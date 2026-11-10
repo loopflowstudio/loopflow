@@ -4,7 +4,9 @@ Implement the [remote attach contract](../rust/loopflow/src/server/README.md#rem
 linked from `docs/server.md`. This checkout contains the planned contract only.
 
 The listener, mobile settings and bulk protocol are outside this Task.
-Keep the contract marked planned until implemented.
+The contract remains marked planned until implemented. Current local tickets
+consume on every attempt and expire using `Instant`; remote identity and expiry
+across host sleep are not implemented here.
 
 ## Transport dependency — November 10, 2026 UTC
 
@@ -25,17 +27,16 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 05:46 UTC, PR #1812 remains open at the same head, with no
-merge time or auto-merge request. Freshly fetched main is
-`169485522edd24e3ea9c0946dfea79c881fe546b`; both transport files remain absent.
+At November 10 06:23 UTC, GitHub reports PR #1812 open and unmerged at the same
+head. Freshly fetched main is
+`9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 Implementation and remote acceptance remain blocked on LOO-718 landing.
 Landing that separate PR is outside this Task's scope. No product decision is
 missing.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
-to older status reads. Keep only the latest observation here so repeated Graph
-passes do not grow the plan.
+to older status reads.
 
 ## Delete — do not maintain
 
@@ -67,6 +68,10 @@ and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
+
+Compression keeps the wire examples and separates authentication from ticket
+lifetime and redemption. The UID-only store remains a deletion target, not a
+refactoring target before the transport lands.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

@@ -362,10 +362,9 @@ part of what a phone or bot client is offered.
   `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
   [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
   as 22 base64url characters, opens one bridge, lasts 60 seconds and is bound
-  to the requesting client's Unix peer UID. Presenting
-  a ticket consumes it even when the UID does not match. An unknown,
-  spent, expired or foreign ticket is `not_found` with a null `id` and closes
-  the connection.
+  to the requesting client's Unix peer UID. Presenting a ticket consumes it
+  even when the UID does not match. An unknown, spent, expired or foreign ticket
+  is `not_found` with a null `id` and closes the connection.
   The owner is the LfProcess holding the Session's terminal (`lf session
   serve`), never the provider's AgentProcess beneath it. The server resolves the
   Session's current owner when it issues the ticket; resolution never starts a
@@ -517,8 +516,8 @@ Connect to the host's authenticated `/v1/machine` WebSocket, complete
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-Open a separate WebSocket to the same host's `/v1/ticket` endpoint, authenticate
-it, and send `attach` as its first message, without a `hello` exchange:
+Open a separate authenticated WebSocket to the same host's `/v1/ticket`
+endpoint and send `attach` first, without `hello`:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
@@ -526,16 +525,16 @@ it, and send `attach` as its first message, without a `hello` exchange:
 ```
 
 Both connections must authenticate with the same Tailscale node stable ID and
-user ID; the same account on another device does not match. A ticket, `hello`
-name, `client_id`, login text or proxy's Unix UID cannot replace that authentication.
-Local and remote tickets are not interchangeable. Each ticket opens one bridge
-within 60 seconds of issue, including time the host spends asleep. Expiry does
-not close an open bridge.
+user ID; another device on the same account does not match. Tickets and
+client-supplied identity (`hello` name, `client_id`, login text) cannot replace
+authentication, nor can a proxy's Unix UID. Local and remote tickets are not
+interchangeable.
 
-Every terminal redemption attempt consumes the ticket. An unknown, spent,
-expired or identity-mismatched ticket returns `not_found` with a null `id` and
-closes the bridge connection. Retry or reconnect with a fresh ticket and bridge
-from the same authenticated device and account.
+Each ticket opens one bridge within 60 seconds of issue, including host sleep;
+expiry does not close an open bridge. Every terminal redemption attempt consumes
+the ticket. An unknown, spent, expired or identity-mismatched ticket returns
+`not_found` with a null `id` and closes the bridge connection. Retry or reconnect
+with a fresh ticket and bridge from the same authenticated device and account.
 
 ## Subscription cost experiment
 

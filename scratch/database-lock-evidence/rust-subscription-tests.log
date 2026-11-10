@@ -1,0 +1,26 @@
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-560c8cfd4dd8c9e8)
+
+running 14 tests
+test server::subscriptions::tests::timestamp_only_refresh_does_not_send_unsolicited_sibling_readings ... ok
+test server::subscriptions::tests::a_pending_checkpoint_keeps_events_after_their_reading ... ok
+test server::subscriptions::tests::a_published_failure_is_not_repeated_when_the_stream_ends ... ok
+test server::subscriptions::tests::a_terminal_failure_sends_its_last_reading_without_answering_a_later_checkpoint ... ok
+test server::subscriptions::tests::events_survive_coalescing_or_end_a_lagging_consumer ... ok
+test server::subscriptions::tests::cancelling_identical_consumers_and_reusing_a_key_never_joins_old_work ... ok
+test server::subscriptions::tests::cancelled_queued_pull_does_no_projection_and_releases_its_reader ... ok
+test server::subscriptions::tests::distinct_arguments_selection_and_service_lifetimes_do_not_alias ... ok
+test server::subscriptions::tests::failed_read_recovers_and_terminal_joins_receive_fresh_final_readings ... ok
+test server::subscriptions::tests::identical_demand_shares_setup_and_coalesces_independent_checkpoints ... ok
+test server::subscriptions::tests::production_sqlite_pulls_progress_with_saturated_outer_pool ... ok
+test server::subscriptions::tests::reader_cleanup_finishes_even_when_the_outer_runtime_rejects_jobs ... ok
+test server::subscriptions::tests::setup_errors_do_not_poison_the_next_admission ... ok
+test server::subscriptions::tests::slow_delivery_keeps_latest_state_without_blocking_a_sibling ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 2681 filtered out; finished in 12.74s
+

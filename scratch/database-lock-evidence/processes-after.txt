@@ -1,0 +1,1722 @@
+    1     0 Thu Oct 22 12:48:07 2026     Ss   /sbin/launchd
+  109     1 Tue Nov 10 09:26:16 2026     S    lf
+  115 86009 Tue Nov 10 10:33:13 2026     Ss   uv
+  167   115 Tue Nov 10 10:33:13 2026     S    /Users/jack/src/loopflow.agent/.venv/bin/python3
+  323     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/logd
+  325     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/UserEventAgent
+  328     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoted
+  331     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/systemstats
+  335     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/configd
+  337     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/CoreServices/powerd.bundle/powerd
+  338     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/IOMFB_bics_daemon
+  346     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/CoreSpeech.framework/corespeechd_system
+  348     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/watchdogd
+  352     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+  353 98556 Tue Nov 10 10:30:20 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+  354     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/kernelmanagerd
+  355     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/diskarbitrationd
+  359     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/syslogd
+  361     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/thermalmonitord
+  362     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/contextstored
+  363     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/opendirectoryd
+  365     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/ApplePushService.framework/apsd
+  366     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/CoreServices/launchservicesd
+  367     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/timed
+  368     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/Resources/usbmuxd
+  369     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/securityd
+  371     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/locationd
+  372     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/nesessionmanager
+  374     1 Thu Oct 22 12:48:52 2026     Ss   autofsd
+  375     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/dasd
+  376     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/corerepaird
+  378     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/distnoted
+  382     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/CoreServices/logind
+  383     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/PrivateFrameworks/GenerationalStorage.framework/Versions/A/Support/revisiond
+  384     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/KernelEventAgent
+  389     1 Thu Oct 22 12:48:52 2026     Ss   /usr/sbin/notifyd
+  391     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/corebrightnessd
+  392     1 Thu Oct 22 12:48:52 2026     Ss   /usr/libexec/AirPlayXPCHelper
+  393     1 Thu Oct 22 12:48:52 2026     Ss   /System/Library/Frameworks/CoreMediaIO.framework/Versions/A/Resources/com.apple.cmio.registerassistantservice
+  396     1 Thu Oct 22 12:48:53 2026     Ss   /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+  398     1 Thu Oct 22 12:48:53 2026     Ss   /usr/sbin/cfprefsd
+  399     1 Thu Oct 22 12:48:53 2026     Ss   /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow
+  401     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/runningboardd
+  402     1 Thu Oct 22 12:48:53 2026     Ss   /System/Library/CoreServices/coreservicesd
+  405     1 Thu Oct 22 12:48:53 2026     Ss   /usr/sbin/coreaudiod
+  406     1 Thu Oct 22 12:48:53 2026     Ss   /System/Library/PrivateFrameworks/CoreAnalytics.framework/Support/analyticsd
+  407     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/lsd
+  415     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/apfsd
+  416     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/nsurlsessiond
+  419     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/airportd
+  425     1 Thu Oct 22 12:48:53 2026     Ss   /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/authd.xpc/Contents/MacOS/authd
+  426     1 Thu Oct 22 12:48:53 2026     S    /usr/sbin/distnoted
+  437     1 Thu Oct 22 12:48:53 2026     S    /usr/sbin/distnoted
+  440     1 Thu Oct 22 12:48:53 2026     Ss   /usr/libexec/eligibilityd
+  447     1 Thu Oct 22 12:48:53 2026     S    /usr/sbin/distnoted
+  478     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/symptomsd
+  480     1 Thu Oct 22 12:48:54 2026     Ss   /usr/sbin/mDNSResponder
+  482     1 Thu Oct 22 12:48:54 2026     S    /usr/sbin/distnoted
+  484     1 Thu Oct 22 12:48:54 2026     Ss   /System/Library/Frameworks/SystemExtensions.framework/Versions/A/Helpers/sysextd
+  486     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/ApplicationFirewall/socketfilterfw
+  489 99907 Tue Oct 27 16:35:03 2026     S    /Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/Frameworks/Docker Desktop Helper (GPU).app/Contents/MacOS/Docker Desktop Helper (GPU)
+  506     1 Thu Oct 22 12:48:54 2026     Ss   Core Audio Driver (BlackHole2ch.driver)
+  510     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/audiomxd
+  513     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/cameracaptured
+  514     1 Thu Oct 22 12:48:54 2026     Ss   /System/Library/CoreServices/appleeventsd
+  516     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/audioclocksyncd
+  517     1 Thu Oct 22 12:48:54 2026     Ss   /System/Library/Frameworks/CoreMediaIO.framework/Versions/A/Resources/UVCAssistant.systemextension/Contents/MacOS/UVCAssistant
+  519     1 Thu Oct 22 12:48:54 2026     Ss   /usr/sbin/appleh16camerad
+  521     1 Thu Oct 22 12:48:54 2026     Ss   /usr/libexec/modelmanagerd
+  527     1 Thu Oct 22 12:48:54 2026     Ss   /usr/sbin/mDNSResponderHelper
+  533     1 Thu Oct 22 12:48:55 2026     S    /usr/sbin/distnoted
+  543     1 Thu Oct 22 12:48:55 2026     S    /usr/sbin/distnoted
+  548     1 Thu Oct 22 12:48:55 2026     Ss   /System/Library/CoreServices/Software Update.app/Contents/Resources/softwareupdated
+  550     1 Thu Oct 22 12:48:55 2026     Ss   /usr/libexec/searchpartyd
+  551     1 Thu Oct 22 12:48:56 2026     S    /usr/sbin/distnoted
+  552     1 Thu Oct 22 12:48:56 2026     Ss   /System/Library/CoreServices/Software Update.app/Contents/Resources/suhelperd
+  557     1 Thu Oct 22 12:48:56 2026     S    /usr/sbin/distnoted
+  569     1 Thu Oct 22 12:48:56 2026     Ss   /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+  571     1 Thu Oct 22 12:48:56 2026     Ss   /System/Library/Frameworks/LocalAuthentication.framework/Support/coreauthd
+  573     1 Thu Oct 22 12:48:56 2026     S    /usr/sbin/distnoted
+  575     1 Thu Oct 22 12:48:57 2026     Ss   /usr/sbin/BTLEServer
+  577     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/UserEventAgent
+  579     1 Thu Oct 22 12:48:57 2026     S    /System/Library/CoreServices/WindowManager.app/Contents/MacOS/WindowManager
+  583     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/neagent
+  585     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/rapportd
+  586     1 Thu Oct 22 12:48:57 2026     S    /System/Library/CoreServices/CoreServicesUIAgent.app/Contents/MacOS/CoreServicesUIAgent
+  587     1 Thu Oct 22 12:48:57 2026     S    /usr/sbin/universalaccessd
+  589     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/pboard
+  593     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/lsd
+  600     1 Thu Oct 22 12:48:57 2026     S    /usr/sbin/distnoted
+  603     1 Thu Oct 22 12:48:57 2026     S    /System/Library/PrivateFrameworks/IDS.framework/identityservicesd.app/Contents/MacOS/identityservicesd
+  609     1 Thu Oct 22 12:48:57 2026     S    /usr/libexec/nsurlsessiond
+  613     1 Thu Oct 22 12:48:57 2026     Ss   /System/Library/Frameworks/CryptoTokenKit.framework/ctkd
+  614     1 Thu Oct 22 12:48:57 2026     S    /System/Library/Frameworks/LocalAuthentication.framework/Support/coreauthd
+  620     1 Thu Oct 22 12:48:58 2026     S    /usr/sbin/usernoted
+  624     1 Thu Oct 22 12:48:59 2026     S    /usr/libexec/ContinuityCaptureAgent
+  626     1 Thu Oct 22 12:48:59 2026     Ss   /System/Library/CoreServices/SubmitDiagInfo
+  629     1 Thu Oct 22 12:48:59 2026     S    /System/Library/CoreServices/NotificationCenter.app/Contents/MacOS/NotificationCenter
+  633     1 Thu Oct 22 12:48:59 2026     S    /usr/sbin/distnoted
+  635     1 Thu Oct 22 12:48:59 2026     S    /System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter
+  643     1 Thu Oct 22 12:48:59 2026     Ss   /usr/sbin/filecoordinationd
+  645     1 Thu Oct 22 12:48:59 2026     S    /System/Library/PrivateFrameworks/UserNotificationsCore.framework/Support/usernotificationsd
+  659     1 Thu Oct 22 12:49:00 2026     S    /System/Library/PrivateFrameworks/ViewBridge.framework/Versions/A/XPCServices/ViewBridgeAuxiliary.xpc/Contents/MacOS/ViewBridgeAuxiliary
+  664     1 Thu Oct 22 12:49:00 2026     Ss   /usr/libexec/nearbyd
+  666     1 Thu Oct 22 12:49:00 2026     S    /System/Library/PrivateFrameworks/FileProvider.framework/Support/fileproviderd
+  669     1 Thu Oct 22 12:49:00 2026     S    /usr/sbin/distnoted
+  677     1 Thu Oct 22 12:49:01 2026     S    /usr/libexec/sharingd
+  678     1 Thu Oct 22 12:49:01 2026     S    /System/Library/CoreServices/sharedfilelistd
+  680     1 Thu Oct 22 12:49:01 2026     S    /System/Library/PrivateFrameworks/FamilyCircle.framework/Versions/A/Resources/familycircled
+  681     1 Thu Oct 22 12:49:01 2026     S    /System/Library/PrivateFrameworks/StatusKit.framework/StatusKitAgent
+  685     1 Thu Oct 22 12:49:01 2026     S    /System/Library/CoreServices/AccessibilityUIServer.app/Contents/MacOS/AccessibilityUIServer
+  689     1 Thu Oct 22 12:49:01 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Frameworks/ATS.framework/Support/fontd
+  693     1 Thu Oct 22 12:49:01 2026     S    /usr/sbin/distnoted
+  697     1 Thu Oct 22 12:49:01 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/ATS.framework/Versions/A/Support/fontworker
+  703     1 Thu Oct 22 12:49:03 2026     S    /System/Library/PrivateFrameworks/AuthKit.framework/Versions/A/Support/akd
+  712   331 Thu Oct 22 12:49:04 2026     S    /usr/sbin/systemstats
+  720     1 Thu Oct 22 12:49:05 2026     Ss   /Library/PrivilegedHelperTools/com.docker.vmnetd
+  721     1 Thu Oct 22 12:49:05 2026     Ss   /usr/libexec/rosetta/oahd
+  725     1 Thu Oct 22 12:49:06 2026     S    /System/Library/CoreServices/WiFiAgent.app/Contents/MacOS/WiFiAgent
+  727     1 Thu Oct 22 12:49:06 2026     Ss   /usr/libexec/cryptexd
+  729     1 Thu Oct 22 12:49:06 2026     Ss   Core Audio Driver (LoomAudioDevice.driver)
+  731     1 Thu Oct 22 12:49:06 2026     Ss   /usr/libexec/aned
+  734     1 Thu Oct 22 12:49:06 2026     Ss   Core Audio Driver (ParrotAudioPlugin.driver)
+  735     1 Thu Oct 22 12:49:06 2026     Ss   /System/Library/ExtensionKit/Extensions/HostInferenceProviderService.appex/Contents/MacOS/HostInferenceProviderService
+  736     1 Thu Oct 22 12:49:06 2026     S    /usr/sbin/distnoted
+  740     1 Thu Oct 22 12:49:06 2026     S    /System/Library/CoreServices/UIKitSystem.app/Contents/MacOS/UIKitSystem
+  741     1 Thu Oct 22 12:49:06 2026     S    /usr/libexec/milod
+  745     1 Thu Oct 22 12:49:06 2026     S    /usr/sbin/distnoted
+  746     1 Thu Oct 22 12:49:06 2026     Ss   /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN
+  747     1 Thu Oct 22 12:49:06 2026     S    /System/Library/PrivateFrameworks/IMCore.framework/imagent.app/Contents/MacOS/imagent
+  749     1 Thu Oct 22 12:49:06 2026     Ss   /System/Library/DriverExtensions/com.apple.DriverKit-IOUserDockChannelSerial.dext/com.apple.DriverKit-IOUserDockChannelSerial
+  752     1 Thu Oct 22 12:49:06 2026     Ss   /System/Library/DriverExtensions/com.apple.AppleUserHIDDrivers.dext/com.apple.AppleUserHIDDrivers
+  766     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ChronoCore.framework/Support/chronod
+  768     1 Thu Oct 22 12:49:06 2026     S    /System/Library/Frameworks/Translation.framework/translationd
+  769     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SiriTTSService.framework/sirittsd
+  771     1 Thu Oct 22 12:49:06 2026     S    /System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoteagent
+  772     1 Thu Oct 22 12:49:06 2026     S    /System/Library/PrivateFrameworks/UserActivity.framework/Agents/useractivityd
+  775     1 Thu Oct 22 12:49:06 2026     S    /System/Library/CoreServices/Dock.app/Contents/MacOS/Dock
+  776     1 Thu Oct 22 12:49:06 2026     S    /System/Library/CoreServices/SystemUIServer.app/Contents/MacOS/SystemUIServer
+  777     1 Thu Oct 22 12:49:06 2026     S    /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+  778     1 Thu Oct 22 12:49:06 2026     S    /usr/libexec/avconferenced
+  782     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AutoFillUI.framework/Contents/AutoFillPanelService.app/Contents/MacOS/AutoFillPanelService
+  783     1 Thu Oct 22 12:49:07 2026     S    /System/Library/CoreServices/WallpaperAgent.app/Contents/MacOS/WallpaperAgent
+  789     1 Thu Oct 22 12:49:07 2026     S    /System/Library/PrivateFrameworks/AMPDevices.framework/Versions/A/Support/AMPDeviceDiscoveryAgent
+  792     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SiriInference.framework/Versions/A/siriinferenced
+  793     1 Thu Oct 22 12:49:07 2026     Ss   /System/Library/ExtensionKit/Extensions/WallpaperAerialsExtension.appex/Contents/MacOS/WallpaperAerialsExtension
+  796     1 Thu Oct 22 12:49:07 2026     Ss   /System/Library/PrivateFrameworks/CloudDocs.framework/PlugIns/com.apple.CloudDocs.iCloudDriveFileProvider.appex/Contents/MacOS/com.apple.CloudDocs.iCloudDriveFileProvider
+  799     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/TelephonyUtilities.framework/callservicesd
+  800     1 Thu Oct 22 12:49:07 2026     S    /System/Library/PrivateFrameworks/CoreSpeech.framework/corespeechd
+  803     1 Thu Oct 22 12:49:07 2026     Ss   automountd
+  814     1 Thu Oct 22 12:49:07 2026     S    /System/Library/CoreServices/UniversalControl.app/Contents/MacOS/UniversalControl
+  820     1 Thu Oct 22 12:49:07 2026     Ss   /System/Library/CoreServices/Dock.app/Contents/XPCServices/com.apple.dock.extra.xpc/Contents/MacOS/com.apple.dock.extra
+  824     1 Thu Oct 22 12:49:08 2026     SN   /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdbulkimport
+  827     1 Thu Oct 22 12:49:08 2026     S    /System/Library/CoreServices/Spotlight.app/Contents/MacOS/Spotlight
+  836     1 Thu Oct 22 12:49:08 2026     S    /System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/Resources/commerce
+  837     1 Thu Oct 22 12:49:08 2026     S    /System/Library/PrivateFrameworks/TextInputUIMacHelper.framework/Versions/A/XPCServices/CursorUIViewService.xpc/Contents/MacOS/CursorUIViewService
+  840     1 Thu Oct 22 12:49:08 2026     S    /System/Library/Frameworks/InputMethodKit.framework/Resources/imklaunchagent
+  841     1 Thu Oct 22 12:49:08 2026     Ss   /System/Library/Input Methods/PressAndHold.app/Contents/PlugIns/PAH_Extension.appex/Contents/MacOS/PAH_Extension
+  844     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd
+  845     1 Thu Oct 22 12:49:09 2026     Ss   /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/CVMServer
+  849     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/gamed
+  850     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+  851     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/PhotoLibraryServices.framework/Versions/A/Support/photolibraryd
+  853     1 Thu Oct 22 12:49:09 2026     S    /usr/libexec/studentd
+  872     1 Thu Oct 22 12:49:09 2026     Ss   /usr/libexec/wifianalyticsd
+  882     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/searchpartyuseragent
+  885     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/routined
+  886     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/HomeKitDaemon.framework/Support/homed
+  887     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd
+  890     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/VoiceShortcuts.framework/Versions/A/Support/siriactionsd
+  891     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/networkserviceproxy
+  893     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/mobileassetd
+  894     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/knowledge-agent
+  896     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AppStoreDaemon.framework/Support/appstoreagent
+  897     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/TextInputSwitcher.app/Contents/MacOS/TextInputSwitcher
+  900     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/DoNotDisturbServer.framework/Support/donotdisturbd
+  901     1 Thu Oct 22 12:49:10 2026     Ss   /System/Library/PrivateFrameworks/CoreFP.framework/Versions/A/fairplayd
+  908     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AppleMediaServicesUI.framework/amsengagementd
+  914     1 Thu Oct 22 12:49:10 2026     S    /System/Library/PrivateFrameworks/SafariSafeBrowsing.framework/com.apple.Safari.SafeBrowsing.Service
+  921     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/Contacts.framework/Support/contactsd
+  923     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ReplicatorCore.framework/Support/replicatord
+  931     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CalendarDaemon.framework/Support/calaccessd
+  941     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SoftwareUpdate.framework/Resources/SoftwareUpdateNotificationManager.app/Contents/MacOS/SoftwareUpdateNotificationManager
+  981     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/Siri.app/Contents/MacOS/Siri
+  996     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/iCloudDriveCore.framework/Versions/A/Support/bird
+ 1005 83380 Wed Nov  4 22:09:16 2026     S    /Applications/Dropbox.app/Contents/Frameworks/Dropbox Helper (Renderer).app/Contents/MacOS/Dropbox Helper (Renderer)
+ 1009     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AXAssetLoader.framework/Support/axassetsd
+ 1011     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/transparencyd
+ 1012     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/findmylocateagent
+ 1027     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/CloudKitDaemon.framework/Support/cloudd
+ 1028     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/Contacts.framework/Support/postersyncd
+ 1034     1 Tue Nov 10 07:57:01 2026     Ss   /usr/libexec/PerfPowerServices
+ 1051     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/Noticeboard.framework/Versions/A/Resources/nbagent.app/Contents/MacOS/nbagent
+ 1062     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CloudSubscriptionFeatures.framework/FeatureAccessAgent
+ 1064     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/tipsd
+ 1067     1 Sat Nov  7 12:43:08 2026     Ss   /Applications/Dropbox.app/Contents/XPCServices/DropboxActivityProvider.xpc/Contents/MacOS/DropboxActivityProvider
+ 1069     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AppleMediaServices.framework/Resources/amsaccountsd
+ 1073     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/FinanceKit.framework/financed
+ 1075     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SyncedDefaults.framework/Support/syncdefaultsd
+ 1078     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/iTunesCloud.framework/Support/itunescloudd
+ 1110     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ScreenTimeCore.framework/Versions/A/ScreenTimeAgent
+ 1111     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/CoreTelephony.framework/Support/CommCenter
+ 1114     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AvatarPersistence.framework/Support/avatarsd
+ 1124     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CommunicationsFilter.framework/CMFSyncAgent
+ 1127     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/pkd
+ 1130     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Support/BackgroundTaskManagementAgent.app/Contents/MacOS/BackgroundTaskManagementAgent
+ 1133     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/coreduetd
+ 1134     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ContactsDonation.framework/Versions/A/Support/contactsdonationagent
+ 1135     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/Keychain Circle Notification.app/Contents/MacOS/Keychain Circle Notification
+ 1136     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CommunicationTrust.framework/Support/communicationtrustd
+ 1148     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/AppSSO.framework/Support/AppSSODaemon
+ 1185     1 Mon Nov  9 16:11:16 2026     Ss   /Users/jack/.codex/packages/app-server-daemon/releases/0.167.0-aarch64-apple-darwin/bin/codex
+ 1187     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/WeatherDaemon.framework/weatherd
+ 1189     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod
+ 1190     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CallHistory.framework/Support/CallHistorySyncHelper
+ 1191     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/appplaceholdersyncd
+ 1192     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/NewsDaemon.framework/newsd
+ 1193     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Frameworks/PrintCore.framework/Versions/A/printtool
+ 1194     1 Sat Nov  7 12:43:08 2026     S    cloudphotod
+ 1195     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/TCC.framework/Support/tccd
+ 1196     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/IntelligenceFlowContextRuntime.framework/Versions/A/intelligencecontextd
+ 1197     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/MapsSync.framework/mapssyncd
+ 1200     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/assetsubscriptiond
+ 1202     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CoreParsec.framework/parsecd
+ 1204     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/ModelCatalogRuntime.framework/Versions/A/modelcatalogd
+ 1206     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/StoreKit.framework/Support/storekitagent
+ 1207     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/EmailDaemon.framework/Versions/A/maild
+ 1208     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/trustd
+ 1209     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/proactived
+ 1210     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/promotedcontentd
+ 1211     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/dmd
+ 1213     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/TextToSpeechVoiceBankingSupport.framework/Support/voicebankingd
+ 1214     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ModelCatalogRuntime.framework/Versions/A/ModelCatalogAgent
+ 1215     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod
+ 1216     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/appleaccountd
+ 1217     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/siriknowledged
+ 1218     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/Stickers.framework/Support/stickersd
+ 1220     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/betaenrollmentagent
+ 1222     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod
+ 1223     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/UsageTracking.framework/Versions/A/UsageTrackingAgent
+ 1226     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SocialLayer.framework/sociallayerd.app/Contents/MacOS/sociallayerd
+ 1227     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/OnDeviceStorage.framework/Support/amsondevicestoraged
+ 1228     1 Mon Nov  9 08:18:08 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 1236     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/Support/accessoryupdaterd
+ 1237     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/diagnosticextensionsd
+ 1268     1 Wed Nov  4 16:54:54 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 1269     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/triald
+ 1270     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CallHistory.framework/Support/CallHistoryPluginHelper
+ 1273     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/BiomeStreams.framework/Support/biomed
+ 1275     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/adprivacyd
+ 1284     1 Sat Nov  7 12:43:08 2026     S    /System/Cryptexes/App/usr/libexec/AuthenticationServicesAgent
+ 1285     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/mlhostd
+ 1287     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/ShazamKit.framework/shazamd
+ 1288     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/ClassKit.framework/Versions/A/progressd
+ 1290     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/ospredictiond
+ 1291     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/RemoteManagement.framework/RemoteManagementAgent
+ 1294     1 Sat Nov  7 12:43:08 2026     S    /Library/Apple/System/Library/PrivateFrameworks/RemotePairing.framework/Versions/A/XPCServices/remotepairingd.xpc/Contents/MacOS/remotepairingd
+ 1297     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/findmydeviced
+ 1299     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/Ecosystem.framework/Support/ecosystemd
+ 1309     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CoreCDP.framework/Versions/A/Resources/cdpd
+ 1310     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/wifip2pd
+ 1321     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/swcd
+ 1322     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/containermanagerd_system
+ 1323     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/remotemanagementd
+ 1325     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/findmybeaconingd
+ 1327     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/GeoServices.framework/Versions/A/XPCServices/com.apple.geod.xpc/Contents/MacOS/com.apple.geod
+ 1328     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/bluetoothuserd
+ 1329     1 Sat Nov  7 12:43:08 2026     S    /System/Cryptexes/App/System/Library/CoreServices/SafariSupport.bundle/Contents/MacOS/SafariBookmarksSyncAgent
+ 1331     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/ProtectedCloudStorage.framework/Helpers/ProtectedCloudKeySyncing
+ 1334     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/GeoAnalytics.framework/geoanalyticsd
+ 1335     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/EcosystemAnalytics.framework/Support/ecosystemanalyticsd
+ 1336     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/CryptoTokenKit.framework/ctkd
+ 1337     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AskPermission.framework/Versions/A/Resources/askpermissiond
+ 1338     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CoreRecents.framework/Versions/A/Support/recentsd
+ 1339     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CacheDelete.framework/deleted
+ 1341     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/AudioToolbox.framework/AudioComponentRegistrar
+ 1342     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/nfcd
+ 1344     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/IntelligenceFlowRuntime.framework/Versions/A/intelligenceflowd
+ 1345     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/storagekitd
+ 1346     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/BusinessChatService.framework/businessservicesd
+ 1347     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CoreAnalytics.framework/Support/analyticsagent
+ 1352     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/dprivacyd
+ 1354     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/iCloudNotification.framework/iCloudNotificationAgent
+ 1358     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/CoreServices/TimeMachine/backupd
+ 1359     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/dprivacyd
+ 1360     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/CascadeSets.framework/Versions/A/XPCServices/SetStoreUpdateService.xpc/Contents/MacOS/SetStoreUpdateService
+ 1362     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/gamecontrollerd
+ 1364     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/nehelper
+ 1367     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/MobileTimer.framework/Executables/mobiletimerd
+ 1369     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/CoreServices/osanalyticshelper
+ 1373     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/SidecarRelay
+ 1375     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/pbs
+ 1377     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/fskitd
+ 1378     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/mmaintenanced
+ 1379     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/EscrowSecurityAlert.app/Contents/MacOS/EscrowSecurityAlert
+ 1382     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/AssetCacheServices.framework/Versions/A/XPCServices/AssetCacheLocatorService.xpc/Contents/MacOS/AssetCacheLocatorService
+ 1383     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/ScopedBookmarkAgent
+ 1384     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/feedbackd
+ 1385     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/findmydevice-user-agent
+ 1386     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/ManagedSettings.framework/Versions/A/ManagedSettingsAgent
+ 1387     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/mobileactivationd
+ 1388     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/powerexperienced
+ 1389     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/containermanagerd
+ 1391     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/AppStoreDaemon.framework/Versions/A/XPCServices/com.apple.AppStoreDaemon.StorePrivilegedODRService.xpc/Contents/MacOS/com.apple.AppStoreDaemon.StorePrivilegedODRService
+ 1392     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AssetCacheServices.framework/Versions/A/XPCServices/AssetCacheLocatorService.xpc/Contents/MacOS/AssetCacheLocatorService
+ 1393     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/keychainsharingmessagingd
+ 1394     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/CoreADI.framework/adid
+ 1395     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/fairplaydeviceidentityd
+ 1397     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/MobileSoftwareUpdate.framework/Versions/A/XPCServices/com.apple.MobileSoftwareUpdate.CleanupPreparePathService.xpc/Contents/MacOS/com.apple.MobileSoftwareUpdate.CleanupPreparePathService
+ 1399     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/InstallCoordination.framework/Support/installcoordinationd
+ 1400     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/containermanagerd
+ 1402     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/containermanagerd
+ 1403     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/containermanagerd
+ 1404     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/griddatad
+ 1405     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/online-auth-agent
+ 1406     1 Sat Nov  7 12:43:08 2026     S    /usr/sbin/cfprefsd
+ 1407     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/usermanagerd
+ 1408     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/CoreServices/TimeMachine/backupd-helper
+ 1409     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/CacheDelete.framework/deleted_helper
+ 1410     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/CoreSymbolication.framework/coresymbolicationd
+ 1411     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/smd
+ 1412     1 Sat Nov  7 12:43:08 2026     Ss   /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect
+ 1413     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/MTLAssetUpgraderD
+ 1414     1 Sat Nov  7 12:43:08 2026     S    /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect
+ 1415     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/powerdatad
+ 1416     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/Noticeboard.framework/Versions/A/Resources/nbstated
+ 1417     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/CoreServices/liquiddetectiond.app/liquiddetectiond
+ 1418     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/CoreServices/ReportSystemMemory
+ 1419     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/microstackshot
+ 1420     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/intelligentroutingd
+ 1422     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/sandboxd
+ 1425     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/secd
+ 1427     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/WatchListKit.framework/Support/watchlistd
+ 1428     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/Accounts.framework/Versions/A/Support/accountsd
+ 1429     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/audioaccessoryd
+ 1430     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistant_service
+ 1432     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/IntlPreferences.framework/Support/localizationswitcherd
+ 1433     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/gamepolicyd
+ 1434     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/HearingCore.framework/heard
+ 1436     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/PrivateFrameworks/SystemStatusServer.framework/Support/systemstatusd
+ 1437     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/secinitd
+ 1439     1 Sat Nov  7 12:43:08 2026     Ss   /usr/sbin/WirelessRadioManagerd
+ 1440     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/amfid
+ 1441     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/GamePolicyAgent
+ 1443     1 Sat Nov  7 12:43:08 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice
+ 1444     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/trustd
+ 1445     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/biometrickitd
+ 1446     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/WorkflowKit.framework/XPCServices/ShortcutsViewService.xpc/Contents/MacOS/ShortcutsViewService
+ 1447     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/containermanagerd
+ 1448     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/trustd
+ 1452     1 Sat Nov  7 12:43:08 2026     Ss   /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/com.apple.CodeSigningHelper.xpc/Contents/MacOS/com.apple.CodeSigningHelper
+ 1454     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/SessionCore.framework/Support/liveactivitiesd
+ 1482     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/replayd
+ 1484     1 Sat Nov  7 12:43:08 2026     S    /usr/libexec/linkd
+ 1485     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/PowerUIAgent
+ 1486     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/Synapse.framework/Support/contentlinkingd
+ 1557     1 Tue Nov 10 10:30:21 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 1731     1 Sat Nov  7 12:43:08 2026     S    /System/Library/CoreServices/ReportCrash
+ 1732     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/rtcreportingd
+ 1746     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/secinitd
+ 1749     1 Sat Nov  7 12:43:08 2026     Ss   /usr/libexec/trustdFileHelper
+ 1770 93487 Tue Nov 10 10:15:08 2026     Ss   doppler
+ 1935 99817 Tue Nov 10 10:30:21 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 1982  1770 Tue Nov 10 10:15:09 2026     S    doppler
+ 2017     1 Sat Nov  7 13:04:58 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+ 2046     1 Mon Nov  9 11:51:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 2067     1 Sat Nov  7 12:43:08 2026     S    /System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd
+ 2204     1 Sat Nov  7 12:43:09 2026     S    /usr/libexec/gamecontrolleragentd
+ 2207     1 Mon Nov  9 07:42:42 2026     S    /usr/sbin/BTLEServerAgent
+ 2244     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/NearFieldPrivateServices.framework/Versions/A/XPCServices/NFStorageServer.xpc/Contents/MacOS/NFStorageServer
+ 2322     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+ 2338  1982 Tue Nov 10 10:15:09 2026     S    uv
+ 2375     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/MessagesBlastDoorService.xpc/Contents/MacOS/MessagesBlastDoorService
+ 2384     1 Sat Nov  7 12:43:09 2026     S    /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/TrustedPeersHelper.xpc/Contents/MacOS/TrustedPeersHelper
+ 2389     1 Sat Nov  7 12:43:09 2026     Ss   /Library/Apple/System/Library/PrivateFrameworks/RemotePairing.framework/Versions/A/Resources/bin/RemotePairingDataVaultHelper
+ 2395     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/UIFoundation.framework/Versions/A/XPCServices/nsattributedstringagent.xpc/Contents/MacOS/nsattributedstringagent
+ 2400     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+ 2405     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/PowerLog.framework/Versions/A/XPCServices/PerfPowerTelemetryClientRegistrationService.xpc/Contents/MacOS/PerfPowerTelemetryClientRegistrationService
+ 2410  2338 Tue Nov 10 10:15:09 2026     S    /Users/jack/src/manabot.c5fba4-frontier-self-play/.venv/bin/python3
+ 2735     1 Mon Nov  9 11:51:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 2835 90862 Mon Nov  9 12:06:11 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 2947     1 Sat Nov  7 12:43:09 2026     S    /System/Library/Frameworks/MediaAccessibility.framework/Versions/A/XPCServices/com.apple.accessibility.mediaaccessibilityd.xpc/Contents/MacOS/com.apple.accessibility.mediaaccessibilityd
+ 2969     1 Sat Nov  7 12:43:09 2026     S    /System/Library/CoreServices/CoreLocationAgent.app/Contents/MacOS/CoreLocationAgent
+ 2984     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/PrivateFrameworks/TelephonyUtilities.framework/XPCServices/com.apple.FaceTime.FTConversationService.xpc/Contents/MacOS/com.apple.FaceTime.FTConversationService
+ 2997     1 Thu Oct 22 12:49:13 2026     Ss   /usr/libexec/diskimagesiod
+ 3000     1 Sat Nov  7 12:43:09 2026     Ss   /System/Library/Frameworks/Speech.framework/Versions/A/XPCServices/localspeechrecognition.xpc/Contents/MacOS/localspeechrecognition
+ 3082     1 Sat Nov  7 15:48:55 2026     Ss   endpointsecurityd
+ 3114     1 Tue Nov 10 10:30:22 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 3146     1 Sat Nov  7 12:43:10 2026     S    /System/Library/PrivateFrameworks/CoreFollowUp.framework/Versions/A/Support/followupd
+ 3400     1 Sun Nov  8 06:17:28 2026     S    /System/Library/PrivateFrameworks/DeviceCheckInternal.framework/devicecheckd
+ 3446     1 Thu Nov  5 07:45:07 2026     S    /Users/jack/.lf/demos/loo593-server-5r7obf0c/Loopflow Server Live.app/Contents/MacOS/lf
+ 3495     1 Sat Nov  7 12:43:10 2026     Ss   /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XprotectService.xpc/Contents/MacOS/XprotectService
+ 3542     1 Mon Nov  9 08:28:31 2026     Ss   /System/Library/ExtensionKit/Extensions/ExperimentationExtension.appex/Contents/MacOS/ExperimentationExtension
+ 3569     1 Sat Nov  7 12:43:10 2026     Ss   /System/Library/CoreServices/ReportCrash
+ 3675     1 Mon Nov  9 12:15:55 2026     S    /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd
+ 3807     1 Thu Nov  5 10:12:12 2026     SN   /tmp/lf-7501-31mWd6/bin/lf
+ 3951 99963 Mon Nov  9 10:38:05 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+ 4007 91783 Wed Nov  4 09:55:48 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)
+ 4008     1 Mon Nov  9 07:42:46 2026     Ss   /usr/libexec/captiveagent
+ 4442     1 Tue Nov 10 10:30:23 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 4560  1535 Mon Nov  9 08:18:10 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+ 4628     1 Mon Nov  9 08:23:16 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 4829     1 Mon Nov  9 08:28:32 2026     Ss   /System/Library/ExtensionKit/Extensions/ODDIExperimentationExtension.appex/Contents/MacOS/ODDIExperimentationExtension
+ 4994     1 Tue Nov 10 10:24:39 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+ 4996     1 Sun Nov  8 15:25:46 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 5006     1 Sat Nov  7 18:40:07 2026     Ss   /Users/jack/.local/bin/lf
+ 5037  3225 Tue Nov 10 10:30:24 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 5063     1 Sat Nov  7 12:43:11 2026     Ss   /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice
+ 5081     1 Sat Nov  7 12:43:11 2026     Ss   /System/Applications/Weather.app/Contents/PlugIns/WeatherWidget.appex/Contents/MacOS/WeatherWidget
+ 5135     1 Sat Nov  7 12:43:11 2026     S    /System/Library/PrivateFrameworks/ContextKit.framework/Versions/A/XPCServices/ContextService.xpc/Contents/MacOS/ContextService
+ 5143     1 Sat Nov  7 12:43:11 2026     S    /usr/libexec/secinitd
+ 5148     1 Sat Nov  7 12:43:11 2026     S    /usr/libexec/secinitd
+ 5217     1 Sat Nov  7 12:43:11 2026     S    /usr/sbin/cfprefsd
+ 5377     1 Sat Nov  7 12:43:11 2026     S    /usr/sbin/cfprefsd
+ 5413     1 Sat Nov  7 12:43:11 2026     S    /usr/libexec/trustd
+ 5418     1 Sat Nov  7 12:43:11 2026     S    /usr/libexec/trustd
+ 5514     1 Thu Nov  5 12:22:28 2026     SN   /tmp/lf-7501-GsHfZO/bin/lf-idle
+ 5547     1 Tue Nov 10 10:33:17 2026     S    /Users/jack/.local/bin/lf
+ 5848     1 Thu Oct 22 12:49:18 2026     S    /System/Library/PrivateFrameworks/People.framework/peopled
+ 5914     1 Thu Oct 22 12:49:18 2026     S    /System/Library/Frameworks/LocalAuthentication.framework/Support/coreautha.bundle/Contents/MacOS/coreautha
+ 5941     1 Sat Nov  7 12:43:12 2026     Ss   /System/Library/PrivateFrameworks/MobileAsset.framework/Versions/A/XPCServices/ManifestStorageService.xpc/Contents/MacOS/ManifestStorageService
+ 6045     1 Sun Nov  8 03:24:48 2026     Ts   /Users/jack/src/loopflow.loo-593-decide-the-desktop/.venv/bin/python3
+ 6144     1 Tue Nov 10 10:30:24 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 6167  5067 Sat Nov  7 18:40:09 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 6277     1 Sun Nov  8 15:26:24 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 6333     1 Sat Nov  7 12:43:12 2026     S    /System/Library/PrivateFrameworks/ContinuousDialogManagerService.framework/assistant_cdmd
+ 6522     1 Thu Oct 22 12:49:20 2026     Ss   /usr/libexec/taskgated
+ 6552     1 Mon Nov  9 07:42:51 2026     Ss   /System/Library/DriverExtensions/IOUserBluetoothSerialDriver.dext/IOUserBluetoothSerialDriver
+ 6560     1 Mon Nov  9 07:42:51 2026     Ss   /System/Library/DriverExtensions/IOUserBluetoothSerialDriver.dext/IOUserBluetoothSerialDriver
+ 6663     1 Sat Nov  7 21:15:45 2026     Ss   /System/Library/PrivateFrameworks/CoreFP.framework/Versions/A/XPCServices/com.apple.fpsd.arcadeservice.xpc/Contents/MacOS/com.apple.fpsd.arcadeservice
+ 6739  4506 Tue Nov 10 10:30:25 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 6834     1 Sat Nov  7 12:43:13 2026     Ss   /System/Library/PrivateFrameworks/IntelligencePlatformCompute.framework/Versions/A/XPCServices/IntelligencePlatformComputeService.xpc/Contents/MacOS/IntelligencePlatformComputeService
+ 7008     1 Sat Nov  7 12:43:13 2026     Ss   /System/Library/PrivateFrameworks/TrialServer.framework/Versions/A/XPCServices/TrialArchivingService.xpc/Contents/MacOS/TrialArchivingService
+ 7147     1 Sat Nov  7 13:29:40 2026     S    /System/Library/PrivateFrameworks/IntelligencePlatformCore.framework/Versions/A/intelligenceplatformd
+ 7181     1 Sat Nov  7 14:02:06 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+ 7182     1 Sat Nov  7 14:02:06 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+ 7283     1 Sat Nov  7 12:43:13 2026     S    /usr/libexec/swtransparencyd
+ 7384     1 Thu Oct 22 12:49:26 2026     S    /System/Library/PrivateFrameworks/UniversalAccess.framework/Versions/A/Resources/universalAccessAuthWarn.app/Contents/MacOS/universalAccessAuthWarn
+ 7405     1 Thu Oct 22 12:49:27 2026     S    /usr/sbin/distnoted
+ 7417     1 Thu Oct 22 12:49:27 2026     S    /opt/homebrew/Cellar/python@3.11/3.11.16/Frameworks/Python.framework/Versions/3.11/Resources/Python.app/Contents/MacOS/Python
+ 7421     1 Mon Nov  9 15:50:56 2026     Ss   /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/SpeechSynthesis.framework/Versions/A/XPCServices/SpeechSynthesisServerXPC.xpc/Contents/MacOS/SpeechSynthesisServerXPC
+ 7427     1 Thu Oct 22 12:49:27 2026     S    /System/Library/Image Capture/Support/icdd
+ 7431     1 Thu Oct 22 12:49:27 2026     S    /Applications/Avid/Avid Link/Avid Link.app/Contents/MacOS/AvidLink
+ 7435     1 Thu Oct 22 12:49:27 2026     S    /System/Library/CoreServices/AirPlayUIAgent.app/Contents/MacOS/AirPlayUIAgent
+ 7441     1 Thu Oct 22 12:49:27 2026     S    /System/Library/CoreServices/diagnostics_agent
+ 7442     1 Thu Oct 22 12:49:27 2026     S    /System/Library/CoreServices/TextInputMenuAgent.app/Contents/MacOS/TextInputMenuAgent
+ 7446     1 Thu Oct 22 12:49:27 2026     Ss   /System/Library/Frameworks/CryptoTokenKit.framework/ctkahp.bundle/Contents/MacOS/ctkahp
+ 7452     1 Thu Oct 22 12:49:27 2026     S    /System/Library/Frameworks/CryptoTokenKit.framework/ctkahp.bundle/Contents/MacOS/ctkahp
+ 7531     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7532     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7533     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7534     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7535     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7536     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7537     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7538     1 Mon Nov  9 10:11:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 7556     1 Tue Nov 10 10:30:25 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 7558     1 Sat Nov  7 12:43:13 2026     Ss   /usr/libexec/countryd
+ 7585     1 Mon Nov  9 12:02:22 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 8093     1 Sat Nov  7 12:43:14 2026     S    /System/Library/PrivateFrameworks/CoreThreadCommissionerService.framework/CoreThreadCommissionerServiced
+ 8163     1 Sat Nov  7 19:16:46 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/MessagesBlastDoorService.xpc/Contents/MacOS/MessagesBlastDoorService
+ 8205     1 Fri Oct 30 13:16:45 2026     S    /System/Applications/Messages.app/Contents/MacOS/Messages
+ 8231     1 Mon Nov  9 08:17:22 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 8260     1 Thu Oct 22 12:49:48 2026     Ss   /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService
+ 8275  6215 Tue Nov 10 10:30:26 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 8364     1 Thu Oct 22 12:49:50 2026     S    /usr/sbin/distnoted
+ 8383     1 Mon Nov  9 16:16:27 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 8434     1 Fri Oct 23 10:17:07 2026     S    /System/Library/CoreServices/UserNotificationCenter.app/Contents/MacOS/UserNotificationCenter
+ 8547     1 Mon Nov  9 11:51:16 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 8553     1 Mon Nov  2 13:06:06 2026     Ss   /System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/ThemeWidgetControlViewService.xpc/Contents/MacOS/ThemeWidgetControlViewService
+ 8687     1 Mon Nov  9 14:16:32 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 8732  4857 Mon Nov  9 08:23:17 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 8796     1 Sat Nov  7 12:43:14 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+ 8799     1 Sat Nov  7 12:43:14 2026     Ss   /usr/libexec/securityd_system
+ 8811     1 Sat Nov  7 12:43:14 2026     S    /usr/libexec/secinitd
+ 8843     1 Sat Nov  7 12:43:14 2026     Ss   /System/Library/PrivateFrameworks/CoreEmbeddedSpeechRecognition.framework/Versions/A/XPCServices/com.apple.siri.embeddedspeech.xpc/Contents/MacOS/com.apple.siri.embeddedspeech
+ 8874     1 Tue Oct 27 09:04:41 2026     Ss   /usr/sbin/cron
+ 8882     1 Wed Oct 28 16:36:18 2026     Ss   /System/Library/PrivateFrameworks/DiskImages.framework/Resources/diskimages-helper
+ 8933     1 Mon Nov  9 11:41:01 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 9035     1 Tue Nov 10 10:30:26 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 9094     1 Thu Oct 22 12:49:55 2026     Ss   /System/Library/ExtensionKit/Extensions/GenerativeExperiencesSafetyInferenceProvider.appex/Contents/MacOS/GenerativeExperiencesSafetyInferenceProvider
+ 9168     1 Sat Nov  7 16:18:03 2026     S    /usr/libexec/testmanagerd
+ 9197     1 Thu Oct 22 12:49:57 2026     Ss   /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService
+ 9289     1 Mon Nov  9 08:32:22 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 9307     1 Sat Nov  7 12:43:15 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+ 9358     1 Mon Nov  9 18:16:59 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 9360     1 Mon Nov  9 18:16:59 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+ 9482  5174 Tue Nov 10 10:24:41 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+ 9545     1 Sat Nov  7 12:43:15 2026     S    /usr/libexec/inputanalyticsd
+ 9787  7687 Tue Nov 10 10:30:27 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+10588     1 Tue Nov 10 10:30:27 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+10724     1 Sat Nov  7 12:43:16 2026     Ss   /System/Library/PrivateFrameworks/iCloudDriveService.framework/XPCServices/ContainerMetadataExtractor.xpc/Contents/MacOS/ContainerMetadataExtractor
+10767     1 Thu Oct 22 12:50:16 2026     Ss   nginx: master process /Applications/Avid/Avid Link/nginx/AvidAppManHelper -p /Users/jack/Library/Logs/Avid/AppManagerUI/nginx -c /Applications/Avid/Avid Link/nginx/conf/nginx.conf -e /Users/jack/Library/Logs/Avid/AppManagerUI/nginx/AvidLink.log
+10768 10767 Thu Oct 22 12:50:16 2026     S    nginx: worker process
+11027     1 Sat Nov  7 15:41:25 2026     S    /System/Library/PrivateFrameworks/Categories.framework/Versions/A/XPCServices/CategoriesService.xpc/Contents/MacOS/CategoriesService
+11124  9156 Tue Nov 10 10:30:28 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+11138     1 Sat Nov  7 15:41:25 2026     S    /System/Library/PrivateFrameworks/ContextKit.framework/Versions/A/XPCServices/ContextService.xpc/Contents/MacOS/ContextService
+11179     1 Thu Nov  5 10:11:19 2026     SN   /tmp/lf-7501-MjLOSg/bin/lf-editor
+11273 41415 Tue Nov 10 10:33:22 2026     R    /Applications/Xcode.app/Contents/Developer/usr/bin/git
+11276 87298 Tue Nov 10 10:33:22 2026     R    /Applications/Xcode.app/Contents/Developer/usr/bin/git
+11303 36895 Tue Nov 10 10:33:22 2026     R    /Applications/Xcode.app/Contents/Developer/usr/bin/git
+11328 90041 Tue Nov 10 10:33:22 2026     R    /Applications/Xcode.app/Contents/Developer/usr/bin/git
+11342 86601 Tue Nov 10 10:33:22 2026     R    (git)
+11365 60086 Tue Nov 10 10:33:22 2026     R    git
+11448 86772 Tue Nov 10 10:33:22 2026     R    /Applications/Xcode.app/Contents/Developer/usr/bin/git
+11451  5547 Tue Nov 10 10:33:22 2026     S    git
+11452 11451 Tue Nov 10 10:33:22 2026     S    /usr/bin/ssh
+11560     1 Sun Oct 25 14:48:06 2026     Ss   /usr/libexec/swiftuitraced
+11632     1 Tue Nov 10 10:30:28 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+11865  2835 Tue Nov 10 10:33:23 2026     R    git
+12044   167 Tue Nov 10 10:33:23 2026     R    ps
+12053 68093 Tue Nov 10 10:33:23 2026     R    (git)
+12307  8397 Mon Nov  9 08:17:24 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+12434     1 Mon Nov  9 08:23:20 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+12473 10838 Tue Nov 10 10:30:29 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+12868     1 Sat Nov  7 16:18:06 2026     Ss   /System/Library/PrivateFrameworks/AutomationMode.framework/automationmode-writer
+13013     1 Sat Nov  7 17:34:32 2026     S    /usr/libexec/spindump_agent
+13112     1 Wed Oct 28 23:10:09 2026     SN   /Users/jack/.manabot/jev-encoding-w13/.venv/bin/python
+13113     1 Wed Oct 28 23:10:09 2026     SN   /Users/jack/.manabot/jev-encoding-w13/.venv/bin/python
+13114     1 Wed Oct 28 23:10:09 2026     SN   /Users/jack/.manabot/jev-encoding-w13/.venv/bin/python
+13182     1 Mon Nov  9 18:10:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+13232     1 Mon Nov  9 08:32:25 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+13343     1 Sat Nov  7 12:43:18 2026     Ss   /usr/libexec/aneuserd
+13581     1 Sat Nov  7 12:43:18 2026     Ss   /usr/libexec/betaenrollmentd
+13587     1 Sun Nov  8 15:30:23 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+13618     1 Tue Nov 10 10:30:30 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+13938     1 Mon Nov  9 08:26:01 2026     S    /System/Library/Frameworks/CoreSpotlight.framework/spotlightknowledged
+13957     1 Thu Nov  5 12:22:34 2026     SN   /tmp/lf-7501-GsHfZO/bin/lf-replaced
+14093 11979 Tue Nov 10 10:30:30 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+14386  5172 Sun Nov  8 15:25:52 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+14443     1 Fri Nov  6 21:16:01 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd
+14674     1 Sun Nov  8 18:34:46 2026     Ss   /System/Library/ExtensionKit/Extensions/AudiovisualThumbnailExtension.appex/Contents/MacOS/AudiovisualThumbnailExtension
+14708     1 Sat Nov  7 12:43:19 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+14736 12658 Mon Nov  9 08:23:21 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+14847     1 Sat Nov  7 12:43:19 2026     Ss   /System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/XPCServices/SafariConfigurationSubscriber.xpc/Contents/MacOS/SafariConfigurationSubscriber
+14970     1 Sat Nov  7 12:30:57 2026     Ss   /Users/jack/.local/bin/lf
+15032     1 Sun Nov  8 18:34:47 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+15415 13317 Mon Nov  9 08:32:26 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+15454     1 Sat Nov  7 20:06:29 2026     Ss   /System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/XPCServices/CredentialProviderExtensionHelper.xpc/Contents/MacOS/CredentialProviderExtensionHelper
+15656     1 Mon Nov  9 07:43:03 2026     SNs  /usr/sbin/netbiosd
+16050     1 Thu Oct 22 12:51:01 2026     S    /usr/sbin/distnoted
+16065     1 Fri Oct 23 14:21:16 2026     Ss   /System/Library/PrivateFrameworks/FileProviderDaemon.framework/XPCServices/FPCKService.xpc/Contents/MacOS/FPCKService
+16146     1 Thu Oct 22 12:51:02 2026     Ss   /System/Library/Frameworks/ManagedAppDistribution.framework/Support/managedappdistributiond
+16164     1 Tue Nov 10 10:30:32 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+16364     1 Sat Nov  7 17:00:48 2026     S    /usr/libexec/keyboardservicesd
+16382     1 Sun Nov  8 03:59:01 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+16559     1 Sun Nov  8 09:13:54 2026     S    /usr/libexec/mlruntimed
+16564     1 Mon Nov  9 16:16:31 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+16565     1 Mon Nov  9 16:16:31 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+16566     1 Mon Nov  9 16:16:31 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+16611     1 Sat Nov  7 15:52:27 2026     S    /usr/libexec/seserviced
+16760     1 Tue Nov  3 17:11:29 2026     S    /System/Applications/iPhone Mirroring.app/Contents/MacOS/iPhone Mirroring
+16845     1 Thu Oct 22 12:51:10 2026     Ss   /System/Library/CoreServices/CrashReporterSupportHelper
+16851     1 Thu Oct 22 12:51:11 2026     S    2BUA8C4S2C.com.1password.browser-helper
+16891     1 Mon Nov  9 08:19:10 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+17072     1 Sat Nov  7 15:52:27 2026     Ss   /System/Library/PrivateFrameworks/MobileSoftwareUpdate.framework/Support/softwareupdated
+17121     1 Sat Nov  7 12:43:21 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/SecuritySubscriber.xpc/Contents/MacOS/SecuritySubscriber
+17130     1 Sat Nov  7 21:55:14 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+17252     1 Sat Nov  7 17:27:33 2026     S    /System/Library/Frameworks/PaperKit.framework/Contents/LinkedNotesUIService.app/Contents/MacOS/LinkedNotesUIService
+17253     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17254     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17255     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17257     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17258     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17259     1 Mon Nov  9 08:21:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+17562     1 Fri Nov  6 21:53:21 2026     Ss   /Users/jack/.local/bin/lf
+17634     1 Sat Nov  7 12:47:12 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/MessagesBlastDoorService.xpc/Contents/MacOS/MessagesBlastDoorService
+17709     1 Sat Nov  7 12:47:12 2026     S    /System/Library/PrivateFrameworks/IMDPersistence.framework/XPCServices/IMDPersistenceAgent.xpc/Contents/MacOS/IMDPersistenceAgent
+17733     1 Sat Nov  7 12:43:21 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/SecuritySubscriber.xpc/Contents/MacOS/SecuritySubscriber
+17888 13894 Tue Nov 10 10:30:33 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+18098     1 Mon Nov  9 10:11:40 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+18099     1 Mon Nov  9 10:11:40 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+18360 13831 Sun Nov  8 15:30:25 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+18443     1 Sun Nov  8 18:34:48 2026     Ss   /System/Library/PrivateFrameworks/AppStoreDaemon.framework/Versions/A/XPCServices/com.apple.AppStoreDaemon.StorePrivilegedTaskService.xpc/Contents/MacOS/com.apple.AppStoreDaemon.StorePrivilegedTaskService
+18541     1 Tue Nov 10 10:30:34 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+18584     1 Sat Nov  7 15:52:28 2026     S    /System/Library/PrivateFrameworks/IASUtilities.framework/Versions/A/Resources/installerauthagent
+18618     1 Sat Nov  7 15:52:28 2026     Ss   /usr/libexec/NRDUpdated
+18651     1 Mon Nov  9 11:40:23 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+18792     1 Sat Nov  7 12:47:12 2026     S    /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/XPCServices/com.apple.tonelibraryd.xpc/Contents/MacOS/com.apple.tonelibraryd
+18808     1 Sat Nov  7 12:47:12 2026     S    /usr/libexec/textunderstandingd
+18961     1 Sat Nov  7 12:47:13 2026     Ss   /System/Applications/Messages.app/Contents/PlugIns/Messages Assistant Extension.appex/Contents/MacOS/Messages Assistant Extension
+18975     1 Sat Nov  7 12:47:13 2026     S    /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/reversetemplated
+19016     1 Sun Nov  8 10:11:45 2026     S    /System/Library/PrivateFrameworks/IMTransferServices.framework/IMTransferAgent.app/Contents/MacOS/IMTransferAgent
+19247     1 Sat Nov  7 15:52:29 2026     Ss   /System/Library/AssetsV2/com_apple_MobileAsset_RecoveryOSUpdateBrain/28f9b40aedc0bda53bdc29e31682c998de89e5cb.asset/AssetData/com.apple.NRD.UpdateBrainService.xpc/Contents/MacOS/com.apple.NRD.UpdateBrainService
+19304     1 Sat Nov  7 12:43:23 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice
+19412     1 Mon Nov  9 12:08:48 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+19460     1 Sat Nov  7 12:43:23 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/InteractiveLegacyProfilesSubscriber.xpc/Contents/MacOS/InteractiveLegacyProfilesSubscriber
+19516     1 Thu Oct 22 12:51:37 2026     S    /usr/bin/ssh-agent
+19666     1 Sat Nov  7 12:44:39 2026     S    /System/Library/PrivateFrameworks/SkyLight.framework//Versions/A/Resources/AquaAppearanceHelper.app/Contents/MacOS/AquaAppearanceHelper
+20042 16256 Tue Nov 10 10:30:35 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+20071     1 Sat Nov  7 15:52:29 2026     Ss   /System/Library/PrivateFrameworks/UIFoundation.framework/Versions/A/XPCServices/nsattributedstringagent.xpc/Contents/MacOS/nsattributedstringagent
+20075     1 Sat Nov  7 12:47:14 2026     Ss   /usr/libexec/dirhelper
+20148     1 Sat Nov  7 15:52:29 2026     S    /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/XPCServices/com.apple.hiservices-xpcservice.xpc/Contents/MacOS/com.apple.hiservices-xpcservice
+20220     1 Sat Nov  7 12:47:14 2026     S    /usr/libexec/textcomposerd
+20247     1 Sat Nov  7 15:52:29 2026     S    /System/Library/Frameworks/MediaAccessibility.framework/Versions/A/XPCServices/com.apple.accessibility.mediaaccessibilityd.xpc/Contents/MacOS/com.apple.accessibility.mediaaccessibilityd
+20753     1 Sun Nov  8 10:11:46 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/MessagesBlastDoorService.xpc/Contents/MacOS/MessagesBlastDoorService
+20797     1 Fri Oct 30 14:25:31 2026     Ss   /Applications/WhatsApp.app/Contents/PlugIns/ServiceExtension.appex/Contents/MacOS/ServiceExtension
+20961 17009 Mon Nov  9 08:19:11 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+21133     1 Sun Nov  8 11:00:17 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTEncoderXPCService.xpc/Contents/MacOS/VTEncoderXPCService
+21503     1 Tue Nov 10 10:30:36 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+21504     1 Fri Oct 23 13:00:32 2026     Ss   /System/Library/PrivateFrameworks/DiskImages.framework/Resources/hdiejectd
+21621     1 Sun Nov  8 06:56:39 2026     Ss   /System/Library/Frameworks/Intents.framework/XPCServices/intents_helper.xpc/Contents/MacOS/intents_helper
+21639     1 Wed Nov  4 09:56:34 2026     S<   /Applications/Cursor.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt
+21697     1 Sat Nov  7 12:53:49 2026     Ss   /System/Library/PrivateFrameworks/AppleCredentialManager.framework/AppleCredentialManagerDaemon
+21725     1 Sat Nov  7 12:53:49 2026     Ss   /System/Library/PrivateFrameworks/SafariFoundation.framework/Versions/A/XPCServices/CredentialProviderExtensionHelper.xpc/Contents/MacOS/CredentialProviderExtensionHelper
+21770     1 Sat Nov  7 12:43:25 2026     Ss   /usr/libexec/triald_system
+21772     1 Sat Nov  7 12:43:25 2026     Ss   /usr/libexec/AssetCache/AssetCache
+21784     1 Sat Nov  7 12:43:25 2026     Ss   /System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd
+21787     1 Sat Nov  7 12:43:25 2026     Ss   /System/Library/PrivateFrameworks/PackageKit.framework/Resources/system_installd
+21793     1 Sat Nov  7 12:43:25 2026     S    /System/Library/Frameworks/QuickLookThumbnailing.framework/Support/com.apple.quicklook.ThumbnailsAgent
+21795     1 Sat Nov  7 12:43:25 2026     S    /System/Library/PrivateFrameworks/GeoServices.framework/geodMachServiceBridge
+21831     1 Sat Nov  7 12:43:25 2026     Ss   /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Resources/backgroundtaskmanagementd
+21864     1 Thu Nov  5 12:22:39 2026     SN   /tmp/lf-7501-GsHfZO/bin/lf
+21879     1 Mon Nov  9 14:19:43 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+22033     1 Sat Nov  7 12:53:49 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+22174     1 Thu Nov  5 12:22:39 2026     SN   /tmp/lf-7501-GsHfZO/bin/lf
+22264     1 Sat Nov  7 12:43:25 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ScreenSharingSubscriber.xpc/Contents/MacOS/ScreenSharingSubscriber
+22503     1 Thu Nov  5 12:22:39 2026     SN   /tmp/lf-7501-GsHfZO/bin/lf-talking
+22536     1 Sat Nov  7 14:21:04 2026     SNs  /Users/jack/.local/bin/lf
+22592 18708 Tue Nov 10 10:30:37 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+23113     1 Sat Nov  7 16:27:12 2026     Ss   /System/Library/ExtensionKit/Extensions/PackageThumbnailExtension.appex/Contents/MacOS/PackageThumbnailExtension
+23197     1 Sat Nov  7 12:43:26 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/InteractiveLegacyProfilesSubscriber.xpc/Contents/MacOS/InteractiveLegacyProfilesSubscriber
+23687     1 Sun Nov  8 18:32:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+23733     1 Tue Nov 10 10:30:38 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+23799     1 Fri Oct 23 19:24:43 2026     SN   /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python
+23801     1 Sat Nov  7 19:20:02 2026     S    /System/Library/PrivateFrameworks/JetCore.framework/Support/jetpackassetd
+23998     1 Sun Nov  8 18:31:33 2026     Ss   /System/Library/Frameworks/Intents.framework/XPCServices/intents_helper.xpc/Contents/MacOS/intents_helper
+24677     1 Mon Nov  9 14:04:42 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+24814     1 Sat Nov  7 19:20:03 2026     S    /usr/libexec/ciphermld
+24919 21606 Tue Nov 10 10:30:39 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+25023  1185 Mon Nov  9 18:06:06 2026     S    /Users/jack/.codex/packages/app-server-daemon/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+25143     1 Thu Nov  5 05:13:25 2026     Ss   /Users/jack/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-agent-worker/agent-cli/.local/bin/cursor-agent
+25361     1 Sat Nov  7 12:43:28 2026     Ss   /System/Library/PrivateFrameworks/AssetCacheServicesExtensions.framework/XPCServices/AssetCacheTetheratorService.xpc/Contents/MacOS/AssetCacheTetheratorService
+25450     1 Sat Nov  7 19:46:26 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+25455     1 Mon Nov  9 08:30:51 2026     Ss   /usr/libexec/DataDetectorsSourceAccess
+25758     1 Sat Nov  7 16:28:55 2026     Ss   /System/Library/ExtensionKit/Extensions/ImageThumbnailExtension.appex/Contents/MacOS/ImageThumbnailExtension
+25847     1 Sun Nov  8 18:34:50 2026     Ss   /System/Library/ExtensionKit/Extensions/WebThumbnailExtension.appex/Contents/MacOS/WebThumbnailExtension
+25855     1 Mon Nov  9 09:38:53 2026     S    /Users/jack/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/ipcserver
+25921     1 Mon Nov  9 11:46:02 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+25946     1 Sat Nov  7 16:53:04 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+26036     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26037     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26038     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26039     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26040     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26041     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26042     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26043     1 Mon Nov  9 08:21:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+26531     1 Sun Nov  8 18:34:50 2026     Ss   /System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU
+26684     1 Sun Nov  8 18:34:50 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+26743     1 Tue Nov 10 10:29:15 2026     SN   doppler
+26746 26743 Tue Nov 10 10:29:15 2026     SN   caffeinate
+26915     1 Sat Nov  7 12:43:29 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+26919 26743 Tue Nov 10 10:29:15 2026     SN   doppler
+27247 26919 Tue Nov 10 10:29:15 2026     SN   uv
+27320     1 Sat Nov  7 12:43:29 2026     S    /System/Library/PrivateFrameworks/PhotoAnalysis.framework/Versions/A/Support/photoanalysisd
+27348 27247 Tue Nov 10 10:29:15 2026     SN   /Users/jack/.cache/uv/builds-v0/.tmpgCb3Y9/bin/python
+27350     1 Sat Nov  7 12:43:29 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+27367     1 Sat Nov  7 16:48:38 2026     Ss   /System/Library/CoreServices/diagnosticservicesd
+27455     1 Sat Nov  7 19:22:25 2026     S    /System/Library/PrivateFrameworks/WebPrivacy.framework/webprivacyd
+27630     1 Mon Nov  9 10:17:27 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+27658     1 Sat Nov  7 16:48:38 2026     S    /System/Library/CoreServices/Problem Reporter.app/Contents/MacOS/Problem Reporter
+27683 23847 Tue Nov 10 10:30:41 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+27981     1 Sat Nov  7 12:48:40 2026     S    /usr/sbin/cfprefsd
+28026     1 Sat Nov  7 16:48:38 2026     Ss   /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/SpeechSynthesis.framework/Versions/A/XPCServices/SpeechSynthesisServerXPC.xpc/Contents/MacOS/SpeechSynthesisServerXPC
+28083     1 Sun Nov  8 09:10:19 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+28096 23930 Sun Nov  8 18:32:58 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+28166     1 Mon Nov  9 08:21:51 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+28167     1 Mon Nov  9 08:21:51 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+28192     1 Sat Nov  7 12:48:40 2026     S    /usr/sbin/cfprefsd
+28338     1 Wed Nov  4 12:19:04 2026     Ss   /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/SimStreamProcessorServices.simdeviceio/Contents/XPCServices/SimStreamProcessorService.xpc/Contents/MacOS/SimStreamProcessorService
+28378     1 Sun Nov  8 09:10:19 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+28384     1 Sat Nov  7 18:20:48 2026     Ss   /System/Library/PrivateFrameworks/Lookup.framework/Versions/A/XPCServices/LookupViewService.xpc/Contents/MacOS/LookupViewService
+28612     1 Sat Nov  7 12:48:41 2026     Ss   /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice
+28650     1 Sat Nov  7 12:48:41 2026     S    /System/Library/PrivateFrameworks/CloudServices.framework/Helpers/com.apple.sbd
+28773     1 Sat Nov  7 12:48:41 2026     Ss   /System/Library/PrivateFrameworks/DifferentialPrivacy.framework/XPCServices/DPSubmissionService.xpc/Contents/MacOS/DPSubmissionService
+28780     1 Wed Nov  4 12:19:05 2026     Ss   /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/SimAudioProcessorServices.simdeviceio/Contents/XPCServices/SimAudioProcessorService.xpc/Contents/MacOS/SimAudioProcessorService
+28949     1 Sat Nov  7 12:43:31 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ScreenSharingSubscriber.xpc/Contents/MacOS/ScreenSharingSubscriber
+29090     1 Sat Nov  7 19:30:25 2026     S    /usr/libexec/metrickitd
+29255     1 Mon Oct 26 00:56:47 2026     S    /System/Library/CoreServices/Setup Assistant.app/Contents/Resources/mbuseragent
+29279     1 Wed Nov  4 11:31:06 2026     Ss   /Applications/Xcode.app/Contents/SharedFrameworks/SourceKit.framework/Versions/A/XPCServices/com.apple.dt.SKAgent.xpc/Contents/MacOS/com.apple.dt.SKAgent
+29391     1 Thu Oct 22 16:06:23 2026     S    /usr/sbin/distnoted
+29417     1 Sat Nov  7 12:48:41 2026     S    /usr/sbin/cfprefsd
+29438     1 Sat Nov  7 12:48:41 2026     S    /usr/sbin/cfprefsd
+29453     1 Sat Nov  7 12:48:41 2026     S    /usr/sbin/cfprefsd
+29478     1 Tue Oct 27 18:09:11 2026     Ss   /Users/jack/.lf/bin/lf-676ce774ab6f63ffe3d6abc667ee1ba505f7c9573f7e91164b591458e6edf178
+29591     1 Tue Nov  3 08:11:31 2026     Ss   /usr/libexec/diskimagesiod
+29613     1 Fri Oct 23 12:04:24 2026     S    /System/Library/Frameworks/Security.framework/Versions/A/XPCServices/XPCTimeStampingService.xpc/Contents/MacOS/XPCTimeStampingService
+29792     1 Sat Nov  7 12:48:41 2026     S    /usr/sbin/cfprefsd
+29810     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29811     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29813     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29815     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29816     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29817     1 Mon Nov  9 16:16:35 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+29824     1 Sat Nov  7 12:50:01 2026     Ss   /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/UARPUpdaterServiceUSBPD.xpc/Contents/MacOS/UARPUpdaterServiceUSBPD
+29825     1 Sat Nov  7 12:48:42 2026     S    /usr/sbin/cfprefsd
+29838     1 Sat Nov  7 16:20:16 2026     Ss   /Users/jack/.local/share/loopflow/demos/task-session-at-checkout-20261107-runtime/bin/lf
+29873     1 Sat Nov  7 12:48:42 2026     S    /usr/sbin/cfprefsd
+29993     1 Sat Nov  7 12:48:42 2026     S    /usr/sbin/cfprefsd
+30101     1 Sun Nov  8 19:03:17 2026     Ss   /Users/jack/.local/bin/lf
+30261     1 Wed Nov  4 16:35:01 2026     Ss   /Users/jack/.local/bin/lf
+30397     1 Sat Nov  7 12:43:32 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/LegacyProfilesSubscriber.xpc/Contents/MacOS/LegacyProfilesSubscriber
+30431     1 Sat Nov  7 12:43:32 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/PasscodeSettingsSubscriber.xpc/Contents/MacOS/PasscodeSettingsSubscriber
+30464     1 Sat Nov  7 12:43:32 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/AccountSubscriber.xpc/Contents/MacOS/AccountSubscriber
+30888     1 Mon Nov  9 12:06:28 2026     Ss   /Users/jack/.local/bin/lf
+31007     1 Mon Nov  9 11:41:51 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+31024     1 Sat Nov  7 12:43:32 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagedAppsSubscriber.xpc/Contents/MacOS/ManagedAppsSubscriber
+31176     1 Tue Nov  3 08:11:41 2026     S    /Applications/Paseo.app/Contents/MacOS/Paseo
+31430     1 Sat Nov  7 16:20:18 2026     S    /usr/libexec/fskit_agent
+31442     1 Sat Nov  7 16:20:18 2026     S    /System/Library/CoreServices/APFSUserAgent
+31560     1 Sat Nov  7 12:43:33 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/LegacyProfilesSubscriber.xpc/Contents/MacOS/LegacyProfilesSubscriber
+31655     1 Tue Nov 10 09:26:35 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+31747     1 Sat Nov  7 16:20:18 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+31991 29983 Sat Nov  7 16:20:18 2026     Ss   /Users/jack/.local/share/loopflow/demos/task-session-at-checkout-20261107-runtime/bin/lf
+32029     1 Wed Nov  4 11:22:28 2026     Ss   /Library/Developer/PrivateFrameworks/CoreDevice.framework/Resources/bin/CoreDeviceDDIUpdaterService
+32108 31176 Tue Nov  3 08:11:45 2026     S    /Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper
+32122 31176 Tue Nov  3 08:11:45 2026     S    /Applications/Paseo.app/Contents/Frameworks/Paseo Helper (Renderer).app/Contents/MacOS/Paseo Helper (Renderer)
+32313 31176 Tue Nov  3 08:11:46 2026     Ss   Paseo Supervisor
+32379     1 Sat Nov  7 12:43:34 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagementTestSubscriber.xpc/Contents/MacOS/ManagementTestSubscriber
+32398     1 Sat Nov  7 12:43:34 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/PasscodeSettingsSubscriber.xpc/Contents/MacOS/PasscodeSettingsSubscriber
+32432 32313 Tue Nov  3 08:11:46 2026     S    Paseo Daemon
+32670     1 Mon Nov  9 10:40:01 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+32790     1 Sat Nov  7 12:43:34 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/DiskManagementSubscriber.xpc/Contents/MacOS/DiskManagementSubscriber
+32899     1 Wed Nov  4 11:22:32 2026     S    /Applications/Xcode.app/Contents/MacOS/Xcode
+33082     1 Sat Nov  7 12:43:34 2026     Ss   /System/Library/PrivateFrameworks/StreamingZip.framework/Versions/A/XPCServices/com.apple.StreamingUnzipService.xpc/Contents/MacOS/com.apple.StreamingUnzipService
+33090     1 Tue Nov  3 08:11:47 2026     Ss   /Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper
+33185     1 Thu Nov  5 10:23:06 2026     Ss   /Users/jack/.local/bin/lf
+33236     1 Thu Oct 22 12:53:42 2026     S    /System/Library/PrivateFrameworks/KerberosHelper/Helpers/DiskUnmountWatcher
+33277 32432 Tue Nov  3 08:11:47 2026     Z    <defunct>
+33323     1 Mon Nov  9 11:47:15 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+33334     1 Wed Nov  4 11:22:34 2026     S    /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/XPCServices/com.apple.CoreSimulator.CoreSimulatorService.xpc/Contents/MacOS/com.apple.CoreSimulator.CoreSimulatorService
+33336     1 Wed Nov  4 11:22:34 2026     S    /Library/Developer/PrivateFrameworks/CoreDevice.framework/Versions/A/XPCServices/CoreDeviceService.xpc/Contents/MacOS/CoreDeviceService
+33373     1 Wed Nov  4 11:22:34 2026     Ss   /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/bin/simdiskimaged
+33382     1 Wed Nov  4 11:22:34 2026     S    /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/XPCServices/SimLaunchHost.arm64.xpc/Contents/MacOS/SimLaunchHost.arm64
+33385     1 Sat Nov  7 08:08:38 2026     Ss   /System/Library/Frameworks/ScreenTime.framework/Versions/A/PlugIns/ScreenTimeWebExtension.appex/Contents/MacOS/ScreenTimeWebExtension
+33426     1 Wed Nov  4 11:22:35 2026     S    /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/XPCServices/SimulatorTrampoline.xpc/Contents/MacOS/SimulatorTrampoline
+33427     1 Wed Nov  4 11:22:35 2026     Ss   /Applications/Xcode.app/Contents/PlugIns/GPUDebugger.ideplugin/Contents/Frameworks/GPUToolsTransportAgents.framework/Versions/A/XPCServices/GPUToolsCompatService.xpc/Contents/MacOS/GPUToolsCompatService
+33432     1 Wed Nov  4 11:22:35 2026     Ss   /Applications/Xcode.app/Contents/PlugIns/GPUDebugger.ideplugin/Contents/Frameworks/GPUToolsTransportAgents.framework/Versions/A/XPCServices/GPUToolsAgentService.xpc/Contents/MacOS/GPUToolsAgentService
+33433     1 Fri Nov  6 11:46:02 2026     S    /tmp/lf-7501-rLFviv/bin/lf-removable
+33603     1 Sun Nov  8 09:10:21 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+33678     1 Sat Nov  7 12:43:35 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/SoftwareUpdateSubscriber.xpc/Contents/MacOS/SoftwareUpdateSubscriber
+33988     1 Sat Nov  7 12:43:35 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ASConfigurationSubscriber.xpc/Contents/MacOS/ASConfigurationSubscriber
+34153     1 Tue Nov 10 10:32:16 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+34286     1 Fri Nov  6 17:33:09 2026     Ss   /Users/jack/.local/bin/lf
+34338     1 Sun Nov  8 18:34:52 2026     Ss   /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XprotectService.xpc/Contents/MacOS/XprotectService
+34738     1 Mon Nov  9 11:48:20 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+34754     1 Sun Nov  8 04:17:22 2026     Ss   /Users/jack/.codex/packages/app-server-daemon/releases/0.167.0-aarch64-apple-darwin/bin/codex
+34840     1 Thu Oct 22 12:54:14 2026     S    /System/Cryptexes/App/usr/libexec/PasswordBreachAgent
+34885     1 Sat Nov  7 12:43:36 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagedAppsSubscriber.xpc/Contents/MacOS/ManagedAppsSubscriber
+35047     1 Sat Nov  7 12:43:36 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagedSettingsSubscriber.xpc/Contents/MacOS/ManagedSettingsSubscriber
+35299     1 Sat Nov  7 12:43:36 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagementTestSubscriber.xpc/Contents/MacOS/ManagementTestSubscriber
+35368     1 Thu Oct 22 12:54:39 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/managedcorespotlightd
+35486     1 Mon Nov  9 08:17:37 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+35632     1 Sat Nov  7 12:43:36 2026     Ss   /System/Library/PrivateFrameworks/RemoteManagement.framework/XPCServices/ManagedConfigurationFilesSubscriber.xpc/Contents/MacOS/ManagedConfigurationFilesSubscriber
+35700     1 Sun Nov  8 18:34:52 2026     Ss   /usr/libexec/diskimagesiod
+35853     1 Thu Nov  5 07:25:56 2026     Ss   /private/tmp/loo-672-redemo-346bmcxn/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+35891 28318 Sun Nov  8 09:10:22 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+36043     1 Tue Nov 10 07:32:28 2026     S    /System/iOSSupport/System/Library/PrivateFrameworks/HomeEnergyDaemon.framework/Support/homeenergyd
+36085     1 Sat Nov  7 12:58:52 2026     Ss   /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANECompilerService.xpc/Contents/MacOS/ANECompilerService
+36442     1 Mon Nov  9 18:13:21 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+36465     1 Sun Nov  8 18:34:53 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+36540     1 Thu Oct 22 12:55:45 2026     S    /System/Library/Frameworks/CoreSpotlight.framework/spotlightknowledged
+36603     1 Sat Nov  7 16:27:17 2026     S    /usr/sbin/cfprefsd
+36681     1 Sat Nov  7 20:36:27 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+36737     1 Thu Nov  5 07:25:56 2026     Ss   /private/tmp/loo-672-redemo-346bmcxn/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+36895 30402 Sun Nov  8 19:03:20 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+37142     1 Sun Nov  8 18:34:53 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+37217     1 Mon Nov  9 08:17:38 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+37350 31713 Tue Nov 10 09:26:40 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+37429     1 Sat Nov  7 12:43:38 2026     Ss   /System/Library/PrivateFrameworks/SiriSuggestionsSupport.framework/Versions/A/XPCServices/SiriSuggestionsBookkeepingService.xpc/Contents/MacOS/SiriSuggestionsBookkeepingService
+37476     1 Mon Nov  9 15:38:58 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+37963     1 Wed Nov  4 09:57:34 2026     Ss   /Users/jack/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-agent-worker/agent-cli/.local/bin/cursor-agent
+38179     1 Mon Nov  9 08:18:29 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+38274     1 Sun Nov  8 19:24:51 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+38491     1 Mon Nov  9 11:46:07 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+38507 38007 Mon Nov  9 12:06:32 2026     Ss   /Users/jack/.local/bin/lf
+39380     1 Thu Nov  5 03:37:31 2026     S    /Applications/WhatsApp.app/Contents/MacOS/WhatsApp
+39532     1 Sat Nov  7 18:20:59 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/DictionaryServices.framework/Versions/A/XPCServices/com.apple.DictionaryServiceHelper.xpc/Contents/MacOS/com.apple.DictionaryServiceHelper
+39535     1 Sat Nov  7 12:55:08 2026     Ss   /System/Library/PrivateFrameworks/SiriAnalytics.framework/Versions/A/XPCServices/SAExtensionOrchestrator.xpc/Contents/MacOS/SAExtensionOrchestrator
+39595     1 Sun Nov  8 03:16:33 2026     Ss   /System/Library/PrivateFrameworks/SafariPlatformSupport.framework/Versions/A/XPCServices/com.apple.SafariPlatformSupport.Helper.xpc/Contents/MacOS/com.apple.SafariPlatformSupport.Helper
+39647     1 Sun Nov  8 03:16:33 2026     S    /System/Library/Frameworks/ColorSync.framework/Support/colorsync.useragent
+39656     1 Sat Nov  7 12:55:08 2026     Ss   /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice
+39679     1 Sun Nov  8 03:16:33 2026     Ss   /System/Library/Frameworks/ColorSync.framework/Versions/A/XPCServices/com.apple.ColorSyncXPCAgent.xpc/Contents/MacOS/com.apple.ColorSyncXPCAgent
+39690     1 Sun Nov  8 03:16:33 2026     Ss   /usr/libexec/colorsyncd
+39786     1 Sat Nov  7 12:55:08 2026     Ss   /System/Library/ExtensionKit/Extensions/IFTelemetrySELFIngestor.appex/Contents/MacOS/IFTelemetrySELFIngestor
+39818     1 Thu Oct 22 13:52:40 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdwrite
+39892     1 Sat Nov  7 12:55:08 2026     Ss   /System/Library/ExtensionKit/Extensions/BiomeSELFIngestor.appex/Contents/MacOS/BiomeSELFIngestor
+39920     1 Sat Nov  7 12:55:08 2026     Ss   /System/Library/ExtensionKit/Extensions/IFTranscriptSELFIngestor.appex/Contents/MacOS/IFTranscriptSELFIngestor
+39944     1 Sat Nov  7 12:55:09 2026     Ss   /System/Library/ExtensionKit/Extensions/GMSSELFIngestor.appex/Contents/MacOS/GMSSELFIngestor
+40096     1 Mon Nov  9 16:13:28 2026     Ss   /Users/jack/src/loopflow.loo-593-decide-the-desktop/.venv/bin/python3
+40371 38312 Mon Nov  9 08:18:31 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+40550     1 Sun Nov  8 15:29:49 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+40794 32432 Tue Nov  3 08:12:32 2026     Ss   opencode
+40860     1 Mon Nov  9 10:36:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+40861     1 Mon Nov  9 10:36:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+41250 37717 Mon Nov  9 08:17:40 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+41415 38415 Sun Nov  8 19:24:53 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+41768     1 Mon Nov  9 10:22:22 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+42024     1 Mon Nov  9 11:46:47 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+42186     1 Sun Nov  8 10:01:43 2026     S    /System/Library/PrivateFrameworks/Ecosystem.framework/Support/ecosystemagent
+42428 31282 Mon Nov  9 12:06:34 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+42841     1 Sat Nov  7 23:00:00 2026     Ss   aslmanager
+43858     1 Thu Oct 22 13:53:27 2026     S    /System/Library/CoreServices/PowerChime.app/Contents/MacOS/PowerChime
+43973 69132 Sun Nov  8 19:08:38 2026     Ss   /Users/jack/.lf/bin/lf-d381672e04be5a2a79dea2c27ef8b7fa131170a4f562308fde4493d079b53c5b
+44156     1 Mon Nov  9 09:39:35 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+44568 47292 Mon Nov  9 14:15:47 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+44569 47292 Mon Nov  9 14:15:47 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+45037 38958 Mon Nov  9 11:46:10 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+45364 36329 Thu Nov  5 07:25:59 2026     Ss   /private/tmp/loo-672-redemo-346bmcxn/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+45400     1 Mon Nov  9 08:28:10 2026     S    /System/Library/PrivateFrameworks/IntelligencePlatformCore.framework/Versions/A/knowledgeconstructiond
+45488     1 Mon Nov  9 08:29:31 2026     S    /System/Library/PrivateFrameworks/GameControllerFoundation.framework/Versions/A/XPCServices/GameControllerConfigService.xpc/Contents/MacOS/GameControllerConfigService
+45781     1 Sat Nov  7 16:48:49 2026     S    /usr/libexec/naturallanguaged
+45891 37362 Thu Nov  5 07:25:59 2026     Ss   /private/tmp/loo-672-redemo-346bmcxn/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+45980     1 Sun Nov  8 15:29:50 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+46147     1 Sat Nov  7 19:48:28 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+46357     1 Sun Nov  8 04:30:56 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+46495 46357 Sun Nov  8 04:30:56 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+46552 46495 Sun Nov  8 04:30:56 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+46728     1 Sat Nov  7 12:54:05 2026     Ss   /System/Library/PrivateFrameworks/AppPredictionFoundation.framework/Versions/A/XPCServices/AppPredictionIntentsHelperService.xpc/Contents/MacOS/AppPredictionIntentsHelperService
+46825     1 Mon Nov  9 11:59:34 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+46884 61471 Mon Nov  9 23:56:09 2026     S    /usr/bin/perl
+46952 88033 Wed Nov  4 13:57:37 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Renderer).app/Contents/MacOS/Cursor Helper (Renderer)
+47292     1 Mon Nov  9 14:06:47 2026     S    /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+47522     1 Sun Nov  8 03:11:06 2026     Ss   /Applications/Xcode.app/Contents/PlugIns/IDEIntelligenceChat.framework/Versions/A/XPCServices/com.apple.dt.ExternalViewService.xpc/Contents/MacOS/com.apple.dt.ExternalViewService
+48016     1 Sun Nov  8 03:11:07 2026     Ss   /Applications/Xcode.app/Contents/SharedFrameworks/DVTSourceControl.framework/Versions/A/XPCServices/com.apple.dt.Xcode.sourcecontrol.WorkingCopyScanner.xpc/Contents/MacOS/com.apple.dt.Xcode.sourcecontrol.WorkingCopyScanner
+48561     1 Sun Nov  8 18:34:57 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+48714     1 Sat Nov  7 12:48:57 2026     Ss   /usr/libexec/ASPCarryLog
+48737     1 Sat Nov  7 12:48:57 2026     Ss   /usr/libexec/symptomsd-diag
+48795     1 Mon Nov  9 08:17:45 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+48884     1 Sun Nov  8 03:11:07 2026     Ss   /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/SpeechSynthesis.framework/Versions/A/XPCServices/SpeechSynthesisServerXPC.xpc/Contents/MacOS/SpeechSynthesisServerXPC
+49149 38767 Mon Nov  9 12:06:38 2026     Ts   /Applications/Loopflow.app/Contents/MacOS/lf
+49380     1 Sat Nov  7 23:49:05 2026     Ss   /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/UARPUpdaterServiceLegacyAudio.xpc/Contents/MacOS/UARPUpdaterServiceLegacyAudio
+49495 44389 Mon Nov  9 09:39:37 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+49633     1 Sat Nov  7 12:48:58 2026     Ss   /System/Library/PrivateFrameworks/ManagedBackgroundAssets.framework/Versions/A/XPCServices/Managed Background Assets Helper Service.xpc/Contents/MacOS/Managed Background Assets Helper Service
+49825 99907 Fri Oct 30 14:11:32 2026     S    /Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/Frameworks/Docker Desktop Helper.app/Contents/MacOS/Docker Desktop Helper
+50478     1 Tue Nov 10 05:29:32 2026     S    /usr/libexec/remindd
+50509     1 Sun Nov  8 15:29:52 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50541     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50542     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50543     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50544     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50545     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50546     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50547     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50548     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50549     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50550     1 Mon Nov  9 10:11:54 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50570 40096 Tue Nov 10 10:32:29 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+50782     1 Fri Oct 23 16:43:47 2026     SN   /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python
+51181 42344 Mon Nov  9 11:46:49 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+51258 40791 Sun Nov  8 15:29:53 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+51307     1 Sat Nov  7 12:48:59 2026     S    /System/Library/PrivateFrameworks/CloudPhotoServices.framework/Versions/A/XPCServices/com.apple.CloudPhotosConfiguration.xpc/Contents/MacOS/com.apple.CloudPhotosConfiguration
+51599     1 Sat Nov  7 12:48:59 2026     S    /System/Library/CoreServices/iconservicesagent
+51600     1 Sat Nov  7 12:50:18 2026     Ss   /System/Library/PrivateFrameworks/StreamingZip.framework/Versions/A/XPCServices/com.apple.StreamingUnzipService.privileged.xpc/Contents/MacOS/com.apple.StreamingUnzipService.privileged
+51730 98845 Thu Nov  5 11:16:51 2026     Ss   /bin/zsh
+51740 51730 Thu Nov  5 11:16:51 2026     S    /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python
+51800     1 Sat Nov  7 12:49:00 2026     Ss   /System/Library/CoreServices/iconservicesd
+51921     1 Mon Nov  9 08:23:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+51923     1 Mon Nov  9 08:23:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+52166     1 Sat Nov  7 12:54:08 2026     S    /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/XPCServices/XProtectPluginService.xpc/Contents/MacOS/XProtectPluginService
+52273     1 Mon Nov  9 16:19:26 2026     S    /Applications/Linear.app/Contents/MacOS/Linear
+52748     1 Sat Nov  7 13:05:28 2026     S    /usr/libexec/backgroundassets.user
+52951     1 Tue Oct 27 11:32:57 2026     Ss   /usr/libexec/dhcp6d
+53201     1 Mon Nov  9 16:19:26 2026     S    /Applications/Linear.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler
+53261     1 Wed Nov  4 10:04:13 2026     Ss   /Users/jack/.local/bin/lf
+53273 52273 Mon Nov  9 16:19:26 2026     S    /Applications/Linear.app/Contents/Frameworks/Linear Helper.app/Contents/MacOS/Linear Helper
+53313 52273 Mon Nov  9 16:19:26 2026     S    /Applications/Linear.app/Contents/Frameworks/Linear Helper.app/Contents/MacOS/Linear Helper
+53479     1 Mon Nov  9 11:51:36 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+53727 52273 Mon Nov  9 16:19:27 2026     S    /Applications/Linear.app/Contents/Frameworks/Linear Helper (Renderer).app/Contents/MacOS/Linear Helper (Renderer)
+53735 52273 Mon Nov  9 16:19:27 2026     S    /Applications/Linear.app/Contents/Frameworks/Linear Helper.app/Contents/MacOS/Linear Helper
+54067     1 Mon Nov  9 11:41:21 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+54283     1 Mon Nov  9 08:18:39 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+54406     1 Fri Oct 23 09:13:49 2026     Ss   /usr/libexec/wifivelocityd
+54733     1 Sat Nov  7 12:49:02 2026     Ss   /System/Library/PrivateFrameworks/CloudTelemetry.framework/Versions/A/XPCServices/CloudTelemetryService.xpc/Contents/MacOS/CloudTelemetryService
+54734     1 Sat Nov  7 12:49:02 2026     Ss   /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XProtectBridgeService.xpc/Contents/MacOS/XProtectBridgeService
+54735     1 Sat Nov  7 12:49:02 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+54756     1 Sat Nov  7 22:44:09 2026     Ss   /System/Library/PrivateFrameworks/CoreKDL.framework/Support/corekdld
+54792     1 Mon Nov  9 14:04:08 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+55030     1 Sat Nov  7 12:49:02 2026     Ss   /System/Library/PrivateFrameworks/MediaConversionService.framework/Versions/A/XPCServices/com.apple.photos.ImageConversionService.xpc/Contents/MacOS/com.apple.photos.ImageConversionService
+55120     1 Sat Nov  7 12:49:02 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/HubbleBlastDoorService.xpc/Contents/MacOS/HubbleBlastDoorService
+55749     1 Mon Nov  9 10:36:08 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+56059     1 Thu Nov  5 14:16:30 2026     S    /Applications/Wispr Flow.app/Contents/MacOS/Wispr Flow
+56256     1 Mon Nov  9 08:09:15 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+56296     1 Mon Nov  9 16:06:32 2026     Ss   /Users/jack/.local/bin/lf
+56371     1 Mon Nov  9 13:32:31 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+56414 46150 Sun Nov  8 15:29:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+56432     1 Mon Nov  9 07:45:06 2026     Ss   /System/iOSSupport/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU
+56434 46552 Sun Nov  8 04:31:01 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+56456 54394 Mon Nov  9 08:18:41 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+57740     1 Sat Nov  7 14:40:04 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+57937     1 Fri Oct 23 00:19:59 2026     S    /System/Library/PrivateFrameworks/IMDPersistence.framework/IMAutomaticHistoryDeletionAgent.app/Contents/MacOS/IMAutomaticHistoryDeletionAgent
+58483     1 Tue Nov 10 10:32:36 2026     S    /Users/jack/.local/bin/browse
+58550     1 Sat Nov  7 14:40:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+58559     1 Sat Nov  7 14:40:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+58592     1 Sat Nov  7 12:49:05 2026     S    /System/Library/PrivateFrameworks/BookKit.framework/Versions/A/XPCServices/com.apple.BKAgentService.xpc/Contents/MacOS/com.apple.BKAgentService
+58648     1 Tue Nov 10 10:32:36 2026     S    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+58699     1 Sun Nov  8 03:12:28 2026     Ts   /Users/jack/src/loopflow.loo-593-decide-the-desktop/.venv/bin/python3
+58798     1 Mon Nov  2 16:57:34 2026     S    /Applications/Rex Beta.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate
+58799     1 Mon Nov  2 16:57:34 2026     S    /Users/jack/Library/Caches/com.superlogical.rex/org.sparkle-project.Sparkle/Launcher/67eQhL7gx/Updater.app/Contents/MacOS/Updater
+59308     1 Sat Nov  7 12:49:06 2026     Ss   /System/Library/CoreServices/iconservicesagent
+59539     1 Sat Nov  7 12:49:06 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+59541     1 Sat Nov  7 12:49:06 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+59750     1 Tue Nov 10 10:22:49 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+59781 56487 Mon Nov  9 16:06:34 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+60037 59750 Tue Nov 10 10:22:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+60086 56425 Mon Nov  9 08:09:17 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+60447     1 Sat Nov  7 18:23:07 2026     Ss   /usr/libexec/misagent
+60525     1 Sun Nov  8 09:14:11 2026     Ss   /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANEStorageMaintainer.xpc/Contents/MacOS/ANEStorageMaintainer
+60537     1 Sun Nov  8 09:14:11 2026     Ss   /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/ANEStorageMaintainer.xpc/Contents/MacOS/ANEStorageMaintainer
+60680     1 Thu Nov  5 14:16:32 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler
+60865 60037 Tue Nov 10 10:22:49 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+60881 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper.app/Contents/MacOS/Wispr Flow Helper
+60882 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper.app/Contents/MacOS/Wispr Flow Helper
+61070     1 Mon Nov  9 14:06:52 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/chrome_crashpad_handler
+61471 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Resources/swift-helper-app-dist/Wispr Flow.app/Contents/MacOS/Wispr Flow
+61603 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper (Renderer).app/Contents/MacOS/Wispr Flow Helper (Renderer)
+61623 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper (Renderer).app/Contents/MacOS/Wispr Flow Helper (Renderer)
+61642     1 Sat Nov  7 12:36:36 2026     Ss   /Users/jack/.nvm/versions/node/v24.22.2/bin/node
+61688 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper (Renderer).app/Contents/MacOS/Wispr Flow Helper (Renderer)
+61718 56059 Thu Nov  5 14:16:33 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper (Renderer).app/Contents/MacOS/Wispr Flow Helper (Renderer)
+61853 47292 Mon Nov  9 14:06:52 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+61900 47292 Mon Nov  9 14:06:52 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+61969 47292 Mon Nov  9 14:06:53 2026     S    /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/157.0.8103.39/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+62309     1 Fri Nov  6 08:24:41 2026     Ss   /Users/jack/.local/share/loopflow/demos/loo498-20261106-native/runtime/native-lf
+62364 56059 Thu Nov  5 14:16:34 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper.app/Contents/MacOS/Wispr Flow Helper
+62365 56059 Thu Nov  5 14:16:34 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper.app/Contents/MacOS/Wispr Flow Helper
+62992     1 Mon Nov  9 15:09:46 2026     Ss   /System/Library/Frameworks/QuickLookUI.framework/Versions/A/XPCServices/QuickLookUIService.xpc/Contents/MacOS/QuickLookUIService
+62997     1 Mon Nov  2 11:35:44 2026     SN   /tmp/lf-7501-dxfrIo/bin/lf-busy
+63058     1 Mon Nov  9 10:41:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+63223     1 Sat Nov  7 14:00:19 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+63292     1 Mon Nov  9 15:09:46 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+63361     1 Mon Nov  9 10:38:38 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+63362     1 Mon Nov  9 10:38:38 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+63363     1 Mon Nov  9 10:38:38 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+63364     1 Mon Nov  9 10:38:38 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+63365     1 Mon Nov  9 10:38:38 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+63924     1 Sat Nov  7 14:40:09 2026     Ss   /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/XPCServices/extensionkitservice.xpc/Contents/MacOS/extensionkitservice
+63952     1 Sat Nov  7 14:40:09 2026     Ss   /System/Library/ExtensionKit/Extensions/TextThumbnailExtension.appex/Contents/MacOS/TextThumbnailExtension
+64016     1 Fri Nov  6 13:03:38 2026     Ss   /Users/jack/.local/bin/lf
+64450     1 Sat Nov  7 23:49:22 2026     Ss   /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/UARPUpdaterServiceDisplay.xpc/Contents/MacOS/UARPUpdaterServiceDisplay
+64774     1 Sat Nov  7 22:00:40 2026     Ss   /Applications/WhatsApp.app/Contents/PlugIns/Intents.appex/Contents/MacOS/Intents
+64916     1 Sun Nov  8 18:35:01 2026     S    /Applications/T3 Code (Beta).app/Contents/MacOS/T3 Code (Beta)
+65156     1 Mon Nov  9 11:46:53 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+65157     1 Mon Nov  9 11:46:53 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+65481 97098 Wed Oct 28 17:17:28 2026     S    /Applications/Docker.app/Contents/MacOS/com.docker.virtualization
+65490     1 Wed Oct 28 17:17:28 2026     Ss   /System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine
+65713     1 Sat Nov  7 04:47:37 2026     SN   /tmp/lf-7501-vqc0rF/bin/lf-removable
+65975 60865 Tue Nov 10 10:22:53 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+66086     1 Sun Nov  8 15:29:21 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+66201     1 Wed Nov  4 09:59:08 2026     Ss   /Users/jack/.local/bin/lf
+66671     1 Thu Nov  5 12:03:49 2026     Ss   /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+66795 56059 Thu Nov  5 14:16:36 2026     S    /Applications/Wispr Flow.app/Contents/Frameworks/Wispr Flow Helper (Renderer).app/Contents/MacOS/Wispr Flow Helper (Renderer)
+66896     1 Sat Nov  7 15:59:09 2026     S    /System/Library/PrivateFrameworks/PrivateCloudCompute.framework/privatecloudcomputed.app/Contents/MacOS/privatecloudcomputed
+67405     1 Thu Nov  5 12:03:49 2026     Ss   /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+67416     1 Sun Nov  8 00:16:42 2026     S    /usr/libexec/mobilerepaird
+67433 95158 Sat Nov  7 20:52:02 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+67882     1 Tue Nov  3 09:50:58 2026     Ss   /System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/ThemeWidgetControlViewService.xpc/Contents/MacOS/ThemeWidgetControlViewService
+68093     1 Thu Nov  5 12:03:49 2026     Ss   /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+68119 65975 Tue Nov 10 10:22:54 2026     S    claude
+68120 68119 Tue Nov 10 10:22:54 2026     S    /bin/sh
+68446 68119 Tue Nov 10 10:22:55 2026     S    /Users/jack/.local/bin/browse
+68464 68446 Tue Nov 10 10:22:55 2026     S    /Users/jack/.local/bin/browse
+68662     1 Wed Nov  4 09:59:10 2026     Ss   /Users/jack/.local/bin/lf
+68843 63216 Mon Nov  9 10:41:59 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+69309     1 Wed Nov  4 14:27:37 2026     Ss   /Users/jack/.local/bin/lf
+69382     1 Fri Oct 23 10:21:10 2026     S    /Library/Apple/System/Library/PrivateFrameworks/RemotePairing.framework/Versions/A/XPCServices/remotepairingd.xpc/Contents/MacOS/remotepairingd
+69989 91782 Mon Nov  9 18:15:09 2026     S    /Users/jack/.local/bin/browse
+70059 69989 Mon Nov  9 18:15:09 2026     S    /Users/jack/.local/bin/browse
+70080     1 Sat Nov  7 13:32:35 2026     Ss   /System/Library/Frameworks/FinderSync.framework/Versions/A/XPCServices/IsExtensionEnabled.xpc/Contents/MacOS/IsExtensionEnabled
+70341     1 Fri Oct 30 17:49:20 2026     Ss   /usr/libexec/diskimagesiod
+70601     1 Fri Oct 30 17:49:25 2026     S    /Applications/Rex Beta.app/Contents/MacOS/Rex
+70775     1 Sun Nov  8 07:02:09 2026     S    /System/Library/PrivateFrameworks/GenerativeExperiencesRuntime.framework/Versions/A/generativeexperiencesd
+70962     1 Sat Nov  7 12:58:07 2026     S    /System/Library/CoreServices/talagentd
+71053     1 Fri Oct 30 17:49:30 2026     S    /Users/jack/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex
+71071 70601 Fri Oct 30 17:49:30 2026     S    /Users/jack/Library/Application Support/com.superlogical.rex/RexServer/Versions/1696/Rex Server.app/Contents/MacOS/rex
+71072 70601 Fri Oct 30 17:49:30 2026     S    /bin/sh
+71604     1 Mon Nov  9 08:18:50 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+72254     1 Mon Nov  9 15:42:48 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+72255     1 Mon Nov  9 15:42:48 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+72641     1 Sat Nov  7 12:47:57 2026     S    /usr/libexec/proactiveeventtrackerd
+72715     1 Sat Nov  7 12:45:23 2026     Ss   /usr/libexec/logd_helper
+72983     1 Sat Nov  7 14:19:03 2026     Ss   /System/Library/Frameworks/Intents.framework/XPCServices/intents_helper.xpc/Contents/MacOS/intents_helper
+73087     1 Sat Nov  7 14:06:46 2026     Ss   /usr/sbin/systemsoundserverd
+73128     1 Sat Nov  7 14:06:46 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/AudioComponentRegistrar
+73202     1 Sat Nov  7 14:06:46 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+73410     1 Sat Nov  7 19:26:05 2026     SN   doppler
+73412 73410 Sat Nov  7 19:26:05 2026     SN   caffeinate
+73529 73410 Sat Nov  7 19:26:06 2026     SN   doppler
+73684 73529 Sat Nov  7 19:26:06 2026     SN   uv
+73697     1 Wed Nov  4 13:41:35 2026     SN   /tmp/lf-7501-85p9zV/bin/lf-editor
+73711     1 Sat Nov  7 12:13:15 2026     Ss   /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd
+74092     1 Mon Nov  9 14:09:06 2026     Ss   /System/Library/Frameworks/AppKit.framework/Versions/C/XPCServices/ThemeWidgetControlViewService.xpc/Contents/MacOS/ThemeWidgetControlViewService
+74380 71786 Mon Nov  9 08:18:52 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+74523     1 Mon Nov  9 10:42:02 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74598     1 Mon Nov  9 11:48:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74599     1 Mon Nov  9 11:48:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74600     1 Mon Nov  9 11:48:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74601     1 Mon Nov  9 11:48:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74602     1 Mon Nov  9 11:48:00 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+74873 73684 Sat Nov  7 19:26:07 2026     SN   /Users/jack/.cache/uv/builds-v0/.tmpJuPS63/bin/python
+75382     1 Sat Nov  7 13:05:44 2026     Ss   /usr/libexec/keybagd
+75523     1 Tue Nov 10 10:13:25 2026     Ss   /Users/jack/.local/bin/lf
+75830     1 Sat Nov  7 04:09:02 2026     Ss   /Users/jack/.local/bin/lf
+76529 67760 Thu Nov  5 12:03:53 2026     Ss   /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+76535 68504 Thu Nov  5 12:03:53 2026     Ss   /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+76597     1 Mon Nov  2 11:38:30 2026     SN   /tmp/lf-7501-VycMUJ/bin/lf-busy
+77026 64916 Sun Nov  8 18:35:05 2026     S    /Applications/T3 Code (Beta).app/Contents/Frameworks/T3 Code (Beta) Helper.app/Contents/MacOS/T3 Code (Beta) Helper
+77065 64916 Sun Nov  8 18:35:05 2026     S    /Applications/T3 Code (Beta).app/Contents/Frameworks/T3 Code (Beta) Helper.app/Contents/MacOS/T3 Code (Beta) Helper
+77326     1 Sun Nov  8 18:35:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+77329     1 Sun Nov  8 18:35:05 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+77614     1 Mon Nov  9 11:46:25 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+77639 64916 Sun Nov  8 18:35:05 2026     S    /Applications/T3 Code (Beta).app/Contents/Frameworks/T3 Code (Beta) Helper (Renderer).app/Contents/MacOS/T3 Code (Beta) Helper (Renderer)
+77888 64916 Sun Nov  8 18:35:05 2026     Ss   /Applications/T3 Code (Beta).app/Contents/MacOS/T3 Code (Beta)
+78024     1 Sun Nov  8 18:35:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+78040 30302 Wed Nov  4 18:11:05 2026     Ss   /bin/zsh
+78042 78040 Wed Nov  4 18:11:05 2026     S    bun
+78043 78042 Wed Nov  4 18:11:05 2026     S    node
+78405     1 Mon Nov  9 08:17:59 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+78786 31176 Mon Nov  9 07:45:26 2026     S    /Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper
+78891     1 Mon Nov  9 11:46:25 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+78954 78043 Wed Nov  4 18:11:06 2026     S    /private/tmp/claude-501/-Users-jack-src-loopflow-humanlayer/3b25b6a3-d7c7-4855-9187-e1ed117457a1/scratchpad/src/humanlayer/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild
+78987     1 Mon Nov  9 11:41:31 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+79014     1 Fri Oct 23 02:09:34 2026     S    /System/Library/Frameworks/ManagedAppDistribution.framework/Support/managedappdistributionagent
+79231     1 Mon Nov  9 10:42:59 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+79474     1 Mon Nov  9 10:14:57 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+79606     1 Sat Oct 24 19:58:33 2026     S    /System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/Resources/storeuid.app/Contents/MacOS/storeuid
+79972 77888 Sun Nov  8 18:35:06 2026     Ss   /Applications/T3 Code (Beta).app/Contents/Resources/resource-monitor/t3-resource-monitor
+79986     1 Mon Nov  9 11:51:05 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+80023     1 Sat Nov  7 16:39:23 2026     S    /System/Cryptexes/App/usr/libexec/SafariLaunchAgent
+80355 78043 Wed Nov  4 18:11:07 2026     S    /private/tmp/claude-501/-Users-jack-src-loopflow-humanlayer/3b25b6a3-d7c7-4855-9187-e1ed117457a1/scratchpad/src/humanlayer/node_modules/.bun/@esbuild+darwin-arm64@0.25.12/node_modules/@esbuild/darwin-arm64/bin/esbuild
+80364     1 Mon Nov  9 18:16:46 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+80389     1 Sat Nov  7 23:49:38 2026     Ss   /usr/libexec/uarpassetmanagerd
+80597     1 Sat Nov  7 22:20:54 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+80626     1 Sat Nov  7 23:49:38 2026     Ss   /System/Library/PrivateFrameworks/UARPAssetManager.framework/XPCServices/UARPAssetManagerServiceMobileAsset.xpc/Contents/MacOS/UARPAssetManagerServiceMobileAsset
+80631     1 Mon Nov  9 08:17:08 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+80726     1 Fri Nov  6 21:53:07 2026     Ss   /Users/jack/.local/bin/lf
+80776     1 Sat Nov  7 23:49:39 2026     Ss   /usr/libexec/tzd
+80903     1 Sat Nov  7 23:49:39 2026     Ss   /usr/libexec/sysdiagnosed
+80908 78043 Wed Nov  4 18:11:08 2026     S    /private/tmp/claude-501/-Users-jack-src-loopflow-humanlayer/3b25b6a3-d7c7-4855-9187-e1ed117457a1/scratchpad/src/humanlayer/node_modules/.bun/@esbuild+darwin-arm64@0.28.2/node_modules/@esbuild/darwin-arm64/bin/esbuild
+80938     1 Sat Nov  7 12:49:22 2026     S    /System/Library/Frameworks/MediaExtension.framework/Versions/A/Helpers/MENotificationAgent
+80983     1 Sat Nov  7 23:49:39 2026     Ss   /System/Library/PrivateFrameworks/XprotectFramework.framework/Versions/A/XPCServices/XProtectUpdateService.xpc/Contents/MacOS/XProtectUpdateService
+81112     1 Mon Nov  9 15:40:47 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+81733     1 Mon Nov  9 14:07:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+81735     1 Mon Nov  9 14:07:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+82477     1 Sat Oct 24 18:36:21 2026     S    /usr/libexec/gputoolsserviced
+82605     1 Mon Nov  9 15:10:05 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+83199 78582 Mon Nov  9 08:18:01 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+83380     1 Wed Nov  4 22:09:08 2026     S    /Applications/Dropbox.app/Contents/MacOS/Dropbox
+83464     1 Wed Nov  4 10:06:02 2026     Ss   /usr/libexec/syspolicyd
+83808     1 Mon Nov  9 07:57:35 2026     Ss   /Users/jack/.local/bin/lf
+83958     1 Mon Nov  9 08:12:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+84061     1 Wed Nov  4 22:09:08 2026     Ss   /Applications/Dropbox.app/Contents/PlugIns/DropboxFileProvider.appex/Contents/MacOS/DropboxFileProvider
+84091     1 Sat Oct 24 18:36:28 2026     Ss   /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService
+84146     1 Wed Nov  4 22:09:08 2026     S    /Applications/Dropbox.app/Contents/PlugIns/DropboxFileProvider.appex/Contents/MacOS/DropboxFileProviderCH
+84183     1 Mon Nov  9 12:04:03 2026     Ss   /Library/Apple/System/Library/PrivateFrameworks/MobileDevice.framework/Versions/A/XPCServices/MDRemoteServiceSupport.xpc/Contents/MacOS/MDRemoteServiceSupport
+84363 80810 Mon Nov  9 08:17:09 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+84618     1 Sun Nov  8 19:05:44 2026     S    /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf
+84869     1 Sat Nov  7 12:44:11 2026     Ss   /System/Library/CoreServices/Siri.app/Contents/XPCServices/SiriNCService.xpc/Contents/MacOS/SiriNCService
+84910 46279 Tue Nov 10 10:28:39 2026     Ss   uv
+84960 84910 Tue Nov 10 10:28:39 2026     S    /Users/jack/src/loopflow.agent/.venv/bin/python3
+84963 84960 Tue Nov 10 10:28:39 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+84986     1 Mon Nov  9 14:20:15 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTEncoderXPCService.xpc/Contents/MacOS/VTEncoderXPCService
+85017     1 Mon Nov  9 14:20:15 2026     Ss   /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+85024 84963 Tue Nov 10 10:28:39 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+85173 85024 Tue Nov 10 10:28:39 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+85205     1 Wed Nov  4 19:47:17 2026     S    /System/Library/PrivateFrameworks/PassKitCore.framework/passd
+85853     1 Wed Nov  4 22:09:09 2026     S    /Applications/Dropbox.app/Contents/MacOS/Dropbox
+85894 83380 Wed Nov  4 22:09:09 2026     S    /Applications/Dropbox.app/Contents/MacOS/Dropbox
+85948     1 Sat Nov  7 23:49:44 2026     Ss   /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/XPCServices/media-indexer.xpc/Contents/MacOS/media-indexer
+86006     1 Sat Nov  7 23:49:44 2026     Ss   /System/Library/PrivateFrameworks/MobileAccessoryUpdater.framework/XPCServices/EAUpdaterService.xpc/Contents/MacOS/EAUpdaterService
+86009 85173 Tue Nov 10 10:28:40 2026     S    codex
+86010 86009 Tue Nov 10 10:28:40 2026     S    /bin/sh
+86047     1 Sat Nov  7 23:49:44 2026     S    /System/Library/PrivateFrameworks/AMPLibrary.framework/Versions/A/Support/AMPLibraryAgent
+86135     1 Thu Nov  5 10:12:03 2026     SN   /tmp/lf-7501-31mWd6/bin/lf
+86513     1 Sun Nov  8 15:25:38 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+86601 79216 Mon Nov  9 11:46:27 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+86679     1 Sat Nov  7 23:49:45 2026     S    /System/Library/PrivateFrameworks/PodcastServices.framework/XPCServices/PodcastContentService.xpc/Contents/MacOS/PodcastContentService
+86772 80181 Mon Nov  9 11:51:09 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+86872 86009 Tue Nov 10 10:28:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+86873 86009 Tue Nov 10 10:28:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+86874 86009 Tue Nov 10 10:28:40 2026     S    /Users/jack/.local/bin/browse
+86891 86874 Tue Nov 10 10:28:40 2026     S    /Users/jack/.local/bin/browse
+86893 86873 Tue Nov 10 10:28:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+86901     1 Mon Nov  9 12:16:52 2026     Ss   /System/Library/PrivateFrameworks/MediaAnalysisAccess.framework/Versions/A/XPCServices/mediaanalysisd-access.xpc/Contents/MacOS/mediaanalysisd-access
+86908     1 Mon Nov  9 18:29:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+86936     1 Sat Nov  7 23:49:45 2026     S    /System/Library/PrivateFrameworks/AMPLibrary.framework/Versions/A/Support/AMPArtworkAgent
+86999     1 Sat Nov  7 18:23:33 2026     Ss   /usr/libexec/applekeystored
+87183     1 Mon Nov  9 08:19:00 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+87298 84097 Mon Nov  9 08:12:59 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+87391     1 Mon Nov  9 14:20:17 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+87487     1 Mon Nov  9 18:12:58 2026     Ss   /Users/jack/.local/bin/browse
+87881     1 Mon Nov  9 10:46:55 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+87967     1 Sat Nov  7 16:15:08 2026     Ss   /usr/libexec/xpcroleaccountd
+87974     1 Sun Nov  1 13:25:09 2026     S    /usr/sbin/distnoted
+88033     1 Wed Nov  4 09:54:42 2026     S    /Applications/Cursor.app/Contents/MacOS/Cursor
+88265     1 Wed Nov  4 09:54:43 2026     S    /Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler
+88266 88033 Wed Nov  4 09:54:43 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper
+88267 88033 Wed Nov  4 09:54:43 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper
+88382 88033 Wed Nov  4 09:54:44 2026     S    Cursor Helper: shared-process
+88397 88033 Wed Nov  4 09:54:44 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Renderer).app/Contents/MacOS/Cursor Helper (Renderer)
+88638     1 Wed Nov  4 13:41:55 2026     SN   /tmp/lf-7501-3fwDXH/bin/lf-editor
+88705     1 Wed Nov  4 09:19:43 2026     Ss   /Applications/Tailscale 2.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension
+88790     1 Mon Nov  9 11:51:50 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+88963     1 Mon Nov  9 12:06:03 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89088     1 Sat Nov  7 13:30:47 2026     Ss   /System/Applications/Photos.app/Contents/PlugIns/PhotosReliveWidget.appex/Contents/MacOS/PhotosReliveWidget
+89178     1 Mon Nov  9 12:02:12 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89201 88033 Thu Nov  5 08:09:17 2026     S    Cursor Helper (Plugin): extension-host manabot.diagrams [1-5]
+89324     1 Sat Nov  7 12:54:32 2026     Ss   /Library/Apple/System/Library/CoreServices/XProtect.app/Contents/XPCServices/XProtectPluginService.xpc/Contents/MacOS/XProtectPluginService
+89335     1 Mon Nov  9 16:16:18 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89413     1 Mon Nov  9 16:05:42 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89557 88033 Thu Nov  5 05:13:09 2026     S    Cursor Helper: fileWatcher [1:96307d3e25b8a12bfe81d2a71b467c7d]
+89581     1 Sun Nov  8 15:27:55 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89676     1 Sat Nov  7 12:44:15 2026     Ss   /usr/libexec/sysmond
+89738     1 Sat Nov  7 12:39:53 2026     Ss   /usr/libexec/audioanalyticsd
+89840     1 Mon Nov  9 10:42:11 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+89844     1 Sat Nov  7 12:39:53 2026     S    /System/Library/PrivateFrameworks/BiomeStreams.framework/Support/BiomeAgent
+89867     1 Sat Nov  7 12:39:53 2026     Ss   /System/Library/PrivateFrameworks/TCC.framework/Support/tccd
+89869     1 Sat Nov  7 12:39:53 2026     S    /usr/libexec/duetexpertd
+89870     1 Sat Nov  7 12:39:53 2026     S    /usr/sbin/cfprefsd
+89884     1 Sat Nov  7 12:39:53 2026     S    /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/ContextStoreAgent
+90028     1 Mon Nov  2 13:35:27 2026     SN   /tmp/lf-7501-oPjGYD/bin/lf
+90041 83961 Mon Nov  9 07:57:38 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+90267     1 Mon Nov  9 08:12:10 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+90343     1 Mon Nov  9 08:28:25 2026     Ss   /System/Library/ExtensionKit/Extensions/PnROnDeviceWorker.appex/Contents/MacOS/PnROnDeviceWorker
+90372  4106 Mon Nov  9 18:30:43 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+90401 87436 Mon Nov  9 08:19:01 2026     Ts   /Applications/Loopflow.app/Contents/MacOS/lf
+90415     1 Mon Nov  9 12:06:03 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+90478     1 Sat Nov  7 20:51:13 2026     S    /System/Library/Services/AppleSpell.service/Contents/MacOS/AppleSpell
+90482     1 Thu Nov  5 12:22:20 2026     SN   /tmp/lf-7501-fbjevY/bin/lf-other
+90605     1 Sat Nov  7 23:35:03 2026     Ss   /System/Library/Frameworks/AudioToolbox.framework/XPCServices/com.apple.audio.SandboxHelper.xpc/Contents/MacOS/com.apple.audio.SandboxHelper
+90974 89201 Thu Nov  5 08:09:19 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)
+91235     1 Sat Nov  7 15:37:27 2026     S    /usr/libexec/frauddefensed
+91400     1 Sun Nov  8 19:07:30 2026     S    /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf
+91574     1 Sat Nov  7 16:12:57 2026     Ss   /Users/jack/.local/bin/lf
+91779 88033 Wed Nov  4 09:54:56 2026     S    Cursor Helper: fileWatcher [1:empty-window]
+91780 88033 Wed Nov  4 09:54:56 2026     S    /Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Cursor Helper
+91782 88033 Wed Nov  4 09:54:56 2026     S    Cursor Helper: mcp-process
+91783 88033 Wed Nov  4 09:54:56 2026     S    Cursor Helper (Plugin): extension-host Agents Window [1-1]
+91820     1 Sat Nov  7 18:23:39 2026     Ss   /System/Library/Frameworks/Metal.framework/Versions/A/XPCServices/MTLCompilerService.xpc/Contents/MacOS/MTLCompilerService
+91861     1 Mon Nov  9 16:19:47 2026     S<   /Applications/Linear.app/Contents/Frameworks/Squirrel.framework/Resources/ShipIt
+92273     1 Mon Nov  9 10:12:53 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+92409 86611 Sun Nov  8 15:25:41 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+92510 56434 Sun Nov  8 05:21:28 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+92549     1 Mon Nov  9 08:23:11 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+93055 90428 Mon Nov  9 08:12:12 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+93090 82026 Tue Nov 10 10:13:39 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+93137     1 Sat Nov  7 19:09:54 2026     SN   uv
+93172     1 Sat Nov  7 18:21:55 2026     Ss   /System/Library/CoreServices/ControlCenter.app/Contents/PlugIns/DisplayControls.appex/Contents/MacOS/DisplayControls
+93174 93137 Sat Nov  7 19:09:54 2026     SN   /Users/jack/src/loopflow.homepage-differentiators/website/.venv/bin/python3
+93318     1 Mon Nov  9 16:22:58 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+93470     1 Sat Nov  7 13:04:55 2026     Ss   /usr/sbin/spindump
+93507 93174 Sat Nov  7 19:09:54 2026     SN   uv
+93624 93507 Sat Nov  7 19:09:54 2026     SN   /Users/jack/src/loopflow.homepage-differentiators/website/.venv/bin/python3
+93708     1 Mon Nov  9 07:42:34 2026     Ss   /usr/sbin/bluetoothd
+93709     1 Mon Nov  9 07:42:34 2026     Ss   /usr/libexec/hidd
+93792     1 Sun Nov  8 19:07:31 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+93796 86009 Tue Nov 10 10:28:47 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+93905 93624 Sat Nov  7 19:09:54 2026     SN   /Users/jack/src/loopflow.homepage-differentiators/website/.venv/bin/python3
+93906 93624 Sat Nov  7 19:09:54 2026     SN   /Users/jack/src/loopflow.homepage-differentiators/website/.venv/bin/python3
+93960     1 Tue Nov 10 10:30:15 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+94111     1 Thu Oct 22 15:32:09 2026     Ss   /System/Library/ExtensionKit/Extensions/TGOnDeviceInferenceProviderService.appex/Contents/MacOS/TGOnDeviceInferenceProviderService
+94294     1 Mon Nov  9 07:42:36 2026     Ss   /System/Applications/Calendar.app/Contents/PlugIns/CalendarWidgetExtension.appex/Contents/MacOS/CalendarWidgetExtension
+94514 89882 Sun Nov  8 15:27:57 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+94550     1 Mon Nov  9 09:15:56 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+94717     1 Mon Nov  9 07:42:37 2026     Ss   /System/Library/PrivateFrameworks/AppleDeviceQuerySupport.framework/Versions/A/XPCServices/AppleDeviceQueryService.xpc/Contents/MacOS/AppleDeviceQueryService
+94795 83380 Wed Nov  4 22:09:14 2026     S    /Applications/Dropbox.app/Contents/Frameworks/Dropbox Helper (GPU).app/Contents/MacOS/Dropbox Helper (GPU)
+94796 83380 Wed Nov  4 22:09:14 2026     S    /Applications/Dropbox.app/Contents/Frameworks/Dropbox Helper.app/Contents/MacOS/Dropbox Helper
+94925     1 Sun Nov  8 09:10:41 2026     Ss   /System/Library/Frameworks/Intents.framework/XPCServices/intents_helper.xpc/Contents/MacOS/intents_helper
+94972     1 Wed Nov  4 17:01:50 2026     Ss   /Users/jack/.local/bin/lf
+95174     1 Mon Nov  2 11:40:41 2026     SN   /tmp/lf-7501-zKaZat/bin/lf-busy
+95391 89078 Mon Nov  9 11:51:52 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+95924     1 Mon Nov  9 09:15:57 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+95933     1 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/MacOS/Spotify
+95942     1 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper
+95944 95933 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper
+95945 95933 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper
+95949 95933 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper
+95956 95933 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper (Renderer).app/Contents/MacOS/Spotify Helper (Renderer)
+95957 95933 Sat Oct 31 13:56:05 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper (Renderer).app/Contents/MacOS/Spotify Helper (Renderer)
+96012 95933 Sat Oct 31 13:56:06 2026     S    /Applications/Spotify.app/Contents/Frameworks/Spotify Helper.app/Contents/MacOS/Spotify Helper
+96128 89692 Mon Nov  9 16:16:21 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+96129 94259 Tue Nov 10 10:30:17 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+96244     1 Mon Nov  9 11:59:08 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+96245     1 Mon Nov  9 11:59:08 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+96537     1 Sat Nov  7 21:47:35 2026     Ss   /System/Library/PrivateFrameworks/FindMyDevice.framework/XPCServices/FindMyDeviceSharedConfigurationXPCService.xpc/Contents/MacOS/FindMyDeviceSharedConfigurationXPCService
+96723     1 Sat Nov  7 21:47:35 2026     Ss   /System/Library/PrivateFrameworks/AuthKit.framework/Versions/A/Support/akd
+96848 92997 Mon Nov  9 08:23:13 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+96950     1 Sat Nov  7 17:44:35 2026     Ss   /System/Library/Frameworks/Speech.framework/Versions/A/XPCServices/localspeechrecognition.xpc/Contents/MacOS/localspeechrecognition
+96997     1 Tue Oct 27 16:34:58 2026     S    /Applications/Docker.app/Contents/MacOS/com.docker.backend
+97035     1 Sat Nov  7 17:44:35 2026     S    /System/Library/PrivateFrameworks/Categories.framework/Versions/A/XPCServices/CategoriesService.xpc/Contents/MacOS/CategoriesService
+97098 96997 Tue Oct 27 16:34:59 2026     S    /Applications/Docker.app/Contents/MacOS/com.docker.backend
+97099 96997 Tue Oct 27 16:34:59 2026     S    /Applications/Docker.app/Contents/MacOS/com.docker.backend
+97213 88033 Wed Nov  4 09:55:19 2026     S    Cursor Helper: conversation-search
+97389     1 Mon Nov  9 11:45:48 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+97468     1 Mon Nov  9 07:42:38 2026     S    /System/Library/PrivateFrameworks/AppSSO.framework/Support/AppSSOAgent.app/Contents/MacOS/AppSSOAgent
+97498     1 Mon Nov  9 07:42:38 2026     Ss   /System/Library/Frameworks/GSS.framework/Helpers/GSSCred
+97595     1 Sun Nov  8 19:05:49 2026     S    /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf
+97597     1 Sun Nov  8 19:05:49 2026     S    /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf
+97981     1 Sat Nov  7 21:15:36 2026     Ss   /usr/libexec/diagnosticd
+98063     1 Mon Nov  9 10:11:33 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+98151 89429 Mon Nov  9 12:02:16 2026     Rs   /Applications/Loopflow.app/Contents/MacOS/lf
+98246     1 Mon Nov  9 11:50:28 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+98247     1 Mon Nov  9 11:50:28 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+98439     1 Tue Nov 10 10:30:19 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+98568     1 Sat Nov  7 19:47:42 2026     Ss   /System/Library/PrivateFrameworks/IMTranscoding.framework/XPCServices/IMTranscoderAgent.xpc/Contents/MacOS/IMTranscoderAgent
+98608     1 Thu Nov  5 11:06:53 2026     Ss   /Users/jack/.local/bin/lf
+98637     1 Sat Nov  7 19:47:42 2026     Ss   /System/Library/PrivateFrameworks/MessagesBlastDoorSupport.framework/Versions/A/XPCServices/MessagesBlastDoorService.xpc/Contents/MacOS/MessagesBlastDoorService
+98921 94013 Sun Nov  8 19:07:34 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+99035 83380 Wed Nov  4 22:09:16 2026     S    /Applications/Dropbox.app/Contents/Frameworks/Dropbox Helper (Renderer).app/Contents/MacOS/Dropbox Helper (Renderer)
+99093     1 Sun Nov  8 15:30:19 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+99094     1 Sun Nov  8 15:30:19 2026     S    /Applications/Loopflow.app/Contents/MacOS/lf
+99102     1 Thu Nov  5 07:55:23 2026     S    /Applications/1Password.app/Contents/MacOS/1Password
+99121 83380 Wed Nov  4 22:09:16 2026     S    /Applications/Dropbox.app/Contents/Frameworks/Dropbox Helper (Renderer).app/Contents/MacOS/Dropbox Helper (Renderer)
+99162     1 Mon Nov  9 10:48:29 2026     Ss   /System/Library/Frameworks/CoreGraphics.framework/Versions/A/XPCServices/CGPDFService.xpc/Contents/MacOS/CGPDFService
+99224     1 Thu Nov  5 07:55:24 2026     S    /Applications/1Password.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler
+99339     1 Thu Nov  5 12:22:25 2026     SN   /tmp/lf-7501-qQ79T7/bin/lf-other
+99359 99102 Thu Nov  5 07:55:24 2026     S    /Applications/1Password.app/Contents/Frameworks/1Password Helper.app/Contents/MacOS/1Password Helper
+99360 99102 Thu Nov  5 07:55:24 2026     S    /Applications/1Password.app/Contents/Frameworks/1Password Helper.app/Contents/MacOS/1Password Helper
+99450     1 Sat Nov  7 23:49:59 2026     Ss   /System/Library/Frameworks/NetFS.framework/Versions/A/XPCServices/PlugInLibraryService.xpc/Contents/MacOS/PlugInLibraryService
+99533     1 Wed Nov  4 12:42:03 2026     S    /Applications/Tailscale 2.app/Contents/MacOS/Tailscale
+99582 99102 Thu Nov  5 07:55:24 2026     S    /Applications/1Password.app/Contents/MacOS/1Password-Crash-Handler
+99617     1 Tue Nov 10 10:30:20 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+99669     1 Mon Nov  2 13:35:58 2026     SN   /tmp/lf-7501-qVseiA/bin/lf
+99715 97099 Tue Oct 27 16:35:02 2026     S    /Applications/Docker.app/Contents/MacOS/com.docker.build
+99727     1 Mon Nov  9 10:38:03 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
+99907 97099 Tue Oct 27 16:35:03 2026     S    /Applications/Docker.app/Contents/MacOS/Docker Desktop.app/Contents/MacOS/Docker Desktop
+  342     1 Thu Oct 22 12:48:52 2026     Ss+  /usr/libexec/remoted
+94259 93960 Tue Nov 10 10:30:16 2026     Ss+  claude
+96298 94259 Tue Nov 10 10:30:17 2026     S+   /Users/jack/.local/bin/browse
+96315 96298 Tue Nov 10 10:30:17 2026     S+   /Users/jack/.local/bin/browse
+ 5174  4994 Tue Nov 10 10:24:39 2026     Ss+  codex
+ 7052  5174 Tue Nov 10 10:24:40 2026     S    codex
+ 7053  7052 Tue Nov 10 10:24:40 2026     S    /bin/sh
+ 8508  7052 Tue Nov 10 10:24:41 2026     S    /Users/jack/.local/bin/browse
+ 8509  7052 Tue Nov 10 10:24:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 8510  7052 Tue Nov 10 10:24:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 8617  8508 Tue Nov 10 10:24:41 2026     S    /Users/jack/.local/bin/browse
+ 8645  8509 Tue Nov 10 10:24:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+19406  7052 Tue Nov 10 10:24:48 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+  932 98556 Tue Nov 10 10:30:21 2026     S+   /Users/jack/.local/bin/browse
+  965   932 Tue Nov 10 10:30:21 2026     S+   /Users/jack/.local/bin/browse
+98556 98439 Tue Nov 10 10:30:19 2026     Ss+  claude
+89692 89335 Mon Nov  9 16:16:19 2026     Ss+  codex
+92900 89692 Mon Nov  9 16:16:20 2026     S    codex
+92945 92900 Mon Nov  9 16:16:20 2026     S    /bin/sh
+95682 92900 Mon Nov  9 16:16:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+95684 92900 Mon Nov  9 16:16:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+95817 95682 Mon Nov  9 16:16:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+66415 66201 Wed Nov  4 09:59:08 2026     Ss+  claude
+38663 94207 Mon Nov  9 12:02:41 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+89429 89178 Mon Nov  9 12:02:13 2026     Ss+  codex
+94207 89429 Mon Nov  9 12:02:14 2026     S    codex
+94212 94207 Mon Nov  9 12:02:14 2026     S    /bin/sh
+95171 94207 Mon Nov  9 12:02:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+95172 94207 Mon Nov  9 12:02:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+95426 95172 Mon Nov  9 12:02:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+29532 29478 Tue Oct 27 18:09:11 2026     Ss+  /Users/jack/.lf/bin/lf-676ce774ab6f63ffe3d6abc667ee1ba505f7c9573f7e91164b591458e6edf178
+30019 29532 Tue Oct 27 18:09:11 2026     S    codex
+30020 30019 Tue Oct 27 18:09:11 2026     S    /bin/sh
+30173 29532 Tue Oct 27 18:09:12 2026     S+   codex
+30491 30019 Tue Oct 27 18:09:13 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+30492 30019 Tue Oct 27 18:09:13 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+30586 30492 Tue Oct 27 18:09:13 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 2363 99817 Tue Nov 10 10:30:21 2026     S+   /Users/jack/.local/bin/browse
+ 2449  2363 Tue Nov 10 10:30:22 2026     S+   /Users/jack/.local/bin/browse
+99817 99617 Tue Nov 10 10:30:20 2026     Ss+  claude
+ 1725  1557 Tue Nov 10 10:30:21 2026     Ss+  claude
+ 3819  1725 Tue Nov 10 10:30:23 2026     S+   /Users/jack/.local/bin/browse
+ 3857  3819 Tue Nov 10 10:30:23 2026     S+   /Users/jack/.local/bin/browse
+53284 53261 Wed Nov  4 10:04:13 2026     Ss+  claude
+ 8074 36008 Sun Nov  8 19:04:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 8075 36008 Sun Nov  8 19:04:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 8239 36008 Sun Nov  8 19:04:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+30402 30101 Sun Nov  8 19:03:17 2026     Ss+  codex
+33638 30402 Sun Nov  8 19:03:19 2026     S    codex
+33644 33638 Sun Nov  8 19:03:19 2026     S    /bin/sh
+35897 33638 Sun Nov  8 19:03:20 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+35898 33638 Sun Nov  8 19:03:20 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+36008 35898 Sun Nov  8 19:03:20 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+52819 33638 Sun Nov  8 19:03:27 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+54394 54283 Mon Nov  9 08:18:39 2026     Ss+  codex
+55392 54394 Mon Nov  9 08:18:40 2026     S    codex
+55393 55392 Mon Nov  9 08:18:40 2026     S    /bin/sh
+56063 55392 Mon Nov  9 08:18:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+56064 55392 Mon Nov  9 08:18:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+56148 56064 Mon Nov  9 08:18:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+97669 55392 Mon Nov  9 10:12:14 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+ 3225  3114 Tue Nov 10 10:30:22 2026     Ss+  claude
+ 5210  3225 Tue Nov 10 10:30:24 2026     S+   /Users/jack/.local/bin/browse
+ 5240  5210 Tue Nov 10 10:30:24 2026     S+   /Users/jack/.local/bin/browse
+ 7493 85647 Mon Nov  9 08:23:17 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+84097 83958 Mon Nov  9 08:12:57 2026     Ss+  codex
+85647 84097 Mon Nov  9 08:12:58 2026     S    codex
+85648 85647 Mon Nov  9 08:12:58 2026     S    /bin/sh
+86652 85647 Mon Nov  9 08:12:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+86653 85647 Mon Nov  9 08:12:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+86816 86652 Mon Nov  9 08:12:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+31713 31655 Tue Nov 10 09:26:35 2026     Ss+  claude
+37570 31713 Tue Nov 10 09:26:40 2026     S+   /Users/jack/.local/bin/browse
+37711 37570 Tue Nov 10 09:26:40 2026     S+   /Users/jack/.local/bin/browse
+36329 35853 Thu Nov  5 07:25:56 2026     Ss+  claude
+42196 36329 Thu Nov  5 07:25:58 2026     Z    <defunct>
+ 6215  6144 Tue Nov 10 10:30:24 2026     Ss+  claude
+ 8445  6215 Tue Nov 10 10:30:26 2026     S+   /Users/jack/.local/bin/browse
+ 8475  8445 Tue Nov 10 10:30:26 2026     S+   /Users/jack/.local/bin/browse
+96283 86135 Thu Nov  5 10:12:09 2026     SNs+ python3
+98087 96283 Thu Nov  5 10:12:10 2026     ZN   <defunct>
+98096 96283 Thu Nov  5 10:12:10 2026     ZN   <defunct>
+17009 16891 Mon Nov  9 08:19:10 2026     Ss+  codex
+19528 17009 Mon Nov  9 08:19:11 2026     S    codex
+19529 19528 Mon Nov  9 08:19:11 2026     S    /bin/sh
+20433 19528 Mon Nov  9 08:19:11 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+20434 19528 Mon Nov  9 08:19:11 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+20499 20434 Mon Nov  9 08:19:11 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+69243 71053 Tue Nov 10 10:31:19 2026     Ss   /usr/bin/login
+69335 69243 Tue Nov 10 10:31:19 2026     S+   -zsh
+18929 11179 Thu Nov  5 10:11:25 2026     SNs+ python3
+71783 65713 Sat Nov  7 04:47:40 2026     SNs+ /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python
+72754 71783 Sat Nov  7 04:47:40 2026     ZN   <defunct>
+ 4506  4442 Tue Nov 10 10:30:23 2026     Ss+  claude
+ 6949  4506 Tue Nov 10 10:30:25 2026     S+   /Users/jack/.local/bin/browse
+ 6980  6949 Tue Nov 10 10:30:25 2026     S+   /Users/jack/.local/bin/browse
+ 7687  7556 Tue Nov 10 10:30:25 2026     Rs+  claude
+ 9974  7687 Tue Nov 10 10:30:27 2026     S+   /Users/jack/.local/bin/browse
+10007  9974 Tue Nov 10 10:30:27 2026     S+   /Users/jack/.local/bin/browse
+ 9156  9035 Tue Nov 10 10:30:26 2026     Ss+  claude
+11373  9156 Tue Nov 10 10:30:28 2026     S+   /Users/jack/.local/bin/browse
+11393 11373 Tue Nov 10 10:30:28 2026     S+   /Users/jack/.local/bin/browse
+10838 10588 Tue Nov 10 10:30:28 2026     Ss+  claude
+12742 10838 Tue Nov 10 10:30:29 2026     S+   /Users/jack/.local/bin/browse
+12800 12742 Tue Nov 10 10:30:29 2026     S+   /Users/jack/.local/bin/browse
+44389 44156 Mon Nov  9 09:39:35 2026     Ss+  codex
+47900 44389 Mon Nov  9 09:39:36 2026     S    codex
+47901 47900 Mon Nov  9 09:39:36 2026     S    /bin/sh
+48800 47900 Mon Nov  9 09:39:36 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+48801 47900 Mon Nov  9 09:39:36 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+48860 48800 Mon Nov  9 09:39:36 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+70498 47900 Mon Nov  9 09:39:45 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+11979 11632 Tue Nov 10 10:30:29 2026     Ss+  claude
+14398 11979 Tue Nov 10 10:30:30 2026     S+   /Users/jack/.local/bin/browse
+14417 14398 Tue Nov 10 10:30:30 2026     S+   /Users/jack/.local/bin/browse
+13894 13618 Tue Nov 10 10:30:30 2026     Ss+  codex
+16388 13894 Tue Nov 10 10:30:32 2026     S    codex
+16389 16388 Tue Nov 10 10:30:32 2026     S    /bin/sh
+17512 16388 Tue Nov 10 10:30:33 2026     S    /Users/jack/.local/bin/browse
+17513 16388 Tue Nov 10 10:30:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+17514 16388 Tue Nov 10 10:30:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+17563 17512 Tue Nov 10 10:30:33 2026     S    /Users/jack/.local/bin/browse
+17575 17514 Tue Nov 10 10:30:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+22606 22536 Sat Nov  7 14:21:04 2026     SNs+ claude
+40880 82855 Mon Nov  9 10:40:05 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+80810 80631 Mon Nov  9 08:17:08 2026     Ss+  codex
+82855 80810 Mon Nov  9 08:17:08 2026     S    codex
+82856 82855 Mon Nov  9 08:17:09 2026     S    /bin/sh
+83601 82855 Mon Nov  9 08:17:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+83657 82855 Mon Nov  9 08:17:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+83717 83601 Mon Nov  9 08:17:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+91752 91574 Sat Nov  7 16:12:58 2026     Ss+  claude
+16256 16164 Tue Nov 10 10:30:32 2026     Ss+  codex
+18867 16256 Tue Nov 10 10:30:34 2026     S    codex
+18868 18867 Tue Nov 10 10:30:34 2026     S    /bin/sh
+19314 18867 Tue Nov 10 10:30:34 2026     S    /Users/jack/.local/bin/browse
+19315 18867 Tue Nov 10 10:30:34 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+19316 18867 Tue Nov 10 10:30:34 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+19382 19314 Tue Nov 10 10:30:34 2026     S    /Users/jack/.local/bin/browse
+19386 19316 Tue Nov 10 10:30:34 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+18708 18541 Tue Nov 10 10:30:34 2026     Ss+  codex
+21766 18708 Tue Nov 10 10:30:36 2026     S    codex
+21767 21766 Tue Nov 10 10:30:36 2026     S    /bin/sh
+22357 21766 Tue Nov 10 10:30:37 2026     S    /Users/jack/.local/bin/browse
+22358 21766 Tue Nov 10 10:30:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+22359 21766 Tue Nov 10 10:30:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+22403 22357 Tue Nov 10 10:30:37 2026     S    /Users/jack/.local/bin/browse
+22411 22358 Tue Nov 10 10:30:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+21606 21503 Tue Nov 10 10:30:36 2026     Ss+  codex
+23929 21606 Tue Nov 10 10:30:38 2026     S    codex
+23931 23929 Tue Nov 10 10:30:38 2026     S    /bin/sh
+24533 23929 Tue Nov 10 10:30:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+24534 23929 Tue Nov 10 10:30:39 2026     S    /Users/jack/.local/bin/browse
+24535 23929 Tue Nov 10 10:30:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+24573 24534 Tue Nov 10 10:30:39 2026     S    /Users/jack/.local/bin/browse
+24575 24533 Tue Nov 10 10:30:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 9880 89038 Sun Nov  8 15:25:49 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+86611 86513 Sun Nov  8 15:25:38 2026     Ss+  codex
+89038 86611 Sun Nov  8 15:25:39 2026     S    codex
+89039 89038 Sun Nov  8 15:25:39 2026     S    /bin/sh
+91504 89038 Sun Nov  8 15:25:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+91506 89038 Sun Nov  8 15:25:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+91611 91506 Sun Nov  8 15:25:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+12658 12434 Mon Nov  9 08:23:20 2026     Ss+  codex
+13562 12658 Mon Nov  9 08:23:20 2026     S    codex
+13563 13562 Mon Nov  9 08:23:20 2026     S    /bin/sh
+14395 13562 Mon Nov  9 08:23:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+14396 13562 Mon Nov  9 08:23:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+14552 14396 Mon Nov  9 08:23:21 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+25721 92953 Sun Nov  8 15:29:06 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+89882 89581 Sun Nov  8 15:27:55 2026     Ss+  codex
+92953 89882 Sun Nov  8 15:27:56 2026     S    codex
+92954 92953 Sun Nov  8 15:27:56 2026     S    /bin/sh
+93803 92953 Sun Nov  8 15:27:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+93804 92953 Sun Nov  8 15:27:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+93961 93803 Sun Nov  8 15:27:57 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+23847 23733 Tue Nov 10 10:30:38 2026     Ss+  codex
+26971 23847 Tue Nov 10 10:30:41 2026     S    codex
+26972 26971 Tue Nov 10 10:30:41 2026     S    /bin/sh
+27396 26971 Tue Nov 10 10:30:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+27397 26971 Tue Nov 10 10:30:41 2026     S    /Users/jack/.local/bin/browse
+27398 26971 Tue Nov 10 10:30:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+27454 27397 Tue Nov 10 10:30:41 2026     S    /Users/jack/.local/bin/browse
+27456 27398 Tue Nov 10 10:30:41 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+29983 29838 Sat Nov  7 16:20:17 2026     Ss+  claude
+37362 36737 Thu Nov  5 07:25:56 2026     Ss+  claude
+42914 37362 Thu Nov  5 07:25:58 2026     Z    <defunct>
+77345 76597 Mon Nov  2 11:38:35 2026     SNs+ /tmp/lf-7501-VycMUJ/bin/lf-busy
+77607 77345 Mon Nov  2 11:38:35 2026     SN+  /bin/sh
+33316 33185 Thu Nov  5 10:23:06 2026     Ss+  claude
+63946 62997 Mon Nov  2 11:35:52 2026     SNs+ /tmp/lf-7501-dxfrIo/bin/lf-busy
+64427 63946 Mon Nov  2 11:35:55 2026     SN+  /bin/sh
+96211 95174 Mon Nov  2 11:40:46 2026     SNs+ /tmp/lf-7501-zKaZat/bin/lf-busy
+96503 96211 Mon Nov  2 11:40:46 2026     SN+  /bin/sh
+ 5067  5006 Sat Nov  7 18:40:08 2026     Ss+  claude
+14255 84189 Mon Nov  9 11:46:38 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+79216 78891 Mon Nov  9 11:46:25 2026     Ss+  codex
+84189 79216 Mon Nov  9 11:46:27 2026     S    codex
+84191 84189 Mon Nov  9 11:46:27 2026     S    /bin/sh
+85375 84189 Mon Nov  9 11:46:27 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+85376 84189 Mon Nov  9 11:46:27 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+85457 85376 Mon Nov  9 11:46:27 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+23930 23687 Sun Nov  8 18:32:57 2026     Ss+  codex
+26175 23930 Sun Nov  8 18:32:58 2026     S    codex
+26176 26175 Sun Nov  8 18:32:58 2026     S    /bin/sh
+27332 26175 Sun Nov  8 18:32:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+27333 26175 Sun Nov  8 18:32:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+27447 27333 Sun Nov  8 18:32:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+76042 73697 Wed Nov  4 13:41:39 2026     SNs+ python3
+90166 90028 Mon Nov  2 13:35:27 2026     SNs+ /tmp/lf-7501-oPjGYD/bin/lf
+90906 90166 Mon Nov  2 13:35:28 2026     SN+  /bin/sh
+ 9079  8933 Mon Nov  9 11:41:01 2026     Ss+  /bin/zsh
+  939 99811 Mon Nov  2 13:35:59 2026     SN+  /bin/sh
+99811 99669 Mon Nov  2 13:35:58 2026     SNs+ /tmp/lf-7501-qVseiA/bin/lf
+91208 88638 Wed Nov  4 13:42:00 2026     SNs+ python3
+38958 38491 Mon Nov  9 11:46:07 2026     Ss+  codex
+42883 38958 Mon Nov  9 11:46:09 2026     S    codex
+42887 42883 Mon Nov  9 11:46:09 2026     S    /bin/sh
+43686 42883 Mon Nov  9 11:46:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+43687 42883 Mon Nov  9 11:46:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+43794 43686 Mon Nov  9 11:46:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+72177 42883 Mon Nov  9 11:46:22 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+ 4106 86908 Mon Nov  9 18:30:10 2026     Ss+  codex
+30908 63921 Mon Nov  9 18:30:58 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+63921  4106 Mon Nov  9 18:30:34 2026     S    codex
+63926 63921 Mon Nov  9 18:30:34 2026     S    /bin/sh
+66193 63921 Mon Nov  9 18:30:35 2026     S    /Users/jack/.local/bin/browse
+66194 63921 Mon Nov  9 18:30:35 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+66209 63921 Mon Nov  9 18:30:35 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+66273 66193 Mon Nov  9 18:30:35 2026     S    /Users/jack/.local/bin/browse
+66277 66194 Mon Nov  9 18:30:35 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 6924 48435 Mon Nov  9 11:47:07 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+42344 42024 Mon Nov  9 11:46:47 2026     Ss+  codex
+48435 42344 Mon Nov  9 11:46:48 2026     S    codex
+48436 48435 Mon Nov  9 11:46:48 2026     S    /bin/sh
+49952 48435 Mon Nov  9 11:46:49 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+49953 48435 Mon Nov  9 11:46:49 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+50057 49953 Mon Nov  9 11:46:49 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+69476 69309 Wed Nov  4 14:27:37 2026     Ss+  claude
+27714 67256 Mon Nov  9 11:50:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+27715 67256 Mon Nov  9 11:50:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+27852 27715 Mon Nov  9 11:50:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+28865 67256 Mon Nov  9 11:51:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+28866 67256 Mon Nov  9 11:51:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+28879 28866 Mon Nov  9 11:51:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+29436 67256 Mon Nov  9 11:45:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+29437 67256 Mon Nov  9 11:45:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+29595 29436 Mon Nov  9 11:45:15 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+63216 63058 Mon Nov  9 10:41:57 2026     Ss+  codex
+67256 63216 Mon Nov  9 10:41:58 2026     S    codex
+67257 67256 Mon Nov  9 10:41:58 2026     S    /bin/sh
+67987 67256 Mon Nov  9 10:41:59 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+67988 67256 Mon Nov  9 10:41:59 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+68100 67987 Mon Nov  9 10:41:59 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+72382 67256 Mon Nov  9 10:42:56 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+98845 98608 Thu Nov  5 11:06:53 2026     Ss+  claude
+28318 28083 Sun Nov  8 09:10:19 2026     Ss+  codex
+33138 28318 Sun Nov  8 09:10:21 2026     S    codex
+33139 33138 Sun Nov  8 09:10:21 2026     S    /bin/sh
+35203 33138 Sun Nov  8 09:10:22 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+35204 33138 Sun Nov  8 09:10:22 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+35320 35204 Sun Nov  8 09:10:22 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+54716 33138 Sun Nov  8 09:10:29 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+34468 34286 Fri Nov  6 17:33:09 2026     Ss+  claude
+75925 75830 Sat Nov  7 04:09:02 2026     Ss+  claude
+ 8397  8231 Mon Nov  9 08:17:22 2026     Ss+  codex
+ 9913  8397 Mon Nov  9 08:17:23 2026     S    codex
+ 9925  9913 Mon Nov  9 08:17:23 2026     S    /bin/sh
+11784  9913 Mon Nov  9 08:17:24 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+11785  9913 Mon Nov  9 08:17:24 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+11828 11785 Mon Nov  9 08:17:24 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+69281 81608 Mon Nov  9 10:12:02 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+78582 78405 Mon Nov  9 08:17:59 2026     Ss+  codex
+81608 78582 Mon Nov  9 08:18:00 2026     S    codex
+81609 81608 Mon Nov  9 08:18:00 2026     S    /bin/sh
+82676 81608 Mon Nov  9 08:18:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+82677 81608 Mon Nov  9 08:18:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+82731 82677 Mon Nov  9 08:18:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 5172  4996 Sun Nov  8 15:25:47 2026     Ss+  claude
+15239 14970 Sat Nov  7 12:30:58 2026     Ss+  claude
+62413 62309 Fri Nov  6 08:24:41 2026     Ss+  claude
+19438 40468 Mon Nov  9 11:42:32 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+38415 38274 Sun Nov  8 19:24:51 2026     Ss+  codex
+40468 38415 Sun Nov  8 19:24:52 2026     S    codex
+40469 40468 Sun Nov  8 19:24:52 2026     S    /bin/sh
+40984 40468 Sun Nov  8 19:24:53 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+40985 40468 Sun Nov  8 19:24:53 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+41034 40984 Sun Nov  8 19:24:53 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+71786 71604 Mon Nov  9 08:18:50 2026     Ss+  codex
+73553 71786 Mon Nov  9 08:18:51 2026     S    codex
+73554 73553 Mon Nov  9 08:18:51 2026     S    /bin/sh
+74036 73553 Mon Nov  9 08:18:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+74037 73553 Mon Nov  9 08:18:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+74118 74036 Mon Nov  9 08:18:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+72189 77888 Sun Nov  8 18:37:32 2026     Ss+  /bin/zsh
+52354 33090 Tue Nov  3 08:13:35 2026     Ss+  codex
+17662 91806 Mon Nov  9 11:41:06 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+90428 90267 Mon Nov  9 08:12:10 2026     Ss+  codex
+91806 90428 Mon Nov  9 08:12:11 2026     S    codex
+91807 91806 Mon Nov  9 08:12:11 2026     S    /bin/sh
+92424 91806 Mon Nov  9 08:12:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+92425 91806 Mon Nov  9 08:12:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+92543 92424 Mon Nov  9 08:12:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 2452 99963 Mon Nov  9 10:38:04 2026     S    codex
+ 2455  2452 Mon Nov  9 10:38:04 2026     S    /bin/sh
+ 3332  2452 Mon Nov  9 10:38:05 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 3333  2452 Mon Nov  9 10:38:05 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 3378  3332 Mon Nov  9 10:38:05 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+99963 99727 Mon Nov  9 10:38:03 2026     Ss+  codex
+56001 55749 Mon Nov  9 10:36:08 2026     Ss+  /bin/zsh
+64425 64016 Fri Nov  6 13:03:38 2026     Ss+  claude
+80181 79986 Mon Nov  9 11:51:05 2026     Ss+  claude
+92447 92273 Mon Nov  9 10:12:53 2026     Ss+  /bin/zsh
+69132 68662 Wed Nov  4 09:59:10 2026     Ss+  claude
+80888 80726 Fri Nov  6 21:53:07 2026     Ss+  claude
+67024 66671 Thu Nov  5 12:03:49 2026     Ss+  /Users/jack/.lf/demos/loo672-9cd2824ab8/runtime/Loopflow LOO-672 Redemo.app/Contents/MacOS/lf
+70857 67024 Thu Nov  5 12:03:50 2026     S    codex
+70864 70857 Thu Nov  5 12:03:50 2026     S    /bin/sh
+72507 67024 Thu Nov  5 12:03:51 2026     S+   codex
+75680 70857 Thu Nov  5 12:03:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+75681 70857 Thu Nov  5 12:03:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+75774 75680 Thu Nov  5 12:03:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+88121 70857 Thu Nov  5 12:04:00 2026     S    /Users/jack/.codex/packages/standalone/releases/0.166.0-aarch64-apple-darwin/bin/codex-code-mode-host
+32836 32670 Mon Nov  9 10:40:01 2026     Ss+  /bin/zsh
+17957 17562 Fri Nov  6 21:53:21 2026     Ss+  claude
+21433 39527 Mon Nov  9 10:15:10 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+38312 38179 Mon Nov  9 08:18:29 2026     Ss+  codex
+39527 38312 Mon Nov  9 08:18:30 2026     S    codex
+39528 39527 Mon Nov  9 08:18:30 2026     S    /bin/sh
+39910 39527 Mon Nov  9 08:18:30 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+39911 39527 Mon Nov  9 08:18:30 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+40013 39911 Mon Nov  9 08:18:30 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 1535  1228 Mon Nov  9 08:18:09 2026     Ss+  codex
+ 3216  1535 Mon Nov  9 08:18:09 2026     S    codex
+ 3217  3216 Mon Nov  9 08:18:09 2026     S    /bin/sh
+ 4047  3216 Mon Nov  9 08:18:10 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 4048  3216 Mon Nov  9 08:18:10 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 4206  4048 Mon Nov  9 08:18:10 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+59767  3216 Mon Nov  9 10:11:59 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+ 2117 46821 Sun Nov  8 15:38:51 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+40791 40550 Sun Nov  8 15:29:49 2026     Ss+  codex
+46821 40791 Sun Nov  8 15:29:51 2026     S    codex
+46822 46821 Sun Nov  8 15:29:51 2026     S    /bin/sh
+48097 46821 Sun Nov  8 15:29:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+48098 46821 Sun Nov  8 15:29:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+48193 48097 Sun Nov  8 15:29:51 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+90007 89840 Mon Nov  9 10:42:11 2026     Ss+  /bin/zsh
+46150 45980 Sun Nov  8 15:29:51 2026     Ss+  codex
+53186 46150 Sun Nov  8 15:29:54 2026     S    codex
+53188 53186 Sun Nov  8 15:29:54 2026     S    /bin/sh
+53926 53186 Sun Nov  8 15:29:55 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+53927 53186 Sun Nov  8 15:29:55 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+54012 53927 Sun Nov  8 15:29:55 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+54458 46150 Sun Nov  8 15:29:55 2026     Z    <defunct>
+65147 53186 Sun Nov  8 15:30:03 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+67760 67405 Thu Nov  5 12:03:49 2026     Ss+  claude
+30302 30261 Wed Nov  4 16:35:02 2026     Ss+  claude
+13831 13587 Sun Nov  8 15:30:23 2026     Ss+  codex
+15870 13831 Sun Nov  8 15:30:24 2026     S    codex
+15871 15870 Sun Nov  8 15:30:24 2026     S    /bin/sh
+17753 15870 Sun Nov  8 15:30:25 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+17754 15870 Sun Nov  8 15:30:25 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+17909 17753 Sun Nov  8 15:30:25 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+89830 88963 Mon Nov  9 12:06:03 2026     Ss+  /bin/zsh
+ 1374  1268 Wed Nov  4 16:54:54 2026     Ss+  claude
+95158 94972 Wed Nov  4 17:01:50 2026     Ss+  claude
+68504 68093 Thu Nov  5 12:03:49 2026     Ss+  claude
+37717 37217 Mon Nov  9 08:17:38 2026     Ss+  codex
+38917 37717 Mon Nov  9 08:17:39 2026     S    codex
+38918 38917 Mon Nov  9 08:17:39 2026     S    /bin/sh
+39849 38917 Mon Nov  9 08:17:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+39850 38917 Mon Nov  9 08:17:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+39965 39850 Mon Nov  9 08:17:40 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+73890 38917 Mon Nov  9 10:14:55 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+84127 93487 Mon Nov  9 11:52:17 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+89078 88790 Mon Nov  9 11:51:50 2026     Ss+  codex
+93487 89078 Mon Nov  9 11:51:52 2026     S    codex
+93488 93487 Mon Nov  9 11:51:52 2026     S    /bin/sh
+94791 93487 Mon Nov  9 11:51:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+94792 93487 Mon Nov  9 11:51:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+94886 94791 Mon Nov  9 11:51:52 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+43116 89312 Mon Nov  9 10:20:02 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+87436 87183 Mon Nov  9 08:19:00 2026     Ss+  codex
+89312 87436 Mon Nov  9 08:19:01 2026     S    codex
+89313 89312 Mon Nov  9 08:19:01 2026     S    /bin/sh
+89942 89312 Mon Nov  9 08:19:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+89943 89312 Mon Nov  9 08:19:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+90054 89943 Mon Nov  9 08:19:01 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+94013 93792 Sun Nov  8 19:07:31 2026     Ss+  codex
+95992 94013 Sun Nov  8 19:07:32 2026     S    codex
+95993 95992 Sun Nov  8 19:07:32 2026     S    /bin/sh
+98101 95992 Sun Nov  8 19:07:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+98102 95992 Sun Nov  8 19:07:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+98179 98101 Sun Nov  8 19:07:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+96402 90482 Thu Nov  5 12:22:23 2026     SNs+ /bin/sh
+16726 98023 Mon Nov  9 12:06:19 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+90862 90415 Mon Nov  9 12:06:04 2026     Ss+  codex
+98023 90862 Mon Nov  9 12:06:08 2026     S    codex
+98032 98023 Mon Nov  9 12:06:08 2026     S    /bin/sh
+99632 98023 Mon Nov  9 12:06:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+99634 98023 Mon Nov  9 12:06:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+99724 99632 Mon Nov  9 12:06:09 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 5866 99339 Thu Nov  5 12:22:29 2026     SNs+ /bin/sh
+31282 30888 Mon Nov  9 12:06:28 2026     Ss+  codex
+40235 31282 Mon Nov  9 12:06:33 2026     S    codex
+40237 40235 Mon Nov  9 12:06:33 2026     S    /bin/sh
+41083 40235 Mon Nov  9 12:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+41084 40235 Mon Nov  9 12:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+41141 41083 Mon Nov  9 12:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+56635 40235 Mon Nov  9 12:06:42 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+92997 92549 Mon Nov  9 08:23:11 2026     Ss+  codex
+94918 92997 Mon Nov  9 08:23:12 2026     S    codex
+94919 94918 Mon Nov  9 08:23:12 2026     S    /bin/sh
+96230 94918 Mon Nov  9 08:23:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+96231 94918 Mon Nov  9 08:23:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+96417 96230 Mon Nov  9 08:23:12 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+34212 71053 Mon Nov  9 12:06:30 2026     Ss   /usr/bin/login
+34319 34212 Mon Nov  9 12:06:30 2026     S    -zsh
+38007 34319 Mon Nov  9 12:06:32 2026     S+   /Users/jack/.local/bin/lf
+ 3875 89054 Mon Nov  9 10:12:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 3876 89054 Mon Nov  9 10:12:58 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+12799 89054 Mon Nov  9 07:59:27 2026     S    /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+13005 88257 Mon Nov  9 07:57:48 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+83961 83808 Mon Nov  9 07:57:35 2026     Ss+  codex
+88257 83961 Mon Nov  9 07:57:38 2026     S    codex
+88258 88257 Mon Nov  9 07:57:38 2026     S    /bin/sh
+88916 88257 Mon Nov  9 07:57:38 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+88918 88257 Mon Nov  9 07:57:38 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+89054 88916 Mon Nov  9 07:57:38 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 4857  4628 Mon Nov  9 08:23:16 2026     Ss+  codex
+ 6307  4857 Mon Nov  9 08:23:16 2026     S    codex
+ 6308  6307 Mon Nov  9 08:23:16 2026     S    /bin/sh
+ 8295  6307 Mon Nov  9 08:23:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 8296  6307 Mon Nov  9 08:23:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 8339  8296 Mon Nov  9 08:23:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+13878  5514 Thu Nov  5 12:22:34 2026     SNs+ /bin/sh
+42398 33433 Fri Nov  6 11:46:07 2026     Ss+  /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python
+11937 29603 Tue Nov 10 10:33:23 2026     SN+  sleep
+29603 22503 Thu Nov  5 12:22:43 2026     SNs+ /bin/sh
+13317 13232 Mon Nov  9 08:32:25 2026     Ss+  codex
+14663 13317 Mon Nov  9 08:32:26 2026     S    codex
+14664 14663 Mon Nov  9 08:32:26 2026     S    /bin/sh
+15230 14663 Mon Nov  9 08:32:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+15231 14663 Mon Nov  9 08:32:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+15267 15230 Mon Nov  9 08:32:26 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+21862 13957 Thu Nov  5 12:22:39 2026     SNs+ /bin/sh
+22125 21864 Thu Nov  5 12:22:39 2026     SNs+ /bin/sh
+22475 22174 Thu Nov  5 12:22:39 2026     SNs+ /bin/sh
+ 9621 46279 Mon Nov  9 14:29:02 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+ 9622 46279 Mon Nov  9 14:29:02 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 9743  9621 Mon Nov  9 14:29:02 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+38767 38507 Mon Nov  9 12:06:32 2026     Ss+  codex
+46279 38767 Mon Nov  9 12:06:36 2026     S    codex
+46280 46279 Mon Nov  9 12:06:36 2026     S    /bin/sh
+47391 46279 Mon Nov  9 12:06:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+47409 46279 Mon Nov  9 12:06:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+47496 47409 Mon Nov  9 12:06:37 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+47711 47496 Mon Nov  9 19:36:54 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+47712 47496 Mon Nov  9 19:36:54 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+48018 47496 Mon Nov  9 19:36:54 2026     S    /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+68254 46279 Mon Nov  9 12:06:47 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+32106 71053 Tue Nov 10 10:14:14 2026     Ss+  /usr/bin/login
+32284 32106 Tue Nov 10 10:14:14 2026     S+   /Applications/Loopflow.app/Contents/MacOS/lf
+ 3919 90692 Tue Nov 10 10:13:47 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+82026 75523 Tue Nov 10 10:13:30 2026     Ss+  codex
+90692 82026 Tue Nov 10 10:13:37 2026     S    codex
+90694 90692 Tue Nov 10 10:13:37 2026     S    /bin/sh
+92553 90692 Tue Nov 10 10:13:39 2026     S    /Users/jack/.local/bin/browse
+92554 90692 Tue Nov 10 10:13:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+92555 90692 Tue Nov 10 10:13:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+92603 92553 Tue Nov 10 10:13:39 2026     S    /Users/jack/.local/bin/browse
+92604 92554 Tue Nov 10 10:13:39 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+24878 24677 Mon Nov  9 14:04:42 2026     Ss+  /bin/zsh
+37162 57796 Mon Nov  9 10:21:42 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+56425 56256 Mon Nov  9 08:09:15 2026     Ss+  codex
+57796 56425 Mon Nov  9 08:09:16 2026     S    codex
+57799 57796 Mon Nov  9 08:09:16 2026     S    /bin/sh
+59440 57796 Mon Nov  9 08:09:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+59441 57796 Mon Nov  9 08:09:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+59525 59440 Mon Nov  9 08:09:17 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+ 8878  8687 Mon Nov  9 14:16:32 2026     Ss+  /bin/zsh
+89554 89413 Mon Nov  9 16:05:42 2026     Ss+  /bin/zsh
+99583 71053 Mon Nov  9 16:05:47 2026     Ss   /usr/bin/login
+99734 99583 Mon Nov  9 16:05:47 2026     S+   -zsh
+56487 56296 Mon Nov  9 16:06:32 2026     Ss+  codex
+58290 56487 Mon Nov  9 16:06:33 2026     S    codex
+58291 58290 Mon Nov  9 16:06:33 2026     S    /bin/sh
+58972 58290 Mon Nov  9 16:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+58973 58290 Mon Nov  9 16:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+59046 58972 Mon Nov  9 16:06:33 2026     S    /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
+79623 58290 Mon Nov  9 16:06:43 2026     S    /Users/jack/.codex/packages/standalone/releases/0.167.0-aarch64-apple-darwin/bin/codex-code-mode-host
+32109 71053 Tue Nov 10 10:14:14 2026     Ss+  /usr/bin/login
+32285 32109 Tue Nov 10 10:14:14 2026     S+   /Applications/Loopflow.app/Contents/MacOS/lf
+32110 71053 Tue Nov 10 10:14:14 2026     Ss   /usr/bin/login
+32286 32110 Tue Nov 10 10:14:14 2026     S+   /bin/zsh

@@ -1,0 +1,15 @@
+{
+  "sqlite": "3.50.4",
+  "before": {
+    "opcodes": 41743,
+    "median_ms": 24.174374993890524,
+    "max_ms": 25.07195807993412
+  },
+  "after": {
+    "opcodes": 687,
+    "median_ms": 0.37787482142448425,
+    "max_ms": 0.4040829371660948
+  },
+  "existing_connection_first_native_insert_after_schema_repair_ms": 3.6959999706596136,
+  "all_trigger_validation_expressions_unchanged": true
+}

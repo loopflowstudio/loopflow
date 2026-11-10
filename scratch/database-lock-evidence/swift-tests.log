@@ -1,0 +1,302 @@
+[0/1] Planning build
+Building for debugging...
+[0/7] Write sources
+[1/6] Write swift-version--58304C5D6DBC2206.txt
+[3/11] Emitting module LoopflowTests
+[4/11] Compiling LoopflowTests WorkModelTests.swift
+[5/11] Compiling LoopflowTests WorkNavigationProofTests.swift
+[6/11] Compiling LoopflowTests WorkCacheTests.swift
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/WorkCacheTests.swift:204:24: warning: immutable value 'model' was never used; consider replacing with '_' or removing it [#no-usage]
+ 202 |         let repository = "repo_" + UUID().uuidString
+ 203 |         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+ 204 |         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+     |                        `- warning: immutable value 'model' was never used; consider replacing with '_' or removing it [#no-usage]
+ 205 |         let key = WorkWorkspaceKey(repository: repository, kind: .task, id: Prefetch.newestOwned)
+ 206 |         await spin { registry.retained(key)?.conversationError == nil }
+
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/WorkCacheTests.swift:463:24: warning: immutable value 'model' was never used; consider replacing with '_' or removing it [#no-usage]
+ 461 |         let repository = "repo_" + UUID().uuidString
+ 462 |         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
+ 463 |         let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+     |                        `- warning: immutable value 'model' was never used; consider replacing with '_' or removing it [#no-usage]
+ 464 |         await spin { await source.preparedTasks.count < 2 }
+ 465 |         let id = try #require(await source.preparedTasks.first)
+[7/11] Compiling LoopflowTests WorkCLISubscriptionTests.swift
+[8/11] Compiling LoopflowTests WaveTests.swift
+[9/11] Compiling LoopflowTests WorkDestinationTests.swift
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/WorkDestinationTests.swift:43:53: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+  41 |         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+  42 |         let address = "loopflow://loopflow?session=exact-taskless"
+  43 |         let resolved = WorkLink(label: record.title ?? "Conversation", url: address, markdown: "", fallbackArgv: [],
+     |                                                     `- warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+  44 |                                 target: .init(kind: waveScoped ? .wave : .repository, repositoryPath: wave.wave.repo,
+  45 |                                               repositoryId: "repo", task: nil, taskId: nil,
+
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/WorkDestinationTests.swift:942:31: warning: result of call to 'perform(_:model:workspaces:)' is unused [#no-usage]
+ 940 |             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
+ 941 |                 work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
+ 942 |             try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
+     |                               `- warning: result of call to 'perform(_:model:workspaces:)' is unused [#no-usage]
+ 943 |             let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
+ 944 |             let tab = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell)
+[10/20] Compiling LoopflowTests WorkspacePanesTests.swift
+[11/20] Compiling LoopflowTests WorkNavigationTests.swift
+[12/20] Compiling LoopflowTests TerminalPaneLayoutTests.swift
+[13/20] Compiling LoopflowTests DesktopNativeSessionFixture.swift
+[14/20] Compiling LoopflowTests WarmPaneMountTests.swift
+[15/20] Compiling LoopflowTests SessionsStoreTests.swift
+[16/20] Compiling LoopflowTests WorkspaceRetentionTests.swift
+[17/20] Compiling LoopflowTests DesktopPerformanceTests.swift
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/DesktopPerformanceTests.swift:44:15: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+  42 |         NSApp.setActivationPolicy(.accessory)
+  43 |         NSApp.finishLaunching()
+  44 |         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+     |               `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+  45 |         guard NSScreen.main != nil else {
+  46 |             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
+
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/DesktopPerformanceTests.swift:324:15: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+ 322 |         NSApp.setActivationPolicy(.accessory)
+ 323 |         NSApp.finishLaunching()
+ 324 |         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+     |               `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+ 325 |         try #require(NSScreen.main != nil)
+ 326 |         GhosttyManager.shared.initialize()
+
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/DesktopPerformanceTests.swift:550:17: warning: no calls to throwing functions occur within 'try' expression
+ 548 |                 files.page = .task
+ 549 |                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
+ 550 |                 try workspace.showBrowser(.files, from: pane)
+     |                 `- warning: no calls to throwing functions occur within 'try' expression
+ 551 |             }, ready: { hasRendered(window, "browser-task-overview") })
+ 552 |             try await sample("task_graph", population, attempt, journal, window, action: {
+
+/Users/jack/src/loopflow.agent/swift/LoopflowTests/DesktopPerformanceTests.swift:1318:15: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+1316 |         NSApp.setActivationPolicy(.accessory)
+1317 |         NSApp.finishLaunching()
+1318 |         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+     |               `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+1319 |         guard NSScreen.main != nil else {
+1320 |             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[18/20] Compiling LoopflowTests GhosttyTerminalInputTests.swift
+[19/22] Emitting module LoopflowSwiftPackageTests
+[20/22] Compiling LoopflowSwiftPackageTests runner.swift
+[20/22] Write Objects.LinkFileList
+warning: (arm64)  could not find symbol '_ImFontConfig_ImFontConfig' in object file '/Users/jack/src/loopflow.agent/swift/.build/arm64-apple-macosx/debug/libghostty.a(ext.o)'
+warning: (arm64)  could not find symbol '_ImGuiStyle_ImGuiStyle' in object file '/Users/jack/src/loopflow.agent/swift/.build/arm64-apple-macosx/debug/libghostty.a(ext.o)'
+[21/22] Linking LoopflowSwiftPackageTests
+Build complete! (32.41s)
+Test Suite 'Selected tests' started at 2026-11-10 10:41:19.253.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-11-10 10:41:19.254.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-11-10 10:41:19.254.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-10 10:41:19.254.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Sessions store" started.
+◇ Suite "Workspace Session lifecycle" started.
+◇ Suite "Application workspace retention" started.
+◇ Suite "Work cache" started.
+◇ Test "Automatic Start stops at a consumed launch instead of reporting a holder" started.
+◇ Test "A working Task shown as a tile stays warm after the Dashboard leaves" started.
+◇ Test "The warm-conversation bound spans repository windows without sharing surfaces" started.
+◇ Test "Closing every Work preserves hidden panes when a repository window reopens" started.
+◇ Test "Unavailable preparation preserves the pane identity" started.
+◇ Test "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test "Eviction fences a preparation that returns after release" started.
+◇ Test "Recent unfinished Tasks stay warm; window Close ends viewers but keeps history" started.
+◇ Test "Close and a failure keep a person's next action" started.
+◇ Test "A returning launch restores its cache before any read finishes" started.
+◇ Test "Restart restores bounded warm intent and preserves explicit Close" started.
+◇ Test "A board larger than its page warms sixteen Tasks and the page; a turn opens the next page" started.
+◇ Test "A consumed first launch recovers with one Try again; refresh never repeats it" started.
+◇ Test "A Session opened elsewhere during selection is not prepared locally" started.
+◇ Test "A page turn lets go of the last-ranked unvisited Tasks, never the freshest" started.
+◇ Test "Saved text never claims a live process or a legal mutation" started.
+◇ Test "A slow provider keeps the saved workspace usable under Updating…" started.
+◇ Test "A first launch has one loading message" started.
+◇ Test "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test "Reopening a repository keeps twelve Work layouts and drafts before inventory arrives" started.
+◇ Test "Known repository entry presents its scene before admitting a new link" started.
+◇ Test "Fresh ownership replaces unavailable opening with Take back" started.
+◇ Test "Retained review feedback stays visible" started.
+◇ Test "Retry after a transient failure only reveals and retains a newly observed holder" started.
+◇ Test "A reopened scene preserves the shared repository identity learned before closing" started.
+◇ Test "A workspace saved under another Machine is dropped" started.
+◇ Test "A prepared Start stays non-replacing through refresh; only Take back transfers input" started.
+◇ Test "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test "A failed transfer retains concurrent Session updates and can retry" started.
+◇ Test "Warm visits are bounded; completed departure and Close release without refresh reopening" started.
+◇ Test "A delayed same-path Session read cannot populate a replacement Machine" started.
+◇ Test "An unresolved restored locator cannot mount a retained registry" started.
+◇ Test "Fresh saved history clears an unavailable opening without starting it" started.
+◇ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" started.
+◇ Test "A Task that becomes working starts the history its reveal could not find" started.
+◇ Test "Filtered refresh retains Sessions without creating local terminals" started.
+◇ Test "Selecting an active Session leaves its other terminal running until Move here" started.
+◇ Test "Cancellation after preparation cannot create a late viewer" started.
+◇ Test "A failed refresh keeps the saved workspace under one truthful status" started.
+◇ Test "An ensured running primary attaches when shown" started.
+◇ Test "Refresh replaces the viewer and reveals the same conversation without resetting it" started.
+◇ Test "Repository windows retain separate surface pools and Work" started.
+◇ Test "A refused provider change preserves the original Session presentation" started.
+◇ Test "Polling preserves the prepared interactive launch command" started.
+◇ Test "An unchanged poll writes nothing" started.
+◇ Test "Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit" started.
+◇ Test "A failed load Start shows its failure, never a Start offer" started.
+◇ Test "Retry stays non-replacing while another client holds input" started.
+◇ Test "Ended Session output survives a fresh inventory without relaunch" started.
+◇ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" started.
+◇ Test "A prepared Task target enters its terminal without another preparation" started.
+◇ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test "A preparation reply behind its Session frame leaves the person's focus alone" started.
+◇ Test "Absent, corrupt and incompatible files load as nothing and are removed" started.
+◇ Test "Another window in the same process opens from the workspace already held" started.
+◇ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" started.
+◇ Test "Explicit reopen revalidates a cached observation failure" started.
+◇ Test "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test "A refresh that finishes after a selection change keeps the newer selection" started.
+◇ Test "Only the most recently saved repositories are kept" started.
+◇ Test "A started Task replaces its refused reveal with an automatic Start" started.
+◇ Test "Session actions use the main repository for a linked worktree" started.
+◇ Test "A failed open stays visible across polling until superseded" started.
+◇ Test "Restoring twelve Sessions prepares only attachments, then switches without preparation" started.
+◇ Test "A link's reveal refused after its Task started leaves no offer and starts" started.
+◇ Test "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test "Explicit Start opens only the requested terminal" started.
+◇ Test "A Session read that finishes after a repository switch saves nothing" started.
+◇ Test "A reveal refused after its Task started leaves no offer and starts" started.
+◇ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" started.
+◇ Test "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test "Focusing a tile past the bound starts its conversation, as selection does" started.
+◇ Test "Every working tile on the page opens with no click, two preparations at a time" started.
+◇ Test "Automatic preparations start selected first, stay bounded and honor Close" started.
+◇ Test case passing 1 argument full → true to "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test case passing 1 argument full → false to "Saved unfinished Tasks fill spare warmth without evicting working Tasks" started.
+◇ Test case passing 1 argument identityChanged → false to "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test case passing 1 argument identityChanged → true to "Reopened content stays visible while resolution stalls or fails" started.
+◇ Test "A saved launch repository opens without git and is checked afterwards" started.
+◇ Test case passing 2 arguments outcome → "failure", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "success", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "failure", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "cancellation", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" started.
+◇ Test case passing 2 arguments outcome → "cancellation", restored → true to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test case passing 2 arguments outcome → "success", restored → false to "Known repository entry presents its scene before admitting a new link" started.
+◇ Test "Prepared Sessions accept current provider and terminal evidence without losing their launch" started.
+◇ Test case passing 2 arguments state → "active", expected → .elsewhere to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test case passing 2 arguments state → "closed", expected → .prepared to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test case passing 1 argument replacing → true to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument ended → true to "A prepared Task target enters its terminal without another preparation" started.
+◇ Test case passing 1 argument closed → false to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test case passing 1 argument closed → true to "Fresh repository load prefetches working Tasks without saved visits and honors Close" started.
+◇ Test case passing 1 argument result → "refused" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 1 argument result → "available" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 2 arguments state → "detached", expected → .prepared to "Showing a pane resumes saved history and leaves external input alone" started.
+◇ Test case passing 1 argument closed → true to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test case passing 1 argument replacing → false to "Polling preserves the prepared interactive launch command" started.
+◇ Test case passing 1 argument agent → "pi" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument agent → "claude" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument machineUnavailable → false to "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test case passing 1 argument machineUnavailable → true to "Restart keeps the selected Task but does not retain stale completion or location" started.
+◇ Test case passing 1 argument result → "unavailable" to "Explicit reopen revalidates a cached observation failure" started.
+◇ Test case passing 1 argument ended → false to "A prepared Task target enters its terminal without another preparation" started.
+◇ Test case passing 1 argument fails → true to "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test "A working Task behind both preparation slots shows opening, never Open conversation" started.
+◇ Test case passing 1 argument agent → "opencode" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test case passing 1 argument fails → false to "Reset leaves the Session live while preparing and keeps updates when it fails" started.
+◇ Test case passing 1 argument closed → false to "Fresh restart prepares the saved conversations and honors saved Close" started.
+◇ Test case passing 1 argument agent → "codex" to "Provider switching keeps the Session and prepares an explicit provider launch" started.
+◇ Test "Reset restarts the same Session with a fresh launch" started.
+◇ Test "An externally killed terminal reclassifies as active elsewhere" started.
+✔ Test "Fresh ownership replaces unavailable opening with Take back" passed after 0.212 seconds.
+✔ Test "A prepared Task target enters its terminal without another preparation" with 2 test cases passed after 0.244 seconds.
+✔ Test "A Session opened elsewhere during selection is not prepared locally" passed after 0.373 seconds.
+✔ Test "Selecting an active Session leaves its other terminal running until Move here" passed after 0.501 seconds.
+✔ Test "Refresh replaces the viewer and reveals the same conversation without resetting it" passed after 0.501 seconds.
+✔ Test "Automatic Start stops at a consumed launch instead of reporting a holder" passed after 0.501 seconds.
+✔ Test "An ensured running primary attaches when shown" passed after 0.502 seconds.
+✔ Test "Showing a pane resumes saved history and leaves external input alone" with 3 test cases passed after 0.516 seconds.
+✔ Test "The warm-conversation bound spans repository windows without sharing surfaces" passed after 0.916 seconds.
+✔ Test "A working Task shown as a tile stays warm after the Dashboard leaves" passed after 0.916 seconds.
+✔ Test "Closing every Work preserves hidden panes when a repository window reopens" passed after 0.916 seconds.
+✔ Test "Polling preserves the prepared interactive launch command" with 2 test cases passed after 0.916 seconds.
+✔ Test "A failed open stays visible across polling until superseded" passed after 0.916 seconds.
+✔ Test "Explicit reopen revalidates a cached observation failure" with 3 test cases passed after 0.916 seconds.
+✔ Test "Explicit Start opens only the requested terminal" passed after 0.917 seconds.
+✔ Test "Prepared Sessions accept current provider and terminal evidence without losing their launch" passed after 0.918 seconds.
+✔ Test "Provider switching keeps the Session and prepares an explicit provider launch" with 4 test cases passed after 0.918 seconds.
+✔ Test "An externally killed terminal reclassifies as active elsewhere" passed after 0.920 seconds.
+✔ Test "Recent unfinished Tasks stay warm; window Close ends viewers but keeps history" passed after 0.920 seconds.
+✔ Test "Saved unfinished Tasks fill spare warmth without evicting working Tasks" with 2 test cases passed after 0.921 seconds.
+✔ Test "A page turn lets go of the last-ranked unvisited Tasks, never the freshest" passed after 0.921 seconds.
+✔ Test "A first launch has one loading message" passed after 0.921 seconds.
+✔ Test "Reopening a repository keeps twelve Work layouts and drafts before inventory arrives" passed after 0.921 seconds.
+✔ Test "Unavailable preparation preserves the pane identity" passed after 0.921 seconds.
+✔ Test "A reopened scene preserves the shared repository identity learned before closing" passed after 1.090 seconds.
+✔ Test "Retained review feedback stays visible" passed after 1.090 seconds.
+✔ Test "Repository windows retain separate surface pools and Work" passed after 1.090 seconds.
+✔ Test "A board larger than its page warms sixteen Tasks and the page; a turn opens the next page" passed after 1.090 seconds.
+✔ Test "Filtered refresh retains Sessions without creating local terminals" passed after 1.090 seconds.
+✔ Test "A prepared Start stays non-replacing through refresh; only Take back transfers input" passed after 1.090 seconds.
+✔ Test "Restart restores bounded warm intent and preserves explicit Close" passed after 1.090 seconds.
+✔ Test "Repository and Wave primaries stay warm beside the Task bound; Close releases until a deliberate visit" passed after 1.090 seconds.
+✔ Test "Warm visits are bounded; completed departure and Close release without refresh reopening" passed after 1.090 seconds.
+✔ Test "A refused provider change preserves the original Session presentation" passed after 1.090 seconds.
+✔ Test "Ended Session output survives a fresh inventory without relaunch" passed after 1.090 seconds.
+✔ Test "Absent, corrupt and incompatible files load as nothing and are removed" passed after 1.091 seconds.
+✔ Test "Fresh saved history clears an unavailable opening without starting it" passed after 1.092 seconds.
+✔ Test "An unresolved restored locator cannot mount a retained registry" passed after 1.092 seconds.
+✔ Test "Only the most recently saved repositories are kept" passed after 1.092 seconds.
+✔ Test "Session actions use the main repository for a linked worktree" passed after 1.092 seconds.
+✔ Test "Reset restarts the same Session with a fresh launch" passed after 1.096 seconds.
+✔ Test "Eviction fences a preparation that returns after release" passed after 1.110 seconds.
+✔ Test "Retry after a transient failure only reveals and retains a newly observed holder" passed after 1.111 seconds.
+✔ Test "Explicit history-only reveal preserves Start recovery outside working Task initialization" passed after 1.112 seconds.
+✔ Test "Retry stays non-replacing while another client holds input" passed after 1.113 seconds.
+✔ Test "Cancellation after preparation cannot create a late viewer" passed after 1.199 seconds.
+✔ Test "A returning launch restores its cache before any read finishes" passed after 1.203 seconds.
+✔ Test "A consumed first launch recovers with one Try again; refresh never repeats it" passed after 1.203 seconds.
+✔ Test "Saved text never claims a live process or a legal mutation" passed after 1.204 seconds.
+✔ Test "A workspace saved under another Machine is dropped" passed after 1.210 seconds.
+✔ Test "A Task that becomes working starts the history its reveal could not find" passed after 1.236 seconds.
+✔ Test "Reset leaves the Session live while preparing and keeps updates when it fails" with 2 test cases passed after 1.237 seconds.
+✔ Test "A failed transfer retains concurrent Session updates and can retry" passed after 1.265 seconds.
+✔ Suite "Sessions store" passed after 1.266 seconds.
+✔ Test "Automatic preparations start selected first, stay bounded and honor Close" passed after 1.659 seconds.
+✔ Test "Another window in the same process opens from the workspace already held" passed after 1.675 seconds.
+✔ Test "A Session read that finishes after a repository switch saves nothing" passed after 1.681 seconds.
+✔ Test "A saved launch repository opens without git and is checked afterwards" passed after 1.684 seconds.
+✔ Test "An unchanged poll writes nothing" passed after 1.690 seconds.
+✔ Test "Repository and Wave primaries open on load beside the Task bound, before any selection" passed after 1.744 seconds.
+✔ Test "Known repository entry presents its scene before admitting a new link" with 6 test cases passed after 1.750 seconds.
+✔ Test "A queued or failed primary shows opening or its failure with Retry, never an Open gate" passed after 1.781 seconds.
+✔ Test "Reopened content stays visible while resolution stalls or fails" with 2 test cases passed after 1.826 seconds.
+✔ Suite "Application workspace retention" passed after 1.826 seconds.
+✔ Test "A delayed same-path Session read cannot populate a replacement Machine" passed after 1.836 seconds.
+✔ Test "A slow provider keeps the saved workspace usable under Updating…" passed after 1.837 seconds.
+✔ Test "A failed load Start shows its failure, never a Start offer" passed after 1.838 seconds.
+✔ Test "A refresh that finishes after a selection change keeps the newer selection" passed after 1.846 seconds.
+✔ Test "Restoring twelve Sessions prepares only attachments, then switches without preparation" passed after 1.847 seconds.
+✔ Suite "Workspace Session lifecycle" passed after 1.849 seconds.
+✔ Test "Close and a failure keep a person's next action" passed after 1.856 seconds.
+✔ Test "A failed refresh keeps the saved workspace under one truthful status" passed after 1.856 seconds.
+✔ Test "Restart keeps the selected Task but does not retain stale completion or location" with 2 test cases passed after 1.858 seconds.
+✔ Test "A preparation reply behind its Session frame leaves the person's focus alone" passed after 1.860 seconds.
+✔ Test "Fresh restart prepares the saved conversations and honors saved Close" with 2 test cases passed after 1.863 seconds.
+✔ Test "A working Task behind both preparation slots shows opening, never Open conversation" passed after 1.975 seconds.
+✔ Test "Fresh repository load prefetches working Tasks without saved visits and honors Close" with 2 test cases passed after 2.231 seconds.
+✔ Test "A board past the bound opens its page; a turn opens the arriving tile and no other" passed after 2.266 seconds.
+✔ Test "Focusing a tile past the bound starts its conversation, as selection does" passed after 2.266 seconds.
+✔ Test "Every working tile on the page opens with no click, two preparations at a time" passed after 2.280 seconds.
+✔ Test "A link's reveal refused after its Task started leaves no offer and starts" passed after 2.284 seconds.
+✔ Test "A started Task replaces its refused reveal with an automatic Start" passed after 2.284 seconds.
+✔ Test "A reveal refused after its Task started leaves no offer and starts" passed after 2.284 seconds.
+✔ Test "A Wave named after another Wave's ID keeps its own primary without repeated preparation" passed after 2.285 seconds.
+✔ Suite "Work cache" passed after 2.287 seconds.
+✔ Test run with 81 tests in 4 suites passed after 2.287 seconds.

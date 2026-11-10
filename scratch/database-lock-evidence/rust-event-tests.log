@@ -1,0 +1,49 @@
+   Compiling loopflow v0.15.2 (/Users/jack/src/loopflow.agent/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 15s
+     Running unittests src/lib.rs (target/debug/deps/loopflow-560c8cfd4dd8c9e8)
+
+running 20 tests
+test store::sqlite::session_events::tests::a_later_usage_receipt_replaces_its_row_in_place has been running for over 60 seconds
+test store::sqlite::session_events::tests::a_recovered_gap_enters_the_sessions_history_once has been running for over 60 seconds
+test store::sqlite::session_events::tests::aggregate_history_discovers_unattributed_native_receipts_without_a_capture has been running for over 60 seconds
+test store::sqlite::session_events::tests::completed_turn_does_not_complete_the_conversation has been running for over 60 seconds
+test store::sqlite::session_events::tests::delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat has been running for over 60 seconds
+test store::sqlite::session_events::tests::deleting_a_session_event_probes_captured_event_by_index has been running for over 60 seconds
+test store::sqlite::session_events::tests::first_provider_attempt_follows_original_input_order_after_import has been running for over 60 seconds
+test store::sqlite::session_events::tests::history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers has been running for over 60 seconds
+test store::sqlite::session_events::tests::native_event_preparation_stays_bounded_and_keeps_identity_checks has been running for over 60 seconds
+test store::sqlite::session_events::tests::native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline has been running for over 60 seconds
+test store::sqlite::session_events::tests::native_usage_keeps_one_row_per_turn_until_the_next_turn_starts has been running for over 60 seconds
+test store::sqlite::session_events::tests::native_usage_survives_attachment_and_input_replacement_without_double_counting has been running for over 60 seconds
+test store::sqlite::session_events::tests::no_decoded_time_follows_its_inputs_bound has been running for over 60 seconds
+test store::sqlite::session_events::tests::process_completion_ends_inputs_without_exit_events has been running for over 60 seconds
+test store::sqlite::session_events::tests::provider_identity_uses_original_event_order_and_fresh_publications has been running for over 60 seconds
+test store::sqlite::session_events::tests::recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts has been running for over 60 seconds
+test store::sqlite::session_events::tests::no_decoded_time_follows_its_inputs_bound ... ok
+test store::sqlite::session_events::tests::provider_identity_uses_original_event_order_and_fresh_publications ... ok
+test store::sqlite::session_events::tests::delayed_origin_preserves_pre_bind_assignment_and_rejects_conflicting_repeat ... ok
+test store::sqlite::session_events::tests::aggregate_history_discovers_unattributed_native_receipts_without_a_capture ... ok
+test store::sqlite::session_events::tests::native_event_preparation_stays_bounded_and_keeps_identity_checks ... ok
+test store::sqlite::session_events::tests::deleting_a_session_event_probes_captured_event_by_index ... ok
+test store::sqlite::session_events::tests::recovered_completion_keeps_missing_start_and_usage_and_rejects_conflicts ... ok
+test store::sqlite::session_events::tests::native_usage_survives_attachment_and_input_replacement_without_double_counting ... ok
+test store::sqlite::session_events::tests::native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline ... ok
+test store::sqlite::session_events::tests::completed_turn_does_not_complete_the_conversation ... ok
+test store::sqlite::session_events::tests::a_later_usage_receipt_replaces_its_row_in_place ... ok
+test store::sqlite::session_events::tests::native_usage_keeps_one_row_per_turn_until_the_next_turn_starts ... ok
+test store::sqlite::session_events::tests::first_provider_attempt_follows_original_input_order_after_import ... ok
+test store::sqlite::session_events::tests::a_recovered_gap_enters_the_sessions_history_once ... ok
+test store::sqlite::session_events::tests::history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_callers ... ok
+test store::sqlite::session_events::tests::session_exit_retires_orphans_but_preserves_primary_and_task_conversations ... ok
+test store::sqlite::session_events::tests::silences_follow_input_order ... ok
+test store::sqlite::session_events::tests::stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation ... ok
+test store::sqlite::session_events::tests::process_completion_ends_inputs_without_exit_events ... ok
+test store::sqlite::session_events::tests::session_exit_closes_agent_process_unless_ownership_transferred ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 2675 filtered out; finished in 99.26s
+

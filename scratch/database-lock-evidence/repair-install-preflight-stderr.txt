@@ -1,0 +1,2 @@
+note: skipped 31 placed Work reference(s) whose catalog root is gone (dead worktrees); they cannot run and do not gate promotion
+Error: promotion preflight refused

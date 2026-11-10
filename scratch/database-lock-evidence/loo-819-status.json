@@ -1,0 +1,64 @@
+{
+  "comments": {
+    "comments": [
+      {
+        "author": {
+          "kind": "person",
+          "name": "jack"
+        },
+        "body": "Jack Heart claimed this on home_39860354aaca640c2ccb50bf6ca609d8\n\n<!-- loopflow-ownership:{\"id\":\"own_73a134c5aee74ea7a24c2cf53430fcdd\",\"task_id\":\"task_58c20a18ce2b47adaf52e5c0d13d0f37\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"jack@loopflow.studio\",\"machine_id\":\"home_39860354aaca640c2ccb50bf6ca609d8\",\"machine_label\":null,\"at\":1794334311} -->",
+        "created_at": "2026-11-10T18:12:19.200Z",
+        "id": "ea03e0ee-b8e3-4a08-8109-59ed549a517e"
+      }
+    ],
+    "conflicts": {},
+    "pending_sync": [],
+    "refresh_error": null
+  },
+  "graph_processes": [
+    {
+      "id": "eaaebeb4-a28f-4777-a2d5-ae579a3c3829",
+      "name": "feature",
+      "state": "completed",
+      "step": "kickoff",
+      "updated_at": "2026-11-10T18:26:59Z"
+    }
+  ],
+  "sessions": [
+    {
+      "agent_process_id": "8b907a88-cfc4-441e-a252-3169a7fb6b11",
+      "available": true,
+      "cwd": "/Users/jack/src/loopflow.loo-819-make-session-orchestration",
+      "id": "c56a176f67d04e23bdaaed8095e7e170",
+      "interactive": true,
+      "provider": "codex",
+      "state": "active",
+      "title": "LOO-819 universal server"
+    },
+    {
+      "agent_process_id": "c6a75b7b-d1d5-4de1-a066-8fddcf4fc7f8",
+      "available": false,
+      "cwd": "/Users/jack/src/loopflow.loo-819-make-session-orchestration",
+      "id": "session_5a2e9980fde64be2875b2a3f64e593c2",
+      "interactive": false,
+      "provider": "codex",
+      "state": "closed",
+      "title": "LOO-819 Server design"
+    }
+  ],
+  "task": {
+    "graph": {
+      "name": "feature",
+      "step": "explore"
+    },
+    "id": "task_58c20a18ce2b47adaf52e5c0d13d0f37",
+    "identifier": "LOO-819",
+    "next": "lf task run LOO-819",
+    "pr": null,
+    "project": null,
+    "reason": "ready",
+    "state": "active",
+    "title": "Make session orchestration cheap through one universal LF server",
+    "wave": null
+  }
+}

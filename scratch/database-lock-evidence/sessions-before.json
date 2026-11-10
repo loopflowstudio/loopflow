@@ -1,0 +1,246 @@
+{
+  "d9c467555ed34b169e20acaf67694088": {
+    "id": "d9c467555ed34b169e20acaf67694088",
+    "current_capture": 2806542,
+    "provider_thread": "98bc74f8-d100-46ce-a097-f038636fdd19",
+    "agent_process_id": "eacb03b9-91cc-4933-91b6-96f9d0d9b050",
+    "transport_lf_process_id": "a38b63c9-e1d2-4d44-9d92-66350bcb2c5a",
+    "cwd": "/Users/jack/src/manabot.892c47-author-tla-cards",
+    "completed_at": null,
+    "provider_threads": [
+      "01a183fa-b86c-7370-b88b-1849202d175e"
+    ]
+  },
+  "ea5bcb72bd404139a2704faa083edd40": {
+    "id": "ea5bcb72bd404139a2704faa083edd40",
+    "current_capture": 2806855,
+    "provider_thread": "51e1e15e-8aa8-4aa6-b416-6513399df47f",
+    "agent_process_id": "c550c32c-182e-4b0b-8d7d-47791f6ad743",
+    "transport_lf_process_id": "7dce6163-975f-4a8b-8e22-36ea2d790313",
+    "cwd": "/Users/jack/src/manabot.repo",
+    "completed_at": null,
+    "provider_threads": [
+      "01a14068-2ce6-7b10-b11b-a2fc514669dd"
+    ]
+  },
+  "636b009eccd244db836492c431b0ba4e": {
+    "id": "636b009eccd244db836492c431b0ba4e",
+    "current_capture": 2805387,
+    "provider_thread": "85be3286-6215-4e81-a9d3-7badae7a90d3",
+    "agent_process_id": "6c9d147b-d4d9-470a-be2b-78bd68fc937e",
+    "transport_lf_process_id": "816356e9-0e78-4578-8ea9-b5a22b193db6",
+    "cwd": "/Users/jack/src/manabot.mtg-212-benchmark-mtg-183",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "1fb1694142e3486e9ddad9e40b945733": {
+    "id": "1fb1694142e3486e9ddad9e40b945733",
+    "current_capture": 2806556,
+    "provider_thread": "c3b7432b-1da5-484a-ae26-0d4e1e0bb1b2",
+    "agent_process_id": "865f71ab-c9bc-403a-8824-f4412a706138",
+    "transport_lf_process_id": "5c6d902f-3940-43f5-826e-a82e76610d27",
+    "cwd": "/Users/jack/src/manabot.f871a8-import-decklist-files",
+    "completed_at": null,
+    "provider_threads": [
+      "01a183fa-e65f-7533-bb26-1d3d026c9a1c"
+    ]
+  },
+  "f090e9dcf80641afb8d1a0f486979871": {
+    "id": "f090e9dcf80641afb8d1a0f486979871",
+    "current_capture": 2801768,
+    "provider_thread": "f00403a0-b494-45c0-b00a-340ad021294a",
+    "agent_process_id": "678c77a3-8aaf-49a4-b74c-0ff92d59a3a1",
+    "transport_lf_process_id": "332969a5-b825-4e85-b1d8-c5da0a6c95f1",
+    "cwd": "/Users/jack/src/loopflow.loo-669-revamp-the-release",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "a17891fe2e26441382555d7332b5c6ad": {
+    "id": "a17891fe2e26441382555d7332b5c6ad",
+    "current_capture": 2809869,
+    "provider_thread": "37821731-cbf1-43b4-89a7-69ead30f2f69",
+    "agent_process_id": "04e73d8c-0282-401f-96b1-850a179c1fc2",
+    "transport_lf_process_id": "715ce1fb-2e66-4b58-a426-1442e1dcbd4c",
+    "cwd": "/Users/jack/src/manabot.87e012-tla-t2-casting",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "b239e5500dfb4c9190c126484537559c": {
+    "id": "b239e5500dfb4c9190c126484537559c",
+    "current_capture": 2809910,
+    "provider_thread": "afb77a75-049f-4c3d-afbd-74123604ab60",
+    "agent_process_id": "54c0906b-206f-4e10-b763-ea24ad4c2ec6",
+    "transport_lf_process_id": "b7d5ab19-35ec-4c69-b14f-8ab96e5652f1",
+    "cwd": "/Users/jack/src/manabot.6875f0-tla-t3-characteristics",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "af0e58a294e547df806225111e9b3170": {
+    "id": "af0e58a294e547df806225111e9b3170",
+    "current_capture": 2820832,
+    "provider_thread": "981ae7f3-1b04-43cb-94c3-9a71e32b5b5f",
+    "agent_process_id": "66d9f645-248e-49bc-a4ab-f2846dcbfe7d",
+    "transport_lf_process_id": "d2e027d6-c038-4c82-953b-c5297ff00519",
+    "cwd": "/Users/jack/src/manabot.488a40-tla-t4-triggers",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "fa6178b2144c47339d9db37f19bf1068": {
+    "id": "fa6178b2144c47339d9db37f19bf1068",
+    "current_capture": 2820967,
+    "provider_thread": "e65f7cf7-b2c8-430e-a65d-69c79cab0982",
+    "agent_process_id": "925a6e25-02c6-40fb-ae1b-835403fc7669",
+    "transport_lf_process_id": "fdb68bef-d217-4ec0-85e5-f5c4a5a5c5db",
+    "cwd": "/Users/jack/src/manabot.558daa-cull-everything-the",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "e76c4e99e66a4cbcb9935767c661b97b": {
+    "id": "e76c4e99e66a4cbcb9935767c661b97b",
+    "current_capture": 2820972,
+    "provider_thread": "8b973b55-1aa6-4bc4-9858-9eb1635920e6",
+    "agent_process_id": "a48e3385-5b0b-45c9-869c-3a98c29a29ea",
+    "transport_lf_process_id": "bf80497a-90f6-4100-8ec7-4ec896d82cf6",
+    "cwd": "/Users/jack/src/manabot.a7234f-tla-t5-permanent",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "session_4ff317503562462cb15dd4ce15b59cf0": {
+    "id": "session_4ff317503562462cb15dd4ce15b59cf0",
+    "current_capture": 2823677,
+    "provider_thread": "afccc6c8-9c72-4ce3-b0e9-3f7562bed4db",
+    "agent_process_id": "21012e53-509f-4db7-8eb0-749c7d86ef8b",
+    "transport_lf_process_id": "f718b19a-1fa4-433c-beba-8481548faad2",
+    "cwd": "/Users/jack/src/loopflow",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "session_89ffcdf8d2444e88a9ae3249095c0609": {
+    "id": "session_89ffcdf8d2444e88a9ae3249095c0609",
+    "current_capture": 2824483,
+    "provider_thread": "4fe05298-782c-492f-aa64-1df7be253e3b",
+    "agent_process_id": "1a437500-43b6-4200-9a72-b10b2024c247",
+    "transport_lf_process_id": "33a46c1d-cba3-45f6-a791-1b06d8989add",
+    "cwd": "/Users/jack/src/manabot.6875f0-tla-t3-characteristics",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "eac235f5c3ed403eb9b7f3a94d3a3e75": {
+    "id": "eac235f5c3ed403eb9b7f3a94d3a3e75",
+    "current_capture": 2830589,
+    "provider_thread": "01a19e70-8757-7203-b26b-7e7403f65f43",
+    "agent_process_id": "6ed65159-bf48-4255-93b3-d687f89d0740",
+    "transport_lf_process_id": "958b296d-499d-4e41-b924-f94bdfee65dc",
+    "cwd": "/Users/jack/src/manabot.mtg-238-catalog-scale-types",
+    "completed_at": null,
+    "provider_threads": [
+      "01a19e70-8757-7203-b26b-7e7403f65f43"
+    ]
+  },
+  "e5d9d2b388ee43349d8b7f3e249c107a": {
+    "id": "e5d9d2b388ee43349d8b7f3e249c107a",
+    "current_capture": 2830607,
+    "provider_thread": "01a19e70-a1a2-7ab2-a095-4efaa4da7784",
+    "agent_process_id": "80bdd6ad-de8e-4a26-a8e0-e5ffa90d41df",
+    "transport_lf_process_id": "b4ce444e-6081-4548-8979-4dd4bd690c3c",
+    "cwd": "/Users/jack/src/manabot.mtg-236-derived-state-revisions",
+    "completed_at": null,
+    "provider_threads": [
+      "01a19e70-a1a2-7ab2-a095-4efaa4da7784"
+    ]
+  },
+  "7f20038b9d4f48c9b3f9952a0ac44756": {
+    "id": "7f20038b9d4f48c9b3f9952a0ac44756",
+    "current_capture": 2830618,
+    "provider_thread": "01a19e70-a321-7bb3-b787-4068780aebde",
+    "agent_process_id": "90853a8a-637b-4d30-a89d-c77abd3ab215",
+    "transport_lf_process_id": "e8516d54-2a69-43c8-acd8-bdfc1b695016",
+    "cwd": "/Users/jack/src/manabot.mtg-237-engine-performance-budget",
+    "completed_at": null,
+    "provider_threads": [
+      "01a19e70-a321-7bb3-b787-4068780aebde"
+    ]
+  },
+  "81c33e7abbfc4484bf7d81f103db4501": {
+    "id": "81c33e7abbfc4484bf7d81f103db4501",
+    "current_capture": 2830628,
+    "provider_thread": "01a19e70-b835-7d10-b028-22aee6ae91d2",
+    "agent_process_id": "a5f5d5e3-1540-43bb-939d-ccf389f9b682",
+    "transport_lf_process_id": "6d359d1e-8acb-4661-9eb5-37673fe723a7",
+    "cwd": "/Users/jack/src/manabot.mtg-235-effect-vocabulary-verbs",
+    "completed_at": null,
+    "provider_threads": [
+      "01a19e70-b835-7d10-b028-22aee6ae91d2"
+    ]
+  },
+  "5d552358ea0940a1beca11c09a0110ab": {
+    "id": "5d552358ea0940a1beca11c09a0110ab",
+    "current_capture": 2830638,
+    "provider_thread": "01a19e70-a58c-7d01-9de7-b150856cbf6e",
+    "agent_process_id": "eac25b7f-9504-495d-992b-18ccd17bf4bf",
+    "transport_lf_process_id": "fa4e5c62-4b60-4478-a996-1da063acfbae",
+    "cwd": "/Users/jack/src/manabot.mtg-225-tla-t6-sagas",
+    "completed_at": null,
+    "provider_threads": [
+      "01a19e70-a58c-7d01-9de7-b150856cbf6e"
+    ]
+  },
+  "e2a4b3267d404a61885a763832bfbea5": {
+    "id": "e2a4b3267d404a61885a763832bfbea5",
+    "current_capture": 2836245,
+    "provider_thread": "01a1a2e2-f09c-7243-a680-9df30394e3e1",
+    "agent_process_id": "cab12597-5143-488c-8306-b5de20560bae",
+    "transport_lf_process_id": "c79f829c-67bb-41ec-be25-ed14f15af4fc",
+    "cwd": "/Users/jack/src/manabot.mtg-239-complete-five-defined",
+    "completed_at": null,
+    "provider_threads": [
+      "01a1a2e2-f09c-7243-a680-9df30394e3e1"
+    ]
+  },
+  "b3ede790bbb442febb9a72d74f599cff": {
+    "id": "b3ede790bbb442febb9a72d74f599cff",
+    "current_capture": 2785205,
+    "provider_thread": null,
+    "agent_process_id": "3dd0cf15-4fa4-44af-9dac-a96c03b499ff",
+    "transport_lf_process_id": "00d082ab-85a5-49c2-815e-d41a9246ad41",
+    "cwd": "/Users/jack/src/etude.eb70f8-keep-each-eval",
+    "completed_at": null,
+    "provider_threads": []
+  },
+  "session_ffcca3d44a284c3eab8de9b313c9987d": {
+    "id": "session_ffcca3d44a284c3eab8de9b313c9987d",
+    "current_capture": 2893767,
+    "provider_thread": "01a1c1eb-7aa8-7851-a8c1-0170f94bef95",
+    "agent_process_id": "fc358cef-d002-4cd3-b40f-955166b22dbe",
+    "transport_lf_process_id": "681f5c23-5113-4468-aa58-0f344013e335",
+    "cwd": "/Users/jack/src/loopflow.agent",
+    "completed_at": null,
+    "provider_threads": [
+      "01a1c1eb-7aa8-7851-a8c1-0170f94bef95"
+    ]
+  },
+  "881aafe7262040e486a79a1c429dfe16": {
+    "id": "881aafe7262040e486a79a1c429dfe16",
+    "current_capture": 2883645,
+    "provider_thread": "01a1baea-1dbb-7b02-826a-552d89f03772",
+    "agent_process_id": "2f15c537-2e58-4124-9ad1-0e4d9304f6d8",
+    "transport_lf_process_id": "95df02a4-81cd-498f-8e03-02a5d69c6c93",
+    "cwd": "/Users/jack/src/manabot.b015d5-investigate-and-optimize",
+    "completed_at": null,
+    "provider_threads": [
+      "01a1baea-1dbb-7b02-826a-552d89f03772"
+    ]
+  },
+  "session_e3012fdbddb843939ffdf12e4934b1b3": {
+    "id": "session_e3012fdbddb843939ffdf12e4934b1b3",
+    "current_capture": 2904353,
+    "provider_thread": "01a1c6b8-2915-7cb0-91ac-9afcb99def97",
+    "agent_process_id": "bfc342dd-944c-42e9-86ed-d8d75dbd0a70",
+    "transport_lf_process_id": "7e8b8c54-2ed6-4a7f-b31b-02094ef80293",
+    "cwd": "/Users/jack/src/loopflow.agent",
+    "completed_at": null,
+    "provider_threads": [
+      "01a1c6b8-2915-7cb0-91ac-9afcb99def97"
+    ]
+  }
+}

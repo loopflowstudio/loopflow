@@ -1,0 +1,4 @@
+agent: codex
+pm:
+  provider: linear
+  linear_team: d5a8730d-2040-4db1-ba04-569cc054ca96

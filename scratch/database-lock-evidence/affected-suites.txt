@@ -1,0 +1,67 @@
+(base: origin/main)
+Changed files: 43
+  rust/loopflow/src/store/migrations/bounded_identity_triggers.sql
+  rust/loopflow/src/store/sqlite/session_events.rs
+  scratch/database-lock-evidence/affected-suites.txt
+  scratch/database-lock-evidence/after-pause.json
+  scratch/database-lock-evidence/after-rollover-lock.json
+  scratch/database-lock-evidence/failed-session-card.json
+  scratch/database-lock-evidence/late-exit-card.json
+  scratch/database-lock-evidence/lf-desktop-actions-20261110.json
+  scratch/database-lock-evidence/lf-lock-holders-20261110.json
+  scratch/database-lock-evidence/lf-lock-owner-49149.txt
+  scratch/database-lock-evidence/lf-lock-owner-90401.txt
+  scratch/database-lock-evidence/lf-pressure-pause-20261110.json
+  scratch/database-lock-evidence/lf-rollover-20261110.json
+  scratch/database-lock-evidence/loo-819-status.json
+  scratch/database-lock-evidence/manabot-config-before.yaml
+  scratch/database-lock-evidence/manabot-resume-stderr.txt
+  scratch/database-lock-evidence/manabot-resume.json
+  scratch/database-lock-evidence/processes-after.txt
+  scratch/database-lock-evidence/processes-before.txt
+  scratch/database-lock-evidence/remaining-pressure.json
+  scratch/database-lock-evidence/resumed-claude-card.json
+  scratch/database-lock-evidence/resumed-codex-card.json
+  scratch/database-lock-evidence/rollover-after.json
+  scratch/database-lock-evidence/rollover-preview.json
+  scratch/database-lock-evidence/rollover-result.json
+  scratch/database-lock-evidence/rollover-stderr.txt
+  scratch/database-lock-evidence/rust-event-tests.log
+  scratch/database-lock-evidence/rust-identity-tests.log
+  scratch/database-lock-evidence/schema-before.sql
+  scratch/database-lock-evidence/second-failed-card.json
+  scratch/database-lock-evidence/server-final.json
+  scratch/database-lock-evidence/sessions-after.json
+  scratch/database-lock-evidence/sessions-before.json
+  scratch/database-lock-evidence/sessions-final.json
+  scratch/database-lock-evidence/swift-tests.log
+  scratch/database-lock-evidence/trigger-repair-experiment.json
+  scratch/database-lock-evidence/writer-4994-debug.txt
+  scratch/database-lock-incident.md
+  scratch/questions.md
+  swift/LoopflowMac/Views/SessionsView.swift
+  swift/LoopflowMac/WorkModel.swift
+  swift/LoopflowTests/WorkCacheTests.swift
+  swift/LoopflowTests/WorkspaceRetentionTests.swift
+
+Plan:
+  RUN  architecture matched (changed paths)  [budget 120s]
+         $ uv run python scripts/check_architecture.py  (budget 120s)
+  SKIP python    skipped (no python/, scripts/*.py, or top-level *.py changes)
+  RUN  rust      matched (changed paths)  [budget 5220s]
+         $ uv run --no-sync python scripts/check_rust_test_inventory.py  (budget 900s)
+         $ cargo fmt --all -- --check  (budget 120s)
+         $ cargo build -p loopflow --bin lf --jobs 4  (budget 900s)
+         $ env LOOPFLOW_TEST_LF=/Users/jack/src/loopflow.agent/target/debug/lf cargo --config target."cfg(all())".runner = ["uv", "run", "--no-sync", "python", "/Users/jack/src/loopflow.agent/scripts/test_network.py"] nextest run --all --no-fail-fast --build-jobs 4 --test-threads 4  (budget 2400s)
+         $ cargo clippy --all-targets --jobs 4 -- -D warnings  (budget 900s)
+  SKIP website   skipped (no website/ or docs/ changes)
+  RUN  swift     matched (changed paths)  [budget 2220s]
+         proves: app builds; model and view/interaction tests run without a display session.
+         $ cargo build -p loopflow --bin lf --jobs 4  (budget 900s)
+         $ scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone  (budget 1200s)
+         $ uv run python scripts/check_swift_multiplatform_boundaries.py  (budget 120s)
+  SKIP e2e       skipped (slow; use --all or --e2e)
+  SKIP loopflow  skipped (slow; use --all or --loopflow)
+         proves: app + UI-test runners COMPILE (build-for-testing). Hosted UI behaviour is optional via `--ui-host`; headless view tests run in swift.
+  SKIP ui-host   optional display diagnostic (run --ui-host on its host)
+         proves: optional hosted LoopflowUITests execute on a permissioned display host.

@@ -1,0 +1,22 @@
+{
+  "waves": [
+    [
+      "8c4a50d4-a51e-4ceb-8944-446f9175c6fd",
+      "infrastructure",
+      "/Users/jack/src/manabot"
+    ],
+    [
+      "c212f7b1-758f-434a-a743-f381943482de",
+      "8c4a50d4-a51e-4ceb-8944-446f9175c6fd",
+      "/Users/jack/src/manabot"
+    ]
+  ],
+  "primary": [
+    [
+      "09a40b4c78b2411ab30bfbc3203d7304",
+      "8c4a50d4-a51e-4ceb-8944-446f9175c6fd",
+      "wave",
+      "/Users/jack/src/manabot.wave-8c4a50d4-a51e-4ceb-8944-446f9175c6fd"
+    ]
+  ]
+}

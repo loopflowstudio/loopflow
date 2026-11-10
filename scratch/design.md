@@ -55,8 +55,9 @@ not built UI or additional implementation direction.
 
 ## Remaining
 
-- Review and affected-suite gate, then repair any failures. No review submission
-  was reported for PR #1873 by `lf pr reviews` on 2026-11-09.
+- Delivery review and CI. Gate passed on 2026-11-09; no production repair was
+  needed. No review submission was reported for PR #1873 by `lf pr reviews`
+  earlier on 2026-11-09.
 - Sync before delivery if main advances, publish the final PR content, repair CI
   if needed, and land PR #1873.
 - Verify merged behavior before completing the Task. The live QA did not exercise
@@ -65,15 +66,45 @@ not built UI or additional implementation direction.
 - Mounted Desktop presentation is unverified and new UI consumers are out of
   scope. Automatic ServerClient recovery, gaps, unknown kinds and saturation
   were not exercised by the live walkthrough; focused tests cover recovery,
-  gaps, unknown kinds and observer overflow. Gate/CI own the remaining automated
-  checks; the headless run does not establish mounted behavior.
+  gaps, unknown kinds and observer overflow. The affected-suite gate now passes;
+  CI owns the full matrix. The headless run does not establish mounted behavior.
 
 Gate's Rust filter is
 `test(server::) | test(lf::commands::subscribe::) | test(store::sqlite::task_comments::) | test(dto_fixtures::) | binary(served_reads)`;
 Swift, website/architecture and clippy also run through the affected-suite runner.
-No successful affected-suite gate is recorded here.
+The gate also includes `test(lf::commands::read::)`,
+`test(session_record::activity::tests::)` and `test(ops::task_execution::tests::)`:
+the pull API's direct caller and the subscription deadline checks required by
+the test module guide. This affected-suite gate passed on 2026-11-09.
+
+Gate plan, 2026-11-09: compare against `origin/main` (merge base `6f7a6c9ca`),
+including the clean working tree. Server wire/client/outbox/service and the new
+observer reach `server::`; subscription and read changes reach their own suites
+and `served_reads`; comment conversion and wire fixtures reach comment and DTO
+tests. Shared wake tracking reaches activity and Task execution deadline tests.
+Swift protocol/client changes reach the headless app/model/view suite and
+platform checks; server docs reach architecture and website checks. Rustfmt,
+inventory and all-target Clippy match CI. No dependency, migration, terminal
+renderer or Xcode configuration changes require the slow installation/full
+matrix checks. Existing live QA is retained; no second walkthrough is planned.
 
 ## Recorded checks and observations
+
+Gate, 2026-11-09, `72e4aa2ea`: review found the implementation and docs agree
+with the contract; no production changes were needed. Expanded the planned
+filter to cover the direct read caller and required activity/deadline checks.
+All four affected suites passed in 484 seconds, with no timeout or CI deferral
+of a required local check. Logs: `.lf/tmp/gate/run-6396/`.
+
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(server::) | test(lf::commands::subscribe::) | test(lf::commands::read::) | test(store::sqlite::task_comments::) | test(dto_fixtures::) | test(session_record::activity::tests::) | test(ops::task_execution::tests::) | binary(served_reads)'`: PASS, 4 suites; inherited `LF_*` unset, stdin closed, `TMPDIR=/private/tmp`, candidate CLI first on PATH.
+- `uv run python scripts/check_architecture.py`: PASS, every mapped owner and boundary covered.
+- `uv run --no-sync python scripts/check_rust_test_inventory.py` and `cargo fmt --all -- --check`: PASS.
+- `cargo build -p loopflow --bin lf --jobs 4`: PASS; filtered nextest run: 123 passed, 3522 excluded, 58.456 seconds of test execution.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`: PASS; the preceding test link emitted the known macOS `__eh_frame` size warning.
+- `cd website && uv run python dev.py test`: PASS, 73 tests.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone`: PASS, app built and Swift reported 797 tests in 98 suites; optional display diagnostics skipped as declared.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: PASS.
+- `git diff --check`: PASS; gate processes exited and no gate-owned server remained. Full Rust matrix, installation/E2E and Xcode targets remain CI's checks; mounted presentation and live merge demonstration remain verification limits above.
 
 QA rerun, 2026-11-09, `d5bba3db5`: CLI and Swift library builds passed;
 `uv run python scratch/qa_events.py` passed all ten live scenarios again.

@@ -1,5 +1,10 @@
 # LOO-809
 
+At November 10 05:44 UTC, `lf open --host desktop --file docs/server.md --file
+rust/loopflow/src/server/README.md` reported both files opening in Loopflow
+Desktop. The docs still cover the chosen contract; no edits or open product
+questions resulted. Visual inspection remains for QA. `git diff --check` passed.
+
 At November 10 05:08 UTC, `lf open --host desktop --file docs/server.md --file
 rust/loopflow/src/server/README.md` reported both files opened in Loopflow
 Desktop. The existing docs cover the chosen contract; no doc edits or open

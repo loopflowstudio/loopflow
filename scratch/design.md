@@ -23,17 +23,15 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 10:49 UTC, GitHub reports PR #1812 open and unmerged at the same
+At November 10 10:52 and 11:27 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeStateStatus: DIRTY` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The fresh `lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
-with PR #1812 open and settlement not armed.
+The accompanying `lf task status LOO-718 --json` recheck still places the
+transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
-The next Graph decision is blocked on LOO-718 landing: this checkout lacks its
-shared ticket store and authenticated endpoints. Recheck that store after landing,
-then implement and run remote acceptance before publication, merge and completion.
-Landing the separate transport PR is outside this Task's scope; no product
-decision is missing.
+LOO-718 must land before implementation and delivery; reinspect its shared store
+and authenticated endpoints then. Landing that PR is outside this Task's scope;
+no product decision is missing.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
@@ -41,38 +39,31 @@ to older status reads.
 
 ## Delete — do not maintain
 
-Integrating the inspected transport removes `server/service.rs::Ticket` and
-`Tickets`, the current UID-only store. Use its shared `server/ticket.rs`
-authority without retaining a second store. Move the identity, consume-on-attempt,
-single-use, expiry and sweeping coverage from
+The transport replaces `server/service.rs::Ticket` and `Tickets` with the shared
+`server/ticket.rs` store. Leave the UID-only store alone until that lands.
+Move coverage from
 `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` to the shared-store
 tests, then delete that predecessor test. Retain bulk cases, service-level bridge
-tests and wire fixtures. Until the transport lands, leave the UID-only store
-alone: changing it would extend code this Task removes.
+tests and wire fixtures.
 
-## Remaining implementation
+## Implementation and acceptance
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
-redemption policy. Replace ticket timing with `SystemTime` so the 60-second
-deadline includes host sleep; leave unrelated throttles on `Instant`. Retain the
-transport's watch resumption.
+redemption policy. Through authenticated client and bridge connections, test that
+matching node/user succeeds once; a different node, different user, or
+local/remote mismatch fails and consumes the terminal ticket. Local UID tests
+alone cannot satisfy these checks.
+
+Replace ticket timing with `SystemTime`; test expiry at 60 seconds with a clock
+advance representing host sleep, expired-ticket sweeping, and unchanged bulk
+redemption behavior. Leave unrelated throttles on `Instant` and retain watch
+resumption.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint in both shipping docs:
 `docs/server.md` (Phone access) and `rust/loopflow/src/server/README.md`
 (Remote attach contract).
 
-## Remaining acceptance
-
-Exercise the remote attach contract through authenticated client and bridge
-connections: matching node/user succeeds once; a different node, different user,
-or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
-60 seconds with a clock advance representing host sleep, expired-ticket sweeping,
-and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
-satisfy these checks.
-
 Desktop visual inspection remains for QA; opening results are in `questions.md`.
 
-Compression consolidates the dependency decision; code cuts await the surviving
-store. `git diff --check` — clean; `lf context` — within both scratch limits.
-Prose-only edits; no build or tests needed.
+`git diff --check` — passed; prose-only consolidation, no build or test rerun.

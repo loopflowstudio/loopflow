@@ -27,8 +27,8 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 08:16 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with merge conflicts reported. Freshly fetched main is
+At November 10 08:54 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeable: false`. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 `lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
 with PR #1812 open and settlement not armed.

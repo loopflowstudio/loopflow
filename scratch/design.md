@@ -8,7 +8,7 @@ Keep the contract marked planned until implemented.
 
 ## Transport dependency — November 10, 2026 UTC
 
-The 22:46 UTC realign check inspected PR #1812 head
+The inspected PR #1812 head is
 `73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. It supplies
 `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
@@ -25,15 +25,19 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 03:54 UTC, `gh pr view 1812` returned `state: OPEN`,
+At November 10 03:57 UTC, `gh pr view 1812` returned `state: OPEN`,
 `mergedAt: null`, `autoMergeRequest: null` and the same head. A fresh fetch kept main at
 `6f7a6c9caf7f68554445df008593d71baf95cfbe`; `git ls-tree` still found neither
 `server/mobile.rs` nor `server/ticket.rs`.
 
-Graph decision finding: stop until LOO-718's PR #1812 merges. Implementation
-and remote acceptance depend on its transport; landing it is outside this
-Task's scope. No product decision is missing. Keep this checkout and planned
-contract, then inspect the landed transport before changing its shared store.
+At November 10 04:31 UTC, the same PR query still returned `state: OPEN`,
+`mergedAt: null`, `autoMergeRequest: null` and the same head. Freshly fetched
+main advanced to `c7094eb9736a8c66a789558019d6cc9b7b476b84`; neither transport
+file exists there. The dependency remains unresolved.
+
+Implementation and remote acceptance depend on LOO-718's transport, which is
+not on main. Landing that separate PR is outside this Task's scope. No product
+decision is missing; the contract remains planned.
 
 Earlier observations, stalled Task status reads and revision comparisons are
 recorded in `cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
@@ -69,9 +73,8 @@ satisfy these checks.
 
 Desktop review and opening results are in `questions.md`.
 
-Compression keeps the dependency decision in one place and removes the repeated
-bridge-lifetime explanation from the contract; the owner lifecycle below it
-already describes closure.
+Compression removes the repeated client-slot limit from attachment docs (the
+local protocol introduction owns it) and condenses remote retry instructions.
 
 `git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
 no build or tests needed.

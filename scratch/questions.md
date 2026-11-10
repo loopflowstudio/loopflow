@@ -30,13 +30,23 @@ inspected in this run. Production capture state was not changed.
 
 2026-11-09 integration: two native Claude clients retried immediately after a
 shared switch using the old token; later typed turns used the replacement.
-The installed 2.1.321 Keychain reader contains a 30-second cache. The recovery
-worker now waits 31 seconds without a credential lock, then checks the active
-login and rejected transcript again. The subsequent two-client native probe completed both continuations and edited
-drafts with second-login request headers. This supports the cache-expiry choice
-for that native build; sleeping alone does not establish credential adoption.
+The installed 2.1.321 Keychain reader contains a 30-second cache. The earlier recovery
+worker waited 31 seconds without a credential lock, then checked the active
+login and rejected transcript again. That wait was removed with the unsafe inbox
+send; it did not serialize newer native input. Before that removal, the two-client
+native probe completed both continuations and edited drafts with second-login
+request headers. This supports the cache-expiry choice for that native build;
+sleeping alone does not establish credential adoption.
 
 2026-11-09 admission repair: no conditional native handoff/retry mechanism is
 established for either provider. Retain truthful native-admission waits and remove
 the unsafe sends, as the concept-review direction permits. Automatic continuation
 remains unfinished. No production Sessions, credentials or installation changed.
+
+2026-11-09 native admission investigation: test conditional steering and hook wake
+before adding credential handoff. Codex's conditional steer cannot restart a
+failed turn; Claude's asynchronous failure-hook wake survives newer completed
+input at both held barriers. Keep these counterexamples in the existing probe
+scripts and stop dependent integration. No production credential switch is needed
+to establish these admission failures. Details and the missing native contract
+are in interactive-limit-recovery.md.

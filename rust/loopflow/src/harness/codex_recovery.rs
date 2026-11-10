@@ -298,8 +298,14 @@ impl Recorder {
             wave.as_ref(),
         )
         .await;
-        match route {
-            Ok(Some(_)) => (),
+        let phase = match route {
+            Ok(Some(_)) => {
+                // Login replaces server-wide credentials and can fail active work.
+                // Neither login nor turn/start conditions admission on this turn.
+                recovery.state = RecoveryState::WaitingNative;
+                recovery.reason = "Codex cannot condition account handoff and retry on this still-current rejected turn; continue in the conversation".into();
+                "admission"
+            }
             result => {
                 recovery.reason = "No eligible login has capacity for this model".into();
                 if let Err(provider_account::ProviderAccountError::NoEligibleAccount {
@@ -309,19 +315,11 @@ impl Recorder {
                 {
                     recovery.retry_at = retry_at;
                 }
-                self.save_recovery(&recovery, &format!("wait:{}", uuid::Uuid::new_v4()))?;
-                self.recovery.check_at = SystemTime::now() + Duration::from_secs(60);
-                return Ok(());
+                "wait"
             }
         };
-        // The native login API changes server-wide credentials and can
-        // fail an active response. Neither it nor turn/start accepts a
-        // still-current failed-turn condition. A second history read
-        // cannot serialize the directly connected client's next input.
-        recovery.state = RecoveryState::WaitingNative;
-        recovery.reason = "Codex cannot condition account handoff and retry on this still-current rejected turn; continue in the conversation".into();
-        recovery.retry_at = None;
-        self.save_recovery(&recovery, &format!("admission:{}", uuid::Uuid::new_v4()))?;
+        self.save_recovery(&recovery, &format!("{phase}:{}", uuid::Uuid::new_v4()))?;
+        self.recovery.check_at = SystemTime::now() + Duration::from_secs(60);
         Ok(())
     }
 }

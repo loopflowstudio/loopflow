@@ -12,8 +12,13 @@ automatic continuation remains unfinished. Earlier two-client native product
 probes passed for both providers with synthetic logins and loopback responses;
 current probes establish safe waits and editable drafts, not automatic recovery. The latest main merge
 still needs gate checks; broader preservation and real-login checks remain open.
-The supplied-token Codex path supersedes the earlier drain/reload blocker.
-The design holds the native callback and retry results and their limits.
+The latest isolated admission probes add two counterexamples: Codex conditional
+steering cannot restart a failed turn, and Claude's asynchronous failure-hook wake
+still runs after newer typed input completes. No credential handoff was attempted
+in those probes; no replacement sending path was integrated.
+Supplied-token experiments passed native callbacks and retries, but the active-turn
+counterexample and missing admission remain. The design retains those results;
+server replacement is still an allowed, unproven alternative.
 
 The implemented experience is described in `docs/sessions.md`, subscriptions
 and Desktop docs; explicit restart limitations remain visible.
@@ -42,8 +47,8 @@ Still unobserved:
   100%. Synthetic native probes and the focused routing test now cover retaining
   the rejected model's hold despite a generic healthy poll; real capacity remains
   unobserved.
-- `resume --account` for running Codex and Claude, and `session move`. The new
-  product probe observes running Claude clients reload after cache expiry and
+- `resume --account` for running Codex and Claude, and `session move`. The earlier
+  product probe observed running Claude clients reload after cache expiry and
   complete retries/drafts; real-login and Task-bound preservation remain open.
 - Whether refreshing Claude invalidates earlier access tokens used by a rental.
 

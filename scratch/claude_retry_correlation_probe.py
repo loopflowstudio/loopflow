@@ -1,4 +1,4 @@
-"""Native inbox correlation with local Messages responses and an isolated Claude home."""
+"""Native inbox correlation and hook-wake admission with isolated local Messages responses."""
 
 import argparse
 import fcntl
@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-def _hook(base: str) -> None:
+def _hook(base: str, rewake: bool = False) -> None:
     event = json.load(sys.stdin)
     payload = {
         "event": event,
@@ -30,6 +30,27 @@ def _hook(base: str) -> None:
     request = urllib.request.Request(base + "/hook", data=json.dumps(payload).encode())
     with urllib.request.urlopen(request, timeout=3):
         pass
+    if rewake:
+        if event["hook_event_name"] != "StopFailure":
+            return
+        # Two barriers model credential preparation and the final wake dispatch.
+        # No credentials are touched: admission must work before adding handoff.
+        for phase in ("prepare", "admit"):
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                with urllib.request.urlopen(base + "/dispatch", timeout=3) as response:
+                    ready = json.load(response).get(phase)
+                if ready:
+                    break
+                time.sleep(0.05)
+            else:
+                raise TimeoutError(phase)
+            with urllib.request.urlopen(
+                urllib.request.Request(base + "/" + phase, data=b"{}"), timeout=3
+            ):
+                pass
+        print("REWAKE_REJECTED_TURN_FIXTURE", file=sys.stderr)
+        raise SystemExit(2)
     if event["hook_event_name"] != "SessionStart":
         return
     deadline = time.monotonic() + 45
@@ -72,9 +93,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--hook")
     parser.add_argument("--quota", action="store_true")
+    parser.add_argument("--async-rewake", action="store_true")
+    parser.add_argument("--race", choices=("none", "preparation", "dispatch"), default="none")
     args = parser.parse_args()
     if args.hook:
-        _hook(args.hook)
+        _hook(args.hook, args.async_rewake)
         return
     if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
         raise RuntimeError("run through scripts/test_network.py")
@@ -84,6 +107,7 @@ def main() -> None:
     messages = []
     dispatch = {}
     sent = threading.Event()
+    prepared = threading.Event()
 
     class Messages(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -105,9 +129,15 @@ def main() -> None:
                 hooks.append(body)
             elif self.path == "/sent":
                 sent.set()
+            elif self.path == "/prepare":
+                prepared.set()
+            elif self.path == "/admit":
+                sent.set()
             elif self.path.startswith("/v1/messages"):
                 messages.append(body)
-                if args.quota and not sent.is_set():
+                if (args.quota and not args.async_rewake and not sent.is_set()) or (
+                    args.async_rewake and len(messages) == 1
+                ):
                     rejected = json.dumps(
                         {
                             "type": "error",
@@ -192,6 +222,8 @@ def main() -> None:
             }
             (native / ".claude.json").write_text(json.dumps(config))
             command = shlex.join([sys.executable, str(Path(__file__).resolve()), "--hook", base])
+            if args.async_rewake:
+                command += " --async-rewake"
             settings = {
                 "hooks": {
                     name: [
@@ -200,7 +232,13 @@ def main() -> None:
                                 {
                                     "type": "command",
                                     "command": command,
-                                    **({"async": True} if name == "SessionStart" else {}),
+                                    **(
+                                        {"asyncRewake": True, "timeout": 90}
+                                        if args.async_rewake and name == "StopFailure"
+                                        else {"async": True}
+                                        if name == "SessionStart"
+                                        else {}
+                                    ),
                                 }
                             ]
                         }
@@ -263,6 +301,20 @@ def main() -> None:
                 os.write(master, text.encode())
                 read(0.3)
 
+            def wait_for(predicate, label):
+                deadline = time.monotonic() + 15
+                while not predicate() and time.monotonic() < deadline:
+                    read(0.1)
+                assert predicate(), label
+
+            def stopped():
+                return sum(h["event"].get("hook_event_name") == "Stop" for h in hooks)
+
+            def newer_input():
+                type_text("NEWER_INPUT_" + args.race.upper())
+                type_text("\r")
+                wait_for(lambda: stopped() >= 1, "newer typed turn did not complete")
+
             read(4)
             if b"ANTHROPIC_API_KEY" in terminal:
                 type_text("\x1b[A\r")
@@ -270,11 +322,41 @@ def main() -> None:
             type_text("FIRST_CORRELATION_FIXTURE")
             type_text("\r")
             read(4)
-            type_text("DRAFT_BEFORE_RETRY")
-            dispatch["uuid"] = str(uuid.uuid4())
-            read(6)
-            results["dispatch_uuid"] = dispatch["uuid"]
-            results["socket_write_completed"] = sent.is_set()
+            if args.async_rewake:
+                wait_for(
+                    lambda: any(h["event"].get("hook_event_name") == "StopFailure" for h in hooks),
+                    "rejection did not reach native failure hook",
+                )
+                if args.race == "preparation":
+                    newer_input()
+                dispatch["prepare"] = True
+                wait_for(prepared.is_set, "failure hook did not reach final dispatch barrier")
+                if args.race == "dispatch":
+                    newer_input()
+                before_wake = len(messages)
+                stops_before = stopped()
+                type_text("DRAFT_BEFORE_RETRY")
+                dispatch["admit"] = True
+                wait_for(sent.is_set, "failure hook did not exit")
+                wait_for(lambda: stopped() > stops_before, "native hook wake did not complete")
+                results.update(
+                    mechanism="StopFailure.asyncRewake",
+                    race=args.race,
+                    requests_before_wake=before_wake,
+                    requests_after_wake=len(messages),
+                    newer_input_completed_before_wake=stops_before == 1,
+                    stale_wake_after_newer_input=args.race != "none"
+                    and len(messages) > before_wake,
+                    wake_reached_model=any(
+                        "REWAKE_REJECTED_TURN_FIXTURE" in json.dumps(m) for m in messages
+                    ),
+                )
+            else:
+                type_text("DRAFT_BEFORE_RETRY")
+                dispatch["uuid"] = str(uuid.uuid4())
+                read(6)
+                results["dispatch_uuid"] = dispatch["uuid"]
+                results["socket_write_completed"] = sent.is_set()
             type_text("_AFTER_RETRY")
             type_text("\r")
             read(4)
@@ -298,9 +380,10 @@ def main() -> None:
                 and hook["event"].get("prompt_id")
                 and hook["event"].get("last_assistant_message") == "CORRELATION_COMPLETED"
             }
-            retry = [row for row in users if row.get("uuid") == dispatch["uuid"]]
-            results["retry_prompt_id"] = retry[0].get("promptId") if len(retry) == 1 else None
-            results["retry_stop_correlated"] = results["retry_prompt_id"] in completed
+            if not args.async_rewake:
+                retry = [row for row in users if row.get("uuid") == dispatch["uuid"]]
+                results["retry_prompt_id"] = retry[0].get("promptId") if len(retry) == 1 else None
+                results["retry_stop_correlated"] = results["retry_prompt_id"] in completed
             drafts = [
                 row
                 for row in users
@@ -310,22 +393,24 @@ def main() -> None:
             results["subsequent_turn_completed"] = (
                 len(drafts) == 1 and drafts[0].get("promptId") in completed
             )
-            if args.quota:
+            if args.quota or args.async_rewake:
                 results["limit_hook"] = [
                     h["event"] for h in hooks if h["event"].get("hook_event_name") == "StopFailure"
                 ]
                 assert results["limit_hook"], "quota rejection never reached StopFailure"
             else:
                 assert len(messages) == 3, "expected initial, inbox and subsequent local turns"
-            assert all(
-                results[key]
-                for key in (
-                    "client_alive",
-                    "retry_stop_correlated",
-                    "draft_submitted_intact",
-                    "subsequent_turn_completed",
-                )
-            ), results
+            required = ["client_alive", "draft_submitted_intact", "subsequent_turn_completed"]
+            if args.async_rewake:
+                results["version"] = subprocess.check_output(
+                    [str(args.claude.resolve()), "--version"], env=env, cwd=root, text=True
+                ).strip()
+                required.append("wake_reached_model")
+                if args.race != "none":
+                    required.append("stale_wake_after_newer_input")
+            else:
+                required.append("retry_stop_correlated")
+            assert all(results[key] for key in required), results
     finally:
         (out / "terminal.bin").write_bytes(terminal)
         if master is not None:

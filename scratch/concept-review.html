@@ -28,6 +28,10 @@ ol { padding-left:22px; } li { margin:7px 0; }
 Built from scratch/interactive-limit-recovery.md; scratch/live-recovery.md;
 docs/sessions.md; session_recovery.rs; harness/{codex_recovery,claude_recovery}.rs;
 store/sqlite/session_events.rs; WorkspacePanesView.swift; SessionRecoveryView.swift</header>
+<p><strong>Historical review, before the admission repair.</strong> The retained-fact
+projection and Task-bound served checks are now implemented. Unsafe native sends
+were removed; safe automatic admission remains unfinished for both providers.
+Current status and acceptance: <a href="interactive-limit-recovery.md">recovery plan</a>.</p>
 <h1>Keep recovery attached to its failed turn</h1>
 <div class="decision"><p><strong>Next step: iterate to implement.</strong>
 Derive progress and retry eligibility from retained dispatch and completion receipts.

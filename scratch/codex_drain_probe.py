@@ -24,17 +24,20 @@ from codex_connect import Client
 from websockets.exceptions import ConnectionClosed
 
 parser = argparse.ArgumentParser(
-    description="Probe native Codex drain admission with no credentials or external inference."
+    description="Probe native Codex recovery admission with synthetic local inference."
 )
 parser.add_argument("--codex", required=True, type=pathlib.Path)
 parser.add_argument("--output", required=True, type=pathlib.Path)
 parser.add_argument("--approval", action="store_true")
 parser.add_argument("--token-handoff", action="store_true")
 parser.add_argument("--control", action="store_true")
+parser.add_argument("--conditional-steer", action="store_true")
 parser.add_argument("--quota", action="store_true")
 parser.add_argument("--refresh", action="store_true")
 parser.add_argument("--refresh-request", type=int, default=2)
 args = parser.parse_args()
+if args.conditional_steer:
+    args.quota = True
 if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
     raise RuntimeError("run through scripts/test_network.py")
 out = args.output.resolve()
@@ -132,7 +135,7 @@ class Model(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if len(requests) == 1 and not approval:
+        if (len(requests) == 1 and not approval) or (args.conditional_steer and len(requests) == 2):
             held.set()
             if not release.wait(30):
                 return
@@ -316,6 +319,99 @@ trust_level="trusted"
             )
         elif not args.quota:
             assert held.is_set(), "model never received admitted input"
+        if args.conditional_steer:
+
+            def wait_for(predicate, label):
+                deadline = time.monotonic() + 15
+                while not predicate() and time.monotonic() < deadline:
+                    read(0.1)
+                assert predicate(), label
+
+            def complete(ident):
+                return any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == ident
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                )
+
+            def steer(expected, text):
+                try:
+                    return {
+                        "result": setup.call(
+                            "turn/steer",
+                            {
+                                "threadId": thread,
+                                "expectedTurnId": expected,
+                                "input": [{"type": "text", "text": text, "text_elements": []}],
+                            },
+                        )
+                    }
+                except AssertionError as error:
+                    return {"error": error.args[0]["error"]}
+
+            results["mechanism"] = "turn/steer.expectedTurnId"
+            results["failed_turn"] = turn
+            results["rejected_turn_observed"] = any(
+                e.get("method") == "turn/completed"
+                and e["params"]["turn"]["id"] == turn
+                and e["params"]["turn"]["status"] == "failed"
+                and e["params"]["turn"].get("error", {}).get("codexErrorInfo")
+                == "usageLimitExceeded"
+                for e in setup.events
+            )
+            assert results["rejected_turn_observed"]
+            os.write(master, b"DRAFT_BEFORE_ADMISSION")
+            read(0.3)
+            results["idle_rejected_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            os.write(master, b"_DURING_PREPARATION")
+            read(0.3)
+            os.write(master, b"\r")
+            wait_for(held.is_set, "newer typed turn did not reach model")
+            active = [
+                e["params"]["turn"]["id"] for e in setup.events if e.get("method") == "turn/started"
+            ][-1]
+            results["newer_turn"] = active
+            results["during_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            results["active_turn_control"] = steer(active, "ACTIVE_STEER_CONTROL")
+            release.set()
+            wait_for(lambda: complete(active), "newer typed turn did not complete")
+            results["after_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            os.write(master, b"SUBSEQUENT_TYPED_INPUT")
+            read(0.3)
+            os.write(master, b"\r")
+            wait_for(
+                lambda: any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] not in (active, turn)
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                ),
+                "subsequent typed input did not complete",
+            )
+            results["client_alive"] = client.poll() is None
+            results["draft_submitted_intact"] = any(
+                "DRAFT_BEFORE_ADMISSION_DURING_PREPARATION" in json.dumps(r) for r in requests
+            )
+            results["stale_retry_reached_model"] = any(
+                "STALE_RETRY_FIXTURE" in json.dumps(r) for r in requests
+            )
+            results["subsequent_turn_completed"] = True
+            results["local_fixture_requests"] = len(requests)
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            results["native_turns"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            assert all(
+                "error" in results[name]
+                for name in ("idle_rejected_turn", "during_newer_turn", "after_newer_turn")
+            )
+            assert "result" in results["active_turn_control"]
+            assert results["client_alive"] and results["draft_submitted_intact"]
+            assert not results["stale_retry_reached_model"]
+            raise SystemExit(0)
         if args.token_handoff:
             if not approval:
                 os.write(master, b"\x1b[200~DRAFT_BEFORE_HANDOFF\x1b[201~")

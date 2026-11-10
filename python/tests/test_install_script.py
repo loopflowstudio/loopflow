@@ -40,6 +40,9 @@ def _stage_build_artifacts(root: Path) -> None:
     (swift_rel / "Sparkle.framework" / "Versions" / "B").mkdir(parents=True)
     _write_fake_macho(swift_rel / "Sparkle.framework" / "Versions" / "B" / "Sparkle")
     _write_fake_macho(swift_rel / "LoopflowMac")
+    fonts = swift_rel / "LoopflowSwift_Loopflow.bundle/Fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "Lato-Regular.ttf").write_bytes(b"font")
 
     swift_loopflow = root / "swift" / "LoopflowMac"
     swift_loopflow.mkdir(parents=True)
@@ -99,6 +102,7 @@ def _patch_subprocess(
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(install.subprocess, "run", fake_run)
+    monkeypatch.setattr(install, "_run_or_raise", lambda *args, **kwargs: None)
 
 
 # --- Tests ---
@@ -123,6 +127,10 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
     )
     assert (spec.app_path / service["BundleProgram"]).is_file()
     assert service["ProgramArguments"] == ["lf", "server", "run"]
+    shutil.rmtree(spec.swift_build_dir)
+    assert (
+        spec.resources_dir / "LoopflowSwift_Loopflow.bundle/Fonts/Lato-Regular.ttf"
+    ).read_bytes() == b"font"
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"

@@ -14,6 +14,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -271,7 +272,13 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
     stamp_bundle_version(installed_plist, version, read_source_revision(ROOT))
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
+    for bundle in spec.swift_build_dir.glob("*.bundle"):
+        shutil.copytree(bundle, spec.resources_dir / bundle.name)
     shutil.copytree(spec.launch_agents, spec.contents_dir / "Library/LaunchAgents")
+    _run_or_raise(
+        [sys.executable, str(ROOT / "scripts/third_party.py"), "package", str(spec.resources_dir)],
+        "notices",
+    )
     (spec.contents_dir / "PkgInfo").write_text("APPL????")
 
     _verify_bundle_layout(spec)

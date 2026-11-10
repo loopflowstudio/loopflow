@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-802 · Typed events QA</title>
+<style>body{margin:0;background:#f6f7f2;color:#21332f;font:17px/1.6 system-ui,sans-serif}main{max-width:920px;margin:48px auto;padding:0 24px 50px}h1{font-size:40px;line-height:1.15}h2{margin-top:34px;font-size:23px}.eyebrow{font-size:13px;letter-spacing:2px;color:#52645d}.result{border-left:4px solid #397760;padding:14px 20px;background:#e8eee6}.limit{border-left:4px solid #a06b35;padding:14px 20px;background:#f4ebdc}a{color:#235c49}li{margin:10px 0}code,pre{font-family:ui-monospace,monospace;font-size:13px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#edf0e9;padding:16px}details{border-top:1px solid #ced8d1;padding:14px 0}summary{cursor:pointer;font-weight:600}footer{margin-top:35px;border-top:1px solid #ced8d1;padding-top:15px;font-size:14px}</style>
+<main><div class="eyebrow">LOO-802 / 9 NOVEMBER 2026 / HEADLESS WALKTHROUGH</div><h1>Read the state.<br>React to what happened.</h1>
+<p class="result"><strong>No typed-event defect found in the exercised flows.</strong> The branch-built server delivered real steer and Graph completion events through its Unix socket. Swift production protocol types encoded live requests and decoded replies.</p>
+<h2>What ran</h2><p>Built <code>cargo build -p loopflow --bin lf</code> and <code>swift build --package-path swift --target Loopflow -Xswiftc -gnone</code>. Used a disposable Git repository, bare local origin, local identity, private HOME and LF_HOME, cleared inherited LF_* variables, and closed CLI stdin. No mock endpoint or SQL seed was used.</p>
+<p>The installed signed CLI prepared a Session; the branch opened the same private Machine and read it. Ordinary CLI commands created Tasks, wrote a multiline Unicode comment, and ran a two-step <code>cmd: help</code> Graph. Socket watches covered full and selected Task readings, plans, and a saved dashboard query. The walkthrough wrote while disconnected, sent eight writes together, retried admission refusals, rejected empty input, and restarted the server.</p>
+<h2>Observed results</h2><ol><li>branch reads the Session prepared by the installed release.</li><li>comment payload, selection-independent delivery, shared sequence and occurrence identity.</li><li>cancelled subscription stops; unknown operation fails alone.</li><li>two real Graph command exits arrive as typed step events.</li><li>reconnect restores missed comments as state without replay; event sequence restarts at one.</li><li>CLI observes same final comments as socket.</li><li>plan and dashboard admit a new Task; eight concurrent steers (7 admission refusals retried) yield sixteen uncoalesced events in connection order.</li><li>empty comment rejected without changing the eight saved comments.</li><li>server restart returns persisted state without replaying old steers or Graph exits.</li><li>Swift production wire types encode requests and decode live Task events.</li></ol><h2>Wire transcripts</h2><p>Event comments matched the CLI’s <code>comments.comments</code> entries exactly, including provenance markers. Overlapping watches shared occurrence identity and one connection sequence.</p><details><summary>Live comment</summary><pre>{
+  &quot;type&quot;: &quot;event&quot;,
+  &quot;id&quot;: &quot;title&quot;,
+  &quot;seq&quot;: 1,
+  &quot;event&quot;: {
+    &quot;kind&quot;: &quot;task.steer&quot;,
+    &quot;task_id&quot;: &quot;task_186c1e90c4ed4ecc8510289e6834bdad&quot;,
+    &quot;steer&quot;: {
+      &quot;id&quot;: &quot;5d0e24fd-b87d-4ece-a8bd-d22231feffb4&quot;,
+      &quot;sequence&quot;: 1,
+      &quot;source&quot;: &quot;comment:d830cd10-523a-4aa3-8036-581737cad23d&quot;,
+      &quot;revision&quot;: &quot;local&quot;,
+      &quot;author&quot;: {
+        &quot;kind&quot;: &quot;named&quot;,
+        &quot;id&quot;: &quot;Event QA&quot;
+      },
+      &quot;text&quot;: &quot;Comment d830cd10-523a-4aa3-8036-581737cad23d by Event QA:\n\nKeep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:d830cd10-523a-4aa3-8036-581737cad23d --&gt;&quot;
+    },
+    &quot;comment&quot;: {
+      &quot;id&quot;: &quot;d830cd10-523a-4aa3-8036-581737cad23d&quot;,
+      &quot;body&quot;: &quot;Keep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:d830cd10-523a-4aa3-8036-581737cad23d --&gt;&quot;,
+      &quot;author&quot;: {
+        &quot;kind&quot;: &quot;person&quot;,
+        &quot;name&quot;: &quot;Event QA&quot;
+      },
+      &quot;created_at&quot;: &quot;2026-11-10T02:30:53.823883Z&quot;
+    }
+  }
+}</pre></details><details><summary>Real Graph exit</summary><pre>{
+  &quot;type&quot;: &quot;event&quot;,
+  &quot;id&quot;: &quot;full&quot;,
+  &quot;seq&quot;: 4,
+  &quot;event&quot;: {
+    &quot;kind&quot;: &quot;graph.step_finished&quot;,
+    &quot;task_id&quot;: &quot;task_186c1e90c4ed4ecc8510289e6834bdad&quot;,
+    &quot;graph_process_id&quot;: &quot;b055392a-82b3-4cfc-95bc-87e26b9320e2&quot;,
+    &quot;step&quot;: {
+      &quot;lf_process_id&quot;: &quot;f48e439b-50f6-490b-a7a3-4b1fd97d8232&quot;,
+      &quot;label&quot;: &quot;help&quot;,
+      &quot;key&quot;: 0,
+      &quot;iterations&quot;: [
+        []
+      ],
+      &quot;started_at&quot;: 1794277859,
+      &quot;completed_at&quot;: 1794277859,
+      &quot;outcome&quot;: &quot;succeeded&quot;,
+      &quot;exit_code&quot;: 0
+    }
+  }
+}</pre></details><details><summary>Admission refusal</summary><pre>{
+  &quot;type&quot;: &quot;error&quot;,
+  &quot;id&quot;: &quot;burst-1&quot;,
+  &quot;code&quot;: &quot;busy&quot;,
+  &quot;message&quot;: &quot;server capacity reached; retry shortly&quot;,
+  &quot;data&quot;: {
+    &quot;limit&quot;: &quot;retained_bytes&quot;,
+    &quot;max&quot;: 67108864
+  }
+}</pre></details><details><summary>Empty comment</summary><pre>{
+  &quot;type&quot;: &quot;error&quot;,
+  &quot;id&quot;: &quot;empty&quot;,
+  &quot;code&quot;: &quot;invalid&quot;,
+  &quot;message&quot;: &quot;Task comment cannot be empty&quot;,
+  &quot;data&quot;: null
+}</pre></details><pre>Swift decoded 16 live readings, 20 steer events, and 2 Graph step events.
+</pre><p><a href="qa-transcript.jsonl">Complete command and socket transcript</a> · <a href="qa_events.py">Walkthrough driver</a> · <a href="qa_swift_probe.swift">Swift probe</a></p>
+<h2>What QA uncovered</h2><p><strong>Task checkout starts a background primary conversation when a provider CLI is installed.</strong> Several early walkthroughs left terminal owners and Codex observers after their command-only Graphs completed. Inspection traced this to existing <code>ops/human_session/primary.rs</code> behavior, outside the typed-event change. All processes belonging to those disposable checkouts were stopped. The driver now isolates CODEX_HOME and CLAUDE_CONFIG_DIR and stops private terminal owners and descendants. The complete walkthrough was rerun with that setup.</p>
+<p>No production repair was needed. The QA skill now records that launch behavior, the original comment payload, the thread-reading command, and saved Task queries. Other probe assumptions were corrected: comments retain provenance markers; <code>lf comment</code> writes; the default dashboard can omit unstarted Tasks; and admission refusals require retrying before checking write results.</p>
+<h2>What remains unchecked</h2><div class="limit"><p><strong>Live task.shipped, including a ship leaving a plan.</strong> This requires an actual recorded GitHub merge. Publishing and landing are outside this QA step; no synthetic merge was substituted. Existing focused tests cover the store-level scenario, but that is not a live walkthrough.</p>
+<p><strong>Desktop presentation and automatic client recovery.</strong> This was a headless protocol walkthrough, not a mounted window session or an end-to-end ServerClient recovery probe. It does not establish board animation, thread presentation, focus, or interaction. New UI consumers are outside this Task.</p>
+<p><strong>Fault injection and maximum load.</strong> Unknown event kinds, sequence gaps, 256-event overflow, and slow-reader timeout were not produced by the live server. Prior focused tests recorded in the design cover client gap and unknown-kind handling. Affected-suite gate and CI remain later steps.</p></div>
+<h2>End state</h2><p>CLI and socket state agreed. All eight burst comments remained after rejecting empty input. Foreground servers were stopped and reaped; private terminal owners and descendants were stopped separately. No unresolved typed-event defect was found in the exercised scenarios.</p><p>Private state retained for inspection: <code>/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo802-qa-4i079yqo</code>. The compiled Swift probe was removed after use; source and transcripts remain.</p><footer>Build under review: bd76f4cf3. This step did not publish, land, or move the Task’s Graph.</footer></main></html>

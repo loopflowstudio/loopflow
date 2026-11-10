@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-802 · Event concepts</title>
+<style>
+  :root { color-scheme: light dark; --ink: #202a30; --paper: #faf9f5; --line: #c5cecf; --accent: #166d61; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e4e8e8; --paper: #182024; --line: #566569; --accent: #8ed5c4; } }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 830px; padding: 28px 22px 40px; font: 16px/1.5 system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+  header { font-size: 13px; }
+  h1 { font-size: clamp(25px, 4vw, 34px); line-height: 1.15; margin: 22px 0 12px; }
+  h2 { font-size: 19px; margin: 25px 0 9px; }
+  p { margin: 9px 0; }
+  a { color: var(--accent); }
+  code { font-size: .88em; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 9px 10px 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  aside { border-left: 3px solid var(--accent); padding-left: 15px; margin: 20px 0; }
+  button { color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 7px 11px; font: inherit; cursor: pointer; margin: 0 5px 7px 0; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #scenario { min-height: 110px; }
+  ol { padding-left: 22px; }
+  @media (max-width: 500px) { body { padding: 20px 14px; } th, td { font-size: 12px; padding-right: 6px; } }
+</style>
+<header>
+  LOO-802 · concept-review · 2026-11-09
+  <details><summary>Built from the working design and implementation</summary>
+    <p><a href="design.md">scratch/design.md</a>,
+    <code>server/README.md</code>, <code>server/events.rs</code>,
+    <code>server/wire.rs</code>, <code>server/service.rs</code>,
+    <code>server/outbox.rs</code>, <code>lf/commands/subscribe.rs</code>,
+    <code>store/sqlite/subscription_events.rs</code> under <code>rust/loopflow/src/</code>;
+    <code>swift/Loopflow/Services/ServerProtocol.swift</code>,
+    <code>swift/LoopflowMac/Services/ServerClient.swift</code> and their tests.</p>
+  </details>
+</header>
+<main>
+  <h1>Advance. No concept change needed.</h1>
+  <p>The contract answers two questions: <strong>what is here?</strong> with a reading,
+    and <strong>what just happened?</strong> with an event. Recovery replaces state
+    without replaying reactions.</p>
+  <table>
+    <thead><tr><th scope="col">Action → concept</th><th scope="col">Before: readings only</th><th scope="col">After: implemented API</th></tr></thead>
+    <tbody>
+      <tr><td>Open a Task → current state</td><td>Render a complete reading.</td><td><code>subscribe(task.get)</code> supplies the baseline; old occurrences stay quiet.</td></tr>
+      <tr><td>Send direction → immutable steer</td><td>Observe the updated thread.</td><td><code>task.steer</code> carries the steer and original comment when present.</td></tr>
+      <tr><td>Land a PR → recorded merge</td><td>Observe changed delivery state.</td><td><code>task.shipped</code> identifies the merged PR, including when the Task leaves the plan.</td></tr>
+      <tr><td>Finish a step → recorded exit</td><td>Observe Graph progress.</td><td><code>graph.step_finished</code> carries the step and outcome, including failure.</td></tr>
+    </tbody>
+  </table>
+  <aside><strong>The main trap: appending twice.</strong>
+    A changed reading arrives before its events. A comment may already be visible.
+    Use its comment ID to append once; use the event to react. Connection
+    <code>seq</code> orders delivery, not occurrence identity or historical causality.
+    Overlapping subscriptions can describe the same occurrence.</aside>
+  <h2>Walk through the consumer</h2>
+  <p>Illustrative UI behavior below; board animations and thread changes remain outside
+    this Task. The event contract and ordered Swift stream are implemented.</p>
+  <div role="group" aria-label="Scenario">
+    <button type="button" data-scene="normal" aria-pressed="true">Live comment</button>
+    <button type="button" data-scene="gap" aria-pressed="false">Delivery gap</button>
+    <button type="button" data-scene="recovery" aria-pressed="false">Reconnect</button>
+  </div>
+  <div id="scenario" aria-live="polite">
+    <p><code>reading [comment 7] → task.steer(comment 7)</code></p>
+    <p>“Keep the examples.” appears once. The reading restores the thread;
+      the event can draw attention to the arrival without requesting another read.</p>
+  </div>
+  <p>Existing merge records, steers and step exits supply occurrences in the reading’s
+    snapshot. Subscription-local observation and bounded delivery suffice; no second
+    event log, replay cursor or execution owner is needed.</p>
+  <h2>Review questions, resolved by the existing design</h2>
+  <ol>
+    <li>Does “shipped” mean Auto-Ship approval? No: it means a recorded PR merge.</li>
+    <li>Should reopening animate old occurrences? No: start with current state.</li>
+    <li>Is a product choice still open? None found. Next demonstrate a live comment,
+      a ship leaving a plan and recovery after missed occurrences.</li>
+  </ol>
+</main>
+<script>
+  const scenes = {
+    normal: ['reading [comment 7] → task.steer(comment 7)', '“Keep the examples.” appears once. The reading restores the thread; the event can draw attention to the arrival without requesting another read.'],
+    gap: ['seq 4 → seq 6 → end event streams', 'Stop incremental reactions for every event consumer on the connection; reopen for a fresh reading. An unknown kind ends only its event subscription. Reading-only watches remain connected.'],
+    recovery: ['disconnect → subscribe(resume: null) → reading [comments 7, 8]', 'The thread includes direction received while offline without replaying arrival animations. A newly included Task also starts quietly. Event sequences start again on the new connection.']
+  };
+  document.querySelectorAll('button[data-scene]').forEach(button => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('button[data-scene]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
+      const [flow, explanation] = scenes[button.dataset.scene];
+      const flowLine = document.createElement('p');
+      const code = document.createElement('code');
+      code.textContent = flow;
+      flowLine.append(code);
+      const text = document.createElement('p');
+      text.textContent = explanation;
+      document.getElementById('scenario').replaceChildren(flowLine, text);
+    });
+  });
+</script>
+</html>

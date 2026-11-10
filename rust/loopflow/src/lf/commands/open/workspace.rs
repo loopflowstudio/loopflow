@@ -1050,7 +1050,6 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     let subscribed = repository.clone();
     let subscribing = super::super::subscribe::start(
         selected.clone(),
-        super::super::subscribe::Wake::every(super::super::subscribe::ACTIVITY_CLOCK),
         move |store, selected| {
             let repository = subscribed.clone();
             async move {

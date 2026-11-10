@@ -16,7 +16,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use super::{launch, Error, ErrorCode, Result};
 use crate::durable::TaskOwnership;
 use crate::id::LfProcessId;
-use crate::lf::commands::subscribe::{Subscription, Transport, Wake, ACTIVITY_CLOCK};
+use crate::lf::commands::subscribe::{Subscription, Transport};
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
 use crate::work::task::comment::TaskComments;
@@ -297,7 +297,6 @@ pub fn subscribe_wait(
 ) -> anyhow::Result<Option<Subscription>> {
     crate::lf::commands::subscribe::start(
         (issue, until),
-        Wake::every(ACTIVITY_CLOCK),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::lf::commands::subscribe::require_store(store)?;
             match crate::ops::task::task_wait_reading(&store, &issue, until).await? {

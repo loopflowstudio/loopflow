@@ -25,6 +25,11 @@ enum ServerClient {
         String(decoding: try JSONEncoder().encode(await request(.command(change), location: location)), as: UTF8.self)
     }
 
+    static func submittedCreation(_ payload: Data) async throws -> String {
+        let value = try JSONDecoder().decode(JSONValue.self, from: payload)
+        return String(decoding: try JSONEncoder().encode(await request(.submittedCreation(value), location: .shared)), as: UTF8.self)
+    }
+
     static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
         try JSONEncoder().encode(await request(.config(operation), location: location))
     }
@@ -36,18 +41,16 @@ enum ServerClient {
     }
 
     /// A subscription on the location's connection; `send` carries checkpoints,
-    /// `cancel` ends it. The subscription fails when the server ends it or disconnects.
+    /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        // Never drop a checkpoint silently. A slow consumer reconnects with a
-        // fresh reading, using the existing WorkObservation recovery path.
+        // Overflow ends the stream; its next consumer starts with a fresh reading.
         let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
-        let subscription = ServerSubscription(continuation)
+        let subscription = ServerSubscription(continuation, query: query) {
+            try await links.link(for: location)
+        }
         Task {
-            do {
-                try Task.checkCancellation()
-                let link = try await links.link(for: location)
-                try subscription.start(on: link, query: query)
-            } catch { subscription.finish(throwing: error) }
+            do { try await subscription.start() }
+            catch { subscription.finish(throwing: error) }
         }
         return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
     }
@@ -141,7 +144,7 @@ actor ServerLocation {
 
 /// One server connection: hello and welcome once, then requests, subscriptions
 /// and cancels by id. One reader thread demultiplexes answers; writes serialize.
-/// Losing the connection fails every pending request and subscription.
+/// Losing the connection fails pending requests; watches resume their retained stream.
 final class ServerLink: @unchecked Sendable {
     let welcome: ServerWelcome
     private let fd: Int32
@@ -225,9 +228,28 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    /// One request and its answer. Cancelling the task sends `cancel` and
-    /// releases the wait; a command already dispatched may still complete.
+    /// Admission refusals ran nothing. Give ordinary concurrent Work loading
+    /// time to drain without replaying a dispatched or disconnected command.
     func request(_ operation: ServerOperation) async throws -> JSONValue {
+        let deadline = ContinuousClock.now + ServerClient.readDeadline
+        var delay = Duration.milliseconds(100)
+        while true {
+            do { return try await requestOnce(operation) }
+            catch let error as ServerError {
+                guard ContinuousClock.now < deadline, error.code == .busy,
+                      case .object(let data) = error.data,
+                      case .integer = data["max"],
+                      case .string(let limit) = data["limit"],
+                      ["open", "writes", "retained_bytes"].contains(limit) else { throw error }
+                try await Task.sleep(for: min(delay, ContinuousClock.now.duration(to: deadline)))
+                delay = min(delay * 2, .milliseconds(1600))
+            }
+        }
+    }
+
+    /// Cancelling sends `cancel` and releases the wait; a command already
+    /// dispatched may still complete.
+    private func requestOnce(_ operation: ServerOperation) async throws -> JSONValue {
         let id = UUID().uuidString
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -250,14 +272,14 @@ final class ServerLink: @unchecked Sendable {
         }
     }
 
-    fileprivate func subscribe(_ subscription: ServerSubscription, query: ServedRead) throws {
+    fileprivate func subscribe(_ subscription: ServerSubscription, query: ServedRead, resume: String?) throws {
         let refused: (any Error)? = state.withLock {
             if let failure { return failure }
             subscriptions[subscription.id] = subscription
             return nil
         }
         if let refused { throw refused }
-        do { try send(.subscribe(id: subscription.id, operation: query, select: nil)) } catch {
+        do { try send(.subscribe(id: subscription.id, operation: query, select: nil, resume: resume)) } catch {
             _ = state.withLock { subscriptions.removeValue(forKey: subscription.id) }
             throw error
         }
@@ -298,8 +320,8 @@ final class ServerLink: @unchecked Sendable {
             if let waiting = state.withLock({ pending.removeValue(forKey: id) }) { waiting.resume(returning: result) }
             // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
-        case .reading(let id, let frame):
-            state.withLock { subscriptions[id] }?.receive(frame)
+        case .reading(let id, let checkpoint, let frame):
+            state.withLock { subscriptions[id] }?.receive(frame, checkpoint: checkpoint)
         case .ended(let id):
             state.withLock { subscriptions.removeValue(forKey: id) }?.end()
         case .error(let id?, let code, let message, let data):
@@ -321,7 +343,7 @@ final class ServerLink: @unchecked Sendable {
             return (Array(pending.values), Array(subscriptions.values))
         }
         for continuation in waiting { continuation.resume(throwing: RegistryQueryError(Self.disconnected)) }
-        for subscription in subscribing { subscription.finish(throwing: error) }
+        for subscription in subscribing { subscription.disconnected(from: self, error: error) }
         writes.withLock { Darwin.close(fd) }
     }
 
@@ -425,28 +447,54 @@ private final class ServerSubscription: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<Data, any Error>.Continuation
     private let lock = NSLock()
     private var link: ServerLink?
-    private var queued: [UInt64] = []
+    /// The server coalesces confirmations: the newest reading answers earlier ones too.
+    private var pending: UInt64?
+    private var checkpoint: String?
+    private var recovery: Task<Void, Never>?
+    private let query: ServedRead
+    private let connect: @Sendable () async throws -> ServerLink
     private var stopped = false
 
-    init(_ continuation: AsyncThrowingStream<Data, any Error>.Continuation) {
+    init(_ continuation: AsyncThrowingStream<Data, any Error>.Continuation, query: ServedRead,
+         connect: @escaping @Sendable () async throws -> ServerLink) {
         self.continuation = continuation
+        self.query = query
+        self.connect = connect
         continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    func start(on link: ServerLink, query: ServedRead) throws {
-        guard !lock.withLock({ stopped }) else { return }
-        try link.subscribe(self, query: query)
-        let queued: [UInt64]? = lock.withLock {
-            guard !stopped else { return nil }
+    func start() async throws {
+        try Task.checkCancellation()
+        let link = try await connect()
+        try Task.checkCancellation()
+        try lock.withLock {
+            guard !stopped else { return }
+            try link.subscribe(self, query: query, resume: checkpoint)
             self.link = link
-            defer { self.queued = [] }
-            return self.queued
+            if let pending {
+                // A torn send shuts down the link; its failure resumes this watch.
+                try? link.send(.checkpoint(id: id, checkpoint: pending))
+            }
         }
-        // Stopped while subscribing: `stop` found no link to cancel through.
-        guard let queued else { link.unsubscribe(id); return }
-        for checkpoint in queued {
-            do { try link.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error); return }
+    }
+
+    /// Keep queued readings in this same stream: the resume token never outruns
+    /// the baseline its consumer receives. A new stream starts without a token.
+    func disconnected(from link: ServerLink, error: any Error) {
+        let resume = lock.withLock {
+            guard !stopped, self.link === link else { return true }
+            self.link = nil
+            guard checkpoint != nil else { return false }
+            recovery = Task { [self] in
+                do {
+                    try await Task.sleep(for: .milliseconds(100))
+                    try await start()
+                } catch is CancellationError { }
+                catch { finish(throwing: error) }
+            }
+            return true
         }
+        if !resume { finish(throwing: error) }
     }
 
     /// A subscription's stdin line, `{"id": n}`: a checkpoint. A subscription's
@@ -457,19 +505,15 @@ private final class ServerSubscription: @unchecked Sendable {
             finish(throwing: RegistryQueryError("Invalid subscription request: \(error.localizedDescription)"))
             return
         }
-        let (target, overflow): (ServerLink?, Bool) = lock.withLock {
-            guard !stopped else { return (nil, false) }
-            if let link { return (link, false) }
-            guard queued.count < 64 else { return (nil, true) }
-            queued.append(checkpoint)
-            return (nil, false)
-        }
-        if overflow {
-            finish(throwing: RegistryQueryError("Server checkpoints exceeded limit before the connection opened"))
-            return
+        let target: ServerLink? = lock.withLock {
+            guard !stopped else { return nil }
+            pending = checkpoint
+            return link
         }
         guard let target else { return }
-        do { try target.send(.checkpoint(id: id, checkpoint: checkpoint)) } catch { finish(throwing: error) }
+        // Send failure shuts down the link. Its disconnect callback retains this
+        // unanswered confirmation and resumes it with the watch.
+        try? target.send(.checkpoint(id: id, checkpoint: checkpoint))
     }
 
     private struct Checkpoint: Decodable {
@@ -485,11 +529,25 @@ private final class ServerSubscription: @unchecked Sendable {
     }
 
     /// From the reader thread: one complete reading.
-    func receive(_ frame: JSONValue) {
+    func receive(_ frame: JSONValue, checkpoint: String) {
         do {
-            if case .dropped = continuation.yield(try JSONEncoder().encode(frame)) {
-                finish(throwing: RegistryQueryError("Server subscription fell behind; reconnect for current Work"))
+            let line = try JSONEncoder().encode(frame)
+            let delivered = lock.withLock {
+                guard !stopped else { return true }
+                switch continuation.yield(line) {
+                case .enqueued:
+                    self.checkpoint = checkpoint
+                    if case .object(let fields) = frame, case .number(let answers) = fields["answers"],
+                       pending.map(Double.init) == answers {
+                        pending = nil
+                    }
+                    return true
+                case .terminated: return true
+                case .dropped: return false
+                @unknown default: return false
+                }
             }
+            if !delivered { finish(throwing: RegistryQueryError("Server subscription fell behind; reconnect for current Work")) }
         } catch { finish(throwing: error) }
     }
 
@@ -504,7 +562,7 @@ private final class ServerSubscription: @unchecked Sendable {
     /// The first end wins; the server hears `cancel` once and the stream ends once.
     private func stop(_ error: (any Error)?) {
         let (first, link): (Bool, ServerLink?) = lock.withLock {
-            defer { stopped = true }
+            defer { stopped = true; recovery?.cancel(); recovery = nil }
             return (!stopped, self.link)
         }
         guard first else { return }

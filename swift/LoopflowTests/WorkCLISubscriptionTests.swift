@@ -10,12 +10,63 @@ import ViewInspector
 @Suite("CLI to retained Work sidebar", .serialized)
 @MainActor
 struct WorkCLISubscriptionTests {
+    @Test("An open Work model keeps its last reading and recovers after server replacement")
+    func serverReplacementKeepsWorkCurrent() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before outage", "--json"])["task"] as! [String: Any]
+        let id = try #require(created["id"] as? String)
+        let server = LocalServerFixture(fixture.lf)
+        let location = server.location()
+        let query = RegistryQuery(serve: {
+            try await ServerClient.read($0, location: location)
+        }, subscribeWork: {
+            try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
+        }) { args, cwd in
+            try await fixture.lf.run(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
+        }
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        let keeping = Task { await model.keepWorkCurrent() }
+        do {
+            try await eventually { model.task(id: id)?.task.task.name == "Before outage" }
+            await server.stop()
+            try await eventually { model.roadmap.errorMessage != nil }
+            #expect(model.task(id: id)?.task.task.name == "Before outage")
+
+            _ = try await fixture.run(["task", "update", id, "--title", "Changed while offline"])
+            _ = try await server.status()
+            try await eventually {
+                model.roadmap.errorMessage == nil
+                    && model.task(id: id)?.task.task.name == "Changed while offline"
+            }
+            // Recovery must leave a live observation, not just refresh once.
+            _ = try await fixture.run(["task", "update", id, "--title", "Changed after recovery"])
+            try await eventually { model.task(id: id)?.task.task.name == "Changed after recovery" }
+
+            await server.stop()
+            try await eventually { model.roadmap.errorMessage != nil }
+            keeping.cancel()
+            await keeping.value
+            // Cancelling the window's reader must not reopen the replacement.
+            _ = try await server.status()
+            let status = try await fixture.json(["server", "status"])
+            #expect((status["clients"] as? [Any])?.isEmpty == true)
+            await server.stop()
+        } catch {
+            keeping.cancel()
+            await keeping.value
+            await server.stop()
+            throw error
+        }
+    }
+
     @Test("Load initializes working Task and repository conversations without a Start click", arguments: [false, true])
     func workingTaskConversationOpensAutomatically(prepared: Bool) async throws {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Conversation recovery", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
         let query = fixture.lf.query
@@ -73,7 +124,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
+        let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])["task"] as! [String: Any]
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "show", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
@@ -98,7 +149,7 @@ struct WorkCLISubscriptionTests {
         originalDraft.editor.string = "retain original draft"
 
         // The reader and selected workspace are already open before either CLI mutation.
-        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
@@ -202,7 +253,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
         let query = fixture.lf.query
@@ -249,7 +300,7 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Mixed case", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Mixed case", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         let current = try await fixture.run(["task", "location", id, "--json"])
         let reading = try #require(try JSONDecoder().decode([TaskLocationObservation].self, from: Data(current.utf8)).first)

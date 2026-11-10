@@ -377,6 +377,16 @@ enum Shown {
 }
 
 fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow::Result<()> {
+    print!("{}", render(id, json, input, view)?);
+    Ok(())
+}
+
+pub(crate) fn render(
+    id: &str,
+    json: bool,
+    input: Option<&str>,
+    view: SessionView,
+) -> anyhow::Result<String> {
     let shown = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let process = store.resolve_process(id).await?;
@@ -410,8 +420,7 @@ fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow:
                 "Session {id} is a copy from {}; it reads as text",
                 copied.session.origin_name()
             );
-            println!("{}", copied.render(&crate::store::lf_home_dir()));
-            return Ok(());
+            return Ok(format!("{}\n", copied.render(&crate::store::lf_home_dir())));
         }
     };
     match process {
@@ -420,12 +429,16 @@ fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow:
                 view == SessionView::Summary,
                 "--final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
             );
-            if !json {
-                print_process(&process);
-            }
-            println!("{}", serde_json::to_string_pretty(&process)?);
-            Ok(())
+            let summary = if json {
+                String::new()
+            } else {
+                format!("{}\n", crate::lf::output::render_process(&process))
+            };
+            Ok(format!(
+                "{summary}{}\n",
+                serde_json::to_string_pretty(&process)?
+            ))
         }
-        None => super::session_history::inspect(input.unwrap_or(id), view, json),
+        None => super::session_history::render(input.unwrap_or(id), view, json),
     }
 }

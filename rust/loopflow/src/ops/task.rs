@@ -1516,6 +1516,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
+    receipt: Option<crate::store::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -1537,8 +1538,17 @@ pub fn task_create(
                     )));
                 }
             }
-            let task =
-                adoption::save(&store, &main, task.id.clone(), None, source, None, false).await?;
+            let task = adoption::save(
+                &store,
+                &main,
+                task.id.clone(),
+                None,
+                source,
+                None,
+                false,
+                receipt.clone(),
+            )
+            .await?;
             super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
             return store
                 .get_task(&task.id)
@@ -1587,6 +1597,7 @@ pub fn task_create(
             source,
             acquisition,
             false,
+            receipt,
         )
         .await?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;

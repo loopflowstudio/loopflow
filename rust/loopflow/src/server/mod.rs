@@ -1,5 +1,6 @@
 //! Standalone transport for shared reads and commands; owns no execution.
 pub mod client;
+mod outbox;
 pub mod schema;
 mod service;
 pub mod wire;

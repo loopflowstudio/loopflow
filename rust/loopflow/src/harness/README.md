@@ -4,6 +4,35 @@ Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
 
+A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
+Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)
+holds the current attachment, provider, account, thread and outcome, with no
+separate execution ID. Native launch and headless respawn use that private state;
+harness input, shutdown and pending operations retain the exact store and
+attachment selected at launch. Claude respawn gets a new attachment through the
+runtime without changing those earlier snapshots.
+
+The runtime holds a `SessionRecorder` under the same lock. The recorder publishes
+input in [`session_record/capture.rs`](../session_record/capture.rs) and writes
+history and receipts in [`session_record.rs`](../session_record.rs); it cannot
+launch or stop a provider. Provider identity in memory advances before best-effort
+history writes, so a recording failure cannot change which account or thread a
+retry continues. Later observations retry unrecorded identity without duplicating
+successful writes.
+
+The runtime retains the store that admitted its attachment for launch, retry and
+cleanup. Completion settles the attachment before writing the receipt; final
+destruction also settles unfinished runtime state, including after a recording
+panic. A failed receipt write remains a headless caller error. Retrying that
+write can record the same outcome but cannot reopen the runtime or change its
+result.
+
+Native exit handles attachment cleanup separately and adopts a plain
+`SessionRecorder` from `CaptureHandoff` to finish recording. It does not reconstruct
+live runtime state. Recording failures there are logged; the provider's exit
+result stands. See [execution](../../../../docs/dev/execution.md#runtime-and-recording)
+for the ownership model.
+
 ## lf never breaks the conversation
 
 lf is a session manager, context adder and hook interjector on top of a harness,

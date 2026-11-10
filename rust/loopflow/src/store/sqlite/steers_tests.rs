@@ -34,6 +34,9 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let claim = store
         .claim_session_attachment("session", None, &process, false)
         .unwrap();
+    store
+        .record_agent_process_identity("session", &claim, std::process::id(), 1)
+        .unwrap();
     let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
     store
         .with_provider_context(&adapter, "native", ACTIVATE, || Ok(()))
@@ -701,9 +704,9 @@ fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
         .lock()
         .unwrap()
         .prepare(
-            "SELECT json_extract(payload,'$.provider_thread'),json_extract(payload,'$.next_provider_thread'),
+            "SELECT json_extract(payload,'$.transition.from_provider_session'),json_extract(payload,'$.transition.to_provider_session'),
              json_extract(payload,'$.source') FROM session_events
-             WHERE json_extract(payload,'$.type')='agent_session_selected' ORDER BY seq",
+             WHERE json_extract(payload,'$.type')='provider_transition' ORDER BY seq",
         )
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))

@@ -30,8 +30,14 @@ current name. Updates wait for complete provider control sequences; slow name
 lookups leave input and output running. cmux tabs and tmux windows also follow the
 Session name, while cmux workspaces keep their Task name or a hand-edited name.
 
-Desktop's server relay stays alive when its service connection drops. Its native
-status row shows **Reconnecting…** and pauses input while local selection, copy,
+Desktop shows **Opening… Input paused** until attachment and native input readiness
+are acknowledged. Initial retries keep that label; **Reconnecting…** follows a
+previously acknowledged connection. Workspace preparation uses the same display
+and retains its last available screen.
+Connection feedback overlays the screen without changing the terminal's size;
+the first retained screen uses the new pane's dimensions and cursor position.
+The server relay stays alive when its service connection drops. Its native
+status row then shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Recovery refreshes the same owner's screen;
 byte streams resume from their received position or refresh when output expires.
 Disconnected typing and uncertain writes are never replayed. If another viewer
@@ -39,18 +45,24 @@ took control, recovery observes it without replacing input or geometry. Choose
 **Move here** in the read-only pane's connection row to edit the same running
 Session. Input stays paused until its owner acknowledges; a lost reply never
 repeats that takeover. Eight attempts with capped backoff lead to **Session
-unavailable** and a native **Retry** action. Only an owner exit event means ended.
+unavailable** and a native **Retry connection** action. Only an owner exit event means ended.
 Closing the surface cancels recovery. Ordinary explicit Open remains separate.
 
-The native surface creates a private temporary mailbox directory and passes
-`LF_SERVER_STATUS` to its relay only. Atomic JSON readings carry connection
-generation, state, input capability and optional explanation; `status.retry`
-requests another bounded cycle. `status.move` carries the current generation;
-the relay consumes it once before requesting an explicit replacing attachment,
-and advances the generation. Stale actions cannot cross a connection loss.
-Surface closure removes the directory and cancels pending actions. This is
-presentation state, not a durable viewer registry or execution authority. Plain
-CLI server relays retain their Ctrl+R/Ctrl+] interaction.
+The native surface listens on a private Unix socket and passes its path through
+`LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry generation,
+state, input capability, native readiness and optional explanation. The same
+stream carries `{"kind":"retry"}` or `{"kind":"move","generation":N}`.
+A move is consumed once before its replacing attachment; stale generations and
+lost actions are never replayed. Closing the surface removes its private directory
+and cancels recovery. A broken status stream pauses Desktop input immediately;
+the relay records the gap, keeps the terminal running, and reconnects the status
+stream with its current reading. Status I/O, including connect, is nonblocking.
+This is temporary presentation, not a viewer registry or execution authority.
+Plain CLI server relays retain their Ctrl+R/Ctrl+] interaction.
+
+Leaving a terminal relay restores keyboard and drawing modes at the current
+cursor position. Returning to the shell must not home the cursor or overwrite
+the command's output.
 
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
@@ -130,10 +142,15 @@ resubmit its input.
 An owner that answers but then fails to attach leaves delivery unknown; that
 reconnection launches no other provider and replays no Graph. Finished Runs retain
 results in Session history.
+A restored screen first clears the previous viewer’s input modes and leaves its
+old alternate screen, then applies the owner’s screen and modes. A snapshot with
+default settings must not inherit mouse reporting or bracketed paste from the
+previous program.
+
 A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session resolution. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
-acknowledged, the attachment stays while its heartbeats reach the owner.
+acknowledged, the attachment stays while the owner answers its heartbeats.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
@@ -211,7 +228,12 @@ A connection that ends without a `leave` request keeps its stream for 60 s.
 `{"kind":"resume","reconnect":…,"received":N,…}` continues from byte `N` with no
 snapshot; a byte the spool no longer holds answers `reconnect_required`, and the
 viewer attaches afresh. Input control and ownership release when the connection
-ends; a resume asks for them again.
+ends; a resume asks for them again. If the viewer's previous socket is still
+connected, resume replaces that socket and takes only its own prior claims.
+Another viewer's input or geometry claim survives. Closing the stale socket
+later cannot revoke the replacement connection's claims.
+On resume, either `own` value requests free ownership; taking another viewer's
+geometry requires a separate `own` request or fresh explicit attachment.
 
 Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
 who receives `owner` with `held: false` and stays attached; `own: "request"`
@@ -326,6 +348,11 @@ independent of input and output; after thirty seconds without
 one the owner releases that connection's retention and input claim. Silent network
 loss needs no EOF. Other connected viewers still hold. Attach/Resume restarts the
 heartbeat deadline, and the same stream carries input, resize, ownership and Leave.
+The viewer also detects thirty seconds without an answer or output, even when
+its writes still succeed. A server-backed viewer reconnects to the same owner;
+other viewers report an unknown outcome and close. Neither starts a provider or
+replays input. Wall time includes sleep; queued replies are read before checking
+the deadline so a responsive, quiet provider stays attached after waking.
 An ordinary external SSH connection uses its host's connection-loss detection; LF's bounded heartbeat applies to its own remote path.
 
 Leaving Desktop’s warm set, window close and orderly Quit send Ctrl+] to release their

@@ -1383,14 +1383,16 @@ mod durable_store_tests {
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
-        let result = store.replace_session_input(session.captured, next.clone());
+        let result = store.replace_session_input(session.captured, next.clone(), None);
         assert!(
             result.is_err(),
             "input changed while its Task checkout was excluded"
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         drop(exclusion);
-        let replaced = store.replace_session_input(session.captured, next).unwrap();
+        let replaced = store
+            .replace_session_input(session.captured, next, None)
+            .unwrap();
         assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
         assert_eq!(replaced.cwd, session.cwd);
         assert_ne!(replaced.captured, session.captured);
@@ -1471,6 +1473,7 @@ mod durable_store_tests {
                 None,
                 Some(&session),
                 task.worktree.as_deref(),
+                None,
             )
             .unwrap();
 
@@ -1503,7 +1506,7 @@ mod durable_store_tests {
         ).unwrap();
         for _ in 0..2 {
             let bound = store
-                .promote_task(&task_id, None, Some(&placement), Some(&session), None)
+                .promote_task(&task_id, None, Some(&placement), Some(&session), None, None)
                 .unwrap();
             assert!(bound.worktree.is_none());
             assert_eq!(
@@ -1697,6 +1700,7 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..first.clone()
                 },
+                None,
             )
             .unwrap();
         assert!(
@@ -1708,7 +1712,8 @@ mod durable_store_tests {
                         provider: Some("changed".into()),
                         model: Some("changed".into()),
                         ..first.clone()
-                    }
+                    },
+                    None
                 )
                 .is_err(),
             "an earlier input cannot become a fresh replacement"
@@ -1802,6 +1807,7 @@ mod durable_store_tests {
                     artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..bound.clone()
                 },
+                None,
             )
             .unwrap();
         assert_eq!(future.task_id, Some(task_id.clone()));

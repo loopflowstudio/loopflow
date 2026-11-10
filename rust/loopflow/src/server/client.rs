@@ -227,6 +227,7 @@ impl Connection {
             id: id.clone(),
             operation,
             select: None,
+            resume: None,
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
@@ -482,6 +483,8 @@ mod tests {
                     limits: Limits {
                         max_message: MAX_MESSAGE,
                         max_connections: MAX_CONNECTIONS,
+                        max_open: super::super::outbox::MAX_OPEN,
+                        max_retained_bytes: super::super::outbox::MAX_RETAINED,
                     },
                 });
                 let mut text = serde_json::to_string(&welcome).unwrap();

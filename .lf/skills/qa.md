@@ -86,6 +86,9 @@ with the production DTOs. Plan reads take a positional Wave:
 Check the resulting state through the CLI as well as the socket. Dashboard
 queries accept `task:<id>`; hide/show members use that same selector.
 `lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.
+Save Dashboard slots with `desktop.dashboard.slots`; `desktop.layout.save`
+accepts Task, Wave and repository pane layouts. A Task layout holds one Session,
+shell and browser pane and includes its `work` key and current `revision`.
 Paged Session reads return `entries` and `next`; the unpaged `session.list`
 subscription returns an array. Stop and reap every server child,
 including on failure; no service installation is needed for this isolated run.
@@ -133,6 +136,26 @@ through internal APIs. Use only reads against that backup, keep probe files in
 the current checkout, and restore its prior file bytes and index entries.
 Comparison bases accept `parent`, `head` or a resolved commit SHA, not `HEAD`.
 
+For typed subscription events, open `task.get` with `resume: null`, then use
+`lf comment <task> '<message>'` to create a real steer. Its `comment` includes
+the stored provenance markers: compare the whole entry with
+`lf task show <task> --json` at `comments.comments`, not just the input text.
+`lf comment` writes; it is not a thread-reading command. Overlapping watches
+share a connection sequence but carry the same occurrence ID. A local command
+Graph supplies real `graph.step_finished` events; a live
+`task.shipped` check requires an actual recorded GitHub merge. Reconnect with a
+fresh reading and check that missed comments return as state, without events.
+To include an unstarted Task in a dashboard watch, save a query with
+`lf desktop dashboard query 'Event walkthrough' 'task:<id>'`; the default
+dashboard can have no members for that Task.
+
+Task checkout can also start a background primary conversation when the provider
+CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
+`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find its
+`lf session serve --terminal` owners by their disposable checkout cwd and stop
+their descendant processes too; stopping the foreground server alone leaves
+those conversations running.
+
 ## Loopflow served launches
 
 Build with `cargo build -p loopflow --bin lf`. Use a disposable Git repository
@@ -143,11 +166,17 @@ read the socket from `server status`. Never fault the installed Machine's store.
 Connect over the Unix socket with newline-delimited JSON: send the current
 hello from `tests/fixtures/dto/server/hello.json`, then requests shaped like
 the adjacent `graph_run.json` or `task_run.json`. A local Graph containing
-`- cmd: help` exercises real execution without a provider. For disposable
+`- cmd: help` needs no provider-backed step; Task checkout may still warm a
+primary conversation as described above. For disposable
 Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
+Before `task.ship`, place the Task with `lf checkout <id> --json`; creating or
+binding a prepared Session alone does not place its checkout. `task.ship` returns
+the shipping Process ID. Inspect its Graph through `lf task status <id> --json`
+and pass that Graph's ID to `lf process show`; the shipping carrier is not a Graph.
+
 For a checkout without launching a Graph, run `lf wt create qa --json`, take
 its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.
 Creation returns a receipt containing the Task: use `task.id`.

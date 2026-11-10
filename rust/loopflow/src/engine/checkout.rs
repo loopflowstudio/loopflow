@@ -235,13 +235,17 @@ pub fn sync(directory: &Path, input: &SyncInput<'_>) -> Result<Sync> {
     if !input.moves() {
         return carry_sync(directory, input, &super::Diagnostics);
     }
+    launch::start(directory, &spell_sync(input))
+}
+
+pub(super) fn spell_sync(input: &SyncInput<'_>) -> Vec<String> {
     let mut args = vec!["sync".to_owned()];
     args.extend(input.onto.map(str::to_owned));
     if input.manual {
         args.push("--manual".to_owned());
     }
     args.push("--json".to_owned());
-    launch::start(directory, &args)
+    args
 }
 
 /// `lf sync` in this process. Started by [`sync`], a sync that moves the

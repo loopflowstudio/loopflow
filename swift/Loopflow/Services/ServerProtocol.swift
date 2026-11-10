@@ -183,6 +183,50 @@ public enum ConfigOperation: Encodable, Sendable {
     }
 }
 
+/// An occurrence beside a complete reading. Unknown kinds stay subscription-local.
+public enum SubscriptionEvent: Decodable, Sendable {
+    case taskShipped(taskID: String, prID: String, number: UInt32, url: String, mergeCommit: String)
+    case taskSteer(taskID: String, steer: Steer, comment: TaskComment?)
+    case graphStepFinished(taskID: String, graphProcessID: String, step: GraphStepProcess)
+    case unknown(kind: String)
+
+    private enum Keys: String, CodingKey {
+        case kind, number, url, steer, step, comment
+        case taskID = "task_id", prID = "pr_id", mergeCommit = "merge_commit", graphProcessID = "graph_process_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: Keys.self)
+        let kind = try box.decode(String.self, forKey: .kind)
+        switch kind {
+        case "task.shipped":
+            self = .taskShipped(taskID: try box.decode(String.self, forKey: .taskID),
+                                prID: try box.decode(String.self, forKey: .prID),
+                                number: try box.decode(UInt32.self, forKey: .number),
+                                url: try box.decode(String.self, forKey: .url),
+                                mergeCommit: try box.decode(String.self, forKey: .mergeCommit))
+        case "task.steer":
+            self = .taskSteer(taskID: try box.decode(String.self, forKey: .taskID),
+                              steer: try box.decode(Steer.self, forKey: .steer),
+                              comment: try box.decode(TaskComment?.self, forKey: .comment))
+        case "graph.step_finished":
+            self = .graphStepFinished(taskID: try box.decode(String.self, forKey: .taskID),
+                                      graphProcessID: try box.decode(String.self, forKey: .graphProcessID),
+                                      step: try box.decode(GraphStepProcess.self, forKey: .step))
+        default: self = .unknown(kind: kind)
+        }
+    }
+}
+
+public struct Steer: Decodable, Sendable {
+    public let id: String
+    public let sequence: Int64
+    public let source: String
+    public let revision: String
+    public let author: WorkAuthor
+    public let text: String
+}
+
 /// One message from the server.
 public enum ServerMessage: Decodable, Sendable {
     case welcome(ServerWelcome)
@@ -193,6 +237,7 @@ public enum ServerMessage: Decodable, Sendable {
     /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
     case bridged(ownerLfProcessID: String)
     case reading(id: String, checkpoint: String, frame: JSONValue)
+    case event(id: String, seq: UInt64, event: SubscriptionEvent)
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
     case ended(id: String)
@@ -203,7 +248,7 @@ public enum ServerMessage: Decodable, Sendable {
     case error(id: String?, code: String, message: String, data: JSONValue)
 
     private enum Keys: String, CodingKey {
-        case type, id, result, frame, checkpoint, code, message, data, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+        case type, id, result, frame, checkpoint, code, message, data, seq, event, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -216,6 +261,9 @@ public enum ServerMessage: Decodable, Sendable {
         case "bridged": self = .bridged(ownerLfProcessID: try box.decode(String.self, forKey: .ownerLfProcessID))
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), checkpoint: try box.decode(String.self, forKey: .checkpoint), frame: try box.decode(JSONValue.self, forKey: .frame))
+        case "event":
+            self = .event(id: try box.decode(String.self, forKey: .id), seq: try box.decode(UInt64.self, forKey: .seq),
+                          event: try box.decode(SubscriptionEvent.self, forKey: .event))
         case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
         case "error":
             self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),

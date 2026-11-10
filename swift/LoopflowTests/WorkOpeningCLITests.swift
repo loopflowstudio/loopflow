@@ -44,9 +44,12 @@ struct WorkOpeningCLITests {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let repo = try fixture.repository(parent: "work", name: "beta", planningRemote: true)
-        struct Created: Decodable, Sendable { let identifier: String }
+        struct Created: Decodable, Sendable {
+            struct Task: Decodable, Sendable { let identifier: String }
+            let task: Task
+        }
         let identifier = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Arrives through CLI", "--json"],
-                                                cwd: repo, as: Created.self).identifier
+                                                cwd: repo, as: Created.self).task.identifier
 
         let router = WorkLinkRouter()
         var windows: [RepositoryWorkspace] = []

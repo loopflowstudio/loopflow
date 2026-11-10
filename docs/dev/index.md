@@ -176,7 +176,8 @@ another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
 Each host can expose a [client API server](server.md) to Desktop and
-mobile; it does not centralize execution across Machines. Machine routing selects
+future mobile clients; remote admission is separate work. It does not centralize
+execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -188,9 +189,10 @@ ledger.
 
 ```text
 Repository
-  `-- Wave                    enduring objective, memory and cadence
-        |   planning          status + Graph + KRs (one Linear Project when connected)
-        `-- Task              identity, worktree, PR and every Graph process for it
+  |-- Task                    repository work, optionally outside a Wave
+  `-- Wave                    enduring objective, memory, cadence and default graph
+        `-- Project           plan, Tasks, KRs and targets; optional provider binding
+              `-- Task        identity, worktree, PR and captured graph position
 
 Process                          one actual lf process; immutable causal parent
 LfSession                  one conversation; nullable attached LfProcess
@@ -207,7 +209,7 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Planning | A Wave's plan, KRs and targets | `projects` row, shared through the planning provider |
+| Project | A Wave's plan, Tasks, KRs and targets | `projects` row, shared through the planning provider |
 | Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
@@ -232,8 +234,10 @@ The provider's AgentProcess resolves to its attached LfProcess at child admissio
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
-Every Graph naming a Task, or run in its checkout, is equally its work;
-none is privileged. `task run` always runs a fresh one.
+Every Graph naming a Task, or run in its checkout, is part of its work.
+Only `lf task run` and `lf ship` advance the Task's captured graph position;
+independent Graphs leave that position unchanged. Each launch starts a fresh
+Graph process.
 Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
 passes are positions in it. Each step is a real child Process whose argv carries
@@ -300,13 +304,13 @@ lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product
 ```
 
-`task run` places the Task, then runs a fresh Graph in its checkout exactly as
-`lf --task ISSUE graph GRAPH` does, returning when the Graph ends; it never
-continues an earlier one. A plan is replaced in place, preserving active Task
-identity and execution. Direct
-questions and helpers use attributed LfSessions without gaining Graph
-authority. Graphs hold autonomous steps only; review happens in the Task
-conversation.
+`task run` places the Task and starts a fresh Graph process from its saved
+position, returning once the process registers. It stops at the next interactive
+step for review in the Task conversation. `-b` waits and runs those steps headless;
+`lf ship` approves continuation through delivery. A stopped process stays history.
+A direct `lf --task ISSUE graph GRAPH` uses the same runner without moving the
+Task's graph position. Replanning keeps existing Task identity and execution.
+See [Task workflows](../orchestration.md#where-a-person-takes-part).
 
 ### Another machine
 

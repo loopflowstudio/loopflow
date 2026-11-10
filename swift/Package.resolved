@@ -1,5 +1,5 @@
 {
-  "originHash" : "dd8a4770c6a4aea6ae848c9ee05a38d9fa528df8bb4f32fd9c41bb9bbb7da059",
+  "originHash" : "b720cee0d87cd4f175539d2360665983fde7c6c463667bc62336de618db57da5",
   "pins" : [
     {
       "identity" : "sparkle",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/nalexn/ViewInspector.git",
       "state" : {
-        "revision" : "e9a06346499a3a889165647e3f23f8a7b2609a1c",
-        "version" : "0.10.3"
+        "revision" : "2dacb6e514be19379c605a5a11564d0f3fea89d9",
+        "version" : "0.10.5"
       }
     }
   ],

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Loopflow
 
 /// A surface's live presentation; it conveys no Session authority.
 struct ServerConnectionReading: Decodable, Equatable {
@@ -9,24 +10,25 @@ struct ServerConnectionReading: Decodable, Equatable {
     let input: Bool
     let nativeReady: Bool
 
-    enum CodingKeys: String, CodingKey { case generation, state, input, message; case nativeReady = "native_ready" }
+    enum CodingKeys: String, CodingKey { case generation, state, input, message, transition; case nativeReady = "native_ready" }
     let message: String?
+    let transition: ProviderTransition?
 
     static let openingTitle = "Opening… Input paused."
     var acceptsInput: Bool { state == .connected && input && nativeReady }
     var canMoveHere: Bool { state == .connected && !input }
     var title: String? {
         switch state {
-        case .connecting: Self.openingTitle
-        case .connected: input ? (nativeReady ? nil : Self.openingTitle) : "Read-only. Move here to type."
-        case .moving: "Moving input here… Input paused."
-        case .reconnecting: "Reconnecting… Input paused; last screen may be stale."
-        case .unavailable: message ?? "Session unavailable. Input paused; last screen may be stale."
-        case .ended: "Session ended."
+        case .connecting: return Self.openingTitle
+        case .connected:
+            if input { return nativeReady ? transition?.explanation : Self.openingTitle }
+            return [transition?.explanation, "Read-only. Move here to type."].compactMap { $0 }.joined(separator: " ")
+        case .moving: return "Moving input here… Input paused."
+        case .reconnecting: return "Reconnecting… Input paused; last screen may be stale."
+        case .unavailable: return message ?? "Session unavailable. Input paused; last screen may be stale."
+        case .ended: return "Session ended."
         }
     }
-
-
 }
 
 @MainActor
@@ -34,7 +36,7 @@ final class ServerConnection {
     private let channel = Channel()
     var directory: URL { channel.directory }
     var path: String { directory.appendingPathComponent("status.sock").path }
-    private(set) var reading = ServerConnectionReading(generation: 0, state: .connecting, input: false, nativeReady: false, message: nil)
+    private(set) var reading = ServerConnectionReading(generation: 0, state: .connecting, input: false, nativeReady: false, message: nil, transition: nil)
     private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var pendingMove: UInt64?
     private var received = Data()
@@ -133,7 +135,7 @@ final class ServerConnection {
         pendingMove = nil
         guard reading.state != .ended else { return }
         reading = ServerConnectionReading(generation: reading.generation, state: .unavailable, input: false, nativeReady: false,
-                                          message: "Connection status unavailable. Input paused.")
+                                          message: "Connection status unavailable. Input paused.", transition: nil)
         changed?(reading)
     }
 
@@ -153,7 +155,7 @@ final class ServerConnection {
     func moveHere() {
         guard reading.canMoveHere, send(["kind": "move", "generation": reading.generation]) else { return }
         pendingMove = reading.generation
-        reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, nativeReady: false, message: nil)
+        reading = ServerConnectionReading(generation: reading.generation, state: .moving, input: false, nativeReady: false, message: nil, transition: nil)
         changed?(reading)
     }
 

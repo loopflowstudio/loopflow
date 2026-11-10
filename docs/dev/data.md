@@ -31,12 +31,14 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Fact | Owner |
 | --- | --- |
 | Authored goals, memory, Skills, Graphs and code | Repository files and Git |
-| Shared planning | Linear Initiatives, Projects and Issues |
+| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear, Asana or Notion provider |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
 | Agent conversation, title, feedback and native identity | `agent_sessions` |
-| Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
+| Native starts, outcomes, retries, provider transitions and usage | LfSession history, correlated to native turn and driving Process |
+| Submitted creation identity and outcome | `creation_receipts`, shared by CLI and server; retained independently of the created resource |
+| Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
@@ -47,7 +49,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Live exclusion | Kernel-held locks and fenced database mutations |
 | Selected executable and installation progress | Installation receipts |
 
-A Machine owns its local store and payloads. Linear and GitHub remain shared truth;
+A Machine owns its local store and payloads. Planning providers and GitHub hold their shared records;
 a local snapshot cannot authorize a provider mutation when a fresh observation
 is required. An identifier joins evidence without transferring authority.
 The [checked inventory](reference.md#complete-ownership-map)
@@ -153,11 +155,12 @@ branch binary at the installed Machine.
 
 ## Planning and external transitions
 
-A Wave's planning is one In Progress Linear Project when connected. Linear
-Project status owns current, planned and historical plans; there is no Chapter
-or Machine-local switch. The local Project row is a synchronized projection. A
-plan is replaced in place, preserving started Tasks and their worktree, PR and
-execution; unrelated competing current Linear Projects remain unresolved.
+A Wave's selected Project holds its Tasks, KRs and targets. Project rows own saved
+planning, with optional provider bindings and separate delivery observations.
+“Chapter” names that plan rather than another runtime object. Local changes save
+before provider delivery; observed provider conflicts follow the planning writer's
+rules. Replanning preserves started Tasks and their worktree, PR and execution;
+competing current provider Projects require reconciliation.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider
 processes. Use the smallest boundary that can prove the operation: a SQLite
@@ -167,7 +170,7 @@ recovering a lost response. Record uncertainty at each seam.
 
 Released migration bytes remain immutable. Candidate promotion validates an
 isolated copy and preserves current operating state before activation.
-See [Machines and processes](machines.md#promote-a-new-artifact) for installation authority.
+See [Machines and processes](machines.md#one-main-machine) for installation authority.
 
 [Execution](execution.md) describes admission and recovery;
 [Planning](planning.md) describes captured progression.

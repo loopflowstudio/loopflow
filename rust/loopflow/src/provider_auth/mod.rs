@@ -15,6 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::io::Write as _;
+#[cfg(target_os = "macos")]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command as ProcessCommand;
@@ -2474,9 +2476,18 @@ pub(crate) fn write_claude_login(
     config_dir: &Path,
     credential: &SecretString,
 ) -> Result<(), AuthError> {
+    write_claude_login_while(config_dir, credential, &|| Ok(()))
+}
+
+pub(crate) fn write_claude_login_while(
+    config_dir: &Path,
+    credential: &SecretString,
+    admitted: &dyn Fn() -> Result<(), AuthError>,
+) -> Result<(), AuthError> {
+    admitted()?;
     #[cfg(target_os = "macos")]
     if claude_login_in_keychain(config_dir) {
-        return write_claude_keychain_credential(config_dir, credential);
+        return write_claude_keychain_credential(config_dir, credential, admitted);
     }
     write_claude_profile_credentials(config_dir, credential)
 }
@@ -2491,6 +2502,7 @@ pub(crate) fn write_claude_login(
 fn write_claude_keychain_credential(
     config_dir: &Path,
     credential: &SecretString,
+    admitted: &dyn Fn() -> Result<(), AuthError>,
 ) -> Result<(), AuthError> {
     if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
         return Err(AuthError::Filesystem(
@@ -2516,6 +2528,7 @@ fn write_claude_keychain_credential(
     let failed = |error: std::io::Error| {
         AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
     };
+    admitted()?;
     let mut security = ProcessCommand::new("security")
         .arg("-i")
         .stdin(Stdio::piped())
@@ -2528,13 +2541,60 @@ fn write_claude_keychain_credential(
         .clone()
         .map(|item| format!("add-generic-password -U -a \"{item}\" -s \"{service}\" -X {hex}\n"))
         .collect();
-    security
-        .stdin
-        .take()
-        .expect("security stdin is piped")
-        .write_all(script.as_bytes())
-        .map_err(failed)?;
-    let status = security.wait().map_err(failed)?;
+    let started = std::time::SystemTime::now();
+    let check = || {
+        admitted().and_then(|()| {
+            if started.elapsed().unwrap_or_default() >= CLAUDE_KEYCHAIN_WRITE_TIMEOUT {
+                Err(AuthError::Filesystem(
+                    "Claude Keychain write timed out; installation may be partial".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    };
+    let result = (|| {
+        let mut stdin = security.stdin.take().expect("security stdin is piped");
+        // SAFETY: stdin owns this descriptor. Only its write end is changed.
+        let flags = unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_GETFL) };
+        // SAFETY: the descriptor remains live and the existing flags are retained.
+        if flags < 0
+            || unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }
+                < 0
+        {
+            return Err(failed(std::io::Error::last_os_error()));
+        }
+        let mut remaining = script.as_bytes();
+        while !remaining.is_empty() {
+            check()?;
+            match stdin.write(remaining) {
+                Ok(0) => return Err(failed(std::io::ErrorKind::WriteZero.into())),
+                Ok(written) => remaining = &remaining[written..],
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(failed(error)),
+            }
+        }
+        drop(stdin);
+        loop {
+            check()?;
+            if let Some(status) = security.try_wait().map_err(failed)? {
+                return Ok(status);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    })();
+    let status = match result {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = security.kill();
+            let _ = security.wait();
+            return Err(error);
+        }
+    };
+    admitted()?;
     // `security -i` reports a failed command only through what it stored.
     if !status.success() {
         return Err(AuthError::Filesystem(format!(
@@ -4485,12 +4545,14 @@ pub(crate) mod tests {
     const FAKE_SECURITY: &str = r#"#!/bin/sh
 dir="$(dirname "$0")/../keychain"
 if [ "$1" = "-i" ]; then
+  while [ -f "$dir/hold-stdin" ]; do :; done
   while IFS= read -r line; do
     acct=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)" -s .*/\1/p')
     svc=$(printf '%s' "$line" | sed -n 's/.* -s "\([^"]*\)" -X .*/\1/p')
     mkdir -p "$dir/$svc"
     [ ! -f "$dir/$svc/$acct.reject" ] || continue
     printf '%s' "${line##* -X }" | xxd -r -p > "$dir/$svc/$acct"
+    while [ -f "$dir/$svc/$acct.hold" ]; do :; done
   done
   exit 0
 fi
@@ -4554,8 +4616,7 @@ echo
             ] {
                 set_keychain_accounts(service, &names);
                 let credential = format!(r#"{{"claudeAiOauth":{{"accessToken":"{token}"}}}}"#);
-                write_claude_keychain_credential(config, &SecretString::new(credential.clone()))
-                    .unwrap();
+                write_claude_login(config, &SecretString::new(credential.clone())).unwrap();
                 for item in names {
                     assert_eq!(fs::read_to_string(items.join(item)).unwrap(), credential);
                 }
@@ -4572,6 +4633,79 @@ echo
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn cancelled_keychain_install_stops_after_partial_write_and_retry_repairs_pair() {
+        with_keychain_fixture(|config, items, service| {
+            set_keychain_accounts(service, &["fixture-current", "fixture-legacy"]);
+            let old = r#"{"claudeAiOauth":{"accessToken":"first"}}"#;
+            let selected = r#"{"claudeAiOauth":{"accessToken":"second"}}"#;
+            for item in ["fixture-current", "fixture-legacy"] {
+                fs::write(items.join(item), old).unwrap();
+            }
+            fs::write(items.join("fixture-current.hold"), "").unwrap();
+            let error =
+                write_claude_login_while(config, &SecretString::new(selected.into()), &|| {
+                    if fs::read_to_string(items.join("fixture-current")).unwrap() == selected {
+                        Err(AuthError::Filesystem("Native admission closed".into()))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains("Native admission closed"));
+            assert_eq!(
+                fs::read_to_string(items.join("fixture-current")).unwrap(),
+                selected
+            );
+            assert_eq!(
+                fs::read_to_string(items.join("fixture-legacy")).unwrap(),
+                old
+            );
+            fs::remove_file(items.join("fixture-current.hold")).unwrap();
+            write_claude_login(config, &SecretString::new(selected.into())).unwrap();
+            assert_eq!(
+                fs::read_to_string(items.join("fixture-current")).unwrap(),
+                selected
+            );
+            assert_eq!(
+                fs::read_to_string(items.join("fixture-legacy")).unwrap(),
+                selected
+            );
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cancelled_keychain_install_bounds_a_blocked_stdin() {
+        with_keychain_fixture(|config, items, service| {
+            set_keychain_accounts(service, &["fixture-current"]);
+            let initial = r#"{"claudeAiOauth":{"accessToken":"first"}}"#;
+            fs::write(items.join("fixture-current"), initial).unwrap();
+            fs::write(items.parent().unwrap().join("hold-stdin"), "").unwrap();
+            let credential =
+                serde_json::json!({"claudeAiOauth":{"accessToken":"x".repeat(128 * 1024)}});
+            let expires = std::time::SystemTime::now() + Duration::from_millis(100);
+            let error = write_claude_login_while(
+                config,
+                &SecretString::new(credential.to_string()),
+                &|| {
+                    if std::time::SystemTime::now() >= expires {
+                        Err(AuthError::Filesystem("Native admission closed".into()))
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("Native admission closed"));
+            assert_eq!(
+                fs::read_to_string(items.join("fixture-current")).unwrap(),
+                initial
+            );
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn keychain_switch_keeps_a_third_item_separate() {
         with_keychain_fixture(|config, items, service| {
             fs::write(items.join("fixture-third"), "untouched").unwrap();
@@ -4581,11 +4715,7 @@ echo
             ] {
                 set_keychain_accounts(service, &names);
                 let credential = r#"{"claudeAiOauth":{"accessToken":"selected"}}"#;
-                write_claude_keychain_credential(
-                    config,
-                    &SecretString::new(credential.to_string()),
-                )
-                .unwrap();
+                write_claude_login(config, &SecretString::new(credential.to_string())).unwrap();
                 for item in ["fixture-current", "fixture-legacy"] {
                     assert_eq!(fs::read_to_string(items.join(item)).unwrap(), credential);
                 }
@@ -4605,11 +4735,8 @@ echo
             fs::write(items.join("fixture-legacy"), "stale").unwrap();
             fs::write(items.join("fixture-legacy.reject"), "").unwrap();
             let credential = r#"{"claudeAiOauth":{"accessToken":"selected"}}"#;
-            let error = write_claude_keychain_credential(
-                config,
-                &SecretString::new(credential.to_string()),
-            )
-            .unwrap_err();
+            let error =
+                write_claude_login(config, &SecretString::new(credential.to_string())).unwrap_err();
             assert!(error.to_string().contains("fixture-legacy"));
             assert_eq!(
                 fs::read_to_string(items.join("fixture-current")).unwrap(),

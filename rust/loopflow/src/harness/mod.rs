@@ -27,6 +27,8 @@ pub mod opencode;
 mod opencode_decode;
 pub mod pi;
 mod pi_decode;
+#[cfg(unix)]
+pub(crate) mod recovery_gate;
 pub(crate) mod task_updates;
 
 use crate::id::AgentSessionId;

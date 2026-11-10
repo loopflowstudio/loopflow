@@ -449,7 +449,15 @@ impl ProviderAccountRoute {
     pub(crate) async fn refresh_codex_auth_tokens(
         &self,
     ) -> Result<secrecy::SecretString, ProviderAccountError> {
-        let _lock = activation::lock_native_credential(Provider::Codex)?;
+        self.prepare_codex_auth_tokens(&|| Ok(())).await
+    }
+
+    pub(crate) async fn prepare_codex_auth_tokens(
+        &self,
+        admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+    ) -> Result<secrecy::SecretString, ProviderAccountError> {
+        let _lock = activation::lock_native_credential_while(Provider::Codex, admitted)?;
+        admitted()?;
         let account = self.check_account().await?;
         let unavailable = |reason: String| ProviderAccountError::CredentialUnavailable {
             provider: Provider::Codex,
@@ -685,6 +693,28 @@ impl ProviderAccountRoute {
             activation::home_env(self.provider).and_then(|name| launch_env(command, name));
         let native = activation::native_home(self.provider, launch_home.as_deref());
         activation::activate(store, self.provider, &self.account_id, &native, *cause).await
+    }
+
+    /// Recovery runs beside the native hook. Refresh/save-back finishes even if
+    /// admission closes; each later native write checks the admission again.
+    pub(crate) async fn activate_recovery(
+        &self,
+        admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+    ) -> Result<Option<fs::File>, ProviderAccountError> {
+        let AccountLogin::Stored { store, cause, .. } = &self.login else {
+            return Err(ProviderAccountError::Runtime(
+                "Replayed logins cannot recover a native Session".into(),
+            ));
+        };
+        activation::activate_while(
+            store,
+            self.provider,
+            &self.account_id,
+            &activation::native_home(self.provider, None),
+            *cause,
+            admitted,
+        )
+        .await
     }
 
     pub(crate) fn launch_as_blocking(
@@ -3826,6 +3856,70 @@ mod account_first_tests {
 
         assert!(error.to_string().contains("cli_auth_credentials_store"));
         assert_eq!(codex_login(&native), "first@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn recovery_cancellation_keeps_rotated_login_without_installing_another() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let rotated = claude_credential(&native).replace("fixture-first", "rotated-first");
+        fs::write(native.join(".credentials.json"), &rotated).unwrap();
+        let second = claude_credential(&temp.path().join("second"));
+        let asked = claude_reports("first");
+        let result = activation::activate_while(
+            &store,
+            Provider::Claude,
+            &parse_account_id("second").unwrap(),
+            &native,
+            activation::SwitchCause::Exhaustion,
+            &|| {
+                if claude_credential(&temp.path().join("first")) == rotated {
+                    Err(ProviderAccountError::Runtime(
+                        "Native admission closed".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .await;
+        asked.join().unwrap();
+        assert!(result.is_err());
+        assert_eq!(claude_credential(&temp.path().join("first")), rotated);
+        assert_eq!(claude_credential(&native), rotated);
+        assert_eq!(claude_credential(&temp.path().join("second")), second);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn recovery_deadline_bounds_a_contended_native_lock() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        let initial = claude_credential(&native);
+        let _held = activation::lock_native_credential(Provider::Claude).unwrap();
+        let expires = std::time::SystemTime::now() + std::time::Duration::from_millis(60);
+        let result = activation::activate_while(
+            &store,
+            Provider::Claude,
+            &parse_account_id("second").unwrap(),
+            &native,
+            activation::SwitchCause::Exhaustion,
+            &|| {
+                if std::time::SystemTime::now() >= expires {
+                    Err(ProviderAccountError::Runtime("Recovery expired".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .await;
+        assert!(result.unwrap_err().to_string().contains("Recovery expired"));
+        assert_eq!(claude_credential(&native), initial);
     }
 
     /// Claude's profile endpoint, reporting `login` to the one request it serves.

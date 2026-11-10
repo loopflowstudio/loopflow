@@ -7,7 +7,8 @@ use secrecy::ExposeSecret;
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::codex_connection::{Recorder, Upstream};
+use super::codex_connection::{CodexObserver, Recorder, Upstream};
+use super::recovery_gate::{Admission, RecoveryGate};
 use crate::provider_account;
 use crate::provider_auth::Provider;
 use crate::session_recovery::{codex_rejected_turn, RecoveryState, SessionRecovery};
@@ -24,6 +25,8 @@ pub(super) struct Recovery {
     pending: Option<HistoryRead>,
     check_at: SystemTime,
     requested: i64,
+    preparing: Option<std::thread::JoinHandle<Result<Prepared>>>,
+    installing: Option<(Value, Prepared)>,
 }
 
 impl Default for Recovery {
@@ -32,8 +35,74 @@ impl Default for Recovery {
             pending: None,
             check_at: SystemTime::UNIX_EPOCH,
             requested: 0,
+            preparing: None,
+            installing: None,
         }
     }
+}
+
+impl Drop for Recovery {
+    fn drop(&mut self) {
+        // Native exit can outlive a refresh response. Keep this observer until
+        // the broker has stored any rotated grant; dropping admission then
+        // closes its socket without releasing the native prompt.
+        if let Some(worker) = self.preparing.take() {
+            if worker.join().is_err() {
+                tracing::warn!("Recovery credential worker panicked during observer exit");
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Prepared {
+    admission: Admission,
+    route: provider_account::ProviderAccountRoute,
+    tokens: secrecy::SecretString,
+    recovery: SessionRecovery,
+}
+
+/// Keep credential preparation off the observer loop. This worker owns the
+/// admission until the observer can install the prepared login on its connection.
+fn prepare(
+    gate: RecoveryGate,
+    observer: CodexObserver,
+    route: provider_account::ProviderAccountRoute,
+    mut recovery: SessionRecovery,
+) -> Result<Prepared> {
+    let admission = gate.accept()?;
+    let turn = super::recovery_gate::codex_current(&admission, &recovery)?;
+    let store = crate::store::sqlite::SqliteStore::new(&observer.database)?;
+    let current = store.session_recovery(&observer.session)?;
+    anyhow::ensure!(
+        current
+            .as_ref()
+            .is_some_and(|r| r.key() == recovery.key() && r.request == recovery.request),
+        "Recovery was superseded"
+    );
+    anyhow::ensure!(
+        store.with_session_attachment(&observer.session, &observer.attachment, || {
+            store.record_session_recovery(&observer.session, &recovery, "admitted")
+        })?,
+        "Recovery attempt was already admitted"
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let tokens = runtime.block_on(route.prepare_codex_auth_tokens(&|| {
+        admission
+            .check()
+            .map_err(|error| provider_account::ProviderAccountError::Runtime(error.to_string()))
+    }))?;
+    // Never cancel the broker future: it owns any rotated grant.
+    admission.check()?;
+    recovery.retry_turn = Some(turn);
+    Ok(Prepared {
+        admission,
+        route,
+        tokens,
+        recovery,
+    })
 }
 
 impl Recorder {
@@ -42,6 +111,44 @@ impl Recorder {
         rpc: &Value,
         writer: &mut SplitSink<Upstream, Message>,
     ) -> Result<()> {
+        if self
+            .recovery
+            .installing
+            .as_ref()
+            .is_some_and(|(id, _)| rpc.get("id") == Some(id))
+        {
+            let (_, prepared) = self
+                .recovery
+                .installing
+                .take()
+                .expect("matched installation");
+            let mut recovery = prepared.recovery;
+            if rpc.get("error").is_some() {
+                recovery.state = RecoveryState::Uncertain;
+                recovery.reason =
+                    "Native account installation was not confirmed; inspect the conversation"
+                        .into();
+                self.save_recovery(&recovery, "unconfirmed")?;
+                return Ok(());
+            }
+            prepared.route.pin_session(&self.observer.thread).await?;
+            self.observer.account = Some(prepared.route.account_id().clone());
+            self.route = Some(prepared.route.clone());
+            if let Some((_, stream)) = self.stream() {
+                stream.writer.set_route(prepared.route);
+            }
+            if prepared.admission.check().is_err() {
+                recovery.state = RecoveryState::Uncertain;
+                recovery.reason = "The login changed but native retry admission ended; continue from the conversation".into();
+                self.save_recovery(&recovery, "unconfirmed")?;
+                return Ok(());
+            }
+            recovery.state = RecoveryState::Recovering;
+            recovery.reason = "The admitted native retry is running".into();
+            self.save_recovery(&recovery, "reply")?;
+            prepared.admission.finish()?;
+            return Ok(());
+        }
         if rpc["method"] == "account/chatgptAuthTokens/refresh" {
             let response = match &self.route {
                 Some(route) => route.refresh_codex_auth_tokens().await.ok(),
@@ -70,12 +177,26 @@ impl Recorder {
                     .pending
                     .take()
                     .expect("matched recovery request");
-                self.recovery_reply(pending.failed_turn, rpc).await?;
+                self.recovery_reply(pending.failed_turn, rpc, writer)
+                    .await?;
                 return Ok(());
             }
         }
         if rpc["params"]["threadId"] != self.observer.thread.as_str() {
             return Ok(());
+        }
+        if rpc["method"] == "item/completed" {
+            let session = self.observer.session.clone();
+            let recovery = match self.stream() {
+                Some((store, _)) => store.session_recovery(&session)?,
+                None => None,
+            };
+            if let Some(recovery) = recovery.filter(|r| {
+                r.retry_turn.as_deref() == rpc["params"]["turnId"].as_str()
+                    && super::recovery_gate::matches_input(&rpc["params"]["item"], &session, r)
+            }) {
+                self.save_recovery(&recovery, "input")?;
+            }
         }
         if rpc["method"] == "turn/completed" {
             let turn = &rpc["params"]["turn"];
@@ -112,6 +233,62 @@ impl Recorder {
         &mut self,
         writer: &mut SplitSink<Upstream, Message>,
     ) -> Result<()> {
+        if self
+            .recovery
+            .preparing
+            .as_ref()
+            .is_some_and(|worker| worker.is_finished())
+        {
+            let worker = self
+                .recovery
+                .preparing
+                .take()
+                .expect("finished preparation");
+            match worker
+                .join()
+                .map_err(|_| anyhow::anyhow!("Recovery preparation panicked"))?
+            {
+                Ok(prepared) => {
+                    prepared.admission.check()?;
+                    anyhow::ensure!(
+                        prepared.recovery.thread == self.observer.thread,
+                        "Recovery thread changed"
+                    );
+                    let session = self.observer.session.clone();
+                    let current = self
+                        .stream()
+                        .ok_or_else(|| anyhow::anyhow!("Session history unavailable"))?
+                        .0
+                        .session_recovery(&session)?;
+                    anyhow::ensure!(
+                        current
+                            .as_ref()
+                            .is_some_and(|r| r.key() == prepared.recovery.key()
+                                && r.request == prepared.recovery.request),
+                        "Recovery was superseded"
+                    );
+                    let id = json!(format!("lf-login-{}", uuid::Uuid::new_v4()));
+                    let mut tokens: Value = serde_json::from_str(prepared.tokens.expose_secret())?;
+                    tokens["type"] = json!("chatgptAuthTokens");
+                    let rpc = json!({"id":id,"method":"account/login/start","params":tokens});
+                    writer.send(Message::Text(rpc.to_string().into())).await?;
+                    self.recovery.installing = Some((id, prepared));
+                }
+                Err(error) => tracing::warn!(%error, "Native recovery preparation stopped"),
+            }
+        }
+        if let Some((_, prepared)) = self.recovery.installing.as_mut() {
+            if prepared.recovery.state != RecoveryState::Uncertain
+                && prepared.admission.check().is_err()
+            {
+                prepared.recovery.state = RecoveryState::Uncertain;
+                prepared.recovery.reason = "Native installation or admission did not finish; continue from the conversation".into();
+                let recovery = prepared.recovery.clone();
+                // A late successful installation reply still updates the broker's
+                // route for subsequent typing, but can never release this gate.
+                self.save_recovery(&recovery, "unconfirmed")?;
+            }
+        }
         if self.recovery.pending.as_ref().is_some_and(|pending| {
             pending
                 .sent_at
@@ -142,6 +319,8 @@ impl Recorder {
             if recovery.state == RecoveryState::Recovering
                 && recovery.request.is_some()
                 && recovery.retry_turn.is_none()
+                && self.recovery.preparing.is_none()
+                && self.recovery.installing.is_none()
             {
                 recovery.state = RecoveryState::Uncertain;
                 recovery.reason = "The observer reconnected without a native retry reply; inspect the conversation before continuing".into();
@@ -154,7 +333,12 @@ impl Recorder {
                     }
                     None => None,
                 };
-                if let Some(result) = result {
+                let received = self
+                    .stream()
+                    .map(|(store, _)| store.has_recovery_phase(&session, recovery, "input"))
+                    .transpose()?
+                    .unwrap_or(false);
+                if let Some(result) = result.filter(|_| received) {
                     recovery.state = if result["status"] == "completed" {
                         RecoveryState::Continued
                     } else {
@@ -177,12 +361,41 @@ impl Recorder {
             return Ok(());
         }
         self.recovery.check_at = SystemTime::now() + Duration::from_secs(60);
-        if let Some(recovery) =
-            recovery.filter(|r| r.thread == self.observer.thread && r.can_retry())
+        if let Some(recovery) = recovery
+            .filter(|r| r.thread == self.observer.thread && (r.can_retry() || r.request.is_some()))
         {
             self.read_recovery(&recovery.failed_turn, writer).await?;
         }
         Ok(())
+    }
+
+    async fn has_recovery_guard(&self) -> Result<bool> {
+        let mut upstream = super::codex_connection::initialized(
+            &self.observer.endpoint,
+            "loopflow_recovery_hooks",
+        )
+        .await?;
+        let hooks = super::codex_connection::rpc_request(
+            &mut upstream,
+            "hooks/list",
+            json!({"threadId":self.observer.thread}),
+        )
+        .await?;
+        let expected = super::recovery_gate::hook_command(&crate::store::lf_home_dir())?;
+        Ok(hooks["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|entry| entry["hooks"].as_array().into_iter().flatten())
+            .any(|hook| {
+                hook["eventName"] == "userPromptSubmit"
+                    && hook["enabled"] == true
+                    && hook["trustStatus"] == "trusted"
+                    && hook["command"] == expected
+                    && hook["timeoutSec"]
+                        .as_u64()
+                        .is_some_and(|timeout| timeout >= 60)
+            }))
     }
 
     async fn read_recovery(
@@ -215,11 +428,43 @@ impl Recorder {
         })?)
     }
 
-    async fn recovery_reply(&mut self, failed: String, rpc: &Value) -> Result<()> {
+    async fn recovery_reply(
+        &mut self,
+        failed: String,
+        rpc: &Value,
+        writer: &mut SplitSink<Upstream, Message>,
+    ) -> Result<()> {
         let thread = &rpc["result"]["thread"];
         let Some(turns) = thread["turns"].as_array() else {
             return Ok(());
         };
+        let session = self.observer.session.clone();
+        let retained = match self.stream() {
+            Some((store, _)) => store.session_recovery(&session)?,
+            None => None,
+        };
+        if let Some(mut recovery) =
+            retained.filter(|r| r.failed_turn == failed && r.request.is_some())
+        {
+            if let Some(turn) = turns
+                .iter()
+                .find(|turn| turn["id"].as_str() == recovery.retry_turn.as_deref())
+            {
+                if turn["itemsView"] == "full"
+                    && turn["status"] == "completed"
+                    && turn["items"].as_array().is_some_and(|items| {
+                        items.iter().any(|item| {
+                            super::recovery_gate::matches_input(item, &session, &recovery)
+                        })
+                    })
+                {
+                    recovery.state = RecoveryState::Continued;
+                    recovery.reason = "The admitted native retry completed".into();
+                    self.save_recovery(&recovery, "settled")?;
+                }
+            }
+            return Ok(());
+        }
         let Some(turn) = turns.iter().find(|turn| turn["id"] == failed) else {
             return Ok(());
         };
@@ -303,11 +548,34 @@ impl Recorder {
         )
         .await;
         let phase = match route {
+            Ok(Some(route)) if self.has_recovery_guard().await.unwrap_or(false) => {
+                if self.recovery.preparing.is_some() || self.recovery.installing.is_some() {
+                    recovery.state = RecoveryState::WaitingNative;
+                    recovery.reason = "The earlier native recovery attempt is settling".into();
+                    self.save_recovery(&recovery, &format!("wait:{}", uuid::Uuid::new_v4()))?;
+                    return Ok(());
+                }
+                let gate = RecoveryGate::new(&session, &recovery)?;
+                let prompt = gate.prompt();
+                recovery.request = Some(gate.attempt().into());
+                recovery.state = RecoveryState::Recovering;
+                recovery.reason = "Waiting for native submission to admit recovery".into();
+                if !self.save_recovery(&recovery, "dispatch")? {
+                    return Ok(());
+                }
+                let observer = self.observer.clone();
+                self.recovery.preparing = Some(std::thread::spawn(move || {
+                    prepare(gate, observer, route, recovery)
+                }));
+                // The reply can name earlier work. Only the hook supplies retry_turn.
+                let rpc = json!({"id":uuid::Uuid::new_v4().to_string(),"method":"turn/start",
+                    "params":{"threadId":self.observer.thread,"input":[{"type":"text","text":prompt}]}});
+                writer.send(Message::Text(rpc.to_string().into())).await?;
+                return Ok(());
+            }
             Ok(Some(_)) => {
-                // Login replaces server-wide credentials and can fail active work.
-                // Neither login nor turn/start conditions admission on this turn.
                 recovery.state = RecoveryState::WaitingNative;
-                recovery.reason = "Codex cannot condition account handoff and retry on this still-current rejected turn; continue in the conversation".into();
+                recovery.reason = "This open Codex has no enabled native recovery guard; continue from the conversation".into();
                 "admission"
             }
             result => {

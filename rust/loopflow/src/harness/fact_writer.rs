@@ -69,6 +69,10 @@ impl FactWriter {
         }
     }
 
+    pub(super) fn set_route(&mut self, route: ProviderAccountRoute) {
+        self.route = Some(route);
+    }
+
     /// Freeze the origin of a request while its attachment still owns dispatch.
     pub(super) fn outbound(&self, request: &str) -> StoreResult<()> {
         let Some(attachment) = &self.attachment else {

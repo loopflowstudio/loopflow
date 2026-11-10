@@ -1,24 +1,21 @@
 //! Claude keeps drafts, approvals and its inbox. Recovery observes the failed
 //! prompt and joins the inbox UUID to a successful Stop, never a socket write.
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
+
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::provider_account::{self, LaunchCapacity};
+use super::recovery_gate::{read_transcript, RecoveryGate};
+use crate::provider_account::{self, LaunchCapacity, ProviderAccountRoute};
 use crate::provider_auth::Provider;
 use crate::session_recovery::{claude_rejected_model, RecoveryState, SessionRecovery};
 use crate::steer::{NativeBoundary, SteerAdapter};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, StoreError, StoreResult};
-
-fn transcript(path: &Path) -> Result<Vec<Value>> {
-    Ok(std::fs::read_to_string(path)?
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<Result<_, _>>()?)
-}
 
 pub(crate) fn boundary(
     store: &SqliteStore,
@@ -63,10 +60,11 @@ pub(crate) fn record_limit(input: &Value) -> Result<()> {
     ) else {
         return Ok(());
     };
-    let rows = transcript(Path::new(path))?;
+    let rows = read_transcript(Path::new(path))?;
     let model = claude_rejected_model(&rows, prompt);
     let account: Option<ProviderAccountId> = store
-        .recovery_boundary(&adapter.session, thread, prompt, "started")?
+        .recovery_boundary(&adapter.session, thread, prompt, "recovery-login")?
+        .or(store.recovery_boundary(&adapter.session, thread, prompt, "started")?)
         .and_then(|value| serde_json::from_value(value["account"].clone()).ok())
         .flatten();
     let safe = model.is_some() && account.is_some();
@@ -126,7 +124,7 @@ impl Recovery {
         if recovery.request.is_none() && SystemTime::now() < self.check_at {
             return Ok(());
         }
-        let rows = transcript(path)?;
+        let rows = read_transcript(path)?;
         if let Some(request) = &recovery.request {
             let mut matching = rows
                 .iter()
@@ -135,13 +133,14 @@ impl Recovery {
                 return Ok(());
             };
             if matching.next().is_some()
+                || recovery.retry_turn.as_deref() != Some(prompt)
+                || !store.has_recovery_phase(&adapter.session, &recovery, "admitted")?
                 || store
                     .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
                     .is_none()
             {
                 return Ok(());
             }
-            recovery.retry_turn = Some(prompt.into());
             recovery.state = RecoveryState::Continued;
             recovery.reason = "The native retry completed".into();
             store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
@@ -226,11 +225,14 @@ fn check_capacity(
     });
     recovery.retry_at = None;
     let phase = match route {
+        Ok(Some(route)) if std::env::var("LF_RECOVERY_GUARD").as_deref() == Ok("1") => {
+            return dispatch_recovery(store, adapter, recovery, &route, &runtime);
+        }
         Ok(Some(_)) => {
-            // The inbox cannot condition a queued message on the failed prompt.
-            // Keep credentials and native input untouched until it can.
             recovery.state = RecoveryState::WaitingNative;
-            recovery.reason = "Claude cannot condition an inbox retry on this still-current rejected prompt; continue in the conversation".into();
+            recovery.reason =
+                "This open Claude has no native recovery guard; continue from the conversation"
+                    .into();
             "admission"
         }
         result => {
@@ -258,6 +260,120 @@ fn check_capacity(
             &format!("{phase}:{}", uuid::Uuid::new_v4()),
         )
     })?;
+    Ok(())
+}
+
+/// Capacity selection ends before dispatch. From here on the fixed attempt is
+/// retained, and any failure leaves it uncertain instead of sending again.
+fn dispatch_recovery(
+    store: &SqliteStore,
+    adapter: &SteerAdapter,
+    mut recovery: SessionRecovery,
+    route: &ProviderAccountRoute,
+    runtime: &tokio::runtime::Runtime,
+) -> Result<()> {
+    let thread = recovery.thread.to_string();
+    let thread = thread.as_str();
+    let gate = RecoveryGate::new(&adapter.session, &recovery)?;
+    let prompt = gate.prompt();
+    let (Ok(path), Ok(token)) = (
+        std::env::var("CLAUDE_CODE_MESSAGING_SOCKET"),
+        std::env::var("CLAUDE_CODE_MESSAGING_TOKEN"),
+    ) else {
+        return Ok(());
+    };
+    let mut socket = UnixStream::connect(path)?;
+    socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+    recovery.request = Some(gate.attempt().into());
+    recovery.state = RecoveryState::Recovering;
+    recovery.reason = "Waiting for native submission to admit recovery".into();
+    let dispatched = store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+        store.record_session_recovery(&adapter.session, &recovery, "dispatch")
+    })?;
+    if !dispatched {
+        return Ok(());
+    }
+    let admitted = (|| -> Result<()> {
+        writeln!(socket, "{}", json!({"type":"auth","token":token}))?;
+        writeln!(
+            socket,
+            "{}",
+            json!({"type":"user","session_id":thread,"uuid":recovery.request,
+            "priority":"next","from":"loopflow","message":{"role":"user","content":prompt}})
+        )?;
+        drop(socket);
+        let admission = gate.accept()?;
+        let rows = admission.transcript()?;
+        // Some native versions append the incoming row before the hook.
+        // Only this exact attempt's row can be excluded from prior history.
+        let prior = rows
+            .iter()
+            .position(|row| {
+                row["type"] == "user" && row["uuid"].as_str() == recovery.request.as_deref()
+            })
+            .unwrap_or(rows.len());
+        anyhow::ensure!(
+            claude_rejected_model(&rows[..prior], &recovery.failed_turn).as_deref()
+                == recovery.model.as_deref(),
+            "Newer native input superseded recovery"
+        );
+        let current = store.session_recovery(&adapter.session)?;
+        anyhow::ensure!(
+            current
+                .as_ref()
+                .is_some_and(|r| r.key() == recovery.key() && r.request == recovery.request),
+            "Recovery was superseded"
+        );
+        anyhow::ensure!(
+            store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                store.record_session_recovery(&adapter.session, &recovery, "admitted")
+            })?,
+            "Recovery attempt was already admitted"
+        );
+        // Claude caches its login for 30 seconds. Wait while native
+        // submission is held, before taking the shared credential lock.
+        let cache_expires = SystemTime::now() + Duration::from_secs(31);
+        while SystemTime::now() < cache_expires {
+            admission.check()?;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let guard = runtime.block_on(route.activate_recovery(&|| {
+            admission
+                .check()
+                .map_err(|error| provider_account::ProviderAccountError::Runtime(error.to_string()))
+        }))?;
+        admission.check()?;
+        runtime.block_on(route.pin_session(&recovery.thread))?;
+        let prompt = admission.input["prompt_id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Native retry has no prompt ID"))?;
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            store.record_recovery_boundary(
+                &adapter.session,
+                thread,
+                prompt,
+                "recovery-login",
+                Some(route.account_id()),
+            )
+        })?;
+        recovery.retry_turn = Some(prompt.into());
+        recovery.reason = "The admitted native retry is running".into();
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            store.record_session_recovery(&adapter.session, &recovery, "reply")
+        })?;
+        admission.finish()?;
+        drop(guard);
+        Ok(())
+    })();
+    if let Err(error) = admitted {
+        recovery.state = RecoveryState::Uncertain;
+        recovery.reason =
+            "Native recovery was not confirmed; inspect the conversation before continuing".into();
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            store.record_session_recovery(&adapter.session, &recovery, "unconfirmed")
+        })?;
+        tracing::warn!(%error, "Claude recovery admission stopped");
+    }
     Ok(())
 }
 
@@ -336,6 +452,13 @@ mod tests {
             .unwrap();
         store
             .record_session_recovery("reader", &late, "wait:late")
+            .unwrap();
+        store
+            .record_session_recovery("reader", &fact, "admitted")
+            .unwrap();
+        fact.retry_turn = Some("retry".into());
+        store
+            .record_session_recovery("reader", &fact, "reply")
             .unwrap();
         let path = home.path().join("transcript");
         std::fs::write(

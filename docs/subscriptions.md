@@ -377,8 +377,11 @@ for the selected model. A failed native model keeps a short scoped hold even
 when a general usage poll shows room. Drafts stay in the client; uncertain work
 is never resent.
 
-**Automatic cross-login continuation is unfinished.** Recovery checks capacity
-but does not yet switch logins and retry automatically.
+Clients launched with the native recovery guard can continue automatically on
+another eligible login. The guard checks the rejected turn inside native prompt
+submission before the broker prepares credentials. Cancelled preparation retains
+any refreshed login but cannot later admit a retry. Older clients without that
+guard keep waiting; they are not restarted automatically.
 
 Desktop's **Recover affected sessions** checks waiting conversations together.
 See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit) for

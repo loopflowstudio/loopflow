@@ -5,16 +5,25 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 ## Remaining work
 
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
-scope, native counterexamples and remaining preservation cases. Automatic
-continuation remains unfinished: runtime checks capacity and reports waits.
-Earlier two-client product successes exercised the removed unconditional sends;
-current probes establish safe waits and editable drafts. Both native submission hooks now demonstrate ordered retry and stale
-rejection; isolated guards reject failures/timeouts and retain drafts after
-cancellation. Codex's pending approval executes once before stale recovery is
-rejected. Native timeout alone still admits Codex recovery. These are probes,
-not product sends: bounded broker activation, partial writes, cancellation and
-Session-owner integration remain. Main `6f7a6c9ca`, merged at `c5b22af31`, still needs gate;
-Task-bound native/Desktop preservation and real-login checks remain open.
+scope, native counterexamples and remaining preservation cases. Guarded runtime
+admission is now integrated through the Session owners and broker. Two native
+Task primary Sessions pass bulk recovery for both providers through Desktop's
+server protocol, retaining their history/model/owners and editable drafts plus
+later input. Both providers pass cancellation while the credential lock is held:
+no native retry or late account change, and drafts complete on the original login.
+Both providers also retain a pending approval while another Task recovers;
+answering it executes its effect once. Cancellation/save-back, blocked Keychain
+stdin and partial-install tests pass.
+Exact commands, candidate hashes, initial fixture failures and remaining checks
+are in the design. Earlier unconditional sends establish none of these guarantees.
+Main `6f7a6c9ca`, merged at `c5b22af31`, still needs gate; rendered Desktop,
+installed and real-login checks remain open.
+
+The ordinary-typing incident remains unresolved: the LOO-813 handoff reported
+physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
+revealed xzy, and both affected conversations subsequently worked after Reset.
+Those observations establish no cause. Quota/draft fixtures and the separate
+installation inventory do not establish physical keyboard repair after reopen.
 
 The implemented experience is described in `docs/sessions.md`, subscriptions
 and Desktop docs; explicit restart limitations remain visible.
@@ -45,7 +54,8 @@ Still unobserved:
   unobserved.
 - `resume --account` for running Codex and Claude, and `session move`. The earlier
   product probe observed running Claude clients reload after cache expiry and
-  complete retries/drafts; real-login and Task-bound preservation remain open.
+  complete retries/drafts; current Task-bound synthetic checks pass, while
+  real-login preservation remains open.
 - Whether refreshing Claude invalidates earlier access tokens used by a rental.
 
 ## Keychain repair scope and check history

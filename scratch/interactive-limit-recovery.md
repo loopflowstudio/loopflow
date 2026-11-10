@@ -25,10 +25,62 @@ expanded title/direction and open PR #1862, without delivery status. The earlier
 local candidate build (`cargo build -p loopflow --bin lf`, inherited LF_* unset)
 passed in 1m 45s. No disposable demo was launched.
 
-## Guarded native submission — November 9, latest pass
+## Runtime integration — November 9
 
-Both native clients now demonstrate submission ordering in isolated probes.
-Automatic product recovery remains unfinished; no runtime sending path was added.
+The native submission guards now run through the existing Session owners and
+account broker. A private, one-use socket binds Session/thread/rejected turn/
+attempt. The native hook holds it open; cancellation or expiry prevents later
+installation and dispatch. Broker refresh/save-back runs outside the hook's
+process group and retains rotated credentials. Native credential and Claude
+refresh locks poll cancellation; a partial Keychain write is stopped and remains
+uncertain. Ordinary hooks still fail open. Clients lacking the loaded recovery
+guard wait rather than receiving unguarded input.
+
+Codex prepares tokens beside its observer, then installs them on that observer's
+connection. Its route follows a confirmed installation even if retry admission
+closed meanwhile. A successful `turn/start` reply proves nothing: completion
+requires the admitted native turn and exact envelope input. Claude expires its
+30-second credential cache inside admission, activates through the shared broker,
+and correlates inbox UUID, admitted prompt ID and Stop.
+
+Checks (inherited LF_* unset; synthetic native endpoints only):
+
+- Candidate CLI build and eight focused guard/cancellation tests passed; the two additional hook-trust/Claude correlation tests passed. Logs: `.lf/tmp/loo-811-{guarded-runtime-build,guard-cancellation-tests,guard-correlation-tests}.log`. Existing large `__eh_frame` linker warning remains.
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --<provider> /Users/jack/.local/bin/<provider> <case flags> --output .lf/tmp/loo-811-protocol/<receipt>` — six passed: `runtime-{codex,claude}-served` (no flags), `runtime-codex-cancel-native` and `runtime-claude-cancel` (`--cancel`), `runtime-codex-approval` and `runtime-claude-approval-retained` (`--approval`). Both Task primary Sessions keep their owner, cwd, model and native history; one correlated retry each, editable drafts and later input. Rechecking through Desktop's server operation does not resend. Escape while the credential lock is held prevents both native retries and account changes; edited drafts complete on the original login. Each provider's pending approval survives the other Task's recovery, then executes its effect once. All fixture clients/owners reaped and scoped Keychain items removed.
+- Earlier whole-fixture failures remain under `runtime-guard-*`: binding after launch generated Task-update turns; newer Task input correctly retained an uncertain Claude attempt; the next fixture lacked checkouts. `runtime-guard-claude-checkouts` continued both but wrongly assumed automatic primary selection. `runtime-codex-cancel` used an absent native executable. All cleaned up; later fixtures create linked checkouts and select their bound primary Sessions before quota errors.
+
+The successful Claude bulk, both cancellation and Codex approval receipts name
+candidate SHA256 `b71b3d61f4769cf7a672234a176b3808bcb5fb54fb40b48ce54180962b41c839`.
+Codex bulk used the preceding candidate; subsequent changes close a consumed
+listener, reap the watchdog, serialize pending attempts and join the broker on
+observer exit. The final review also found a blocking Keychain stdin write before
+its deadline loop; input now writes nonblocking under the same cancellation and
+timeout, killing/reaping the writer on failure.
+
+- `cargo test -p loopflow --lib cancelled_keychain_install < /dev/null` — both blocked-stdin cancellation and partial-write/retry tests passed; `.lf/tmp/loo-811-keychain-cancel-write-tests.log`. Final `cargo build -p loopflow --bin lf` passed; `.lf/tmp/loo-811-guarded-runtime-final-build.log`, SHA256 `19267dfe1becbf2b77db2d73d9b7aa2d995b95532623e1aee8318bc4a49f6add`.
+
+Claude's first approval fixture (`runtime-claude-approval`) used native auto mode,
+so its harmless command ran without an approval. Explicit default mode retained
+the approval across recovery (`runtime-claude-approval-default`), but the fixture
+matched an unrendered terminal string whose spaces were cursor movements. Neither
+whole fixture passed; both cleaned up. The corrected check joins native tool-use
+and tool-result IDs, then requires the answer to execute its effect exactly once;
+`runtime-claude-approval-retained` passes on final candidate `19267dfe1bec…`.
+
+- Saved-receipt/cleanup check — six native cases pass, zero remaining fixture processes and all six scoped Keychain items absent; `.lf/tmp/loo-811-protocol/runtime-cleanup-checks.json`.
+- `cargo fmt --check`, `uv run ruff check scratch/native_recovery_probe.py`, `uv run ruff format --check scratch/native_recovery_probe.py`, `git diff --check`, `lf context` — passed; scratch and memory fit their targets. Broader checks/clippy remain at gate.
+
+Desktop's served mutation/projection is exercised without claiming a rendered
+Desktop demonstration. The ordinary-typing incident and installed/real-login
+limits stay in `live-recovery.md`. No production accounts, Sessions or installed
+application have changed. Proposed Wave memory update: replace the stale
+“Runtime sends remain removed” paragraph with this integration and its measured
+limits; `.lf/wave/` remains unchanged by this implementation pass.
+
+## Guarded native submission — November 9, mechanism pass
+
+This earlier pass demonstrated submission ordering in isolated probes.
+It added no runtime sending path; the integration above is subsequent work.
 The probes use synthetic logins, loopback inference and network isolation, not
 installed-app or real-token acceptance. Earlier unsafe replacement/drain results
 remain applicable; they no longer justify saying Codex has no admission mechanism.
@@ -71,8 +123,8 @@ Codex native hook timeout allows recovery through. A recovery-only shell watchdo
 with a shorter deadline can return a blocking JSON decision instead; the timeout
 and cancellation probes retain drafts and complete subsequent input without a
 retry request. Its first two versions failed because `status` is read-only in
-zsh; `gate_status` fixes that measured wrapper error. The watchdog remains a
-probe: cancellation/partial-write handling with the real broker is unimplemented.
+zsh; `gate_status` fixes that measured wrapper error. At that pass the watchdog
+remained a probe; broker cancellation/partial-write handling came in the integration above.
 A watchdog must not kill a worker between receiving and storing a rotated token.
 
 Receipts: `.lf/tmp/loo-811-protocol/`:
@@ -153,12 +205,10 @@ context checks passed; no runtime sends were integrated by those passes.
 
 ## Delete — do not maintain
 
-The unsafe sending paths are removed: Codex recovery's `account/login/start`
-and `turn/start`; Claude recovery's shared activation, cache-expiry sleep and
-inbox send. Keep unguarded sends removed. Native submission ordering is now demonstrated;
-only a guarded path with bounded broker work and cancellation handling can replace
-them. No disabled copy, second credential owner, outside history read or lf lock
-substitutes for native admission.
+The unguarded Codex login/retry and Claude activation/inbox paths are removed.
+Their replacements admit input through the native submission hook, with bounded
+broker work and cancellation handling. Keep no disabled predecessor or second
+credential owner; outside history reads and lf locks do not reserve native input.
 Historical probes stay as counterexamples, including successful unconditional
 sends that did not protect racing input.
 
@@ -168,12 +218,26 @@ cannot delay observing a dispatched attempt's completion. Retain broker refresh,
 normal Task inbox delivery, manual account switching, Graph recovery and all
 attempt/completion facts.
 
-The remaining implementation has no predecessor deletion targets. This pass
-removes duplicate submission-gate drivers in the Claude probe and duplicate
-wait loops in the Codex probe. Codex completion now joins the native submission
-hook's turn to its exact recovery input; a successful RPC reply's turn alone
+The remaining implementation has no predecessor deletion targets. The probe
+compression removed duplicate submission-gate drivers in the Claude probe and
+duplicate wait loops in the Codex probe. Codex completion now joins the native
+submission hook's turn to its exact recovery input; a successful RPC reply's turn alone
 cannot establish continuation. Keep one gate driver for inbox and async wake,
 including failure, timeout, cancellation and both input-ordering barriers.
+
+Runtime compression separates Claude capacity selection from guarded dispatch,
+and Codex broker preparation from its observer loop. One transcript decoder
+serves both providers; the test-only Keychain writer wrapper is removed and its
+tests use the production login writer. Completion still requires the admitted
+input, and failed admission still retains dispatch. Pre-pass uncommitted sources:
+`.lf/tmp/loo-811-before-runtime-compress/`.
+
+- `cargo test -p loopflow --lib recovery < /dev/null` (inherited LF_* unset) — 28 passed; `.lf/tmp/loo-811-compress-runtime-tests.log`. Existing large `__eh_frame` linker warning remains.
+- `cargo test -p loopflow --lib keychain_ < /dev/null` (inherited LF_* unset) — 7 passed, including blocked stdin, partial installation/retry and both-item switching; `.lf/tmp/loo-811-compress-keychain-tests.log`.
+- `cargo build -p loopflow --bin lf < /dev/null` (inherited LF_* unset) — passed; `.lf/tmp/loo-811-compress-runtime-build.log`, SHA256 `21dd464633268c528d094ca7ef2d3180ff195e56b05d42b9cae6b8cb6aa263b1`.
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --<provider> /Users/jack/.local/bin/<provider> --output .lf/tmp/loo-811-protocol/compress-runtime-<provider> < /dev/null` — both providers passed: two Task primary Sessions, one retry each, retained identity/model/drafts and subsequent input. Synthetic logins and served Desktop protocol only; approval/cancellation cases retain the earlier integration receipts.
+- Saved-receipt/cleanup check — both cases pass; zero fixture processes, temporary roots removed and all three scoped Claude Keychain items absent; `.lf/tmp/loo-811-protocol/compress-runtime-cleanup.json`.
+- `cargo fmt --check`, `git diff --check`, `lf context` — passed; memory and scratch fit both targets. Gate owns broader suites and clippy; rendered Desktop, ordinary typing and installed/real-login checks remain open.
 
 Compression checks, November 9 (all native commands below use
 `uv run python scripts/test_network.py`, then `uv run --offline`, stdin closed):
@@ -213,42 +277,25 @@ uses two Task primary Sessions, retains their memberships and attempts, refuses
 a second request for dispatched work, and starts no Process. These fixtures do
 not exercise native automatic admission or pending approvals through Desktop.
 
-### Implementation still required
+### Remaining verification
 
-The outcome still requires **both** providers. A demonstrated provider mechanism
-can be integrated while the other remains unresolved; unsupported cases keep
-their wait or uncertainty. New input either wins with no old retry or follows an
-admitted recovery without credential replacement failing its request.
+Both providers now use the guarded runtime envelope and broker integration.
+Unsupported cases retain their wait or uncertainty. New input either wins with
+no old retry or follows an admitted recovery. The two-Task served/native bulk,
+held-lock cancellation and approval cases pass; they do not replace gate or demo.
 
-1. Claude: integrate the demonstrated recovery-only submission wrapper, one-use
-   attempt and inbox correlation through the existing watcher and Session facts.
-   Credential activation belongs inside admission. Broker work needs bounded,
-   cancellable lock acquisition and a token writer that survives cancellation
-   long enough to store any received refresh grant. Failure or partial native
-   installation blocks the prompt and keeps a truthful wait/uncertainty. Current
-   native failure/timeout/cancel tests cover the gate, not broker integration.
-2. Codex: integrate native `UserPromptSubmit` ordering through the existing
-   observer/broker, with recovery-only failure rejection. The native deadline
-   itself fails open; the measured shorter watchdog rejects its child timeout.
-   Broker refresh cannot be that killable child. No login happens before native
-   admission; stale work keeps the original login, active request and approval.
-   Correlation comes from the admitted native hook, since the `turn/start` reply
-   can name earlier work. Cancellation during credential preparation and final
-   dispatch, partial writes and missing history still need integration checks.
-3. Retain dispatch/completion facts across reconnects and subsequent rejections.
-   Keep history, selected model, drafts and pending approvals; leave uncertain
-   delivery intact and execute completed tool effects and Graph steps once.
-   Extend the Task-bound served/Desktop path to two simultaneously rejected native
-   Sessions, including a draft and pending approval, successful continuations and
-   subsequent typed input. Existing unbound product passes describe the removed
-   unconditional sends; the new wait probes establish no automatic recovery.
-4. Cover model changes, distinct models/restricted routes, simultaneous reports,
-   partial credential preparation, no capacity and later reset. Preferred-login
-   capacity and model-specific holds already have focused coverage. Gate owns
-   affected lifecycle, transport, account, decoder/hook, Session/projection, DTO
-   and Swift view suites, including missing history, lost replies, stale attachment,
-   `/new`, repeated limits and earlier effects. The latest focused build/checks
-   above passed; those do not replace the broader merged-tree gate.
+1. Gate: cover distinct models/restricted routes, simultaneous reports, no capacity and
+   later reset. Unsupported or incomplete native history stays waiting/uncertain.
+   Gate owns affected lifecycle, transport, account, decoder/hook, Session/projection,
+   DTO and Swift suites, including lost replies, reconnect, `/new`, repeated limits
+   and earlier effects. The new ContextMoment also reaches `lf::tests::`,
+   `cli_discovery::` and retained-hook checks; route attribution reaches
+   `process::runtime::tests::`, `harness::{codex_connection,fact_writer}::tests::`
+   and Session metadata tests. `scripts/test.py --list` reaches architecture,
+   Python, Rust, website and headless Swift; use a focused Rust filter at gate.
+2. Demo/review: rendered Desktop, physical keyboard input after reopen and the
+   installed/real-login observations below. No production switch or installation
+   occurred in the disposable checks.
 
 The ordinary-typing incident remains unresolved. The LOO-813 handoff reported
 physical x/z invisible in Desktop and a passive owner snapshot; pasting y then
@@ -265,9 +312,9 @@ remain for demo/review. No new product decision is needed for reversible work.
 
 The review page, `scratch/concept-review.html`, records the pre-repair findings.
 Its proposed usage wording is now in `docs/sessions.md`; those docs and the
-harness/subscription/Desktop docs accurately state that automatic continuation
-is unfinished. Remaining guarded broker and Session-owner integration is substantial work,
-not a documentation adjustment or a smaller acceptance bar.
+harness/subscription/Desktop docs now describe guarded automatic continuation
+and the waits for unsupported clients. Native acceptance still needs the whole
+preservation matrix; changing documentation does not complete it.
 
 ## Earlier native results and retained counterexamples
 
@@ -331,7 +378,8 @@ Earlier focused checks covered 43 selected recovery/routing/CLI tests, the DTO
 round trip and Desktop recovery control. Their full commands and limits are in
 the git source above. The later six-test focused run and candidate build in this
 plan cover the retained waiting implementation, not the latest merged tree.
-Main `6f7a6c9ca` is merged at `c5b22af31`: it retains #1863, #1858, #1865 and
+The November 9 realign read of `git ls-remote origin refs/heads/main` still
+returned `6f7a6c9ca`, already merged at `c5b22af31`: it retains #1863, #1858, #1865 and
 #1854 and adds #1866's Desktop Task launches, #1871's observed live reads and
 #1870's Codex service tiers. Recovery must retain reconnect's current tier and
 use the existing served reads/Session owners. Gate owns checks against this merged

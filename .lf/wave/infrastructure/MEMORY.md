@@ -27,38 +27,36 @@ continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
 work. Account switching alone does not establish continuation. Keep history,
 model, drafts and approvals; distinguish rejection from uncertain/completed work.
 
-Codex 0.167.0 direct server replacement adopts another managed login and retains
-idle history/model/drafts, but interrupts active responses and loses pending
-approvals. SIGHUP drain preserves an admitted approval yet exits the TUI on racing
-input. Token handoff fails active responses despite native 401 refresh success;
-`turn/steer` cannot restart failed turns. Server replacement remains allowed;
-client survival proves neither preserved work nor transparent delivery.
+Restart is allowed, but idle account adoption proves no preservation: Codex
+replacement loses active work/approvals; SIGHUP drain exits on racing input;
+active-response handoff fails.
 
-Claude 2.1.322 runs `UserPromptSubmit` for `StopFailure.asyncRewake` input.
-Submission/Stop prompt IDs correlate completion. Its blocking submission hook
-rejects stale wake before credentials change; a valid wake adopts scoped synthetic
-credentials and orders retry before later typed input at both held barriers.
-But hook exit 1 admits stale wake after newer input completes. Correlation then
-proves execution, not admission. Recovery-only failure/timeout/cancellation
-rejection remains unproved; ordinary hooks must stay best-effort. Earlier stale-wake
-counterexamples still apply.
+Synthetic native probes demonstrate submission ordering.
+Claude 2.1.322's recovery-only wrapper with `onFailure: "block"` rejects gate
+failure/timeout while ordinary context-hook failure permits typing. Cancellation
+requeues async wake: a one-use attempt rejects the duplicate. Guarded inbox retry
+orders credential preparation and retry before later input, joining UUID to
+promptId and Stop. Without the wrapper, hook exit 1 admits stale execution.
 
-Runtime sends remain removed; earlier two-client successes used unconditional
-sends. Cache expiry, history reads and lf locks reserve no native input position.
-Release's entry-point lesson applies: mechanism probes do not establish product
-recovery through the broker and Session owners.
+Codex 0.167.0 `UserPromptSubmit` orders supplied-token login and retry before later
+input. Older work/approvals finish before queued recovery is rejected as stale,
+without handoff. Native hook timeout fails open; a shorter recovery-only watchdog
+blocks its child timeout. `turn/start` can return an existing turn ID: that turn's
+completion proves no recovery. Correlate the admitted hook and exact retry input.
 
-Late waits retain dispatch/completion across reconnect and provider replacement;
-subsequent rejections stay separate. Task-bound served fixtures retain memberships
-and attempts without new owners. Recovery admission that survives failures,
-Task-bound bulk/approval preservation, model/routes and merged-tree gate remain.
-Desktop continuation and ordinary-typing repair remain unproved.
+Runtime sends remain removed. Cache expiry, external history reads and lf locks
+reserve no native input position. Release's entry-point lesson applies: mechanism
+probes do not establish recovery through the broker and Session owners. Bounded
+activation must retain any received refresh grant even after cancellation, without
+allowing a cancelled worker to dispatch or replace native credentials later.
+Ordinary input remains best-effort; only recovery may depend on its gate.
 
-Scoped Keychain checks cover USER plus one lexical legacy item.
-Native write rejection, installed/unsuffixed repair, real token rotation, Codex
-overwriting another login, Claude no-model quota with healthy windows and rental
-token invalidation remain unobserved. Direction/results:
-`4655b419a5de05781aa04206c89bd31097987206:scratch/`.
+Late waits retain dispatch/completion across reconnect and subsequent rejections.
+Task-bound served fixtures retain memberships/attempts without new owners.
+Broker integration, Task-bound native bulk/approval preservation, model/routes,
+merged-tree gate and ordinary-typing repair remain open. Scoped Keychain checks
+cover USER plus one lexical legacy item; native write rejection, installed/
+unsuffixed repair and real-token observations remain unproved. Sources: `b2fa40d734bd744c00357d266a37ab34bb7a54d8:scratch/`.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

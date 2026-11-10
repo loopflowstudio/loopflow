@@ -76,18 +76,28 @@ The existing Codex observer and Claude hook watcher retain recovery observations
 in Session history. Complete native history can establish rejection before work,
 but cannot reserve the next input position. Previously dispatched attempts keep
 their fixed receipt; unknown delivery cannot be retried by reconnection or a
-Desktop request. Current recovery does not dispatch new attempts.
+Desktop request. Recovery dispatches only when the client has its native
+submission guard.
 
 The projection folds each failed turn's dispatch and correlated result; a late
 wait cannot replace them or hide a subsequent rejection. Checking again cannot
 resend an attempt already dispatched.
 
-Native submission gates are not yet integrated with the account broker.
-Recovery checks capacity, then reports a native wait without switching credentials
-or sending. Guarded submission ordering has native probe coverage; bounded
-credential preparation, cancellation and partial installation still need integration.
-The existing broker still handles Codex same-account refresh callbacks, and the
-watchers still settle previously dispatched attempts by native correlation.
+A recovery envelope binds the Session, native thread, rejected turn and one-use
+attempt. The recovery-only shell wrapper blocks failures and beats Codex's native
+fail-open timeout; ordinary hooks remain best-effort. Inside native submission,
+the owner checks retained history before asking the existing account broker to
+prepare credentials. A private socket holds admission: close or expiry revokes
+later installation and dispatch. Broker refresh/save-back finishes outside the
+hook's process group so a received rotated grant is retained. A partial native
+write leaves the attempt uncertain.
+
+Codex installs supplied tokens on its existing observer connection and keeps
+native refresh callbacks on that route. Completion requires both the admitted
+hook's turn and its exact recovery input, never the `turn/start` reply alone.
+Claude waits for credential cache expiry inside admission before activating the
+shared login, then joins its inbox UUID, admitted prompt ID and Stop. Neither
+provider replaces the client, edits a draft or answers an approval.
 
 Focused checks: `session_recovery::`, `harness::claude_recovery::`,
 `served_bulk_recovery_keeps_task_identity_and_dispatched_attempts`,

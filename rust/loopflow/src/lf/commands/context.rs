@@ -245,6 +245,10 @@ pub fn emit_block(
     moment: crate::context_block::ContextMoment,
 ) -> Result<()> {
     let input = read_callback()?;
+    #[cfg(unix)]
+    if moment == crate::context_block::ContextMoment::Recovery {
+        return crate::harness::recovery_gate::hook(&input);
+    }
     if input.get("agent_id").is_some_and(|id| !id.is_null()) {
         return Ok(());
     }

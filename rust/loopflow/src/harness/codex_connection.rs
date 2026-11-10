@@ -159,7 +159,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
     Ok(())
 }
 
-async fn initialized(endpoint: &Path, name: &str) -> Result<Upstream> {
+pub(super) async fn initialized(endpoint: &Path, name: &str) -> Result<Upstream> {
     let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
     rpc_request(
         &mut upstream,
@@ -844,7 +844,11 @@ fn turn_running(result: &Value) -> bool {
         .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"))
 }
 
-async fn rpc_request(upstream: &mut Upstream, method: &str, params: Value) -> Result<Value> {
+pub(super) async fn rpc_request(
+    upstream: &mut Upstream,
+    method: &str,
+    params: Value,
+) -> Result<Value> {
     rpc_within(upstream, method, params, REPLY_LIMIT).await
 }
 

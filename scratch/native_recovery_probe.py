@@ -1,7 +1,7 @@
 # /// script
 # dependencies = ["websockets>=15,<16"]
 # ///
-"""Exercise recovery admission waits and native input with two isolated TUIs."""
+"""Exercise Task-bound native recovery through the served Session projection."""
 
 import argparse
 import fcntl
@@ -12,6 +12,7 @@ import os
 import pty
 import select
 import signal
+import socket
 import sqlite3
 import struct
 import subprocess
@@ -65,6 +66,8 @@ parser.add_argument("--lf", type=Path, required=True)
 parser.add_argument("--codex", type=Path)
 parser.add_argument("--claude", type=Path)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--cancel", action="store_true")
+parser.add_argument("--approval", action="store_true")
 args = parser.parse_args()
 provider = "claude" if args.claude else "codex"
 native_binary = args.claude or args.codex
@@ -73,6 +76,7 @@ if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
 release = threading.Event()
+approval_sent = threading.Event()
 requests = []
 get_paths = []
 
@@ -138,7 +142,12 @@ class Backend(http.server.BaseHTTPRequestHandler):
         requests.append(
             {"account": account, "input": request.get("input", request.get("messages"))}
         )
-        if account == "first" and len(requests) <= 2:
+        approval_turn = (
+            args.approval
+            and "REJECTED_PROMPT_1" in json.dumps(request)
+            and not approval_sent.is_set()
+        )
+        if account == "first" and len(requests) <= 2 and not approval_turn:
             release.wait(30)
             data = json.dumps(
                 {
@@ -170,6 +179,23 @@ class Backend(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         if provider == "claude":
+            if approval_turn:
+                approval_sent.set()
+            block = (
+                {"type": "tool_use", "id": "approval", "name": "Bash", "input": {}}
+                if approval_turn
+                else {"type": "text", "text": ""}
+            )
+            delta = (
+                {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(
+                        {"command": f"echo EFFECT >> {root / 'approval-effect'}"}
+                    ),
+                }
+                if approval_turn
+                else {"type": "text_delta", "text": "RECOVERY_COMPLETED"}
+            )
             message = {
                 "id": f"msg_{len(requests)}",
                 "type": "message",
@@ -184,17 +210,20 @@ class Backend(http.server.BaseHTTPRequestHandler):
                 ("message_start", {"message": message}),
                 (
                     "content_block_start",
-                    {"index": 0, "content_block": {"type": "text", "text": ""}},
+                    {"index": 0, "content_block": block},
                 ),
                 (
                     "content_block_delta",
-                    {"index": 0, "delta": {"type": "text_delta", "text": "RECOVERY_COMPLETED"}},
+                    {"index": 0, "delta": delta},
                 ),
                 ("content_block_stop", {"index": 0}),
                 (
                     "message_delta",
                     {
-                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "delta": {
+                            "stop_reason": "tool_use" if approval_turn else "end_turn",
+                            "stop_sequence": None,
+                        },
                         "usage": {"output_tokens": 5},
                     },
                 ),
@@ -211,6 +240,21 @@ class Backend(http.server.BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": "RECOVERY_COMPLETED"}],
         }
+        if approval_turn:
+            approval_sent.set()
+            item = {
+                "id": "fc_approval",
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "approval",
+                "arguments": json.dumps(
+                    {
+                        "cmd": f"/bin/echo EFFECT >> {root / 'approval-effect'}",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Allow disposable recovery fixture?",
+                    }
+                ),
+            }
         response = {"id": "resp_fixture", "status": "in_progress", "output": []}
         for kind, data in [
             ("response.created", {"response": response}),
@@ -238,9 +282,12 @@ backend = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
 worker = threading.Thread(target=backend.serve_forever)
 worker.start()
 clients = []
+server = None
+credential_lock = None
+tasks = []
 masters = []
 terminal = [bytearray(), bytearray()]
-results = {}
+results = {"candidate_sha256": hashlib.sha256(args.lf.read_bytes()).hexdigest()}
 with tempfile.TemporaryDirectory(prefix="loo811-product-", dir="/tmp") as temporary:
     root = Path(temporary).resolve()
     native = root / ("." + provider)
@@ -250,6 +297,7 @@ with tempfile.TemporaryDirectory(prefix="loo811-product-", dir="/tmp") as tempor
     processes = root / "processes"
     processes.mkdir()
     (bindir / "lf").symlink_to(args.lf.resolve())
+    native_args = ["--permission-mode", "default"] if args.approval and provider == "claude" else []
     wrapper = bindir / provider
     wrapper.write_text(f"""#!{sys.executable}
 import os,sys,subprocess,json
@@ -258,7 +306,7 @@ if 'app-server' in sys.argv:
  pid=os.getpid()
  stamp=subprocess.check_output(['ps','-p',str(pid),'-o','lstart='],text=True).strip()
  Path({str(processes)!r},str(pid)+'.json').write_text(json.dumps([pid,stamp]))
-os.execv({str(native_binary.resolve())!r},[{str(native_binary.resolve())!r},*sys.argv[1:]])
+os.execv({str(native_binary.resolve())!r},[{str(native_binary.resolve())!r},*{native_args!r},*sys.argv[1:]])
 """)
     wrapper.chmod(0o700)
     config = f"""cli_auth_credentials_store="file"
@@ -273,6 +321,11 @@ requires_openai_auth=true
 [projects.{json.dumps(str(root))}]
 trust_level="trusted"
 """
+    for i in range(2):
+        config += f'\n[projects.{json.dumps(str(root / f"task-{i}"))}]\ntrust_level="trusted"\n'
+    if args.approval:
+        assert not args.cancel
+        config = 'approval_policy="on-request"\nsandbox_mode="read-only"\n' + config
     if provider == "codex":
         (native / "config.toml").write_text(config)
         _auth(native, "first")
@@ -282,7 +335,10 @@ trust_level="trusted"
                 {
                     "hasCompletedOnboarding": True,
                     "theme": "dark",
-                    "projects": {str(root): {"hasTrustDialogAccepted": True}},
+                    "projects": {
+                        str(path): {"hasTrustDialogAccepted": True}
+                        for path in (root, root / "task-0", root / "task-1")
+                    },
                 }
             )
         )
@@ -294,7 +350,6 @@ trust_level="trusted"
         "TERM": "xterm-256color",
         "LF_BIN": str(bindir / "lf"),
         "GIT_CONFIG_NOSYSTEM": "1",
-        "RUST_LOG": "warn",
     }
     if provider == "claude":
         env.pop("CODEX_HOME")
@@ -322,6 +377,49 @@ trust_level="trusted"
             raise RuntimeError(result.stderr)
         return result.stdout
 
+    def served(operation):
+        status = json.loads(lf("server", "status"))
+        assert status["ready"], status
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(15)
+            connection.connect(status["socket"])
+            stream = connection.makefile("rwb")
+            hello = {
+                "type": "hello",
+                "revision": 4,
+                "min_revision": 4,
+                "client": {
+                    "kind": "fixture",
+                    "platform": "macos",
+                    "name": "native-recovery",
+                    "version": "1",
+                },
+            }
+            stream.write(json.dumps(hello).encode() + b"\n")
+            stream.flush()
+            assert json.loads(stream.readline())["type"] == "welcome"
+            stream.write(
+                json.dumps(
+                    {"type": "request", "id": "check", "operation": operation, "select": None}
+                ).encode()
+                + b"\n"
+            )
+            stream.flush()
+            response = json.loads(stream.readline())
+            assert response["type"] == "response", response
+            return response["result"]
+
+    def sessions():
+        return served(
+            {
+                "kind": "session.list",
+                "directory": str(root),
+                "headless": False,
+                "after": None,
+                "limit": None,
+            }
+        )
+
     def read(seconds):
         until = time.monotonic() + seconds
         while time.monotonic() < until:
@@ -342,7 +440,54 @@ trust_level="trusted"
             env=env,
             check=True,
         )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Fixture"], env=env, check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "--allow-empty", "-qm", "Fixture"],
+            env=env,
+            check=True,
+        )
         lf("session", "list", "--json")
+        for i in range(2):
+            checkout = root / f"task-{i}"
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "worktree",
+                    "add",
+                    "-qb",
+                    f"task-{i}",
+                    str(checkout),
+                    "HEAD",
+                ],
+                env=env,
+                check=True,
+            )
+            task = json.loads(
+                lf(
+                    "task",
+                    "create",
+                    "--title",
+                    f"Recovery fixture {i}",
+                    "--worktree",
+                    str(checkout),
+                    "--json",
+                )
+            )
+            tasks.append(task["task"]["id"])
+        server = subprocess.Popen(
+            [str(bindir / "lf"), "server", "run"],
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
         with sqlite3.connect(root / "machine/loopflow.db") as db:
             for name in ("first", "second"):
                 profile = root / "machine/accounts" / provider / name
@@ -394,6 +539,8 @@ trust_level="trusted"
                 subprocess.Popen(
                     [
                         str(bindir / "lf"),
+                        "--task",
+                        tasks[i],
                         "--account",
                         f"{provider}=first",
                         "-a",
@@ -416,27 +563,74 @@ trust_level="trusted"
             if len(requests) >= 2 or any(child.poll() is not None for child in clients):
                 break
         assert all(child.poll() is None for child in clients), "native launch failed"
+        records = json.loads(lf("session", "list", "--all", "--json"))
+        assert len(records) == 2, records
+        for record in records:
+            lf("session", "bind", record["id"], "--task", record["task_ids"][0])
+        before = sessions()
+        results["before"] = before
         for i, fd in enumerate(masters):
-            os.write(fd, f"\x1b[200~DRAFT_{i}\x1b[201~".encode())
+            if not args.approval or i == 0:
+                os.write(fd, f"\x1b[200~DRAFT_{i}\x1b[201~".encode())
         read(1)
+        if args.cancel:
+            credential_lock = open(root / "machine/accounts" / provider / ".native.lock", "a+")
+            fcntl.flock(credential_lock, fcntl.LOCK_EX)
         release.set()
-        for _ in range(45):
+        if args.cancel:
+            for _ in range(30):
+                read(0.5)
+                with sqlite3.connect(root / "machine/loopflow.db") as db:
+                    admitted = db.execute(
+                        "SELECT COUNT(*) FROM session_events "
+                        "WHERE receipt_key LIKE 'recovery:%:admitted'"
+                    ).fetchone()[0]
+                if admitted == 2:
+                    break
+            assert admitted == 2, "native submissions did not reach their guards"
+            for fd in masters:
+                os.write(fd, b"\x1b")
             read(1)
-            results["sessions"] = json.loads(lf("session", "list", "--all", "--json"))
-            if len(results["sessions"]) == 2 and all(
-                (session.get("recovery") or {}).get("state") == "waiting_native"
-                and "cannot condition" in session["recovery"]["reason"]
-                for session in results["sessions"]
-            ):
+            fcntl.flock(credential_lock, fcntl.LOCK_UN)
+            credential_lock.close()
+            credential_lock = None
+        expected_state = "uncertain" if args.cancel else "continued"
+        for _ in range(100):
+            read(1)
+            results["sessions"] = sessions()
+            if len(
+                [
+                    session
+                    for session in results["sessions"]
+                    if (session.get("recovery") or {}).get("state") == expected_state
+                ]
+            ) == (1 if args.approval else 2):
                 break
-        results["admission_wait_both"] = len(results["sessions"]) == 2 and all(
-            (session.get("recovery") or {}).get("state") == "waiting_native"
-            and "cannot condition" in session["recovery"]["reason"]
-            and session["recovery"]["request"] is None
+        results["expected_recoveries_settled"] = len(results["sessions"]) == 2 and sum(
+            (session.get("recovery") or {}).get("state") == expected_state
             for session in results["sessions"]
+        ) == (1 if args.approval else 2)
+        results["expected_state"] = expected_state
+        prior = {record["id"]: record for record in before}
+        results["task_identity_preserved"] = all(
+            current["task_primary"]
+            and all(
+                current[key] == prior[current["id"]][key]
+                for key in ("task_ids", "task_primary", "cwd", "agent_process_id", "model")
+            )
+            for current in results["sessions"]
         )
-        assert results["admission_wait_both"], results["sessions"]
-        results["no_recovery_input"] = len(requests) == 2
+        # Desktop invokes the same served SessionRecover mutation. Checking a
+        # dispatched/completed attempt again must not produce another input.
+        results["served_recovery"] = served(
+            {
+                "kind": "session.recover",
+                "directory": str(root),
+                "ids": [record["id"] for record in results["sessions"]],
+            }
+        )
+        read(2)
+        assert results["expected_recoveries_settled"], results["sessions"]
         results["native_threads"] = []
         with sqlite3.connect(root / "machine/loopflow.db") as db:
             endpoints = db.execute(
@@ -451,6 +645,76 @@ trust_level="trusted"
                 )
             finally:
                 connection.close()
+        if provider == "codex":
+            results["one_retry_each"] = all(
+                sum(
+                    item["type"] == "userMessage"
+                    and any(
+                        part.get("text", "").startswith("<lf-recovery:")
+                        for part in item.get("content", [])
+                    )
+                    for turn in record["thread"]["turns"]
+                    for item in turn["items"]
+                )
+                == (
+                    0
+                    if args.cancel or (args.approval and "REJECTED_PROMPT_1" in json.dumps(record))
+                    else 1
+                )
+                for record in results["native_threads"]
+            )
+        else:
+            results["one_retry_each"] = all(
+                sum(
+                    row.get("type") == "user" and row.get("uuid") == session["recovery"]["request"]
+                    for transcript in native.rglob("*.jsonl")
+                    for row in map(json.loads, transcript.read_text().splitlines())
+                )
+                == (0 if args.cancel else 1)
+                for session in results["sessions"]
+                if session.get("recovery") is not None
+            )
+        if args.approval:
+            claude_content = (
+                [
+                    block
+                    for transcript in native.rglob("*.jsonl")
+                    for row in map(json.loads, transcript.read_text().splitlines())
+                    if isinstance(row.get("message", {}).get("content"), list)
+                    for block in row["message"]["content"]
+                ]
+                if provider == "claude"
+                else []
+            )
+            results["approval_pending_after_recovery"] = (
+                approval_sent.is_set()
+                and not (root / "approval-effect").exists()
+                and (
+                    any(
+                        turn["status"] == "inProgress"
+                        for record in results["native_threads"]
+                        for turn in record["thread"]["turns"]
+                    )
+                    if provider == "codex"
+                    else any(
+                        block.get("type") == "tool_use" and block.get("id") == "approval"
+                        for block in claude_content
+                    )
+                    and not any(
+                        block.get("type") == "tool_result"
+                        and block.get("tool_use_id") == "approval"
+                        for block in claude_content
+                    )
+                )
+            )
+            assert results["approval_pending_after_recovery"], "pending approval did not survive"
+            os.write(masters[1], b"y" if provider == "codex" else b"1")
+            read(0.3)
+            os.write(masters[1], b"\r")
+            read(4)
+            results["completed_effect_once"] = (root / "approval-effect").read_text() == "EFFECT\n"
+            assert results["completed_effect_once"]
+            os.write(masters[1], b"\x1b[200~DRAFT_1\x1b[201~")
         for fd in masters:
             os.write(fd, b"\x1b[200~_EDITED\x1b[201~")
         read(0.5)
@@ -462,21 +726,50 @@ trust_level="trusted"
             for i in range(2)
         )
         results["native_clients_alive"] = all(child.poll() is None for child in clients)
-        results["no_credential_handoff"] = all(request["account"] == "first" for request in requests)
+        results["selected_login"] = [request["account"] for request in requests[:2]] == [
+            "first",
+            "first",
+        ] and all(
+            request["account"]
+            == (
+                "first"
+                if args.cancel
+                or (
+                    provider == "codex"
+                    and args.approval
+                    and "REJECTED_PROMPT_1" in json.dumps(request["input"])
+                )
+                else "second"
+            )
+            for request in requests[2:]
+        )
         results["typed_completion"] = all(b"RECOVERY_COMPLETED" in data for data in terminal)
-        results["only_typed_turns"] = len(requests) == 4
         results["requests"] = requests
         results["get_paths"] = get_paths
-        assert (
-            results["admission_wait_both"]
-            and results["no_recovery_input"]
-            and results["no_credential_handoff"]
-            and results["only_typed_turns"]
-            and results["typed_completion"]
-            and results["drafts_intact"]
-            and results["native_clients_alive"]
+        assert all(
+            results[name]
+            for name in (
+                "expected_recoveries_settled",
+                "task_identity_preserved",
+                "one_retry_each",
+                "selected_login",
+                "typed_completion",
+                "drafts_intact",
+                "native_clients_alive",
+            )
         )
     finally:
+        if credential_lock is not None:
+            fcntl.flock(credential_lock, fcntl.LOCK_UN)
+            credential_lock.close()
+        with sqlite3.connect(root / "machine/loopflow.db") as db:
+            results["recovery_receipts"] = [
+                (session, key, json.loads(payload))
+                for session, key, payload in db.execute(
+                    "SELECT session_id,receipt_key,payload FROM session_events "
+                    "WHERE receipt_key LIKE 'recovery:%' ORDER BY seq"
+                )
+            ]
         release.set()
         results["get_paths"] = get_paths
         results["requests"] = requests
@@ -492,6 +785,13 @@ trust_level="trusted"
                 except subprocess.TimeoutExpired:
                     child.kill()
                     child.wait(timeout=5)
+        if server is not None:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
         _stop_fixture_agent_processes(processes)
         _stop_owned_processes(root)
         results["owners_reaped"] = True
@@ -511,7 +811,16 @@ trust_level="trusted"
                 {
                     k: v
                     for k, v in results.items()
-                    if k not in ("sessions", "requests", "get_paths", "native_threads")
+                    if k
+                    not in (
+                        "sessions",
+                        "before",
+                        "requests",
+                        "get_paths",
+                        "native_threads",
+                        "recovery_receipts",
+                        "served_recovery",
+                    )
                 }
             )
         )

@@ -205,18 +205,24 @@ Claude and Codex conversations together. Each conversation shows its wait reason
 and any known capacity reset. Keep it open to retain history, editable drafts
 and pending approvals.
 
-**Automatic continuation is unfinished.** Recovery currently checks capacity
-and reports a wait; it cannot safely switch accounts and retry while new input
-can arrive. Continue from the open conversation.
+When another eligible login has room, a native submission guard admits one
+retry in the same conversation. It checks that the rejected turn is still
+current before preparing credentials. Claude waits for its credential cache to
+expire while holding that submission. History, model and editable drafts remain
+in the native client; pending approvals remain answerable.
+
+The guard must already be loaded in the running client. Older clients without
+it keep waiting and explain why. Recovery never restarts them to install it.
 
 Checking again does not resend a dispatched retry. Its progress follows the
-original attempt, even after a reconnect. New input takes precedence over
-recovery of an older turn.
+original attempt, even after a reconnect. Newer submitted input supersedes an
+old rejection; input submitted after recovery is admitted follows that retry.
 
 | What is waiting | What happens next |
 |---|---|
 | No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
-| The native client cannot safely admit recovery | Recovery waits without changing credentials or queuing input behind newer work. Drafts stay editable and approvals stay answerable. |
+| This client has no native recovery guard | Recovery waits without changing credentials or queuing a retry. Continue from the open conversation. |
+| Preparation was cancelled, timed out, or only partly installed credentials | Recovery keeps the attempt uncertain and does not resend it. Review the conversation and continue from what happened. |
 | A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
 
 Incomplete native history stays uncertain. Recovery does not replay completed

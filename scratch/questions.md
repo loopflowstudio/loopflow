@@ -37,3 +37,11 @@ ID. Native transcript validation occurs inside the gate. These choices do not
 license killing a broker worker while it owns a rotated refresh grant; bounded
 activation and cancellation remain part of integration, with unsupported cases
 waiting or uncertain.
+
+2026-11-09 runtime admission: use one ephemeral Unix socket per recovery attempt,
+held by the existing owner, instead of a second credential store or service.
+Expire admission after 40 seconds; the recovery-only shell watchdog blocks before
+native timeout. Claude's cache expires inside admission before taking the shared
+credential lock. Clients without the guard stay waiting; cancellation or partial
+installation retains the attempt as uncertain. Task fixtures use separate linked
+checkouts under their disposable root.

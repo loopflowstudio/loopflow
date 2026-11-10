@@ -10,6 +10,73 @@ pub(super) const MAX_OPEN: usize = 256;
 pub(super) const MAX_WRITES: usize = 16;
 pub(super) const MAX_RETAINED: usize = 64 * 1024 * 1024;
 const PROCESS_RETAINED: usize = 256 * 1024 * 1024;
+const SHARED_RETAINED: usize = PROCESS_RETAINED / 2;
+static PROCESS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static SHARED: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn process_budget() -> Arc<Semaphore> {
+    PROCESS
+        .get_or_init(|| Arc::new(Semaphore::new(PROCESS_RETAINED)))
+        .clone()
+}
+
+/// A shared reader reserves the same process headroom as a client response.
+#[derive(Debug)]
+pub(super) struct Materializing(OwnedSemaphorePermit);
+
+/// Charge the latest shared reading until its last delivery releases it.
+/// At most half the process budget can be retained between reads, leaving
+/// room for refreshes, errors and delivery even when the cache is full.
+#[derive(Debug)]
+pub(super) struct Retained {
+    _process: OwnedSemaphorePermit,
+    _shared: OwnedSemaphorePermit,
+}
+
+impl Materializing {
+    pub async fn reserve() -> Result<Self> {
+        Ok(Self(
+            process_budget()
+                .acquire_many_owned(MAX_MESSAGE as u32)
+                .await?,
+        ))
+    }
+
+    pub fn retain(mut self, bytes: usize) -> Result<Retained> {
+        anyhow::ensure!(bytes <= MAX_MESSAGE, "shared reading exceeds max_message");
+        let shared = SHARED
+            .get_or_init(|| Arc::new(Semaphore::new(SHARED_RETAINED)))
+            .clone()
+            .try_acquire_many_owned(bytes as u32)
+            .map_err(|_| {
+                crate::engine::Error::new(
+                    crate::engine::ErrorCode::Busy,
+                    "shared subscription retained capacity reached; retry shortly",
+                )
+            })?;
+        let release = self.0.num_permits() - bytes;
+        drop(self.0.split(release));
+        Ok(Retained {
+            _process: self.0,
+            _shared: shared,
+        })
+    }
+}
+
+#[cfg(test)]
+impl Retained {
+    pub fn empty() -> Self {
+        let zero = || {
+            Arc::new(Semaphore::new(0))
+                .try_acquire_many_owned(0)
+                .unwrap()
+        };
+        Self {
+            _process: zero(),
+            _shared: zero(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct Outbox {
@@ -50,12 +117,7 @@ impl Reservation {
 
 impl Outbox {
     pub fn new() -> (Self, mpsc::Receiver<Frame>) {
-        static PROCESS: OnceLock<Arc<Semaphore>> = OnceLock::new();
-        Self::with_process(
-            PROCESS
-                .get_or_init(|| Arc::new(Semaphore::new(PROCESS_RETAINED)))
-                .clone(),
-        )
+        Self::with_process(process_budget())
     }
 
     fn with_process(process: Arc<Semaphore>) -> (Self, mpsc::Receiver<Frame>) {
@@ -168,8 +230,35 @@ mod tests {
 
     use tokio::sync::Semaphore;
 
-    use super::{Outbox, MAX_RETAINED, PROCESS_RETAINED};
+    use super::{Materializing, Outbox, MAX_RETAINED, PROCESS_RETAINED};
     use crate::server::wire::{ServerMessage, MAX_MESSAGE};
+
+    #[test]
+    fn shared_reading_retains_its_bytes_until_the_last_consumer_releases_it() {
+        let process = Arc::new(Semaphore::new(MAX_MESSAGE));
+        let reading = Materializing(
+            process
+                .clone()
+                .try_acquire_many_owned(MAX_MESSAGE as u32)
+                .unwrap(),
+        );
+        assert_eq!(process.available_permits(), 0);
+        let producer = Arc::new(reading.retain(1024).unwrap());
+        let consumer = producer.clone();
+        assert_eq!(process.available_permits(), MAX_MESSAGE - 1024);
+        drop(producer);
+        assert_eq!(process.available_permits(), MAX_MESSAGE - 1024);
+        drop(consumer);
+        assert_eq!(process.available_permits(), MAX_MESSAGE);
+        let oversized = Materializing(
+            process
+                .clone()
+                .try_acquire_many_owned(MAX_MESSAGE as u32)
+                .unwrap(),
+        );
+        assert!(oversized.retain(MAX_MESSAGE + 1).is_err());
+        assert_eq!(process.available_permits(), MAX_MESSAGE);
+    }
 
     #[tokio::test]
     async fn producers_and_queued_frames_share_connection_and_process_budgets() {

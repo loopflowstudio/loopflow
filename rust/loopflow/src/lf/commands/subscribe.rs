@@ -18,6 +18,11 @@
 //! command would print. A subscription's arguments are fixed; it takes only
 //! checkpoints.
 
+#[cfg(test)]
+use crate::performance::subscription_measurement::{Runtime, Stage};
+#[cfg(not(test))]
+use tokio::runtime::Runtime;
+
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -299,12 +304,16 @@ where
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
     std::thread::spawn(move || {
+        #[cfg(test)]
+        let _waker = Stage::new("wake_thread_lifetime");
         let mut mailbox = lock(&waker);
         while !mailbox.closed {
             mailbox = match mailbox.pull_at {
                 Some(at) if mailbox.asked() || Instant::now() >= at => {
                     mailbox.pull_at = None;
                     drop(mailbox);
+                    #[cfg(test)]
+                    let _wake = Stage::new("wake_callback");
                     wake();
                     lock(&waker)
                 }
@@ -398,13 +407,22 @@ struct Step {
     wake: Instant,
 }
 
+fn reader_runtime() -> std::io::Result<Runtime> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    #[cfg(test)]
+    return Runtime::build(&mut builder);
+    #[cfg(not(test))]
+    builder.build()
+}
+
 /// One subscription's reading state: what it last read and sent, and when.
 struct Reader<A, F> {
     shared: Shared<A>,
     database: PathBuf,
     read: F,
     args: A,
-    runtime: Option<tokio::runtime::Runtime>,
+    runtime: Runtime,
     observations: Arc<Cache>,
     dependencies: Dependencies,
     store: Option<SharedStore>,
@@ -419,17 +437,6 @@ struct Reader<A, F> {
     sent: Option<[u8; 32]>,
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
-}
-
-// A served subscription may be cancelled while its async owner is shutting
-// down. Its private runtime has finished its blocking reads and must not wait
-// for runtime shutdown from that async worker.
-impl<A, F> Drop for Reader<A, F> {
-    fn drop(&mut self) {
-        if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_background();
-        }
-    }
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -457,7 +464,7 @@ where
             read,
             args,
             select,
-            runtime: Some(tokio::runtime::Runtime::new()?),
+            runtime: reader_runtime()?,
             observations: Cache::shared(),
             dependencies: Dependencies::default(),
             store: None,
@@ -475,6 +482,8 @@ where
     /// Take requests, read when the result may have changed, and say what to
     /// send and when to step again.
     fn step(&mut self) -> Result<Step> {
+        #[cfg(test)]
+        let _step = Stage::new("reader_step");
         // A closed subscription still answers what it was asked, then stops.
         let closing = {
             let mut mailbox = lock(&self.shared);
@@ -492,11 +501,11 @@ where
             mailbox.closed
         };
         if self.store.is_none() && self.database.exists() {
+            #[cfg(test)]
+            let _open = Stage::new("reader_store_open");
             let config = StorageConfig::sqlite(self.database.clone());
             match self
                 .runtime
-                .as_ref()
-                .expect("the reader owns its runtime until drop")
                 .block_on(crate::store::open_read_only_store(&config))
             {
                 Ok(opened) => {
@@ -528,6 +537,8 @@ where
             };
         let mut frame = None;
         if due {
+            #[cfg(test)]
+            let _projection = Stage::new("projection");
             if !self.force
                 && (observed_changes || (self.read_at.is_some() && self.read_at != revisions))
             {
@@ -549,8 +560,6 @@ where
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
                 None => self
                     .runtime
-                    .as_ref()
-                    .expect("the reader owns its runtime until drop")
                     .block_on((self.read)(self.store.clone(), self.args.clone())),
             });
             self.dependencies = dependencies;
@@ -715,6 +724,8 @@ fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, parent: Option<u32>) {
 /// one whose parent exited: a descendant that inherited the pipe can hold
 /// stdin open long after the parent is gone. Ends with its last subscription.
 fn observe(database: &Path) {
+    #[cfg(test)]
+    let _observer = Stage::new("observer_lifetime");
     let mut store = StoreChanges::watch(database);
     loop {
         store.wait(CHECK);

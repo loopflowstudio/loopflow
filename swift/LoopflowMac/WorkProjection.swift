@@ -278,9 +278,12 @@ final class WorkNavigation {
     }
     var palette: Palette? {
         didSet {
+            if oldValue != palette { paletteGeneration &+= 1 }
             if oldValue == nil, palette != nil { restorePaletteFocus = true }
         }
     }
+    /// A dismissed and reopened sheet is a different presentation, even at the same Work.
+    @ObservationIgnored private(set) var paletteGeneration = 0
     var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.

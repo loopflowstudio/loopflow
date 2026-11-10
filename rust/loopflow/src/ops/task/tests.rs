@@ -30,6 +30,85 @@ struct TaskFixture {
     work: WorkRef,
 }
 
+#[test]
+fn task_wait_condition_releases_terminal_tasks() {
+    use crate::ops::task::TaskWaitUntil;
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let fixture = runtime.block_on(task_fixture_at("WAIT-1", repo.path().into()));
+    let store = &fixture.store;
+    let read = |until| {
+        runtime
+            .block_on(super::task_wait_condition(store, "WAIT-1", until))
+            .unwrap()
+            .unwrap()
+    };
+    assert!(!read(TaskWaitUntil::Terminal).1);
+    assert!(!read(TaskWaitUntil::Open).1);
+    let mut pr = runtime
+        .block_on(store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        presentation: None,
+        github: Some(GithubPr {
+            number: 1,
+            url: "https://github.com/example/repo/pull/1".into(),
+            head_sha: None,
+        }),
+        merge: None,
+    });
+    runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    assert!(read(TaskWaitUntil::Open).1);
+    assert!(!read(TaskWaitUntil::Terminal).1);
+    pr.publication = None;
+    runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    for field in ["planning_completed", "abandoned_at"] {
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                &format!("UPDATE tasks SET {field}=1 WHERE id=?1"),
+                [fixture.task.id.as_str()],
+            )
+            .unwrap();
+        assert!(read(TaskWaitUntil::Terminal).1);
+        assert!(
+            read(TaskWaitUntil::Open).1,
+            "terminal also releases submitted waits"
+        );
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                &format!(
+                    "UPDATE tasks SET {field}={} WHERE id=?1",
+                    if field == "planning_completed" {
+                        "0"
+                    } else {
+                        "NULL"
+                    }
+                ),
+                [fixture.task.id.as_str()],
+            )
+            .unwrap();
+    }
+    assert!(runtime
+        .block_on(super::task_wait_condition(
+            store,
+            "missing",
+            TaskWaitUntil::Terminal
+        ))
+        .unwrap()
+        .is_none());
+}
+
 struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
 impl EnvRestore {

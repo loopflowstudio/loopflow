@@ -2381,16 +2381,23 @@ final class WorkModel {
     /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let requestID = UUID().uuidString
+        let owner = navigation
+        let presentation = owner.paletteGeneration
+        let destination = destinationGeneration
         do {
             let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
             CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-            navigation.palette = nil
-            await openTaskConversation(receipt.task.id)
+            if owner.paletteGeneration == presentation {
+                owner.palette = nil
+                if navigation === owner, destinationGeneration == destination {
+                    await openTaskConversation(receipt.task.id)
+                }
+            }
             try? await confirmWorkUpdate()
         } catch is SubmittedCreationError {
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
-            navigation.palette = nil
+            if owner.paletteGeneration == presentation { owner.palette = nil }
         }
     }
 

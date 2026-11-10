@@ -164,13 +164,15 @@ the reading scope; a mutation runs outside it. File and process observations,
 Git commands and GitHub requests refresh independently, so a slow provider does
 not hold up local observations. Facts no longer read expire from memory.
 
-Observed answers and their revisions live only in server memory, never in
-SQLite; server replacement starts with new observations. A subscription follows
-the observed facts it reads alongside the store revision domains it reads.
-Changes to those dependencies wake it; an unchanged selected answer sends no
-new reading. Dependencies come from the read itself, without a separate clock,
-checkout or probe policy for each operation. Database-derived joins retain their
-transactional snapshot; external observations do not share that transaction.
+Observed answers and their revisions live only in process memory, never in
+SQLite; server replacement starts with new observations. CLI `--subscribe`
+readings use the same cache in their own process. A subscription follows the
+observed facts it reads alongside the existing store revisions (all domains
+except usage). Changes to those facts or revisions wake it; an unchanged
+selected answer sends no new reading. External dependencies come from the read
+itself, without a separate clock, checkout or probe policy for each operation.
+Database-derived joins retain their transactional snapshot; external
+observations do not share that transaction.
 
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own

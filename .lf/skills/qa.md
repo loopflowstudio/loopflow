@@ -114,6 +114,26 @@ Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.
 Create with stdin closed; `--graph` on creation requires `--run`.
+For a checkout without launching a Graph, run `lf wt create qa --json`, take
+its `path`, then pass it to `lf task create --worktree <path> --title ... --json`.
+Creation returns the Task directly: use its `id`, not `task.id`.
+
+To exercise external observations, subscribe to `task.get` and inspect
+`row.condition.local_progress.dirty`. Edit a tracked file, add an untracked
+file, and move the disposable checkout aside and back. Read-only queries of
+`store_revisions` before and after establish whether the change arrived without
+a store write. A simultaneous selection of `task.title` should send no frame
+for those edits. `graph.list` and `config.settings` are request-only reads;
+repeat them after editing `.lf/graphs/` or `.lf/config.yaml` externally.
+For process liveness, start `lf task create --title ...` with a pipe held open
+on stdin. Watch its PID through `process.list`, kill and reap it before sending
+input, and expect its removal without a store revision. Repeat through
+`lf process list --subscribe --json` with the server stopped.
+
+A Swift command-line probe can import the built module with
+`swiftc -I swift/.build/debug/Modules probe.swift swift/.build/debug/Loopflow.build/*.o -o probe`.
+Encode `ServerClientMessage` values in the probe, then send those exact JSON
+lines to the private server. This exercises production encoding, not a window.
 
 To delay a report, SIGSTOP the launched command before it reports, leaving its
 execution owner running. Check that a live owner waits beyond the unknown grace.

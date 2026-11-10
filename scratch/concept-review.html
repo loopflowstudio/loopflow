@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-790 — served observations</title>
+<style>
+  :root { color-scheme: light dark; --ink: #202c33; --paper: #faf9f5; --muted: #52616b; --line: #aab8ba; --accent: #17655d; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e6e9e4; --paper: #182024; --muted: #abbabc; --line: #52666d; --accent: #8ad8c5; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 30px 22px 44px; background: var(--paper); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 810px; margin: auto; }
+  header { color: var(--muted); font-size: 13px; }
+  h1 { font-size: clamp(25px, 4vw, 35px); line-height: 1.15; letter-spacing: -.03em; margin: 22px 0 14px; }
+  h2 { font-size: 19px; margin: 24px 0 8px; }
+  p { margin: 10px 0; }
+  code { font-size: .9em; overflow-wrap: anywhere; }
+  .decision { border-left: 3px solid var(--accent); padding-left: 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { padding-left: 0; }
+  th { color: var(--muted); font-weight: 500; }
+  ol { padding-left: 22px; }
+  li { padding: 4px 0; }
+  footer { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 10px; }
+  @media (max-width: 520px) { body { padding: 20px 16px; } th, td { padding: 8px 5px; } table { font-size: 12px; } }
+</style>
+<main>
+<header>
+  LOO-790 · concept-review · 2026-11-09<br>
+  Built from <code>scratch/served-reads.md</code>, <code>docs/server.md</code>,
+  <code>rust/loopflow/src/{observe.rs,lf/commands/subscribe.rs,server/service.rs,server/README.md}</code>
+</header>
+<h1>Keep the observation model; advance to gate.</h1>
+<p class="decision">No new product decision. Leave a Task open while editing its checkout or waiting for CI. Its live reading updates when the changed fact is observed. The implementation keeps that interaction; protocol acceptance remains to be verified.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+  <thead><tr><th>Action</th><th>Concept</th><th>API and state</th></tr></thead>
+  <tbody>
+    <tr><td>Open a Task; edit a file</td><td>One live reading</td><td><code>subscribe task.get</code> → <code>observe::git</code> → fact revision → changed reading</td></tr>
+    <tr><td>Read once in a shell</td><td>Current external facts</td><td><code>lf task status LOO-790 --json</code> → the same observers, inline</td></tr>
+    <tr><td>Change Work</td><td>A command changes real state</td><td><code>Write::run</code> → direct observations and existing command writes</td></tr>
+    <tr><td>Return after a server restart</td><td>A complete current baseline</td><td><code>subscribe</code> → unknown resume token → complete reading; new in-memory cache</td></tr>
+  </tbody>
+</table>
+
+<h2>The mismatch this change removes</h2>
+<p><strong>Before:</strong> each operation needed a separate clock, checkout or probe policy to describe when its answer might change. Adding a fact to a read could leave its live view asleep.</p>
+<p><strong>Implemented:</strong> <code>Cache::capture</code> records the facts the reading touches. <code>Dependencies::changed</code> follows their revisions. Bounded workers inherit that reading. The checkout watcher, Git retention and Session probe are replaced by this shared path.</p>
+<p>The cache holds answers, including errors; SQLite holds Work. Only SQLite joins share a pinned snapshot. External observations arrive independently. Existing store revisions still wake reads broadly; narrower store subscriptions and screen-shaped reads remain outside this Task.</p>
+
+<h2>Normal, failure, recovery</h2>
+<p><strong>Normal:</strong> an external edit changes an observed Git answer, wakes its dependent view and emits a frame only if the selected result changed. No store write is needed.</p>
+<p><strong>Failure:</strong> an observation can become an error or report a missing checkout. That answer has a revision too. Local observations continue independently of GitHub polling.</p>
+<p><strong>Recovery:</strong> a later successful observation advances the revision. A surviving reading follows it; a served watch that ended with <code>unavailable</code> follows the existing client reopen path. Restart discards observations, not Work. Commands are never replayed to recover a reading.</p>
+
+<h2>What to show next</h2>
+<p><strong>Pending gate:</strong> restore a missing checkout, recover a failed provider and cross a quiet deadline without a store write. Exercise actual reads. Also show that unrelated facts do not rerun them and unselected changes emit no frame. These counterexamples test the existing design; no additional behavior is proposed.</p>
+<footer>
+  <ol>
+    <li><strong>Does the design need another concept or action?</strong> No. Keep observation revisions internal and leave the existing usage docs and skill guidance intact.</li>
+    <li><strong>Is a product choice open?</strong> No. Advance; gate and QA must still verify the implemented behavior.</li>
+  </ol>
+</footer>
+</main>
+</html>

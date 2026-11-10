@@ -1,6 +1,6 @@
 # LOO-790 served observations
 
-Implementation design, 2026-11-09. Served reads and CLI subscriptions capture
+Reconciled 2026-11-09. Served reads and CLI subscriptions capture
 external fact dependencies through `observe`; bare reads and writes observe
 inline. A process-owned cache keeps answers and revisions in memory, polls only
 facts already read, and is shared across requests and subscriptions. Readers
@@ -8,36 +8,51 @@ keep the existing pinned SQLite snapshot and selected-answer deduplication.
 Observation intervals belong to facts, never operation names. Errors are answers
 and recovery advances the revision. Unused facts expire; no schema changes.
 
-Delete — do not maintain:
-- `subscribe::Wake`, `Probe`, per-read clocks and checkout registration.
-- `subscribe/checkouts.rs`, its sole `platform/fs_events.rs` dependency,
-  Git's global retained-output/TTL implementation and `ask_checkouts_ahead`.
-- `config::observation::Files`; use the same file facts and dependency scope.
-- `SqliteStore::session_observations` and its probe-only test. Keep liveness,
-  quiet-time transitions and missing checkout coverage on actual read paths.
+Implemented: the cache replaces per-read wake policies, the checkout watcher,
+Git retention, config-file tracking and the Session observation probe.
+Subscriptions compare external fact revisions and existing non-usage store
+domains; per-read store-domain selection is outside this change. Process answers
+use `OsProcess` equality. Quiet availability and planning staleness use observed
+deadlines; rolling history uses a minute-resolution clock.
 
-The deletion cut is complete. Subscriptions use revision comparisons directly;
-they need no stale flag. Process answers use `OsProcess` equality so activity
-state changes remain visible, rather than comparing a second field list.
-
-Acceptance: shared reads reuse observations; external Git/file/process changes
+Acceptance: shared reads reuse observations; external Git/file/process/PR/CI changes
 wake dependent subscriptions without store writes; unrelated facts do not rerun
 a reading; argument changes replace dependencies; fresh CLI/writes bypass cache;
 nested workers inherit scope and unwinding restores it; failed observations
-recover. Gate also owns served_reads, subscription and direct caller suites.
+recover. No external facts enter SQLite; server replacement starts fresh and
+unused facts expire. Screen-shaped reads remain a separate Task.
 
-Documentation: the intended-behavior edits in `docs/server.md` and
-`rust/loopflow/src/server/README.md` remain in place. The documentation pass's
+Concept review, 2026-11-09: no design change or open product choice. Keep the
+experience as “leave the Task open; edits and CI changes arrive when observed.”
+No refresh command, persisted observation record or additional client state is
+needed. Cache recovery does not change the existing protocol: a served watch
+that ends with `unavailable` must be opened again by its client; a restarted
+server supplies a complete baseline. Bare reads and writes remain direct.
+The review page is `scratch/concept-review.html`.
+
+Counterexamples for gate: a missing checkout appears without a store write;
+a provider fails and later recovers; a quiet deadline passes while no process
+or row changes. Each must reach the actual dependent reading. An unrelated
+external fact must not rerun it, and a changed unselected field must not emit
+a frame. These are the existing acceptance requirements, not new design work.
+
+Remaining: gate must verify the affected callers and quiet-time transitions.
+QA exercised live served Git/file reads, process exit and missing-checkout recovery.
+Full clippy and CI remain unverified here; the live QA results are in `scratch/qa.html`. No product decision is open.
+Fetching origin/main during realign found it still at the checkout base
+`28b0af568`; delivery still needs a fresh sync if main advances.
+
+Documentation now distinguishes CLI subscriptions from bare reads and describes
+the existing store-domain behavior. The documentation pass's
 `lf open --host desktop --file docs/server.md --file rust/loopflow/src/server/README.md`
 failed: "has no workspace in this Desktop window; nothing changed."
 
 Gate coverage: `observe::tests::`, `lf::commands::subscribe::tests::`,
 `harness::fact_writer::tests::`, `journal::request::tests::`,
-`journal::os_process::tests::`, `lf::commands::top::tests::`,
+`journal::os_process::tests::`, `journal::tests::`, `lf::commands::top::tests::`,
 `skills::catalog::`, `graph::tests::`, `store::sqlite::sessions::`,
-`ops::task::tests::`, `binary(served_reads)`, `test(session_list_subscribe::)`;
-include the owner-prescribed journal/agent-startup checks if gate finds that
-boundary reached. Sync against main before delivery remains the auto Graph's step.
+`ops::task::tests::`, affected PR observers in `engine::pr` and `ops::pr`,
+`binary(served_reads)`, `test(session_list_subscribe::)`.
 
 Checks (inherited LF variables unset):
 - `cargo test -p loopflow --lib observe::tests::` — passed after compression (7 cache tests plus 3 matching Linear tests).
@@ -48,3 +63,14 @@ The macOS test linker warns that `__eh_frame` exceeds 16 MB; tests pass.
 Compression's first stop-state regression failed on macOS: its native observer
 maps live states to `S`, including stopped processes. Keep that existing platform
 behavior; the stop-state regression runs on Linux in CI, with exit coverage on both.
+
+QA, 2026-11-09: live isolated server and CLI walkthrough passed; details and
+limits in `scratch/qa.html`. Updated `.lf/skills/qa.md` with the working recipe.
+No production repairs. Real provider quiet-time and GitHub CI transitions remain
+unexercised in the private home, which has no provider/GitHub login.
+
+- `cargo build -p loopflow --bin lf` — passed (QA).
+- `swift build --package-path swift -Xswiftc -gnone` — passed (QA).
+- `uv run python scratch/qa_served.py` — passed with Swift-encoded live messages (QA).
+- `uv run python scratch/qa_cli_subscription.py` — passed, no server running (QA).
+- `scripts/test_desktop.sh --filter 'WorkCLISubscriptionTests/serverReplacementKeepsWorkCurrent|DesktopHeadlessTests/workStates' -Xswiftc -gnone` — 2 passed with inherited LF variables unset and stdin closed (QA).

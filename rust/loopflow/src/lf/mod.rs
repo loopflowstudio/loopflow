@@ -1261,6 +1261,7 @@ impl SessionCommand {
             | Self::Rename { .. }
             | Self::Move { .. }
             | Self::Send { .. }
+            | Self::Recover { .. }
             | Self::Receive { .. } => true,
         }
     }
@@ -1747,6 +1748,13 @@ pub struct SessionSelectorArgs {
 // History carries its feed filters and its own commands; Clap owns the layout.
 #[allow(clippy::large_enum_variant)]
 pub enum SessionCommand {
+    /// Ask affected open conversations to check capacity again; uncertain input is never resent
+    Recover {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Move the selected open Sessions to another agent (-a harness[:model]);
     /// `lf session list` with the same flags previews them
     #[command(

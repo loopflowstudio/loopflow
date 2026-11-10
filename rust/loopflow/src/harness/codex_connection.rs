@@ -31,7 +31,7 @@ use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, RecordingGap, StoreError};
 
-type Upstream = WebSocketStream<UnixStream>;
+pub(super) type Upstream = WebSocketStream<UnixStream>;
 
 const REPLY_LIMIT: Duration = Duration::from_secs(15);
 /// Starting a thread loads MCP servers and plugins.
@@ -371,15 +371,16 @@ async fn observe(observer: CodexObserver, ready: impl FnOnce()) -> Result<()> {
     }
 }
 
-struct Recorder {
-    observer: CodexObserver,
-    route: Option<crate::provider_account::ProviderAccountRoute>,
+pub(super) struct Recorder {
+    pub(super) observer: CodexObserver,
+    pub(super) route: Option<crate::provider_account::ProviderAccountRoute>,
     store: Option<(SqliteStore, CodexStream)>,
     retry_at: Option<Instant>,
     failure: RecordingGap,
     updates: TaskUpdates,
     /// A turn is running, or may be; updates wait for it.
-    busy: bool,
+    pub(super) busy: bool,
+    pub(super) recovery: super::codex_recovery::Recovery,
     update_request: Option<(Value, TaskUpdate)>,
     /// The person moved to this thread and the store has not recorded it yet.
     selection: Option<&'static str>,
@@ -390,15 +391,18 @@ struct Recorder {
 }
 
 impl Recorder {
-    async fn new(observer: CodexObserver) -> Self {
+    pub(super) fn adopt_route(&mut self, route: crate::provider_account::ProviderAccountRoute) {
+        self.observer.account = Some(route.account_id().clone());
+        self.route = Some(route);
+        // The next stream records usage and native affinity under the new login.
+        self.store = None;
+    }
+    async fn new(mut observer: CodexObserver) -> Self {
         let route = match &observer.account {
-            Some(account) => crate::provider_account::resolve_provider_account_exact(
+            Some(account) => crate::provider_account::session_account_route(
                 Provider::Codex,
-                Some(&observer.thread),
-                Some(account),
-                None,
-                None,
-                Some(&observer.cwd),
+                &observer.thread,
+                account,
             )
             .await
             .unwrap_or_else(|error| {
@@ -407,6 +411,9 @@ impl Recorder {
             }),
             None => None,
         };
+        if let Some(route) = &route {
+            observer.account = Some(route.account_id().clone());
+        }
         Self {
             observer,
             route,
@@ -415,6 +422,7 @@ impl Recorder {
             failure: RecordingGap::default(),
             updates: TaskUpdates::default(),
             busy: true,
+            recovery: Default::default(),
             update_request: None,
             selection: None,
             following: false,
@@ -423,7 +431,7 @@ impl Recorder {
     }
 
     /// The store, reopened at most every `STORE_RETRY` while it stays broken.
-    fn stream(&mut self) -> Option<&mut (SqliteStore, CodexStream)> {
+    pub(super) fn stream(&mut self) -> Option<&mut (SqliteStore, CodexStream)> {
         if self.store.is_none() && self.retry_at.is_none_or(|at| at <= Instant::now()) {
             match SqliteStore::new(&self.observer.database) {
                 Ok(store) => {
@@ -548,7 +556,10 @@ impl Recorder {
                     if self.following && self.resume_request.is_none() {
                         self.resume(&mut writer).await;
                     }
-                    if !self.busy && self.update_request.is_none() {
+                    if let Err(error) = self.recovery_tick(&mut writer).await {
+                        tracing::warn!(%error, "Codex recovery remains pending");
+                    }
+                    if !self.busy && self.update_request.is_none() && !self.recovery.pending() {
                         self.deliver_update(&mut writer).await;
                     }
                 }
@@ -585,7 +596,7 @@ impl Recorder {
                 self.busy = true;
                 // Only our update has a request to answer for it; every other
                 // turn came from the person's client.
-                if self.update_request.is_none() {
+                if self.update_request.is_none() && !self.recovery.pending() {
                     if let (Some(turn), Some((_, history))) = (
                         params.pointer("/turn/id").and_then(Value::as_str),
                         self.stream(),
@@ -598,6 +609,9 @@ impl Recorder {
             _ => {}
         }
         self.record(rpc).await;
+        if let Err(error) = self.recovery_message(rpc, writer).await {
+            tracing::warn!(%error, "Codex recovery remains pending");
+        }
         let answered = self
             .update_request
             .as_ref()
@@ -646,6 +660,7 @@ impl Recorder {
             tracing::warn!(%error, "Codex conversation's hooks have no lf context");
         }
         self.observer.thread = thread;
+        self.recovery = Default::default();
         self.selection = Some(source);
         self.select();
         (self.busy, self.following) = (true, true);

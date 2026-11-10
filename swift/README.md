@@ -558,8 +558,8 @@ Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-**Recover affected sessions** appears beside affected Sessions to retry them
-together, showing progress and why any remain waiting. See
+**Recover affected sessions** appears beside a waiting conversation. It checks
+affected Sessions together, showing native completion and remaining waits. See
 [Recover after a usage limit](../docs/sessions.md#recover-after-a-usage-limit)
 for automatic recovery, capacity waits, and retaining history, drafts and approvals.
 

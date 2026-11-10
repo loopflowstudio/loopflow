@@ -180,6 +180,7 @@ public struct SessionPreview: Codable, Hashable, Sendable {
 }
 
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let recovery: SessionRecovery?
     public let preview: SessionPreview?
     public let primaryScope: String?
     public let availability: SessionAvailability?
@@ -250,6 +251,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case recovery
         case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
         case preview
         case programStatus = "program_status"
@@ -318,6 +320,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        recovery = try values.decodeIfPresent(SessionRecovery.self, forKey: .recovery)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
@@ -345,5 +348,43 @@ extension SessionRecord {
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
+    }
+}
+
+public struct SessionRecovery: Codable, Sendable, Hashable {
+    public let agentProcessId: AgentProcessId
+    public enum State: String, Codable, Sendable {
+        case waitingCapacity = "waiting_capacity"
+        case waitingNative = "waiting_native"
+        case uncertain, recovering, continued
+
+        public var label: String {
+            switch self {
+            case .waitingCapacity: "Waiting for capacity"
+            case .waitingNative: "Waiting for native conversation"
+            case .uncertain: "Review conversation"
+            case .recovering: "Recovering"
+            case .continued: "Continued"
+            }
+        }
+    }
+    public let thread: AgentSessionId
+    public let failedTurn: String
+    public let model: String?
+    public let account: String?
+    public let state: State
+    public let reason: String
+    public let retryAt: Int64?
+    public let request: String?
+    public let retryTurn: String?
+
+    public var canRetry: Bool { request == nil && (state == .waitingCapacity || state == .waitingNative) }
+
+    enum CodingKeys: String, CodingKey {
+        case agentProcessId = "agent_process_id"
+        case thread, model, account, state, reason, request
+        case failedTurn = "failed_turn"
+        case retryAt = "retry_at"
+        case retryTurn = "retry_turn"
     }
 }

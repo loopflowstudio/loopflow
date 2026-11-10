@@ -262,6 +262,7 @@ pub fn emit_block(
                 &input,
                 adapter,
                 thread,
+                |_| Ok(()),
                 |store, adapter, thread, update| {
                     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
                         if !store.record_task_update(
@@ -307,6 +308,12 @@ pub fn emit_block(
         let mut gap = recording_gap(&delivery.home, thread);
         let recorded = hook_store(&delivery.home).and_then(|store| {
             store.record_native_turn(adapter, thread, yielded, open_tools)?;
+            if matches!(
+                input["hook_event_name"].as_str(),
+                Some("Stop" | "UserPromptSubmit")
+            ) {
+                crate::harness::claude_recovery::boundary(&store, adapter, thread, &input)?;
+            }
             if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
                 if yielded {
                     store.acknowledge_native_input(adapter, thread, prompt_id, None)?;

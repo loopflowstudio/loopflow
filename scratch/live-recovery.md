@@ -5,18 +5,16 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 ## Remaining work
 
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
-scope, replacement design, native Codex findings and preservation cases. Automatic
-continuation and Desktop recovery remain unimplemented. November 9's drain probe
-invalidates generation replacement with Codex 0.167.0 when input races shutdown.
-Pass 3 also observed managed `account/read` refresh retaining the old account
-after a cross-account file switch, despite successfully reloading same-account
-rotation. Claude 2.1.321 inbox UUID → transcript prompt ID → successful Stop
-correlation and draft/subsequent-input retention passed with local responses.
-Those probes and their limits are in the design. Codex's mechanism remains
-unresolved; dependent integration and publication cannot proceed as designed.
+scope, replacement design, native Codex findings and preservation cases. Runtime continuation, served bulk recovery and Desktop progress are now
+implemented in the working tree. Two-client native product probes passed for
+both providers with synthetic logins and loopback responses; gate and demo retain
+the broader preservation and real-login checks.
+The supplied-token Codex path supersedes the earlier drain/reload blocker.
+The design holds the native callback and retry results and their limits.
 
-The intended experience is in `docs/sessions.md`, linked from subscriptions and
-Desktop docs. November 9's `lf open --host desktop --file docs/sessions.md --file
+The implemented experience is described in `docs/sessions.md`, subscriptions
+and Desktop docs; explicit restart limitations remain visible.
+November 9's `lf open --host desktop --file docs/sessions.md --file
 docs/subscriptions.md --file swift/README.md` reported all three opened. No demo
 or approval of the expanded outcome occurred. November 8's Keychain concept
 review, QA and gate cover only that repair.
@@ -37,12 +35,13 @@ Still unobserved:
   scoped service; installed checks below predate the repair.
 - A running Codex refresh after switching the shared home: whether it rewrites
   auth.json and loses the other login's rotated refresh token.
-- Claude's no-model "You've hit your limit" line paired with every account-wide
-  usage window below 100%, and whether clearing that cooldown repeatedly selects
-  the spent login until the attempt budget runs out. Polls alone establish neither.
-- `resume --account` for running Codex and Claude, `session move`, and running
-  Claude's credential reload. Check Session identity, retained history and continued
-  input alongside account selection. The native fixture starts fresh Claude clients.
+- Real-provider Claude no-model quota behavior with account-wide usage below
+  100%. Synthetic native probes and the focused routing test now cover retaining
+  the rejected model's hold despite a generic healthy poll; real capacity remains
+  unobserved.
+- `resume --account` for running Codex and Claude, and `session move`. The new
+  product probe observes running Claude clients reload after cache expiry and
+  complete retries/drafts; real-login and Task-bound preservation remain open.
 - Whether refreshing Claude invalidates earlier access tokens used by a rental.
 
 ## Keychain repair scope and check history

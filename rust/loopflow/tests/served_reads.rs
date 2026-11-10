@@ -1063,6 +1063,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::SessionMove { .. }
+        | Write::SessionRecover { .. }
         | Write::WaveCreate { .. }
         | Write::WaveSync { .. }
         // Binding, connecting and reteaming reach Linear; served_planning_binding_matches_cli
@@ -1154,6 +1155,10 @@ fn server_operations_match_their_lf_commands() {
                     agent: None,
                 },
                 // No fixture login is held back, so nothing is blocked to move.
+                Write::SessionRecover {
+                    directory: directory.clone(),
+                    ids: vec![session.clone()],
+                },
                 Write::SessionMove {
                     directory: directory.clone(),
                     blocked: true,

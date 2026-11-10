@@ -372,11 +372,15 @@ Running out of usage credits ("You're out of usage credits", Claude's
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
 and the step goes on with Opus on the same account, in the same conversation.
 
-Open Claude and Codex Sessions recover together after a usage limit. Loopflow
-continues affected conversations on another eligible login for their selected
-model and account restrictions. Desktop's **Recover affected sessions** retries
-recovery and shows what is waiting. See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit)
-for retry rules, capacity waits, and retaining history, drafts and approvals.
+Open Claude and Codex Sessions recover a turn rejected before work began on
+another eligible login for the selected model. Claude waits for its native
+credential cache to reload; Codex supplies the login to its existing private
+server. A failed native model keeps a short scoped hold even when a general
+usage poll shows room. Drafts stay in the client; uncertain work is never resent.
+
+Desktop's **Recover affected sessions** checks waiting conversations together.
+See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit) for
+progress, capacity waits and the limits on automatic retry.
 
 To see what would fail next, and move it in one go:
 

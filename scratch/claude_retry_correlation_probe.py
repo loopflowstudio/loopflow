@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--claude", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--hook")
+    parser.add_argument("--quota", action="store_true")
     args = parser.parse_args()
     if args.hook:
         _hook(args.hook)
@@ -106,6 +107,24 @@ def main() -> None:
                 sent.set()
             elif self.path.startswith("/v1/messages"):
                 messages.append(body)
+                if args.quota and not sent.is_set():
+                    rejected = json.dumps(
+                        {
+                            "type": "error",
+                            "error": {
+                                "type": "rate_limit_error",
+                                "message": "You've hit your limit",
+                            },
+                        }
+                    ).encode()
+                    self.send_response(429)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(rejected)))
+                    self.send_header("anthropic-ratelimit-unified-status", "rejected")
+                    self.send_header("anthropic-ratelimit-unified-reset", "4102444800")
+                    self.end_headers()
+                    self.wfile.write(rejected)
+                    return
                 message = {
                     "id": "msg_fixture_" + str(len(messages)),
                     "type": "message",
@@ -199,6 +218,7 @@ def main() -> None:
                 "ANTHROPIC_BASE_URL": base,
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 "DISABLE_TELEMETRY": "1",
+                "CLAUDE_CODE_MAX_RETRIES": "0",
             }
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -290,7 +310,13 @@ def main() -> None:
             results["subsequent_turn_completed"] = (
                 len(drafts) == 1 and drafts[0].get("promptId") in completed
             )
-            assert len(messages) == 3, "expected initial, inbox and subsequent local turns"
+            if args.quota:
+                results["limit_hook"] = [
+                    h["event"] for h in hooks if h["event"].get("hook_event_name") == "StopFailure"
+                ]
+                assert results["limit_hook"], "quota rejection never reached StopFailure"
+            else:
+                assert len(messages) == 3, "expected initial, inbox and subsequent local turns"
             assert all(
                 results[key]
                 for key in (

@@ -32,20 +32,21 @@ LOO-813/#1863 is complete opening/reconnect work. Account switching alone cannot
 establish continuation. Keep native history, selected model, drafts and approvals;
 rejected-before-work, uncertain delivery and completed effects need distinct handling.
 
-Codex 0.167.0's disposable replacement probe kept an editable draft and completed
-a synthetic turn. The later SIGHUP drain probe disproved safe replacement:
-concurrent typed input got `serverShuttingDown` on `turn/steer`, exited the client
-1 and never reached the model. Separately, a pending approval stayed answerable;
-its client survived replacement and completed subsequent input. Both probes used
-a credential-free local endpoint and reaped every child. They establish no
-managed-account handoff or multiple-Session recovery.
+Codex 0.167.0 replacement kept an editable draft, but SIGHUP drain rejected racing
+`turn/steer` input with `serverShuttingDown`: client exit 1, input lost. Separately,
+an approval stayed answerable and its client completed input after replacement.
+Managed `account/read` forced refresh reloaded same-account token changes but kept
+the old account after a cross-account file switch; the new file stayed intact.
+Neither path supports recovery. External-token ownership and provider changes
+remain unselected.
 
-Automatic continuation and Desktop recovery remain unimplemented. An idle observer
-read cannot prevent racing input; drain admission alone cannot retain the client.
-`resume --account` also ends it. Replacement needs native input retention and
-transferred exit ownership; managed-account reload without replacement is unproved.
-Claude's inbox write has no consumption acknowledgement; retain uncertainty, never
-replay it. Retry needs native-turn correlation.
+Claude 2.1.321's inbox UUID joins through transcript user `promptId` (a different
+ID) to successful Stop `prompt_id`. A draft stayed editable and later completed.
+Transcripts may lag hooks: retain uncertainty until both records arrive; socket
+writes or unrelated Stops prove no continuation and never authorize resend.
+These network-contained synthetic probes reaped their children. They prove no
+managed-login continuation, rejected-turn safety or multiple-Session recovery.
+Automatic continuation and Desktop recovery remain unimplemented.
 
 November 8 checks exposed lookup selecting USER twice and same-login activation
 skipping repair. Scoped checks cover both items following switches, seeded repair
@@ -55,9 +56,8 @@ item, lexical choice assumed, third items untouched.
 
 Also unobserved: running-client account changes, Codex refresh overwriting another
 login, Claude's no-model spent line clearing its cooldown when all windows read
-below 100%, and refresh invalidating rentals' earlier access tokens. Release's
-entry-point lesson applies: exercise continued native input, not only the account writer.
-Plans/probe/receipts: `f5b353964:scratch/`; earlier: `d4941f0456`, this heading.
+below 100%, and refresh invalidating rentals' earlier access tokens.
+Plans/probes/receipts: `87f6ba324:scratch/`; earlier: `d4941f0456`, this heading.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

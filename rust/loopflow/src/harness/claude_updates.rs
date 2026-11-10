@@ -1,17 +1,13 @@
 //! One asynchronous native hook observes Task work for its owning provider.
 //! Claude supplies its inbox and ephemeral child token to that hook. They never
 //! leave process memory. Provider capability fences survive attachment-only moves.
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-use std::time::Duration;
-
 use anyhow::Result;
-use serde_json::json;
 
+use super::claude_inbox::Inbox;
 use super::task_updates::TaskUpdate;
 use crate::steer::{NativeBoundary, SteerAdapter};
 use crate::store::sqlite::SqliteStore;
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 
 pub(crate) fn watch(home: &std::path::Path, input: &serde_json::Value) -> Result<()> {
     let (Ok(socket), Ok(token), Some(thread), Ok(adapter)) = (
@@ -23,11 +19,26 @@ pub(crate) fn watch(home: &std::path::Path, input: &serde_json::Value) -> Result
         return Ok(());
     };
     let adapter: SteerAdapter = serde_json::from_str(&adapter)?;
+    let mut recovery = super::claude_recovery::Recovery::default();
+    let recovery_adapter = adapter.clone();
     super::task_updates::watch(
         home,
         input,
         adapter,
         thread,
+        |store| {
+            if let Some(path) = input["transcript_path"].as_str() {
+                recovery.tick(
+                    store,
+                    &recovery_adapter,
+                    thread,
+                    std::path::Path::new(path),
+                    &socket,
+                    &token,
+                )?;
+            }
+            Ok(())
+        },
         |store, adapter, thread, update| deliver(store, adapter, thread, &socket, &token, update),
     )
 }
@@ -40,11 +51,7 @@ fn deliver(
     token: &str,
     update: &TaskUpdate,
 ) -> StoreResult<()> {
-    let io_error = |error: std::io::Error| StoreError::InvalidData(error.to_string());
-    let mut socket = UnixStream::connect(path).map_err(io_error)?;
-    socket
-        .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(io_error)?;
+    let mut inbox = Inbox::connect(path)?;
     // Use Claude's native peer envelope so its transcript can attribute and
     // collapse the message instead of rendering a user-style fallback block.
     let body = update
@@ -56,12 +63,6 @@ fn deliver(
         "<cross-session-message from=\"loopflow\" from-name=\"Loopflow worker progress\">\n{}\n</cross-session-message>",
         body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
     );
-    let bytes = format!(
-        "{}\n{}\n",
-        json!({"type":"auth","token":token}),
-        json!({"type":"user","session_id":thread,"uuid":uuid::Uuid::new_v4().to_string(),
-            "priority":"next","from":"loopflow", "message":{"role":"user","content":content}})
-    );
     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
         if !store.record_task_update(
             &adapter.session,
@@ -71,10 +72,9 @@ fn deliver(
         )? {
             return Ok(());
         }
-        socket.write_all(bytes.as_bytes()).map_err(io_error)?;
         // No acknowledgement exists on this connection. A successful write is
         // not consumption; retain uncertainty and never replay it on reconnect.
-        Ok(())
+        inbox.send(token, thread, &uuid::Uuid::new_v4().to_string(), &content)
     })
 }
 

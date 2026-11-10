@@ -1,6 +1,10 @@
 pub mod agent_process;
 pub mod claude;
 mod claude_decode;
+#[cfg(unix)]
+mod claude_inbox;
+#[cfg(unix)]
+pub(crate) mod claude_recovery;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
 pub(crate) mod claude_updates;
@@ -8,6 +12,8 @@ pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
 mod codex_decode;
+#[cfg(unix)]
+mod codex_recovery;
 mod common;
 #[cfg(test)]
 mod conformance_tests;

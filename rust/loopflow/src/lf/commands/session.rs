@@ -162,6 +162,20 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
             unreachable!("reads return before any runtime")
         }
+        SessionCommand::Recover { ids, json } => {
+            let store = open_shared_store().await?;
+            let records = recover_sessions(&store, ids)?;
+            if *json {
+                println!("{}", serde_json::to_string(&records)?);
+            } else {
+                for record in records {
+                    if let Some(recovery) = record.recovery {
+                        println!("{}: {}", record.title, recovery.reason);
+                    }
+                }
+            }
+            Ok(())
+        }
         SessionCommand::Move {
             selector,
             all,
@@ -931,4 +945,23 @@ pub(super) fn mutate(
             _ => unreachable!("is_mutation selects Session mutations"),
         }
     })
+}
+
+fn recover_sessions(
+    store: &crate::store::SharedStore,
+    ids: &[String],
+) -> anyhow::Result<Vec<SessionRecord>> {
+    let mut records = Vec::new();
+    for id in ids {
+        if let Some(record) = crate::ops::human_session::listed(store, id)? {
+            store.sqlite.request_session_recovery(&record.id)?;
+            records.push(record);
+        }
+    }
+    Ok(records)
+}
+
+pub(crate) fn recovered(ids: &[String]) -> anyhow::Result<Vec<SessionRecord>> {
+    tokio::runtime::Runtime::new()?
+        .block_on(async { recover_sessions(&open_shared_store().await?, ids) })
 }

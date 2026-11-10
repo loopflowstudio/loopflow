@@ -1090,3 +1090,25 @@ struct TaskLifecycleCapture {
         return part
     }
 }
+
+@Test("Recovery keeps the rejected native turn and capacity wait")
+func sessionRecoveryFixture() throws {
+    let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
+    let recovery = try #require(session.recovery)
+    #expect(recovery.state == .waitingCapacity)
+    #expect(recovery.failedTurn == "rejected-turn")
+    #expect(recovery.canRetry)
+    #expect(recovery.retryAt == 1794270600)
+    #expect(try JSONDecoder().decode(SessionRecovery.self, from: JSONEncoder().encode(recovery)) == recovery)
+}
+
+@Test("An uncertain dispatch cannot be retried from Desktop")
+func uncertainRecoveryDoesNotOfferRetry() throws {
+    var value = try #require(JSONSerialization.jsonObject(with: loadFixtureData("session.json")) as? [String: Any])
+    var recovery = try #require(value["recovery"] as? [String: Any])
+    recovery["state"] = "uncertain"
+    recovery["request"] = "unconfirmed-dispatch"
+    value["recovery"] = recovery
+    let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+    #expect(session.recovery?.canRetry == false)
+}

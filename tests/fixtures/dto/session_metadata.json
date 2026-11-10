@@ -9,7 +9,7 @@
   "detail": "review-design",
   "provider": "codex",
   "model": null,
-  "blocked": true,
+  "blocked": true, "recovery": null,
   "cwd": "/src/loopflow.task",
   "state": "unknown",
   "ready_summary": null,

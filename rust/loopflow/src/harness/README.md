@@ -40,3 +40,24 @@ Codex (`codex_connection.rs`) has no relay: the Codex TUI connects straight to
 its private app-server, and lf's observer subscribes beside it to record turns
 and deliver Task updates. A store the observer cannot open is a recording gap it
 retries; history fills it on the next launch.
+
+## Quota recovery
+
+The existing Codex observer and Claude hook watcher retain recovery observations
+in Session history. Only complete native evidence of a rejection before work
+permits continuation. A fixed dispatch receipt is written before native input;
+unknown delivery cannot be retried by reconnection or a Desktop request.
+
+Codex uses its private server's supplied-token API and answers refresh callbacks
+through the existing managed-account broker. Claude's detached failure worker
+finishes credential work independently of the hook, then waits for its native
+credential cache before using the inbox. Both keep the native client, thread,
+model and editor. A correlated successful native completion marks continuation.
+
+Focused checks: `session_recovery::`,
+`provider_account::account_first_tests::recovery_respects_capacity_even_for_a_preferred_login`,
+and Desktop's `sessionRecoveryControlKeepsUncertaintyVisible`. Gate also covers
+provider-account, native decoder, hook, Session projection, served mutation and
+transport ownership suites. Native-client probes use disposable homes, synthetic
+logins and loopback responses; they do not establish real-token or installed-app
+acceptance.

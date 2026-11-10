@@ -8439,6 +8439,16 @@
       ],
       "type": "object"
     },
+    "RecoveryState": {
+      "enum": [
+        "waiting_capacity",
+        "waiting_native",
+        "uncertain",
+        "recovering",
+        "continued"
+      ],
+      "type": "string"
+    },
     "Redemption": {
       "additionalProperties": false,
       "description": "What `account.redeem_reset` spent, and the usage before and after.",
@@ -10076,6 +10086,16 @@
             "null"
           ]
         },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecovery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "state": {
           "$ref": "#/$defs/SessionState"
         },
@@ -10139,6 +10159,7 @@
         }
       },
       "required": [
+        "recovery",
         "preview",
         "primary_scope",
         "availability",
@@ -10166,6 +10187,70 @@
         "ready_summary",
         "open_argv",
         "terminal_ids"
+      ],
+      "type": "object"
+    },
+    "SessionRecovery": {
+      "properties": {
+        "account": {
+          "description": "The login that received the rejected turn, retained after handoff.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agent_process_id": {
+          "$ref": "#/$defs/AgentProcessId"
+        },
+        "failed_turn": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retry_turn": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RecoveryState"
+        },
+        "thread": {
+          "$ref": "#/$defs/AgentSessionId"
+        }
+      },
+      "required": [
+        "agent_process_id",
+        "thread",
+        "failed_turn",
+        "model",
+        "account",
+        "state",
+        "reason",
+        "retry_at",
+        "request",
+        "retry_turn"
       ],
       "type": "object"
     },
@@ -15535,6 +15620,37 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/MoveReport"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Request another capacity check for these exact open Sessions.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "session.recover",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "ids"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            "type": "array"
           }
         },
         {

@@ -258,6 +258,7 @@ pub(crate) fn watch(
     input: &serde_json::Value,
     adapter: crate::steer::SteerAdapter,
     thread: &str,
+    mut tick: impl FnMut(&SqliteStore) -> anyhow::Result<()>,
     mut deliver: impl FnMut(
         &SqliteStore,
         &crate::steer::SteerAdapter,
@@ -355,6 +356,9 @@ pub(crate) fn watch(
                 Err(StoreError::InvalidAuthority(_)) => return Ok(()),
                 Err(error) => gap.note("native Task update delivery", &error),
             }
+        }
+        if let Err(error) = tick(&store) {
+            gap.note("native recovery", &error);
         }
         std::thread::sleep(Duration::from_secs(1));
     }

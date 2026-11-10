@@ -387,6 +387,7 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
+    pub recovery: Option<crate::session_recovery::SessionRecovery>,
     pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
@@ -546,7 +547,9 @@ pub(crate) async fn list(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let capacity = LaunchCapacity::read(&store.sqlite)?;
     for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(&session, &capacity));
+        let mut reading = summary_surface(&session, &capacity);
+        reading.recovery = store.sqlite.session_recovery(&session.id)?;
+        sessions.push(reading);
     }
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
@@ -603,10 +606,14 @@ fn graph_occurrence(
 pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let capacity = LaunchCapacity::read(&store.sqlite)?;
-    Ok(store
+    let mut record = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity)))
+        .map(|session| summary_surface(&session, &capacity));
+    if let Some(record) = &mut record {
+        record.recovery = store.sqlite.session_recovery(id)?;
+    }
+    Ok(record)
 }
 
 /// What `--on <account|harness[:model]>` names, resolved once before filtering.
@@ -728,6 +735,7 @@ fn summary_surface(
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        recovery: None,
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         availability: session_availability(session),
@@ -1633,6 +1641,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         },
     };
     let mut reading = SessionRecord {
+        recovery: store.sqlite.session_recovery(&session.id)?,
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         availability: session_availability(&metadata),

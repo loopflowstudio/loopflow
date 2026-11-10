@@ -1336,3 +1336,17 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
     );
     assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }
+
+#[test]
+fn session_recovery_round_trips_the_failed_turn_and_wait() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/session.json")).unwrap();
+    let recovery: loopflow::session_recovery::SessionRecovery =
+        serde_json::from_value(raw["recovery"].clone()).unwrap();
+    assert_eq!(
+        recovery.state,
+        loopflow::session_recovery::RecoveryState::WaitingCapacity
+    );
+    assert_eq!(recovery.failed_turn, "rejected-turn");
+    assert_eq!(serde_json::to_value(recovery).unwrap(), raw["recovery"]);
+}

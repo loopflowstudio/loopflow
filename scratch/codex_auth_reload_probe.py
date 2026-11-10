@@ -55,6 +55,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--external-token-handoff", action="store_true")
     args = parser.parse_args()
     if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
         raise RuntimeError("run through scripts/test_network.py")
@@ -162,6 +163,26 @@ def main() -> None:
                     results["cross_account_reload"] = (
                         results["after_forced_refresh"]["account"]["email"] == "second@example.test"
                     )
+                    if args.external_token_handoff:
+                        tokens = json.loads(saved)["tokens"]
+                        results["token_handoff"] = client.call(
+                            "account/login/start",
+                            {
+                                "type": "chatgptAuthTokens",
+                                "accessToken": tokens["access_token"],
+                                "chatgptAccountId": "second",
+                                "chatgptPlanType": "plus",
+                            },
+                        )
+                        read("after_token_handoff", False)
+                        results["handoff_file_unchanged"] = (
+                            home / "auth.json"
+                        ).read_bytes() == saved
+                        results["handoff_provider_alive"] = process.poll() is None
+                        assert (
+                            results["after_token_handoff"]["account"]["email"]
+                            == "second@example.test"
+                        )
                 finally:
                     if client is not None:
                         client.close()

@@ -188,11 +188,12 @@ not mean a stopped turn has continued.
 | What is waiting | What happens next |
 |---|---|
 | No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
-| A draft or pending approval needs its current provider | The draft stays editable and the approval stays answerable. Recovery waits if replacing the provider would lose either. |
+| The native client is adopting a login | Claude waits for its credential cache to expire before continuing; Codex keeps its existing server and client. Drafts stay editable and approvals stay answerable. |
 | A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
 
 A turn rejected by the provider before work began can retry automatically.
-Completed tool actions and finished Graph steps are never replayed. Recovery
+Incomplete native history also stays uncertain. Completed tool actions and
+finished Graph steps are never replayed. Recovery
 keeps the selected model and respects the Session's account restrictions; it
 does not change your preferences or answer approvals for you. See
 [Subscriptions](subscriptions.md#when-an-account-runs-out) for account routing
@@ -209,11 +210,15 @@ lf account use claude=work@                  # switch the Machine's login and st
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-Use a move when you want to choose another model or provider. Usage-limit
-recovery above continues the existing native conversation on its selected
-model. `--blocked` and `--on` read the login each Session uses. Logins belong
+Use a move when you want to choose another model or provider.
+`--blocked` and `--on` read the login each Session uses. Logins belong
 to the Machine, not to a Session: `use` switches the shared login and holds
 launches there until the login fills up or `lf account use auto`.
+
+A running Codex keeps its login until quota recovery supplies another eligible
+login or an explicit `lf --account codex=<login> resume <session>` restarts it.
+An explicit restart restores native history, but does not retain the old client's
+draft or pending approval.
 
 Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 

@@ -295,7 +295,7 @@ fn has_login(provider: Provider, home: &Path) -> bool {
 }
 
 /// A launch waits here rather than failing: a switch in progress is short.
-fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccountError> {
+pub(super) fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccountError> {
     let directory = crate::store::lf_home_dir()
         .join("accounts")
         .join(provider.as_str());

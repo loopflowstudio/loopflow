@@ -196,6 +196,13 @@ pub enum Write {
         on: Option<String>,
         agent: String,
     },
+    /// Request another capacity check for these exact open Sessions.
+    #[serde(rename = "session.recover")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::ops::human_session::SessionRecord>>()))]
+    SessionRecover {
+        directory: PathBuf,
+        ids: Vec<String>,
+    },
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -674,6 +681,7 @@ impl Write {
             Self::SessionMove {
                 blocked, on, agent, ..
             } => value(&super::session::moved(*blocked, on.as_deref(), agent)?),
+            Self::SessionRecover { ids, .. } => value(&super::session::recovered(ids)?),
             Self::SessionResume { .. } | Self::SessionNew { .. } => {
                 let (cli, _) = self
                     .cli()
@@ -1173,6 +1181,7 @@ impl Write {
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::SessionMove { directory, .. }
+            | Self::SessionRecover { directory, .. }
             | Self::WaveCreate { directory, .. }
             | Self::WaveSync { directory, .. }
             | Self::WavePlanBind { directory, .. }

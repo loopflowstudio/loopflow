@@ -19,7 +19,9 @@ import threading
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tests/e2e"))
+from codex_auth_reload_probe import _auth
 from codex_connect import Client
+from websockets.exceptions import ConnectionClosed
 
 parser = argparse.ArgumentParser(
     description="Probe native Codex drain admission with no credentials or external inference."
@@ -27,23 +29,109 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--codex", required=True, type=pathlib.Path)
 parser.add_argument("--output", required=True, type=pathlib.Path)
 parser.add_argument("--approval", action="store_true")
+parser.add_argument("--token-handoff", action="store_true")
+parser.add_argument("--control", action="store_true")
+parser.add_argument("--quota", action="store_true")
+parser.add_argument("--refresh", action="store_true")
+parser.add_argument("--refresh-request", type=int, default=2)
 args = parser.parse_args()
+if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
+    raise RuntimeError("run through scripts/test_network.py")
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
 codex = str(args.codex.resolve())
 held = threading.Event()
 release = threading.Event()
 requests = []
+request_accounts = []
+refresh_requests = []
+refreshed = threading.Event()
 approval = args.approval
+
+
+class RefreshClient(Client):
+    def _read(self):
+        try:
+            for message in self.socket:
+                event = json.loads(message)
+                self.events.append(event)
+                self.pending.put(event)
+                if event.get("method") == "account/chatgptAuthTokens/refresh":
+                    refresh_requests.append(event["params"])
+                    # Let the native TUI answer first if this request is broadcast.
+                    time.sleep(1)
+                    self.socket.send(
+                        json.dumps(
+                            {
+                                "id": event["id"],
+                                "result": refresh_tokens,
+                            }
+                        )
+                    )
+                    refreshed.set()
+        except ConnectionClosed:
+            pass
 
 
 class Model(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        payload = (
+            {
+                "accounts": [
+                    {
+                        "id": name,
+                        "name": name,
+                        "workspace_backend_origin": "https://fixture.example.test",
+                        "account_routing_override": "NO_CONSTRAINT",
+                    }
+                    for name in ("first", "second")
+                ]
+            }
+            if "/accounts/check" in self.path
+            else {}
+        )
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
+        if self.path != "/v1/responses":
+            self.send_error(404)
+            return
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         requests.append(request)
+        request_accounts.append(self.headers.get("chatgpt-account-id"))
+        if args.refresh and len(requests) == args.refresh_request:
+            body = b'{"error":{"type":"authentication_error","message":"fixture expired"}}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if len(requests) == 1 and args.quota:
+            body = json.dumps(
+                {
+                    "error": {
+                        "type": "usage_limit_reached",
+                        "message": "Synthetic fixture usage limit",
+                        "plan_type": "plus",
+                        "resets_at": 4102444800,
+                    }
+                }
+            ).encode()
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if len(requests) == 1 and not approval:
             held.set()
             if not release.wait(30):
@@ -109,16 +197,32 @@ with tempfile.TemporaryDirectory(prefix="loo811-drain-", dir="/tmp") as temporar
     home = root / "codex"
     home.mkdir()
     (home / "config.toml").write_text(f"""cli_auth_credentials_store="file"
+chatgpt_base_url="http://127.0.0.1:{model.server_port}/backend-api/"
 model="fixture"
 model_provider="fixture"
 [model_providers.fixture]
 name="fixture"
 base_url="http://127.0.0.1:{model.server_port}/v1"
 wire_api="responses"
-requires_openai_auth=false
+requires_openai_auth={str(args.token_handoff).lower()}
 [projects.{json.dumps(str(root))}]
 trust_level="trusted"
 """)
+    if args.token_handoff:
+        _auth(home, "first")
+    refresh_tokens = (
+        {
+            "accessToken": json.loads(_auth(home, "second", "refreshed@example.test"))["tokens"][
+                "access_token"
+            ],
+            "chatgptAccountId": "second",
+            "chatgptPlanType": "plus",
+        }
+        if args.refresh
+        else None
+    )
+    if args.refresh:
+        _auth(home, "first")
     env = {
         "HOME": str(root),
         "CODEX_HOME": str(home),
@@ -172,7 +276,7 @@ trust_level="trusted"
 
     try:
         provider = server()
-        setup = Client(endpoint)
+        setup = RefreshClient(endpoint) if args.refresh else Client(endpoint)
         connections.append(setup)
         thread = setup.call(
             "thread/start",
@@ -210,18 +314,45 @@ trust_level="trusted"
             results["approval_before_drain"] = any(
                 e.get("method") == "item/commandExecution/requestApproval" for e in setup.events
             )
-        else:
+        elif not args.quota:
             assert held.is_set(), "model never received admitted input"
-        provider.send_signal(signal.SIGHUP)
+        if args.token_handoff:
+            if not approval:
+                os.write(master, b"\x1b[200~DRAFT_BEFORE_HANDOFF\x1b[201~")
+                read(0.5)
+            if not args.control:
+                saved = _auth(home, "second")
+                results["token_handoff"] = setup.call(
+                    "account/login/start",
+                    {
+                        "type": "chatgptAuthTokens",
+                        "accessToken": json.loads(saved)["tokens"]["access_token"],
+                        "chatgptAccountId": "second",
+                        "chatgptPlanType": "plus",
+                    },
+                )
+            results["account_after_handoff"] = setup.call("account/read", {})
+            if args.quota:
+                retry = setup.start_turn(thread, "Run the disposable fixture.")
+                read(2)
+                results["quota_retry_completed"] = any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == retry
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                )
+        else:
+            provider.send_signal(signal.SIGHUP)
         read(1)
         results["provider_waits_for_admitted_turn"] = provider.poll() is None
         if provider.poll() is not None:
             raise RuntimeError("drain killed admitted turn")
         # This call observes the native rejection, never retries it.
-        try:
-            setup.start_turn(thread, "RPC_DURING_DRAIN")
-        except AssertionError as error:
-            results["new_turn_rejection"] = error.args[0].get("error")
+        if not args.token_handoff:
+            try:
+                setup.start_turn(thread, "RPC_DURING_DRAIN")
+            except AssertionError as error:
+                results["new_turn_rejection"] = error.args[0].get("error")
         if approval:
             os.write(master, b"y")
             read(0.5)
@@ -248,10 +379,11 @@ trust_level="trusted"
             and "function_call_output" in json.dumps(r.get("input", []))
             for r in requests
         )
-        if provider.poll() is None:
-            raise RuntimeError("drain did not complete")
-        endpoint.unlink(missing_ok=True)
-        replacement = server()
+        if not args.token_handoff:
+            if provider.poll() is None:
+                raise RuntimeError("drain did not complete")
+            endpoint.unlink(missing_ok=True)
+            replacement = server()
         read(5)
         before = len(transcript)
         if client.poll() is None:
@@ -268,9 +400,32 @@ trust_level="trusted"
         )
         results["subsequent_turn_completed"] = b"DRAIN_TURN_COMPLETED" in transcript[before:]
         results["local_fixture_requests"] = len(requests)
+        results["turn_results"] = [
+            {"id": e["params"]["turn"]["id"], "status": e["params"]["turn"]["status"]}
+            for e in setup.events
+            if e.get("method") == "turn/completed"
+        ]
+        results["original_turn_id"] = turn
+        if args.token_handoff:
+            results["request_accounts"] = request_accounts
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in setup.events
+            )
+            results["draft_reached_model"] = any(
+                "DRAFT_BEFORE_HANDOFF" in json.dumps(r) for r in requests
+            )
         results["version"] = subprocess.check_output(
             [codex, "--version"], env=env, cwd=root, text=True
         ).strip()
+        if args.refresh:
+            results["refresh_requests"] = refresh_requests
+            results["refresh_answered"] = refreshed.is_set()
+            results["account_after_refresh"] = setup.call("account/read", {})
+        results["native_turns"] = setup.call(
+            "thread/read", {"threadId": thread, "includeTurns": True}
+        )
     finally:
         release.set()
         for connection in connections:
@@ -287,12 +442,28 @@ trust_level="trusted"
         results["all_children_reaped"] = all(p.poll() is not None for p in children)
         (out / f"drain-{results['case']}-terminal.bin").write_bytes(transcript)
         (out / f"drain-{results['case']}-results.json").write_text(json.dumps(results, indent=2))
-        print(json.dumps(results))
+        print(json.dumps({key: value for key, value in results.items() if key != "native_turns"}))
 
 assert results["client_survived_drain"], "native client exited on drain rejection"
-assert results["old_turn_completed"], "admitted turn was not completed"
+if args.quota:
+    assert any(t["id"] == turn and t["status"] == "failed" for t in results["turn_results"])
+    assert results["quota_retry_completed"]
+else:
+    assert results["old_turn_completed"], "admitted turn was not completed"
 assert results["subsequent_turn_completed"], "subsequent typed turn did not complete"
 if approval:
     assert results["approval_before_drain"] and results["approval_executed"]
 else:
     assert results["typed_input_reached_model"], "input submitted during draining was lost"
+if args.token_handoff:
+    assert request_accounts[0] == "first"
+    expected = "first" if args.control else "second"
+    assert request_accounts[-1] == expected
+    assert results["account_after_handoff"]["account"]["email"] == expected + "@example.test"
+    if approval:
+        assert results["completed_commands"] == 1
+    else:
+        assert results["draft_reached_model"]
+if args.refresh:
+    assert results["refresh_answered"]
+    assert results["account_after_refresh"]["account"]["email"] == "refreshed@example.test"

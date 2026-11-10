@@ -28,10 +28,6 @@ use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 pub(crate) const RESET_GRACE_SECS: i64 = 5;
-/// A limit reported this soon after a switch belongs to the account before it.
-/// Running Claude picks a switched login up within seconds (its credentials
-/// file's mtime), and launches switch often, so the window stays short.
-const SWITCH_SETTLE_SECS: i64 = 15;
 const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -445,6 +441,68 @@ impl ProviderAccountRoute {
 
     pub(crate) fn account_id(&self) -> &ProviderAccountId {
         &self.account_id
+    }
+
+    /// Supply the private native server from the existing credential broker.
+    /// The lock and native refresh complete before returning; no refresh grant
+    /// enters the observer or a second credential store.
+    pub(crate) async fn codex_auth_tokens(
+        &self,
+        refresh: bool,
+    ) -> Result<secrecy::SecretString, ProviderAccountError> {
+        let _lock = activation::lock_native_credential(Provider::Codex)?;
+        let account = self.check_account().await?;
+        let unavailable = |reason: String| ProviderAccountError::CredentialUnavailable {
+            provider: Provider::Codex,
+            account_id: self.account_id.clone(),
+            reason,
+        };
+        let mut access = codex_access::resolve(&account, None)
+            .await
+            .map_err(|error| unavailable(error.to_string()))?;
+        if refresh {
+            let reply = access
+                .connection
+                .request_raw("account/read", serde_json::json!({"refreshToken":true}))
+                .await
+                .map_err(|_| unavailable("Native Codex token refresh failed".into()))?;
+            if reply.get("error").is_some() {
+                return Err(unavailable(
+                    "Native Codex token refresh was rejected".into(),
+                ));
+            }
+            access = codex_access::resolve(&account, None)
+                .await
+                .map_err(|error| unavailable(error.to_string()))?;
+        }
+        access
+            .save_to(&account, self.account_home())
+            .map_err(|error| unavailable(error.to_string()))?;
+        let bytes = fs::read(access.home().join("auth.json"))
+            .map_err(|_| unavailable("Codex credential unavailable".into()))?;
+        let credential: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| unavailable("Codex credential unreadable".into()))?;
+        let token = credential
+            .pointer("/tokens/access_token")
+            .and_then(serde_json::Value::as_str);
+        let account = credential
+            .pointer("/tokens/account_id")
+            .and_then(serde_json::Value::as_str);
+        let (Some(token), Some(account)) = (token, account) else {
+            return Err(unavailable(
+                "Codex credential has no managed account token".into(),
+            ));
+        };
+        access
+            .ensure_unchanged()
+            .map_err(|error| unavailable(error.to_string()))?;
+        Ok(secrecy::SecretString::new(
+            serde_json::json!({
+                "accessToken":token, "chatgptAccountId":account,
+                "chatgptPlanType":access.usage.plan,
+            })
+            .to_string(),
+        ))
     }
 
     /// The account this route's usage belongs to now. A launch's account is
@@ -1074,8 +1132,6 @@ pub(crate) async fn resolve_provider_account(
     .await
 }
 
-const LIMIT_REASON_ENV: &str = "LF_LIMIT_REASON";
-
 /// Native Claude reported a limit through `StopFailure`, on stdin. Its stream is
 /// not ours to read, so this hook is how lf hears of it. Recording it can wait
 /// on Claude's lock and the provider's token endpoint, longer than the hook's
@@ -1089,15 +1145,19 @@ pub fn observe_native_limit() {
     }
 }
 
-fn start_limit_recording(input: &str) -> anyhow::Result<()> {
+pub(crate) fn start_limit_recording(input: &str) -> anyhow::Result<()> {
     // Anything else, a capacity blip included, records nothing: the person
     // still sees Claude's own message.
-    let Some(limit) = spent_limit_reason(input) else {
+    if spent_limit_reason(input).is_none() {
         return Ok(());
-    };
-    crate::os_process::detached_context_block("record-limit")?
-        .env(LIMIT_REASON_ENV, limit.reason)
+    }
+    use std::io::Write;
+    let mut child = crate::os_process::detached_context_block("record-limit")?
+        .stdin(std::process::Stdio::piped())
         .spawn()?;
+    if let Some(mut pipe) = child.stdin.take() {
+        pipe.write_all(input.as_bytes())?;
+    }
     Ok(())
 }
 
@@ -1109,68 +1169,85 @@ fn spent_limit_reason(input: &str) -> Option<crate::agent::SpentLimit> {
     crate::agent::subscription_limit_text(details["last_assistant_message"].as_str()?)
 }
 
-/// The recorder a limit hook started: the account cools and a shared login
-/// moves to the eligible account that ranks first, which every open Claude
-/// follows. Their next message runs there, with no input of ours. Other
-/// Sessions reporting the same limit find the login already moved.
+/// Record the native failed prompt. The Session observer owns account work
+/// and continuation, outside the lifetime of the provider's failure hook.
 pub fn record_limit() {
-    // The hook passes the displayed line it matched; the recorder reads its
-    // scope from it.
-    let line = std::env::var(LIMIT_REASON_ENV).unwrap_or_default();
-    let Some(limit) = crate::agent::subscription_limit_text(&line) else {
-        return;
-    };
-    let recorded = _run_blocking_account(Provider::Claude, "record", |runtime| {
-        runtime.block_on(record_native_limit(Provider::Claude, limit))
-    });
+    let recorded = (|| -> anyhow::Result<()> {
+        let input = std::io::read_to_string(std::io::stdin())?;
+        crate::harness::claude_recovery::record_limit(&serde_json::from_str(&input)?)
+    })();
     if let Err(error) = recorded {
         RecordingGap::default().note("usage limit", &error);
     }
 }
 
-async fn record_native_limit(
+/// The failed native turn names its account and model; a later shared-login
+/// switch must not attribute the old rejection to the replacement account.
+pub(crate) async fn record_session_limit(
     provider: Provider,
+    account: &ProviderAccountId,
+    model: &str,
     limit: crate::agent::SpentLimit,
 ) -> Result<(), ProviderAccountError> {
+    if let Some(store) = route_store().await? {
+        // A rejected native prompt is stronger than an account-wide usage poll.
+        // Hold this model briefly even when the generic windows have room.
+        let mut signal = RateLimitSignal::stated(limit.clone());
+        record_stated_limit(&store, provider, account, limit, Some(model)).await?;
+        signal.model = Some(launched_model_family(Some(model)));
+        signal.windows = vec![crate::store::AccountLimitWindow {
+            window: format!("rejected:{model}"),
+            used_percent: 100,
+            resets_at: signal.resets_at,
+            plan: None,
+            model: signal.model.clone(),
+            limited_until: None,
+        }];
+        record_rate_limit_signal(&store, provider, account, &signal, Some(model)).await?;
+    }
+    Ok(())
+}
+
+/// Observe the login already pinned to a native conversation, even when it is
+/// spent. Selection here could attribute its rejection to a healthier login.
+pub(crate) async fn session_account_route(
+    provider: Provider,
+    thread: &AgentSessionId,
+    launched: &ProviderAccountId,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let Some(store) = route_store().await? else {
-        return Ok(());
+        return Ok(None);
     };
-    let settled = now_unix() - SWITCH_SETTLE_SECS;
-    if store
-        .provider_account_switched_since(provider, settled)
+    let account = store
+        .provider_session_account(provider, thread)
         .await?
-        .is_some()
-    {
-        return Ok(());
-    }
-    let native = activation::native_home(provider, None);
-    let Some(active) = activation::observe_active_account(&store, provider, &native).await? else {
-        return Ok(());
+        .unwrap_or_else(|| launched.clone());
+    let Some(account) = store
+        .get_provider_account(provider.as_str(), &account)
+        .await?
+    else {
+        return Ok(None);
     };
-    // Read before the switch, while the spent login is still the active home.
-    // A terminal's model is its own to change; credits land on the default.
-    record_stated_limit(&store, provider, &active, limit, None).await?;
-    // A Session a person pinned to accounts keeps to them.
-    if !selection::AccountSelection::from_env()?.is_default() {
-        return Ok(());
-    }
-    let wave = crate::work::wave::context::ambient_wave_id();
-    match select_route(provider, None, None, wave.as_ref(), None, None).await {
-        Ok(Some(route)) => {
-            activation::activate(
-                &store,
-                provider,
-                &route.account_id,
-                &native,
-                activation::SwitchCause::Exhaustion,
-            )
-            .await?;
-            Ok(())
-        }
-        // Nothing has capacity: the login stays, and Sessions wait for the reset.
-        Ok(None) | Err(ProviderAccountError::NoEligibleAccount { .. }) => Ok(()),
-        Err(error) => Err(error),
-    }
+    Ok(Some(shared_route(provider, account, store, false)?))
+}
+
+pub(crate) async fn session_recovery_route(
+    provider: Provider,
+    model: &str,
+    directory: &Path,
+    wave: Option<&WaveId>,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    Ok(select_route(
+        provider,
+        None,
+        None,
+        wave,
+        Some(model),
+        Some(directory),
+        true,
+    )
+    .await?
+    .map(|route| route.launching(Some(model))))
 }
 
 /// The `provider` login this launch's `--account` names when `current` is not
@@ -1215,6 +1292,7 @@ pub(crate) async fn resolve_provider_account_exact(
         wave_id,
         model,
         directory,
+        false,
     )
     .await?
     .map(|route| route.launching(model));
@@ -1235,6 +1313,7 @@ async fn select_route(
     wave_id: Option<&WaveId>,
     model: Option<&str>,
     directory: Option<&Path>,
+    require_capacity: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -1254,6 +1333,7 @@ async fn select_route(
             store,
             model,
             directory,
+            require_capacity,
         )
         .await;
     }
@@ -1416,6 +1496,7 @@ async fn resolve_selected_provider_account(
     local_store: Option<SharedStore>,
     model: Option<&str>,
     directory: Option<&Path>,
+    require_capacity: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = launch_repo_id(directory)?;
     let Some(candidates) = ordered_selected_candidates(
@@ -1447,7 +1528,7 @@ async fn resolve_selected_provider_account(
     );
     for (candidate, explicit) in candidates {
         let home = &candidate.home;
-        if !explicit
+        if (!explicit || require_capacity)
             && store
                 .select_provider_account(
                     provider,
@@ -4372,48 +4453,72 @@ mod account_first_tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn one_native_limit_moves_the_shared_login_and_repeats_change_nothing() {
+    async fn recovery_respects_capacity_even_for_a_preferred_login() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (store, native) = shared_home(Provider::Codex, temp.path(), "first").await;
-        let active = || {
-            let store = Arc::clone(&store);
-            let native = native.clone();
-            async move {
-                activation::observe_active_account(&store, Provider::Codex, &native)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .as_str()
-                    .to_string()
-            }
-        };
-        let cooling = |id: &'static str| {
-            let store = Arc::clone(&store);
-            async move {
-                store
-                    .get_provider_account("codex", &parse_account_id(id).unwrap())
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .cooldown_until
-            }
-        };
-
-        record_native_limit(Provider::Codex, stated("usage limit reached"))
+        let (store, _) = shared_home(Provider::Codex, temp.path(), "first").await;
+        record_session_limit(
+            Provider::Codex,
+            &parse_account_id("first").unwrap(),
+            "gpt-5",
+            stated("You've hit your usage limit"),
+        )
+        .await
+        .unwrap();
+        let preferred =
+            selection::AccountSelection::from_flags(&["codex=first@".into()], &[]).unwrap();
+        let guard = preferred.activate().unwrap();
+        let route = session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(active().await, "second");
-        assert!(cooling("first").await.is_some());
-
-        // Every other open Session reports the same limit moments later.
-        record_native_limit(Provider::Codex, stated("usage limit reached"))
+        assert_eq!(route.account_id().as_str(), "second");
+        drop(guard);
+        let restricted =
+            selection::AccountSelection::from_flags(&[], &["codex=first@".into()]).unwrap();
+        let _guard = restricted.activate().unwrap();
+        assert!(matches!(
+            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None).await,
+            Err(ProviderAccountError::NoEligibleAccount {
+                retry_at: Some(_),
+                ..
+            })
+        ));
+        // A fresh generic usage reading cannot erase the rejected model's hold.
+        let account = store
+            .get_provider_account("codex", &parse_account_id("first").unwrap())
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(active().await, "second");
-        assert_eq!(cooling("second").await, None);
+        save_polled_usage(
+            &store,
+            &account,
+            &[crate::store::AccountLimitWindow {
+                window: "five_hour".into(),
+                used_percent: 20,
+                resets_at: None,
+                plan: None,
+                model: None,
+                limited_until: None,
+            }],
+        )
+        .await
+        .unwrap();
+        assert!(
+            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            session_recovery_route(Provider::Codex, "another-model", Path::new("/"), None)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id()
+                .as_str(),
+            "first"
+        );
     }
 
     fn stated(line: &str) -> crate::agent::SpentLimit {
@@ -4590,96 +4695,6 @@ mod account_first_tests {
             assert_eq!(spent_limit_reason(&input), None, "{input}");
         }
         assert!(spent_limit_reason(&stop_failure(SPENT_LINE, None)).is_some());
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_limit_hook_returns_while_its_recorder_waits_on_the_provider() {
-        // The stand-in endpoints exist only in this binary, so `lf` here is it.
-        // Its ctor drops the provider home, so the fixture variable carries it.
-        if let Some(native) = std::env::var_os("LIMIT_RECORDER_NATIVE") {
-            std::env::set_var("CLAUDE_CONFIG_DIR", native);
-            record_limit();
-            return;
-        }
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _lf_bin = EnvRestore::capture(&["LF_BIN"]);
-        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
-        expire_claude_login(&store, temp.path(), "second").await;
-        let recorder = temp.path().join("lf");
-        fs::write(
-            &recorder,
-            format!(
-                "#!/bin/sh\nLIMIT_RECORDER_NATIVE='{}' exec '{}' --exact provider_account::account_first_tests::a_limit_hook_returns_while_its_recorder_waits_on_the_provider\n",
-                native.display(),
-                std::env::current_exe().unwrap().display()
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(
-            &recorder,
-            std::os::unix::fs::PermissionsExt::from_mode(0o755),
-        )
-        .unwrap();
-        std::env::set_var("LF_BIN", &recorder);
-        let (asked, token_requested) = std::sync::mpsc::channel();
-        let (answer, answered) = std::sync::mpsc::channel::<()>();
-        // The spent login's usage is read first, then the parked login refreshes.
-        let (_endpoints, server) = crate::subscription::observation_tests::serve(
-            vec![
-                (200, serde_json::json!({"limits": []}).to_string()),
-                (
-                    200,
-                    serde_json::json!({"account":{"email":"first@example.com","uuid":"first"}})
-                        .to_string(),
-                ),
-                (
-                    200,
-                    serde_json::json!({"access_token":"renewed","refresh_token":"rotated","expires_in":28800}).to_string(),
-                ),
-                (
-                    200,
-                    serde_json::json!({"account":{"email":"second@example.com","uuid":"second"}})
-                        .to_string(),
-                ),
-            ],
-            move |request| {
-                if request == 2 {
-                    asked.send(()).unwrap();
-                    answered.recv().unwrap();
-                }
-            },
-        )
-        .await;
-
-        // Run inline, this would sit on the token request the endpoint holds.
-        start_limit_recording(&stop_failure(SPENT_LINE, None)).unwrap();
-        tokio::task::spawn_blocking(move || {
-            token_requested
-                .recv_timeout(std::time::Duration::from_secs(30))
-                .unwrap()
-        })
-        .await
-        .unwrap();
-
-        let first = parse_account_id("first").unwrap();
-        let limited = store.get_provider_account("claude", &first).await.unwrap();
-        assert!(limited.unwrap().cooldown_until.is_some());
-        assert!(!claude_credential(&native).contains("rotated"));
-
-        answer.send(()).unwrap();
-        server.await.unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !claude_credential(&native).contains("rotated") {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the login never moved"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        assert!(claude_credential(&temp.path().join("second")).contains("rotated"));
     }
 
     #[allow(clippy::await_holding_lock)]

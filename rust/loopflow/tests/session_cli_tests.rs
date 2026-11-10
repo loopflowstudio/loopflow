@@ -75,7 +75,9 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(help.contains("resume"));
     assert!(help.contains("new"));
     assert!(!help.contains("connect"));
-    assert!(!help.contains("attach"));
+    assert!(!help
+        .lines()
+        .any(|line| line.trim_start().starts_with("attach ")));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));

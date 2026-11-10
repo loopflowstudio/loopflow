@@ -122,3 +122,5 @@ The docs preview command
 `lf open --host desktop --file rust/loopflow/src/server/README.md --file docs/dev/server.md`
 returned “Error: task_82f1213c2bdf4537a349942b6f1a7939 has no workspace in this Desktop window; nothing changed.”
 The docs remain readable at those paths; this does not establish a mounted preview.
+
+- Sync conflict check, 2026-11-09, `fcd75a311`: `cargo test -p loopflow --lib server::service::tests::typed_events_share_connection_order_survive_selection_and_stop_on_cancel` (with `LF_*` unset and stdin closed) passed, 1 test; macOS linker warned about `__eh_frame` size. Gate/CI own broader checks and clippy after the sync.

@@ -25,6 +25,7 @@ struct MobileTaskList: View {
     @State private var creation: MobileTaskCreation?
     @State private var createdTask: MobileTaskOpening?
     @State private var showCreatedTask = false
+    @State private var chosenSessions: [WorkWorkspaceKey: SessionRecord] = [:]
     private let creationClient: (any MobileTaskCreationClient)?
     private let connectionLabel: String
     private let onForget: (() -> Void)?
@@ -59,7 +60,8 @@ struct MobileTaskList: View {
                     }
                     ForEach(visibleTasks, id: \.work) { task in
                         NavigationLink {
-                            MobileSessionView(task: task, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
+                            MobileSessionView(task: task, workspace: workspace, theme: theme,
+                                chosenSession: $chosenSessions[task.work], connectionLabel: connectionLabel)
                         } label: {
                             MobileTaskRow(task: task, theme: theme)
                         }
@@ -112,7 +114,8 @@ struct MobileTaskList: View {
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(isPresented: $showCreatedTask) {
                 if let createdTask {
-                    MobileSessionView(task: createdTask.task, workspace: workspace, theme: theme, connectionLabel: connectionLabel)
+                    MobileSessionView(task: createdTask.task, workspace: workspace, theme: theme,
+                        chosenSession: $chosenSessions[createdTask.task.work], connectionLabel: connectionLabel)
                         .onAppear(perform: createdTask.presented)
                 }
             }
@@ -241,12 +244,12 @@ struct MobileSessionView: View {
     let task: WorkViewPlan.Content
     let workspace: MobileWorkspace
     let theme: ThemeDefinition
+    @Binding var chosenSession: SessionRecord?
     var connectionLabel: String = "Offline fixture"
     @Environment(\.dynamicTypeSize) private var textSize
     @Environment(\.verticalSizeClass) private var verticalSize
     @State private var opening: Task<Void, Never>?
     @State private var showingSessions = false
-    @State private var chosenSession: SessionRecord?
     @State private var showingDetails = false
 
     private var compact: Bool { verticalSize == .compact }
@@ -315,7 +318,7 @@ struct MobileSessionView: View {
                     .disabled(workspace.findInTerminal == nil)
             }
         }
-        .task { await workspace.open(task) }
+        .task { await workspace.open(task, sessionID: chosenSession?.id) }
         .onDisappear { opening?.cancel(); workspace.leave() }
         .sheet(isPresented: $showingSessions) {
             if let client = workspace.sessionListingClient {

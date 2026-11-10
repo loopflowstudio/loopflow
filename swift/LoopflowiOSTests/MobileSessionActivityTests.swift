@@ -21,7 +21,7 @@ final class MobileSessionActivityTests: XCTestCase {
         let first = try XCTUnwrap(client.attachments.first)
         first.reportStatus(report(.blocked))
         try await wait { workspace.programStatus?.summary?.state == .blocked }
-        let view = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let view = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertNoThrow(try view.inspect().find(text: "Codex · Blocked · Permission"))
         XCTAssertEqual(workspace.state, .controlling)
         first.reportStatus(report(nil))

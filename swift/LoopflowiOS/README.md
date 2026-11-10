@@ -35,7 +35,10 @@ The **Sessions** button lists this Task's open conversations with their names,
 providers, availability and primary/current markers. Select one to view its terminal;
 **Use keyboard** takes control separately. Each keeps its own unfinished draft.
 Reconnect, returning to the app and **Open Session** stay on the conversation you
-selected. Choosing one never changes the Task's primary Session. Pull to refresh;
+selected. Returning to Tasks and reopening the same Task also keeps that choice
+for this connected workspace, as an observer. Each Task remembers its own choice;
+restarting the app starts at the Task list. Choosing one never changes the Task's
+primary Session. Pull to refresh;
 **Load more Sessions** reads the next page. A failed read preserves the list, and
 closing the sheet cancels its requests. The shared CLI applies Task membership
 before the page limit; the phone has no separate Session inventory or watcher.

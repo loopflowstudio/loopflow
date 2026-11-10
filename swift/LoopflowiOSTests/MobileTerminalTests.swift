@@ -769,7 +769,7 @@ final class MobileTerminalTests: XCTestCase {
         let workspace = MobileWorkspace(client: client)
         defer { workspace.leave() }
         let task = try await client.workingTasks()[0]
-        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
 
         await workspace.open(task)
         for _ in 0..<2 {
@@ -878,7 +878,7 @@ final class MobileTerminalTests: XCTestCase {
         var output = Data()
         workspace.render = { bytes, _ in output.append(bytes) }
         let task = try await client.workingTasks()[0]
-        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
         await workspace.open(task)
         await settle()
         workspace.suspend()
@@ -922,7 +922,7 @@ final class MobileTerminalTests: XCTestCase {
         await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .notRunning)
         XCTAssertTrue(client.starts.isEmpty)
-        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
         try screen.inspect().find(button: "Open Session").tap()
         await settle()
@@ -947,7 +947,7 @@ final class MobileTerminalTests: XCTestCase {
             let workspace = MobileWorkspace(client: client)
             defer { workspace.leave() }
             let task = try await client.workingTasks()[0]
-            let view = NavigationStack { MobileSessionView(task: task, workspace: workspace, theme: theme) }
+            let view = NavigationStack { MobileSessionView(task: task, workspace: workspace, theme: theme, chosenSession: .constant(nil)) }
                 .environment(\.dynamicTypeSize, textSize)
                 .preferredColorScheme(name == "dark" ? .dark : .light)
             let controller = UIHostingController(rootView: view)
@@ -1054,7 +1054,7 @@ final class MobileTerminalTests: XCTestCase {
         workspace.suspend()
         await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .unavailable("No running owner"))
-        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertThrowsError(try screen.inspect().find(button: "Reconnect"))
         XCTAssertThrowsError(try screen.inspect().find(button: "Use keyboard"))
         XCTAssertNil(client.transport)
@@ -1064,7 +1064,7 @@ final class MobileTerminalTests: XCTestCase {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }
         let task = try XCTUnwrap(workspace.selected)
-        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: task, workspace: workspace, theme: .light, chosenSession: .constant(nil))
 
         client.transport.failNextSendAfterAccept = true
         controller.terminal.insertText("accepted once")
@@ -1104,7 +1104,7 @@ final class MobileTerminalTests: XCTestCase {
         workspace.suspend()
         await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .ended)
-        let endedScreen = MobileSessionView(task: try XCTUnwrap(workspace.selected), workspace: workspace, theme: .light)
+        let endedScreen = MobileSessionView(task: try XCTUnwrap(workspace.selected), workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertThrowsError(try endedScreen.inspect().find(button: "Reconnect"))
         workspace.send(Data("no".utf8))
         XCTAssertTrue(client.terminal.draft.isEmpty)
@@ -1117,7 +1117,7 @@ final class MobileTerminalTests: XCTestCase {
         workspace.suspend()
         await workspace.restoreForegroundSession()
         XCTAssertEqual(workspace.state, .unavailable("No existing Session is recorded"))
-        let missingScreen = MobileSessionView(task: rows[2], workspace: workspace, theme: .light)
+        let missingScreen = MobileSessionView(task: rows[2], workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertThrowsError(try missingScreen.inspect().find(button: "Reconnect"))
     }
 
@@ -1141,7 +1141,7 @@ final class MobileTerminalTests: XCTestCase {
         await workspace.open(withoutPrimary)
         XCTAssertEqual(workspace.state, .unavailable("No Session is recorded here. This Task’s checkout is on another Machine; connect there to look for its conversation."))
         XCTAssertFalse(workspace.canStartSession)
-        let screen = MobileSessionView(task: withoutPrimary, workspace: workspace, theme: .light)
+        let screen = MobileSessionView(task: withoutPrimary, workspace: workspace, theme: .light, chosenSession: .constant(nil))
         XCTAssertThrowsError(try screen.inspect().find(button: "Open Session"))
 
         await workspace.open(withoutPrimary, sessionID: task.primarySession)

@@ -152,11 +152,37 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         keyboard.tap()
         app.typeText("review draft")
+        app.navigationBars.buttons["Tasks"].tap()
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        app.staticTexts["Review a change"].tap()
+        XCTAssertTrue(app.staticTexts["Viewing Session"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Design review"].exists, "Session choices belong to their own Task")
+        app.navigationBars.buttons["Tasks"].tap()
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+        task.tap()
+        XCTAssertTrue(app.staticTexts["Viewing Session"].waitForExistence(timeout: 5))
+        guard app.staticTexts["Design review"].waitForExistence(timeout: 5) else {
+            XCTFail("Reopening the Task should retain its chosen Session")
+            return
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        app.buttons["Find in Session"].tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("review draft")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        app.buttons["Close Find"].tap()
+        XCTAssertTrue(keyboard.isHittable, "Returning must not retake keyboard control")
         app.buttons["Sessions"].tap()
         app.buttons.containing(.staticText, identifier: "Implementation").firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Viewing Session"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Implementation"].exists)
         XCTAssertFalse(app.keyboards.firstMatch.exists)
+        app.buttons["Find in Session"].tap()
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("original draft")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+        app.buttons["Close Find"].tap()
         capture(app, "session-picker-return")
     }
 

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-806 concept review</title>
+<style>
+:root { color-scheme: light dark; font: 17px/1.55 system-ui, sans-serif; }
+body { max-width: 48rem; margin: 3rem auto; padding: 0 1.2rem; }
+h1 { font-size: 1.8rem; line-height: 1.2; }
+h2 { font-size: 1.15rem; margin-top: 1.7rem; }
+small { color: light-dark(#555, #bbb); }
+code { overflow-wrap: anywhere; font-size: .9em; }
+pre { padding: 1rem; white-space: pre-wrap; background: light-dark(#f0f2f4, #23272b); }
+li { margin: .5rem 0; }
+</style>
+<header><small>LOO-806 · concept-review · 2026-11-09</small>
+<h1>Advance with the existing design</h1>
+<p>No design change or open product choice. The implemented change makes the
+declared result trustworthy without adding an interaction.</p>
+<small>Built from scratch/typed-writes.md, lf/commands/write.rs,
+engine/task.rs, engine/launch.rs, server/service.rs and server/README.md
+(Rust paths under rust/loopflow/src/).</small></header>
+<h2>Action → concept → API</h2>
+<pre>Ship Task → Task shipping state → task.ship → TaskShip
+Bind Session → Session or binding preview → session.bind → SessionBinding
+Save arrangement → Dashboard / layout / tile → desktop.* → saved record</pre>
+<h2>The mismatch, before and after</h2>
+<p><strong>Before:</strong> a write returned arbitrary JSON beside an independently
+declared schema. A client could receive a shape the schema did not describe.</p>
+<p><strong>Implemented:</strong> one declaration supplies the Rust result type,
+dispatch variant and <code>x-result</code>. The server serializes the result
+without adding a tag. Engine child-command builders also feed Clap checks.</p>
+<h2>Normal use and recovery</h2>
+<ol>
+<li>Submit <code>task.ship</code>; decode <code>shipping</code>,
+<code>already_shipping</code> or <code>at_end</code>. Follow the existing Task
+and execution references.</li>
+<li>If the reply is lost, the write may already have taken effect. Inspect
+existing state; the carrier does not replay locally. A request trace does
+not replace the execution owner.</li>
+<li>Disconnecting leaves admitted work running. Typed answers do not introduce
+rollback, a new stored lifecycle or a persistence migration.</li>
+</ol>
+<h2>Next check</h2>
+<p>QA and gate should exercise shipping, an already-shipping Task, and request
+failure/recovery. This page records a design review, not a new test run.</p>
+<p>Open product questions: none.</p>
+</html>

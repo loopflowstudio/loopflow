@@ -7,7 +7,7 @@ and bulk protocol are outside this Task.
 ## Transport dependency — November 10, 2026 UTC
 
 The inspected PR #1812 head is
-`73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. It supplies
+`e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`. It supplies
 `Admission::Remote { node: String, user: u64 }` through
 `server/mobile.rs::permits_peer`: Tailscale WhoIs `Node.StableID` and
 `UserProfile.ID`, checked against `Node.User`. Both WebSocket paths authenticate
@@ -23,13 +23,14 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 20:11 UTC, GitHub reports PR #1812 open and unmerged at
-`e0f6d4c19aa5aecd1388248a2d2b6fd5c7fedf29`, now `mergeable: MERGEABLE`,
-with no auto-merge. Its inspected `server/ticket.rs` still uses `Instant` and
-leaves foreign terminal attempts unconsumed. Freshly fetched main is
-`9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The November 10 20:11 UTC `lf task status LOO-718 --json` read still places the
-transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
+At November 10 20:14 UTC, GitHub reports PR #1812 open and unmerged at that
+head, `mergeable: MERGEABLE`, with no auto-merge. At 20:49 UTC, PR #1812 remains
+open and unmerged at `dde39d48f4a6865104ba8911ac9d0afb218e13fa`, still mergeable
+with no auto-merge. Freshly fetched main is
+`454f768944fb4b4aa4ee572beb1ca5418b18df6d`; `server/mobile.rs` and
+`server/ticket.rs` remain absent. The fresh `lf task status LOO-718 --json`
+read still places the transport Task at `feature/demo`, with PR #1812 open and
+settlement not armed. The newer PR head has not been inspected for code changes.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;
@@ -59,8 +60,8 @@ alone cannot satisfy these checks.
 
 Replace ticket timing with `SystemTime`; test expiry at 60 seconds with a clock
 advance representing host sleep, expired-ticket sweeping, and unchanged bulk
-redemption behavior. Leave unrelated throttles on `Instant` and retain watch
-resumption.
+redemption behavior, including release of abandoned bulk reservations without
+another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
 After integration, update `docs/server.md` (Phone access) and
 `rust/loopflow/src/server/README.md` (Remote attach contract): remove their

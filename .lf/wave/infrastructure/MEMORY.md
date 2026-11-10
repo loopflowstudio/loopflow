@@ -27,38 +27,37 @@ continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
 work. Account switching alone does not establish continuation. Keep history,
 model, drafts and approvals; distinguish rejection from uncertain/completed work.
 
-Codex 0.167.0 replacement kept drafts, but SIGHUP drain rejected racing
-`turn/steer`: client exit 1, input lost. Approvals survived a separate replacement
-probe. Forced managed refresh reloaded same-account changes, not another account.
-Supplied tokens through the existing broker passed native 401 callbacks on retry
-and later typed input; handoff during an active response failed its control.
-Server replacement remains permitted but unproven.
+Codex 0.167.0 replacement kept drafts; SIGHUP drain lost racing input and exited
+the client. Separate approvals survived. Managed refresh reloaded only the same
+account. Broker-supplied tokens passed native 401 callbacks, but handoff failed an
+active response. Conditional `turn/steer.expectedTurnId` protects active turns
+yet cannot restart a rejected turn: `no active turn to steer`. Server replacement
+remains allowed, unproven for complete recovery.
 
-Claude 2.1.321 joins inbox UUID → transcript user `promptId` → Stop `prompt_id`.
-Transcripts can lag hooks; socket writes and unrelated Stops prove no continuation.
-Immediate retries used old tokens; cache expiry plus fresh reads passed, but
-neither a delay nor a read reserves the native input position.
+Claude 2.1.321 correlates inbox UUID → user `promptId` → Stop `prompt_id`.
+Transcripts lag hooks. Cache expiry allowed changed tokens on retry, but reserves
+no input position. `StopFailure.asyncRewake` wakes after quota rejection; held
+preparation/dispatch probes both woke again after newer typed input completed.
+Their barriers performed no credential writes; wake correlation was unestablished.
 
-Earlier two-client product probes passed with synthetic logins/local inference,
-correlated completion, edited drafts and cleanup. The admission review then
-removed Codex login/start and Claude switch/inbox sends: neither inspected API
-conditions the operation on the still-current failed turn. Current probes show
-native waits, no handoff/retry, editable drafts and completed typed input.
-Automatic continuation remains unfinished.
+Earlier two-client synthetic-login probes completed retries and edited drafts.
+Admission review removed Codex login/start and Claude switch/inbox sends because
+they can race native input. Current probes establish safe waits, editable drafts,
+later typed completion and cleanup, not automatic continuation. These failures
+rule out the tested mechanisms, not every native alternative. Reads and lf locks
+cannot reserve input on an independently connected client.
 
-Late waits cannot erase retained dispatch/completion. Tests cover reconnect,
-correlation, a subsequent rejection and provider replacement. Task-bound served
-checks retain memberships/attempts without starting owners. Safe admission during
-credential work and at dispatch, native Task-bound bulk preservation, pending
-approvals, model/route variants and the broader merged-tree gate remain.
-Release's entry-point lesson applies: observer checks prove neither Desktop bulk
-continuation nor repair of the unresolved ordinary-typing incident.
+Late waits retain dispatch/completion across reconnect and provider replacement;
+subsequent rejections stay separate. Task-bound served fixtures retain memberships
+and attempts without new owners. Native admission with credential adoption,
+Task-bound bulk/approval preservation, model/routes and merged-tree gate remain.
+Observer checks prove neither Desktop continuation nor ordinary-typing repair.
 
-Scoped Keychain checks cover USER plus one lexical legacy item; third untouched.
+Scoped Keychain checks cover USER plus one lexical legacy item, leaving a third.
 Native write rejection, installed/unsuffixed repair, real token rotation, Codex
-overwriting another login, Claude no-model quota with healthy windows, and rental
-token invalidation remain unobserved. Exact direction/results:
-`65686dbf9:scratch/`; earlier: `d4941f0456`, this heading.
+overwriting another login, Claude no-model quota with healthy windows and rental
+token invalidation remain unobserved. Direction/results:
+`98c32372889f39819bcaccd512f1849ea5446d55:scratch/`.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

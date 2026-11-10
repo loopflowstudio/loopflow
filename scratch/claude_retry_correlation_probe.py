@@ -20,8 +20,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests/e2e"))
+from claude_shared_home import _forget_native_login, _seed_keychain_login
 
-def _hook(base: str, rewake: bool = False) -> None:
+
+def _hook(
+    base: str,
+    rewake: bool = False,
+    block_recovery: bool = False,
+    admit_recovery: bool = False,
+    gate_failure: bool = False,
+) -> None:
     event = json.load(sys.stdin)
     payload = {
         "event": event,
@@ -30,6 +39,46 @@ def _hook(base: str, rewake: bool = False) -> None:
     request = urllib.request.Request(base + "/hook", data=json.dumps(payload).encode())
     with urllib.request.urlopen(request, timeout=3):
         pass
+    recovery = event["hook_event_name"] == "UserPromptSubmit" and any(
+        marker in event.get("prompt", "")
+        for marker in ("RETRY_CORRELATION_FIXTURE", "REWAKE_REJECTED_TURN_FIXTURE")
+    )
+    if admit_recovery and recovery:
+        if gate_failure:
+            raise SystemExit(1)
+        for phase in ("gate_prepare", "gate_dispatch"):
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                with urllib.request.urlopen(base + "/dispatch", timeout=3) as response:
+                    ready = json.load(response).get(phase)
+                if ready:
+                    break
+                time.sleep(0.05)
+            else:
+                raise TimeoutError(phase)
+            with urllib.request.urlopen(
+                urllib.request.Request(base + "/" + phase, data=b"{}"), timeout=3
+            ) as response:
+                decision = json.load(response)
+            if decision.get("stale"):
+                print(
+                    json.dumps(
+                        {"decision": "block", "reason": "Newer native input superseded recovery"}
+                    )
+                )
+                return
+        return
+    if block_recovery and event["hook_event_name"] == "UserPromptSubmit":
+        if any(
+            marker in event.get("prompt", "")
+            for marker in (
+                "RETRY_CORRELATION_FIXTURE",
+                "REWAKE_REJECTED_TURN_FIXTURE",
+                "BLOCK_CONTROL",
+            )
+        ):
+            print(json.dumps({"decision": "block", "reason": "Recovery submission fixture"}))
+            return
     if rewake:
         if event["hook_event_name"] != "StopFailure":
             return
@@ -94,10 +143,21 @@ def main() -> None:
     parser.add_argument("--hook")
     parser.add_argument("--quota", action="store_true")
     parser.add_argument("--async-rewake", action="store_true")
+    parser.add_argument("--block-recovery", action="store_true")
+    parser.add_argument("--admit-recovery", action="store_true")
+    parser.add_argument("--gate-failure", action="store_true")
+    parser.add_argument("--handoff", action="store_true")
+    parser.add_argument("--gate-race", choices=("none", "preparation", "dispatch"), default="none")
     parser.add_argument("--race", choices=("none", "preparation", "dispatch"), default="none")
     args = parser.parse_args()
     if args.hook:
-        _hook(args.hook, args.async_rewake)
+        _hook(
+            args.hook,
+            args.async_rewake,
+            args.block_recovery,
+            args.admit_recovery,
+            args.gate_failure,
+        )
         return
     if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
         raise RuntimeError("run through scripts/test_network.py")
@@ -108,6 +168,21 @@ def main() -> None:
     dispatch = {}
     sent = threading.Event()
     prepared = threading.Event()
+    gate_entered = threading.Event()
+    gate_prepared = threading.Event()
+    gate_finished = threading.Event()
+    accounts = []
+    order = []
+    native = None
+
+    def stale():
+        prompts = [
+            h["event"].get("prompt", "")
+            for h in hooks
+            if h["event"].get("hook_event_name") == "UserPromptSubmit"
+            and "REWAKE_REJECTED_TURN_FIXTURE" not in h["event"].get("prompt", "")
+        ]
+        return bool(prompts and prompts[-1] != "FIRST_CORRELATION_FIXTURE")
 
     class Messages(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -127,6 +202,36 @@ def main() -> None:
             )
             if self.path == "/hook":
                 hooks.append(body)
+                event = body["event"]
+                order.append(
+                    {
+                        "event": event["hook_event_name"],
+                        "prompt": event.get("prompt"),
+                        "prompt_id": event.get("prompt_id"),
+                    }
+                )
+                if event[
+                    "hook_event_name"
+                ] == "UserPromptSubmit" and "REWAKE_REJECTED_TURN_FIXTURE" in event.get(
+                    "prompt", ""
+                ):
+                    gate_entered.set()
+            elif self.path in ("/gate_prepare", "/gate_dispatch"):
+                is_stale = stale()
+                if self.path == "/gate_prepare":
+                    if args.handoff and not is_stale:
+                        _seed_keychain_login(native, "fixture-current", "second")
+                        order.append({"event": "credentials_installed"})
+                    gate_prepared.set()
+                else:
+                    gate_finished.set()
+                order.append({"event": self.path, "stale": is_stale})
+                payload = json.dumps({"stale": is_stale}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             elif self.path == "/sent":
                 sent.set()
             elif self.path == "/prepare":
@@ -135,6 +240,15 @@ def main() -> None:
                 sent.set()
             elif self.path.startswith("/v1/messages"):
                 messages.append(body)
+                account = self.headers.get("Authorization", "")
+                accounts.append(
+                    "second"
+                    if account.endswith("fixture-second")
+                    else "first"
+                    if account.endswith("fixture-first")
+                    else "api-key"
+                )
+                order.append({"event": "model_request", "account": accounts[-1]})
                 if (args.quota and not args.async_rewake and not sent.is_set()) or (
                     args.async_rewake and len(messages) == 1
                 ):
@@ -224,6 +338,12 @@ def main() -> None:
             command = shlex.join([sys.executable, str(Path(__file__).resolve()), "--hook", base])
             if args.async_rewake:
                 command += " --async-rewake"
+            if args.block_recovery:
+                command += " --block-recovery"
+            if args.admit_recovery:
+                command += " --admit-recovery"
+            if args.gate_failure:
+                command += " --gate-failure"
             settings = {
                 "hooks": {
                     name: [
@@ -232,6 +352,7 @@ def main() -> None:
                                 {
                                     "type": "command",
                                     "command": command,
+                                    "timeout": 90,
                                     **(
                                         {"asyncRewake": True, "timeout": 90}
                                         if args.async_rewake and name == "StopFailure"
@@ -258,6 +379,10 @@ def main() -> None:
                 "DISABLE_TELEMETRY": "1",
                 "CLAUDE_CODE_MAX_RETRIES": "0",
             }
+            if args.handoff:
+                env.pop("ANTHROPIC_API_KEY")
+                env.update(HOME=str(Path.home()), USER="fixture-current")
+                _seed_keychain_login(native, "fixture-current", "first")
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
 
@@ -319,6 +444,17 @@ def main() -> None:
             if b"ANTHROPIC_API_KEY" in terminal:
                 type_text("\x1b[A\r")
                 read(2)
+            if args.block_recovery:
+                type_text("BLOCK_CONTROL")
+                type_text("\r")
+                wait_for(
+                    lambda: any(h["event"].get("prompt") == "BLOCK_CONTROL" for h in hooks),
+                    "blocking hook control did not run",
+                )
+                read(1)
+                results["typed_control_blocked"] = not messages
+                assert results["typed_control_blocked"]
+                type_text("\x15")
             type_text("FIRST_CORRELATION_FIXTURE")
             type_text("\r")
             read(4)
@@ -338,7 +474,40 @@ def main() -> None:
                 type_text("DRAFT_BEFORE_RETRY")
                 dispatch["admit"] = True
                 wait_for(sent.is_set, "failure hook did not exit")
-                wait_for(lambda: stopped() > stops_before, "native hook wake did not complete")
+                if args.gate_failure:
+                    read(3)
+                if args.admit_recovery and not args.gate_failure:
+                    wait_for(gate_entered.is_set, "wake did not reach admission hook")
+                    if args.gate_race == "preparation":
+                        type_text("_NEWER_DURING_PREPARATION")
+                        type_text("\r")
+                        read(1)
+                    dispatch["gate_prepare"] = True
+                    wait_for(gate_prepared.is_set, "credential preparation did not run")
+                    if args.handoff and not stale():
+                        read(31)
+                    if args.gate_race == "dispatch":
+                        type_text("_NEWER_DURING_DISPATCH")
+                        type_text("\r")
+                        read(1)
+                    dispatch["gate_dispatch"] = True
+                    # Native cancellation can stop the hook before this point.
+                    read(3)
+                    results["gate_finished"] = gate_finished.is_set()
+                    results["requests_after_gate"] = len(messages)
+                    if args.gate_race != "none":
+                        type_text("DRAFT_BEFORE_RETRY")
+                if args.block_recovery:
+                    wait_for(
+                        lambda: any(
+                            "REWAKE_REJECTED_TURN_FIXTURE" in h["event"].get("prompt", "")
+                            for h in hooks
+                        ),
+                        "wake did not reach submission hook",
+                    )
+                    read(1)
+                elif not (args.admit_recovery and stale()):
+                    wait_for(lambda: stopped() > stops_before, "native hook wake did not complete")
                 results.update(
                     mechanism="StopFailure.asyncRewake",
                     race=args.race,
@@ -384,6 +553,15 @@ def main() -> None:
                 retry = [row for row in users if row.get("uuid") == dispatch["uuid"]]
                 results["retry_prompt_id"] = retry[0].get("promptId") if len(retry) == 1 else None
                 results["retry_stop_correlated"] = results["retry_prompt_id"] in completed
+            else:
+                retry = [
+                    h["event"]
+                    for h in hooks
+                    if h["event"].get("hook_event_name") == "UserPromptSubmit"
+                    and "REWAKE_REJECTED_TURN_FIXTURE" in h["event"].get("prompt", "")
+                ]
+                results["retry_prompt_id"] = retry[0].get("prompt_id") if len(retry) == 1 else None
+                results["retry_stop_correlated"] = results["retry_prompt_id"] in completed
             drafts = [
                 row
                 for row in users
@@ -398,20 +576,78 @@ def main() -> None:
                     h["event"] for h in hooks if h["event"].get("hook_event_name") == "StopFailure"
                 ]
                 assert results["limit_hook"], "quota rejection never reached StopFailure"
-            else:
+            elif not args.block_recovery:
                 assert len(messages) == 3, "expected initial, inbox and subsequent local turns"
             required = ["client_alive", "draft_submitted_intact", "subsequent_turn_completed"]
+            if args.admit_recovery:
+                results["gate_race"] = args.gate_race
+                expected_stale = args.race != "none"
+                results["stale_rejected_before_credentials"] = (
+                    expected_stale
+                    and not results["wake_reached_model"]
+                    and not any(row["event"] == "credentials_installed" for row in order)
+                )
+                if expected_stale:
+                    if args.gate_failure:
+                        results["failed_gate_admitted_stale_wake"] = results["wake_reached_model"]
+                        required.append("failed_gate_admitted_stale_wake")
+                    else:
+                        required.append("stale_rejected_before_credentials")
+                else:
+                    required.extend(["wake_reached_model", "retry_stop_correlated"])
+                    if args.handoff:
+                        assert accounts == ["first"] + ["second"] * (len(messages) - 1), accounts
+                if args.gate_race != "none":
+                    newer = [
+                        h["event"]
+                        for h in hooks
+                        if h["event"].get("prompt", "").startswith("DRAFT_BEFORE_RETRY_NEWER_")
+                    ]
+                    results["newer_input_completed"] = (
+                        len(newer) == 1 and newer[0].get("prompt_id") in completed
+                    )
+                    required.append("newer_input_completed")
+                    stops = [row.get("prompt_id") for row in order if row["event"] == "Stop"]
+                    results["retry_completed_before_newer"] = (
+                        results["retry_prompt_id"] in stops
+                        and len(newer) == 1
+                        and newer[0]["prompt_id"] in stops
+                        and stops.index(results["retry_prompt_id"])
+                        < stops.index(newer[0]["prompt_id"])
+                    )
+                    required.append("retry_completed_before_newer")
             if args.async_rewake:
                 results["version"] = subprocess.check_output(
                     [str(args.claude.resolve()), "--version"], env=env, cwd=root, text=True
                 ).strip()
-                required.append("wake_reached_model")
-                if args.race != "none":
+                if not args.block_recovery and not args.admit_recovery:
+                    required.append("wake_reached_model")
+                if args.race != "none" and not args.block_recovery and not args.admit_recovery:
                     required.append("stale_wake_after_newer_input")
-            else:
+            elif not args.block_recovery:
                 required.append("retry_stop_correlated")
+            if args.block_recovery:
+                results["recovery_submission_hooks"] = [
+                    h["event"]
+                    for h in hooks
+                    if h["event"].get("hook_event_name") == "UserPromptSubmit"
+                    and any(
+                        marker in h["event"].get("prompt", "")
+                        for marker in ("RETRY_CORRELATION_FIXTURE", "REWAKE_REJECTED_TURN_FIXTURE")
+                    )
+                ]
+                results["recovery_blocked"] = not any(
+                    any(
+                        marker in json.dumps(message)
+                        for marker in ("RETRY_CORRELATION_FIXTURE", "REWAKE_REJECTED_TURN_FIXTURE")
+                    )
+                    for message in messages
+                )
             assert all(results[key] for key in required), results
     finally:
+        results["hooks"] = hooks
+        results["order"] = order
+        results["accounts"] = accounts
         (out / "terminal.bin").write_bytes(terminal)
         if master is not None:
             os.close(master)
@@ -427,6 +663,9 @@ def main() -> None:
                 os.killpg(child.pid, 9)
                 child.wait(timeout=5)
         results["client_reaped"] = child is None or child.poll() is not None
+        if args.handoff and native:
+            _forget_native_login(native)
+            results["keychain_removed"] = True
         server.shutdown()
         server.server_close()
         worker.join(timeout=3)
@@ -434,7 +673,12 @@ def main() -> None:
         (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
         print(
             json.dumps(
-                {key: value for key, value in results.items() if key not in ("hooks", "requests")}
+                {
+                    key: value
+                    for key, value in results.items()
+                    if key
+                    not in ("hooks", "requests", "order", "recovery_submission_hooks", "limit_hook")
+                }
             )
         )
 

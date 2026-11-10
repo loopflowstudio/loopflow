@@ -19,7 +19,7 @@ checks; seeded partial state does not establish a rejected native write or live
 login acceptance. Keep the installed pair and production conversations untouched.
 
 2026-11-09 current direction: server restarts are allowed; see the exact words and
-new native supplied-token experiments at the top of interactive-limit-recovery.md.
+native findings in interactive-limit-recovery.md.
 Continue implementation using the existing account broker, with native refresh
 callback and quota-retry checks recorded in the design. The former credential-ownership choice is
 no longer a reason to stop all work. No production processes are probe targets.
@@ -43,10 +43,19 @@ established for either provider. Retain truthful native-admission waits and remo
 the unsafe sends, as the concept-review direction permits. Automatic continuation
 remains unfinished. No production Sessions, credentials or installation changed.
 
-2026-11-09 native admission investigation: test conditional steering and hook wake
+2026-11-09 native admission investigation tested conditional steering and hook wake
 before adding credential handoff. Codex's conditional steer cannot restart a
 failed turn; Claude's asynchronous failure-hook wake survives newer completed
 input at both held barriers. Keep these counterexamples in the existing probe
 scripts and stop dependent integration. No production credential switch is needed
 to establish these admission failures. Details and the missing native contract
 are in interactive-limit-recovery.md.
+
+2026-11-09 latest probes: use the already isolated synthetic Keychain fixture to
+test credential preparation inside Claude's native submission hook. Claude now
+reports 2.1.322; the earlier 2.1.321 results remain historical. No real login is
+needed for native ordering. A failed hook admits a stale wake, so keep runtime
+sends removed until recovery-only failure rejection is demonstrated without
+making ordinary input depend on lf. Direct Codex replacement adopts credentials
+but loses active work/approvals. No new product judgment or production action is
+implied by these mechanism results.

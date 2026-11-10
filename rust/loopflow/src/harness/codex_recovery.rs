@@ -10,12 +10,18 @@ use tokio_tungstenite::tungstenite::Message;
 use super::codex_connection::{Recorder, Upstream};
 use crate::provider_account;
 use crate::provider_auth::Provider;
-use crate::session_recovery::{codex_rejected_input, RecoveryState, SessionRecovery};
+use crate::session_recovery::{codex_rejected_turn, RecoveryState, SessionRecovery};
+
+#[derive(Debug)]
+struct HistoryRead {
+    id: Value,
+    failed_turn: String,
+    sent_at: SystemTime,
+}
 
 #[derive(Debug)]
 pub(super) struct Recovery {
-    pending: Option<(Value, String)>,
-    sent_at: SystemTime,
+    pending: Option<HistoryRead>,
     check_at: SystemTime,
     requested: i64,
 }
@@ -24,7 +30,6 @@ impl Default for Recovery {
     fn default() -> Self {
         Self {
             pending: None,
-            sent_at: SystemTime::UNIX_EPOCH,
             check_at: SystemTime::UNIX_EPOCH,
             requested: 0,
         }
@@ -58,14 +63,14 @@ impl Recorder {
             writer.send(Message::Text(reply.to_string().into())).await?;
             return Ok(());
         }
-        if let Some((id, _)) = &self.recovery.pending {
-            if rpc.get("id") == Some(id) {
-                let (_, request) = self
+        if let Some(pending) = &self.recovery.pending {
+            if rpc.get("id") == Some(&pending.id) {
+                let pending = self
                     .recovery
                     .pending
                     .take()
                     .expect("matched recovery request");
-                self.recovery_reply(request, rpc).await?;
+                self.recovery_reply(pending.failed_turn, rpc).await?;
                 return Ok(());
             }
         }
@@ -107,12 +112,12 @@ impl Recorder {
         &mut self,
         writer: &mut SplitSink<Upstream, Message>,
     ) -> Result<()> {
-        if self
-            .recovery
-            .sent_at
-            .elapsed()
-            .is_ok_and(|elapsed| elapsed >= Duration::from_secs(15))
-        {
+        if self.recovery.pending.as_ref().is_some_and(|pending| {
+            pending
+                .sent_at
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed >= Duration::from_secs(15))
+        }) {
             // History reads have no native effect and can be repeated.
             self.recovery.pending = None;
         }
@@ -189,8 +194,11 @@ impl Recorder {
         let rpc = json!({"id":id,"method":"thread/read",
             "params":{"threadId":self.observer.thread,"includeTurns":true}});
         writer.send(Message::Text(rpc.to_string().into())).await?;
-        self.recovery.pending = Some((id, turn.into()));
-        self.recovery.sent_at = SystemTime::now();
+        self.recovery.pending = Some(HistoryRead {
+            id,
+            failed_turn: turn.into(),
+            sent_at: SystemTime::now(),
+        });
         Ok(())
     }
 
@@ -215,7 +223,6 @@ impl Recorder {
         let Some(turn) = turns.iter().find(|turn| turn["id"] == failed) else {
             return Ok(());
         };
-        let rejected = codex_rejected_input(turn).is_some();
         let mut recovery = SessionRecovery {
             agent_process_id: self.observer.attachment.agent_process_id.clone(),
             thread: self.observer.thread.clone(),
@@ -228,7 +235,7 @@ impl Recorder {
             request: None,
             retry_turn: None,
         };
-        if !rejected
+        if !codex_rejected_turn(turn)
             || turns.last() != Some(turn)
             || !matches!(
                 thread["status"]["type"].as_str(),
@@ -252,13 +259,10 @@ impl Recorder {
         };
         let previous = store.session_recovery(&session)?;
         if let Some(previous) = previous.as_ref().filter(|old| old.key() == recovery.key()) {
+            if previous.request.is_some() {
+                return Ok(());
+            }
             recovery.account = previous.account.clone();
-        }
-        if previous
-            .as_ref()
-            .is_some_and(|old| old.key() == recovery.key() && old.request.is_some())
-        {
-            return Ok(());
         }
         let Some(account) = recovery.account.clone() else {
             recovery.reason = "This Session has no managed login to recover".into();

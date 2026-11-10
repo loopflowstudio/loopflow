@@ -128,34 +128,25 @@ impl Recovery {
         }
         let rows = transcript(path)?;
         if let Some(request) = &recovery.request {
-            let matching: Vec<_> = rows
+            let mut matching = rows
                 .iter()
-                .filter(|row| row["type"] == "user" && row["uuid"] == *request)
-                .collect();
-            if matching.len() == 1 {
-                if let Some(prompt) = matching[0]["promptId"].as_str() {
-                    if store
-                        .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
-                        .is_some()
-                    {
-                        recovery.retry_turn = Some(prompt.into());
-                        recovery.state = RecoveryState::Continued;
-                        recovery.reason = "The native retry completed".into();
-                        store.with_provider_context(
-                            adapter,
-                            thread,
-                            NativeBoundary::Turn,
-                            || {
-                                store.record_session_recovery(
-                                    &adapter.session,
-                                    &recovery,
-                                    "settled",
-                                )
-                            },
-                        )?;
-                    }
-                }
+                .filter(|row| row["type"] == "user" && row["uuid"] == *request);
+            let Some(prompt) = matching.next().and_then(|row| row["promptId"].as_str()) else {
+                return Ok(());
+            };
+            if matching.next().is_some()
+                || store
+                    .recovery_boundary(&adapter.session, thread, prompt, "stopped")?
+                    .is_none()
+            {
+                return Ok(());
             }
+            recovery.retry_turn = Some(prompt.into());
+            recovery.state = RecoveryState::Continued;
+            recovery.reason = "The native retry completed".into();
+            store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+                store.record_session_recovery(&adapter.session, &recovery, "settled")
+            })?;
             return Ok(());
         }
         self.check_at = SystemTime::now() + Duration::from_secs(60);

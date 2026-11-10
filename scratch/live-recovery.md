@@ -5,20 +5,13 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 ## Remaining work
 
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
-scope, supplied-token design, native findings and preservation cases. Runtime
-observations, served bulk recovery and Desktop progress are implemented on the
-branch. The November 9 admission repair removed unconditional interactive sends;
-automatic continuation remains unfinished. Earlier two-client native product
-probes passed for both providers with synthetic logins and loopback responses;
-current probes establish safe waits and editable drafts, not automatic recovery. The latest main merge
-still needs gate checks; broader preservation and real-login checks remain open.
-The latest isolated admission probes add two counterexamples: Codex conditional
-steering cannot restart a failed turn, and Claude's asynchronous failure-hook wake
-still runs after newer typed input completes. No credential handoff was attempted
-in those probes; no replacement sending path was integrated.
-Supplied-token experiments passed native callbacks and retries, but the active-turn
-counterexample and missing admission remain. The design retains those results;
-server replacement is still an allowed, unproven alternative.
+scope, native counterexamples and remaining preservation cases. Automatic
+continuation remains unfinished: runtime checks capacity and reports waits.
+Earlier two-client product successes exercised the removed unconditional sends;
+current probes establish safe waits and editable drafts. Claude's ordered
+submission hook still fails open; Codex replacement loses active work/approvals.
+No replacement sending path is integrated. The latest main merge needs gate;
+Task-bound native/Desktop preservation and real-login checks remain open.
 
 The implemented experience is described in `docs/sessions.md`, subscriptions
 and Desktop docs; explicit restart limitations remain visible.

@@ -84,19 +84,23 @@ impl SessionRecovery {
 
 /// Only complete native history can establish a rejection before work. Partial
 /// turn notifications, absent items and unrecognized items retain uncertainty.
-pub(crate) fn codex_rejected_input(turn: &Value) -> Option<&Value> {
+pub(crate) fn codex_rejected_turn(turn: &Value) -> bool {
     if turn["status"] != "failed"
         || turn["itemsView"] != "full"
-        || turn.pointer("/error/codexErrorInfo")?.as_str()? != "usageLimitExceeded"
+        || turn["error"]["codexErrorInfo"] != "usageLimitExceeded"
     {
-        return None;
+        return false;
     }
-    let items = turn["items"].as_array()?;
-    if items.len() != 1 || items[0]["type"] != "userMessage" {
-        return None;
-    }
-    let content = &items[0]["content"];
-    (!content.as_array()?.is_empty()).then_some(content)
+    let Some(items) = turn["items"].as_array() else {
+        return false;
+    };
+    let [input] = items.as_slice() else {
+        return false;
+    };
+    input["type"] == "userMessage"
+        && input["content"]
+            .as_array()
+            .is_some_and(|content| !content.is_empty())
 }
 
 /// Follow Claude's native parent chain back to the rejected prompt. A synthetic
@@ -108,15 +112,12 @@ pub(crate) fn claude_rejected_model(rows: &[Value], prompt: &str) -> Option<Stri
     if rows[start]["promptId"] != prompt {
         return None;
     }
-    let errors: Vec<_> = rows[start + 1..]
+    let mut errors = rows[start + 1..]
         .iter()
-        .filter(|row| row["type"] == "assistant")
-        .collect();
-    if errors.len() != 1 {
-        return None;
-    }
-    let error = errors[0];
-    if error["isApiErrorMessage"] != true
+        .filter(|row| row["type"] == "assistant");
+    let error = errors.next()?;
+    if errors.next().is_some()
+        || error["isApiErrorMessage"] != true
         || error["failedResponseHadNoToolCall"] != true
         || error["error"] != "rate_limit"
         || error["isSidechain"] != false
@@ -143,14 +144,14 @@ pub(crate) fn claude_rejected_model(rows: &[Value], prompt: &str) -> Option<Stri
         }
         parent = row["parentUuid"].as_str()?;
     }
-    let requests: Vec<_> = rows[start + 1..]
+    let mut requests = rows[start + 1..]
         .iter()
-        .filter(|row| row["type"] == "api-request")
-        .collect();
-    if requests.len() != 1 {
+        .filter(|row| row["type"] == "api-request");
+    let request = requests.next()?;
+    if requests.next().is_some() {
         return None;
     }
-    requests[0]
+    request
         .pointer("/params/model")?
         .as_str()
         .map(str::to_owned)
@@ -158,18 +159,18 @@ pub(crate) fn claude_rejected_model(rows: &[Value], prompt: &str) -> Option<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_rejected_model, codex_rejected_input, RecoveryState, SessionRecovery};
+    use super::{claude_rejected_model, codex_rejected_turn, RecoveryState, SessionRecovery};
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
     use serde_json::{json, Value};
 
     #[test]
-    fn only_a_complete_rejected_turn_can_be_resent() {
+    fn only_complete_history_establishes_rejection_before_work() {
         let input = json!([{"type":"text","text":"do the work"}]);
         let turn = json!({"id":"failed", "status":"failed", "itemsView":"full",
             "error":{"codexErrorInfo":"usageLimitExceeded"},
             "items":[{"type":"userMessage","content":input}]});
-        assert_eq!(codex_rejected_input(&turn), Some(&input));
+        assert!(codex_rejected_turn(&turn));
         for kind in [
             "commandExecution",
             "fileChange",
@@ -182,19 +183,19 @@ mod tests {
                 .as_array_mut()
                 .unwrap()
                 .push(json!({"type":kind}));
-            assert!(codex_rejected_input(&worked).is_none(), "{kind}");
+            assert!(!codex_rejected_turn(&worked), "{kind}");
         }
         for view in [json!("notLoaded"), Value::Null] {
             let mut partial = turn.clone();
             partial["itemsView"] = view;
-            assert!(codex_rejected_input(&partial).is_none());
+            assert!(!codex_rejected_turn(&partial));
         }
         let mut empty = turn.clone();
         empty["items"] = json!([]);
-        assert!(codex_rejected_input(&empty).is_none());
+        assert!(!codex_rejected_turn(&empty));
         let mut interrupted = turn;
         interrupted["status"] = json!("interrupted");
-        assert!(codex_rejected_input(&interrupted).is_none());
+        assert!(!codex_rejected_turn(&interrupted));
     }
 
     fn rejected_claude() -> Vec<Value> {

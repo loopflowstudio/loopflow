@@ -73,9 +73,10 @@ retries; history fills it on the next launch.
 ## Quota recovery
 
 The existing Codex observer and Claude hook watcher retain recovery observations
-in Session history. Only complete native evidence of a rejection before work
-permits continuation. A fixed dispatch receipt is written before native input;
-unknown delivery cannot be retried by reconnection or a Desktop request.
+in Session history. Complete native history can establish rejection before work,
+but cannot reserve the next input position. Previously dispatched attempts keep
+their fixed receipt; unknown delivery cannot be retried by reconnection or a
+Desktop request. Current recovery does not dispatch new attempts.
 
 The projection folds each failed turn's dispatch and correlated result; a late
 wait cannot replace them or hide a subsequent rejection. Checking again cannot

@@ -25,7 +25,86 @@ expanded title/direction and open PR #1862, without delivery status. The earlier
 local candidate build (`cargo build -p loopflow --bin lf`, inherited LF_* unset)
 passed in 1m 45s. No disposable demo was launched.
 
-## Native admission investigation — November 9, latest implementation pass
+## Native replacement and submission checks — November 9, latest pass
+
+Automatic continuation remains unfinished. No production recovery sends were
+added. The probes now separate a promising Claude submission mechanism from
+its failure case, and directly test managed-account Codex replacement.
+
+**Claude 2.1.322** (the binary reported this version during these runs): native
+`UserPromptSubmit` runs for `StopFailure.asyncRewake` messages. Its `prompt_id`
+correlates to the retry's successful Stop; the earlier claim that hook-wake
+completion cannot be correlated is superseded by this observation.
+
+- A blocking submission hook rejects a stale wake after newer typed input has
+  completed. Requests stay at two; the existing draft remains editable and its
+  later submission completes. A separately typed blocking control also passes.
+- A valid wake can prepare the scoped native Keychain login inside that hook,
+  wait for the measured cache lifetime, then proceed. Requests use first → second
+  → second; retry completion, edited draft and later input all pass.
+- Input typed while the submission hook is held before credential preparation,
+  or immediately before final release, stays in native order: the admitted retry
+  completes first, then the queued edited input completes on the second login.
+  Both runs have first → second → second → second request accounts, correlated
+  completions and intact drafts. These observations use a native submission hook,
+  not an observer history read or an lf lock as admission.
+- A stale wake reaching the same conditional hook after newer input completed
+  is rejected **before** any credential write. All three model requests remain
+  on the first synthetic login (initial rejection, newer input, later draft).
+- **Counterexample:** make that submission hook exit 1 before its decision.
+  Native Claude allows the stale wake through: requests rise from two to three
+  after newer input completed. The stale retry even reports a correlated Stop.
+  Correlation establishes execution, not permission to execute.
+
+The [Claude hooks reference](https://code.claude.com/docs/en/hooks#userpromptsubmit),
+read November 9, documents timeout continuation and `onFailure: "block"`.
+`UserPromptSubmit` has no native matcher. Applying blocking failure behavior to
+all lf prompt hooks would violate ordinary input's best-effort contract. The next
+Claude implementation must isolate the recovery-only gate from the ordinary
+context hook, demonstrate rejection on gate failure/timeout and cancellation,
+then integrate broker activation and correlated attempts. A candidate is a
+self-contained native hook wrapper which invokes the recovery gate only for its
+own envelope; normal input must not depend on that gate or lf state. This wrapper
+has **not** been implemented or demonstrated. Do not reintroduce sends with the
+current fail-open hook. The synchronous credential wait also needs bounded broker
+work and partial-write handling; a synthetic Keychain write is not that integration.
+
+**Codex 0.167.0:** direct server replacement, without SIGHUP, adopts the second
+synthetic managed login. The idle rejected-turn baseline retains the native
+client, same thread/model and draft; retry and subsequent edited input complete
+with request accounts first → second → second.
+
+Two preservation cases invalidate unconditional replacement. A newer native
+request held before shutdown becomes `interrupted` in the replacement's history;
+its response connection is cut. With a pending approval, the original turn also
+becomes `interrupted`; typing `y` after replacement creates a new user turn,
+executes no original command and no longer answers the approval. Keeping the
+TUI alive does not retain its server-side work. Input submitted while the server
+is down remains in the editor; after reconnect, appending text and submitting
+again completes it. That last result is draft retention, not transparent delivery.
+No replacement runtime path was integrated. The earlier drain counterexample
+and active supplied-token-handoff failure remain applicable.
+
+Receipts under `.lf/tmp/loo-811-protocol/`:
+`replace-{baseline,preparation,approval,disconnected}/`,
+`rewake-submit-preservation/`, `submit-handoff-{baseline,preparation,dispatch}/`,
+`submit-stale-dispatch/`, `submit-failure-dispatch/`. Each has native transcript,
+request/turn or hook ordering and cleanup results. Initial submission-control
+fixtures restored their blocked typed text, and a second fixture incorrectly
+waited for Stop after deliberately blocking wake; those failed setup runs are
+retained as `rewake-submit-block/` and `rewake-submit-block-final/`. Corrected
+controls clear only that fixture input and wait for native submission. No
+production credentials, Sessions or installation were changed. All owned native
+clients, servers and HTTP workers were reaped; scoped Keychain items were removed.
+
+Checks (all native probes use `scripts/test_network.py`, private homes and
+loopback synthetic inference; external egress denied):
+
+- `uv run --offline --script scratch/codex_drain_probe.py --codex /Users/jack/.local/bin/codex --replace-server [--race preparation|disconnected | --approval] --output <receipt> < /dev/null` — idle continuation passed; active-turn and approval counterexamples recorded; disconnected editor/input observed. Saved-receipt assertions check each outcome.
+- `uv run --offline python scratch/claude_retry_correlation_probe.py --claude /Users/jack/.local/bin/claude --async-rewake --admit-recovery --handoff [--gate-race preparation|dispatch | --race dispatch] --output <receipt> < /dev/null` — valid admission, native ordering, credential adoption, stale rejection and cleanup passed. The same probe with `--gate-failure --race dispatch` (without handoff) reproduced fail-open stale execution.
+- Ruff check/format for both probes, saved native receipt assertions and `git diff --check` — passed. `lf context` — scratch and memory fit both budgets. Runtime source is unchanged; earlier focused Rust/build results remain applicable. Gate owns broader suites.
+
+## Prior native admission investigation — November 9
 
 Two different native mechanisms were exercised, without file-refresh, drain,
 account handoff, a proxy or another history-read gate. Neither provides safe
@@ -49,6 +128,9 @@ containing the old wake message. Requests increase from two to three. Drafts
 remain editable and later input completes, but the stale wake violates the
 required precedence. These barriers model timing around credential preparation;
 they perform no credential writes and establish no account adoption.
+All three wake receipts also report `retry_prompt_id: null` and
+`retry_stop_correlated: false`: a model request occurred, but the existing inbox
+UUID → promptId → Stop completion contract was not established for hook wake.
 
 Receipts under `.lf/tmp/loo-811-protocol/`: `conditional-steer-final/`,
 `rewake-baseline/`, `rewake-preparation/`, `rewake-dispatch/`. Native transcripts,
@@ -72,89 +154,48 @@ describes asynchronous wake on exit 2; the native probes above show its behavior
 after newer input. Sources read November 9; installed behavior is measured,
 not inferred from current documentation.
 
-### Required native operation; dependent integration stopped
+## Delete — do not maintain
 
-The next implementation needs a demonstrated provider operation that admits
-recovery only if the rejected turn is still current, combines that admission
-with credential adoption, and reports a correlated attempt. New input must
-either win admission with no old retry, or follow an already-admitted recovery
-without credential replacement failing its request. Existing lf locks and
-observation cannot add this contract to independently connected native clients.
-The two new candidates above do not supply it. No safe sending implementation
-is available to integrate in this pass; reintroducing either would contradict
-the preservation requirement. This is a native capability gap, not a request for
-a different product outcome. Task-bound bulk recovery, pending-approval checks,
-publication and demo remain incomplete.
+The unsafe sending paths are removed: Codex recovery's `account/login/start`
+and `turn/start`; Claude recovery's shared activation, cache-expiry sleep and
+inbox send. Keep them removed until native admission is demonstrated. No disabled
+copy, second credential owner, extra history read or lf lock substitutes for it.
+Historical probes stay as counterexamples, including successful unconditional
+sends that did not protect racing input.
 
-### Delete — do not maintain
+The old Claude `Recovery.detached` mode and duplicate transcript read are gone.
+Detached capacity work remains separate from polling/completion; a capacity wait
+cannot delay observing a dispatched attempt's completion. Retain broker refresh,
+normal Task inbox delivery, manual account switching, Graph recovery and all
+attempt/completion facts.
 
-The earlier unconditional sends stay removed: Codex recovery's
-`account/login/start` plus `turn/start`, and Claude recovery's shared activation,
-cache-expiry sleep and inbox send. No disabled copy or second credential owner
-replaces them. Retain broker refresh, normal Task inbox delivery, manual account
-switches, Graph recovery and retained attempt/completion facts. Historical probes
-remain counterexamples; their successful old sends are not acceptance checks.
+This compression removes Codex's unused replay-payload return: the history
+validator answers only whether rejection preceded work. Pending history reads
+own their timeout instead of leaving a separate timestamp after completion.
+Claude's single-match checks use iterators, retaining rejection of duplicate
+rows without allocating collections. No remaining predecessor deletion targets.
 
-Keep Claude's detached capacity work separate from its polling/completion watcher;
-the former `Recovery.detached` mode and second transcript read are removed. Waiting
-polls read history only when due; dispatched attempts still check completion every
-tick. Both providers record capacity/admission waits through one write path.
-Uncommitted notes before this compression are saved in
-`.lf/tmp/compress-admission-before/`; the earlier backup below is separate.
+Compression checks for this revision (inherited LF_* unset):
 
-Watcher compression checks, November 9 (inherited LF_* unset; logs
-`.lf/tmp/loo-811-compress-watchers-*.log`):
+- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::) | test(harness::claude_recovery::) | test(harness::claude_updates::) | test(harness::codex_connection::tests::client_turns_keep_their_origin_during_a_recovery_read)' < /dev/null` — 6 passed; nextest marked the pure Claude history-parser test leaky. Existing large `__eh_frame` linker warning. Log: `.lf/tmp/loo-811-compress-final-test.log`.
+- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::tests::claude_requires_the_entire_rejected_prompt_chain_and_its_actual_model)' < /dev/null` — 1 passed without a leak report; no subprocess path found in that parser test. The first report remains unexplained; gate retains the broader check. Log: `.lf/tmp/loo-811-compress-final-leak-check.log`.
+- `cargo build -p loopflow --bin lf < /dev/null` — passed; `.lf/tmp/loo-811-compress-final-build.log`.
+- `cargo fmt --check`, `git diff --check`, `lf context` — passed; both context budgets fit. No new native recovery claim; gate owns broader suites/clippy.
 
-- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::) | test(harness::claude_recovery::) | test(harness::claude_updates::) | test(harness::codex_connection::tests::client_turns_keep_their_origin_during_a_recovery_read)' < /dev/null` — 6 passed; correlated Stop bypasses capacity backoff. Existing large `__eh_frame` linker warning; broader suites/clippy remain with gate.
-- `cargo build -p loopflow --bin lf < /dev/null` — passed.
-- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --claude /Users/jack/.local/bin/claude --output .lf/tmp/loo-811-protocol/compress-watchers-claude < /dev/null` — passed: two waits, intact edited drafts, typed completion, no handoff/retry input, clients/owners reaped.
-- Same command with `--codex /Users/jack/.local/bin/codex` and output `compress-watchers-codex` — passed with the same results. Both probes use synthetic logins/loopback inference, not real-login or automatic-recovery acceptance.
-- `cargo fmt --check`, `git diff --check`, `lf context` — passed; memory and scratch fit both limits.
+### Retained implementation checks — November 9
 
-## Implement revision — November 9: native admission remains missing
-
-The automatic outcome remains required and unfinished. The native APIs inspected
-here cannot admit account handoff plus retry only while the rejected turn is
-still current. Codex's generated 0.167.0 `TurnStartParams` has no such condition:
-`parentTurnId` is attribution, explicitly ignored when adding input to an active
-turn. `LoginAccountParams` has no thread/turn condition. Sources remain under
-`.lf/tmp/loo-811-protocol/schema/v2/`; the saved `account_processor.rs` performs
-server-wide external-auth replacement. The earlier active-response failure is
-still contrary evidence. Claude's inbox queues `priority: next` without a
-failed-prompt condition; the transcript read cannot reserve that queue position.
-
-Revised implementation removes interactive recovery's Codex login/start sends
-and Claude activation/cache-sleep/inbox send. Available capacity produces a named
-native-admission wait; unavailable capacity retains its reason/reset. The broker,
-Codex same-account refresh callback, Session owners, normal Task inbox messages,
-manual account switching and Graph recovery remain. There is no speculative
-second-read protection or disabled alternate sending path. Native admission is
-an implementation limit, not a new product choice or a reduced acceptance bar.
-A safe provider mechanism must be demonstrated before automatic sends return.
-
-The reader now folds dispatch, correlated reply and completion for a failed turn;
-a late wait cannot replace those facts. Latest failure means latest *first*
-observation, so an older worker cannot hide a subsequent rejection. Existing
-wire types stay unchanged. A reconnect continues observing an existing attempt
-and never resends it. Earlier native product successes below describe the removed
-unconditional sending path, not acceptance of this revision.
-
-Verification, inherited LF_* unset (logs `.lf/tmp/loo-811-*-test.log`):
+All Rust commands below ran with inherited LF_* unset. Earlier uncommitted notes
+are in `.lf/tmp/compress-before/` and `.lf/tmp/compress-admission-before/`;
+the full notes before this pass are in `.lf/tmp/loo-811-compress-final-before/`.
 
 - `cargo test -p loopflow --lib session_recovery::` — 3 passed, including same-thread provider replacement; existing large `__eh_frame` linker warning.
 - `cargo test -p loopflow --lib harness::claude_recovery::` — 1 passed: unrelated Stop stays uncertain; correlated Stop settles after late wait/reconnect.
-- `cargo test -p loopflow --test served_reads served_bulk_recovery_keeps_task_identity_and_dispatched_attempts` — built candidate and passed; fixed the merged tree's missing `SessionRecover` CLI-spelling match arm. Task memberships/primary Sessions and Process count stay unchanged.
-- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --output .lf/tmp/loo-811-protocol/admission-wait-codex` — passed: two native waits, no retry input or credential handoff, edited drafts complete, clients/owners reaped.
-- Same probe with `--claude /Users/jack/.local/bin/claude --output .lf/tmp/loo-811-protocol/admission-wait-claude` — passed with the same results; temporary scoped Keychain items removed. Both probes use synthetic logins/loopback inference and unbound Sessions.
-- `cargo fmt --check`, `git diff --check`, `lf context` — passed; gate owns merged-tree suites/clippy.
-
-Compression checks after the admission cut (inherited LF_* unset):
-
-- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::) | test(harness::claude_recovery::) | test(harness::claude_updates::) | test(harness::codex_connection::tests::client_turns_keep_their_origin_during_a_recovery_read)' < /dev/null` — 6 passed on the final formatted tree; existing large `__eh_frame` linker warning. Log: `.lf/tmp/loo-811-compress-admission-test.log`.
-- `cargo build -p loopflow --bin lf < /dev/null` — passed; log `.lf/tmp/loo-811-compress-admission-build.log`.
-- `cargo fmt --check`, `git diff --check`, `lf context` — passed; fixture formatting retained identical parsed JSON. Gate owns merged-tree suites/clippy; native admission remains unfinished.
-
-Pre-compression uncommitted notes are saved under `.lf/tmp/compress-before/`.
+- `cargo test -p loopflow --test served_reads served_bulk_recovery_keeps_task_identity_and_dispatched_attempts` — built candidate and passed; repaired the merged tree's missing `SessionRecover` CLI-spelling match arm. Task memberships, primary Sessions and Process count stayed unchanged.
+- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::) | test(harness::claude_recovery::) | test(harness::claude_updates::) | test(harness::codex_connection::tests::client_turns_keep_their_origin_during_a_recovery_read)' < /dev/null` — 6 passed in both admission and watcher compression; correlated Stop bypassed capacity backoff. Logs: `.lf/tmp/loo-811-compress-{admission,watchers}-test.log`.
+- `cargo build -p loopflow --bin lf < /dev/null` — passed after both compressions; logs `.lf/tmp/loo-811-compress-{admission,watchers}-build.log`.
+- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --output <receipt> < /dev/null` — passed at `admission-wait-codex` and `compress-watchers-codex` under `.lf/tmp/loo-811-protocol/`. Two waits, intact edited drafts, typed completion, no retry input or credential handoff; clients/owners reaped.
+- Same probe with `--claude /Users/jack/.local/bin/claude` — passed at `admission-wait-claude` and `compress-watchers-claude`; scoped Keychain items removed. These are unbound Sessions with synthetic logins/loopback inference, not automatic recovery or real-login acceptance.
+- `cargo fmt --check`, `git diff --check`, `lf context` — passed; parsed DTO fixtures unchanged, memory and scratch fit both limits. Gate owns broader merged-tree suites/clippy.
 
 ## Current design and remaining work
 
@@ -178,14 +219,13 @@ not exercise native automatic admission or pending approvals through Desktop.
 ### Implementation still required
 
 1. Establish safe native admission for **both** providers, including credential
-   handoff. Input arriving during credential preparation and immediately before
-   dispatch must take precedence without an old retry queuing behind it or a
-   handoff failing the new turn. The inspected APIs provide no conditional
-   operation; an extra history read, receipt or lf lock cannot serialize a directly
-   connected native client. The current native wait is truthful but does not
-   satisfy automatic continuation. Server replacement remains allowed, with the
-   preservation cases below; the disproven drain and file-refresh designs remain
-   counterexamples. No alternative provider mechanism is yet demonstrated.
+   handoff. New input either wins with no old retry or follows an admitted recovery
+   without credential replacement failing its request. Claude needs failure/timeout
+   rejection confined to recovery; ordinary context delivery stays best-effort.
+   Codex needs an operation that retains active work and approvals. The native
+   counterexamples above rule out unconditional handoff/replacement and history-read
+   gates; they do not rule out every mechanism. The current wait is truthful but
+   does not satisfy automatic continuation.
 2. Integrate the demonstrated mechanism through the existing broker and Session
    owners. Keep native history, selected model, draft and pending approval, retain
    uncertain delivery, and execute completed tool effects and Graph steps once.
@@ -221,323 +261,66 @@ harness/subscription/Desktop docs accurately state that automatic continuation
 is unfinished. Remaining native admission is substantial implementation work,
 not a documentation adjustment or a smaller acceptance bar.
 
-## Native observations — November 9, before the admission cut
+## Earlier native results and retained counterexamples
 
-The results below retain the successful experiments and contrary findings from
-the earlier sending implementation. They do not describe current automatic sends.
+Full sources and detailed check history remain at
+`98c32372889f39819bcaccd512f1849ea5446d55:scratch/interactive-limit-recovery.md`.
+Pre-curation uncommitted notes are saved under
+`.lf/tmp/loo-811-before-submission-probes/`. The current plan above supersedes
+historical implementation instructions, not their measured failures.
 
-### Direction
-
-Jack Heart:
+Jack Heart's November 9 direction remains:
 
 > ok figure out ow to make progress
 
 > do we need another strategy? it is ok if we need to restart the codex servers to switch
 > or look online for how people handle
 
-Server replacement is allowed; keeping a server process alive is not an outcome.
-History, drafts, approvals and uncertain work still matter. This supersedes the
-earlier claim that a credential-ownership decision must stop all implementation.
-Use the existing account broker and test the native mechanism; do not wait for a
-second design approval for reversible implementation. No production Session or
-account is used for these probes. The other conversation's signed dev installation
-does not establish recovery or resolve the ordinary-typing incident.
+Server replacement is allowed; retaining the server PID is not an outcome.
+Native history, drafts, approvals, newer input and uncertain work still matter.
 
-November 9 research found an upstream maintainer explaining that manually
-changed auth files require a server restart, while account APIs are preferred:
-https://github.com/openai/codex/issues/49651 (October 3 etraut-openai comment).
-Issue #42771 independently reproduces stale
-cross-account auth until daemon restart. The official experimental token contract
-is https://learn.chatgpt.com/docs/app-server#auth-endpoints: the host supplies
-tokens and answers refresh requests. It does not require a second OAuth store.
+Retained observations (synthetic credentials, loopback only):
 
-**Earlier implementation:** supplied tokens used the existing Codex account broker
-and native refresh. The observer sent `account/login/start` over its side
-connection; the native client stayed directly connected. Native 401 callbacks
-passed before integration. No second OAuth store or server replacement path was
-added. Server replacement remains permitted; failed drain and file-refresh
-observations below still apply.
+- Codex 0.167.0's generated `TurnStartParams` has no rejected-turn condition;
+  `parentTurnId` is attribution and is ignored when adding input to an active
+  turn. `LoginAccountParams` has no thread/turn condition. Schema and saved
+  `account_processor.rs` under `.lf/tmp/loo-811-protocol/` show server-wide
+  external-auth replacement. Claude's inbox `priority: next` likewise has no
+  failed-prompt condition.
+- Codex 0.167.0 managed file reload follows token rotation for the same account,
+  but forced refresh still reports the old identity after a cross-account file
+  replacement. Receipts: `auth-reload-control/`. Upstream source inventory:
+  `openai/codex@9f04d886f3663b584fba87d6fd71001fb6f9fcf3` in the protocol directory.
+- Supplied-token login changes identity without rewriting auth.json; native 401
+  callbacks on observer and later TUI requests use the broker-supplied refresh.
+  `token-native-refresh/` and `token-native-typed-refresh/` passed. It is still an
+  unstable/internal protocol. A handoff during a held active response fails with
+  “Fatal error: application network permission was revoked”; its no-handoff
+  control completes. Never apply that success claim to unrelated active work.
+- SIGHUP rejects new work while draining but racing TUI input exits the client
+  with `turn/steer failed: Server is draining`. Separately, an admitted pending
+  approval survives drain, executes once and permits replacement. Receipts:
+  `final-drain/`. A separate idle unauthenticated restart retained an edited draft;
+  the newer managed-account replacement probe above adds account adoption but
+  shows pending-approval and active-turn loss.
+- Claude's inbox UUID differs from its transcript `promptId`, which matches
+  `Stop.prompt_id`. A socket write or unrelated Stop is not completion. Native
+  transcripts can lag hooks. `claude-correlation-final/` and `claude-quota/`
+  established draft/typed-input survival and correlation. The latest submission
+  probes additionally correlate hook-wake retries directly by their prompt IDs.
+- Earlier two-client product probes completed retries and edited drafts on second
+  logins, but lacked conditional admission, Task binding and pending approvals.
+  They exercised the now-removed unconditional sends. Immediate Claude retry used
+  cached credentials; expiry after 31 seconds permitted adoption. Cache expiry
+  alone reserves no input position. Receipts: `product-codex-structured/`,
+  `product-claude-reload/` and `product-*-compress/`.
+- Initial product cleanup left 28 detached disposable owners. Those exact owners
+  were stopped; corrected cleanup and `product-codex-cleanup/` reaped clients and
+  owners. No production process was signalled. The mixed HTTP fixture that counted
+  plugin/MCP POSTs as inference is invalid; later probes count `/v1/responses` only.
 
-Fresh isolated Codex 0.167.0 observations (synthetic tokens, loopback only):
-
-- `codex_auth_reload_probe.py --external-token-handoff` reports second-account
-  identity and routing in the original server, leaving the auth file unchanged.
-  Results: `.lf/tmp/loo-811-protocol/external-token-handoff/results.json`.
-- `codex_drain_probe.py --token-handoff --approval` keeps the original native
-  approval answerable, executes its command exactly once, then completes typed
-  input with account headers changing from first to second. Both native processes
-  survive until fixture cleanup. Results: `token-native-approval/` in that tree.
-- The held-response handoff keeps the client and draft, but fails the old active
-  turn; the same test without handoff completes it. Both complete later typed
-  input. Results: `token-native-input-observed/` and `token-native-input-control/`.
-  Do not call this an all-turn preservation pass or switch unrelated active work.
-  Quota recovery targets a failed turn; newer/uncertain work must not be replayed.
-- The first mixed HTTP fixture incorrectly counted plugin/MCP POSTs as model
-  requests. Its initial result is invalid. Corrected probes accept only
-  `/v1/responses`; use the directories above, not `token-native-input/`.
-- `codex_drain_probe.py --token-handoff --quota` now passes: the first request
-  receives a synthetic usage-limit 429; after account handoff the observer retries
-  that exact prompt in the same thread while the native draft stays unsent.
-  The retry completes, the edited draft reaches the model, and a subsequent typed
-  turn completes. Headers are first, second, second, second; original server and
-  client survive. Results: `token-native-quota-retry/`. All fixture children exit.
-
-### Earlier integration — November 9
-
-The supplied-token path passed native 401 callbacks both on the observer's
-retry and on a later turn typed into the original TUI. Codex 0.167.0 delivered
-`account/chatgptAuthTokens/refresh` to the observer; the synthetic refreshed login
-was accepted, the retry and edited draft completed, and both native processes
-survived until cleanup. Results: `token-native-refresh/` and
-`token-native-typed-refresh/` under `.lf/tmp/loo-811-protocol/`. The held-response
-failure above ended with “Fatal error: application network permission was revoked”.
-It remains a counterexample to switching unrelated active work.
-
-Claude 2.1.321 also passed the correlation probe with a synthetic quota rejection:
-`claude-quota/` in the same tree. StopFailure identified the failed prompt; its
-complete transcript parent chain contained no assistant/tool work, and the
-`api-request` row supplied the actual selected model. The inbox UUID joined to
-a different promptId and then to the successful Stop. Draft and subsequent input
-completed; the fixture reaped its client and HTTP worker.
-
-The earlier integration supplied Codex tokens through the broker before re-reading
-the failed thread, and sent Claude inbox continuations from detached workers.
-Both sending paths were removed after the admission review. Session history,
-completion observers, served checks and Desktop progress remain.
-
-Both earlier two-client product probes passed on that candidate with native clients,
-synthetic logins and loopback inference. Each first-account prompt was rejected
-once, each correlated continuation completed on the second login, and each edited
-draft completed afterward in its original client/thread. Six requests per probe
-used first, first, second, second, second, second. Receipts:
-`product-codex-structured/` (Codex 0.167.0) and `product-claude-reload/`
-(Claude 2.1.321) under `.lf/tmp/loo-811-protocol/`. These Sessions were unbound;
-the integrated runs contained no pending approval or completed Graph step.
-
-Three failures changed the implementation. Codex's full rejected snapshot uses
-thread status `systemError`, not `idle`. Its localized “You’ve hit your usage
-limit” display text escaped the generic text classifier and initially caused a
-retry loop on the first login; recovery now uses structured `usageLimitExceeded`.
-Claude's immediate inbox retry retained the old token; later typed input used
-the replacement. Its native Keychain cache is 30 seconds. A 31-second detached
-wait followed by fresh account/history reads produced the passing result above.
-That wait held no credential lock; it established neither admission nor adoption
-by itself, and was removed with the inbox recovery send.
-
-Recovery checks capacity even for an explicitly preferred login. A rejected
-native model keeps its short model-specific hold when a generic usage poll shows
-room. Manual launch and Graph routing retain their existing semantics. Lost
-Codex replies retain uncertainty after observer restart, with no new dispatch.
-Credential preparation failures remain visible as native waits.
-
-The first product fixture cleanup ended viewers but left detached disposable
-owners. All 28 identified leftovers from these private probe roots were stopped;
-none remained. The fixture now stops its exact root-owned processes before
-removing the store. The cleanup rerun passed and is recorded below.
-
-Focused checks (inherited LF_* unset; logs under `.lf/tmp/loo-811-protocol/`):
-
-- `cargo nextest run -p loopflow --lib -E 'test(session_recovery::) | test(recovery_respects_capacity_even_for_a_preferred_login) | test(lf::tests::)'` — 43 passed.
-- `cargo build -p loopflow --bin lf` — passed; the final later edit only collapses an equivalent nested condition. Gate owns clippy and affected suites.
-- `cargo test -p loopflow --test integration dto_fixtures::session_recovery_round_trips_the_failed_turn_and_wait` — passed.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'sessionRecoveryControlKeepsUncertaintyVisible'` — passed; earlier recovery DTO filters passed (2 tests).
-- `uv run python scripts/test_network.py uv run --offline --script scratch/native_recovery_probe.py --lf target/debug/lf --codex /Users/jack/.local/bin/codex --output .lf/tmp/loo-811-protocol/product-codex-cleanup` — passed: both continuations and edited drafts, exact rejection counts, correlated completion, clients and owners reaped.
-
-The latest reconciliation is `e8c777f9c`, merging main `7cf2d25b3` after the
-implementation/compression checks above. It includes #1863, #1858's runtime
-ownership/native-exit changes, #1865's Desktop watches and #1854's submitted
-creation recovery. Realign fetched main again at `7cf2d25b3`; no upstream
-commits remain outside this branch. Earlier automatic-product results predate
-that merge and the admission cut; the focused admission checks above are later.
-Gate still owns broader merged-tree checks. The two-item Keychain repair remains.
-
-### Counterexample to composing the existing operations
-
-`human_session::open` handles Codex's explicit account change by calling
-`stop_session_agent`, ending its native client as well as its app-server.
-`restore::resume` reopens history but cannot restore the client's editor or
-approval channel. The existing `NativeExit` also names the old attachment and
-AgentProcess; replacing only the server without handing that record over would
-leave quit/cleanup aimed at the wrong generation. `Recorder::attachment_moved`
-currently ends the old client on any attachment change. These are not account
-selection problems, and copying the existing bulk model move would create a new
-seeded thread instead of continuing the native one.
-
-A separate idle read before stopping the provider is insufficient: a native
-client can submit a new turn or receive a request between the read and shutdown.
-The same issue applies to a background inbox message. Recovery needs a provider
-handoff that accounts for those arrivals, not an exception to native-input or
-pending-request retention.
-
-### Native observation
-
-A disposable Codex 0.167.0 probe used a private HOME/CODEX_HOME, Unix endpoint,
-PTY and a credential-free loopback Responses endpoint. External egress was denied.
-It opened and named a native thread without a turn, typed a draft, stopped only
-that private app-server, started its replacement at the same socket, edited the
-still-running terminal's draft, and submitted it. One local synthetic response
-completed. Results:
-
-- draft rendered before replacement: true
-- original client survived: true
-- further editing rendered after replacement: true
-- local endpoint received `DRAFT_BEFORE_RESTART_AFTER_RESTART` intact: true
-- terminal displayed `RESTART_TURN_COMPLETED`: true
-- local fixture requests: 1; every owned process reaped
-
-Command: `uv run python scripts/test_network.py uv run --offline --script .lf/tmp/loo-811-protocol/restart_probe.py < /dev/null` — passed.
-Probe and terminal/server artifacts are under `.lf/tmp/loo-811-protocol/`.
-This proves native editor survival and continued input on an unauthenticated
-custom provider. It does not prove managed-account switching, pending approval
-survival, a turn racing shutdown, Loopflow receipt handoff, or multiple Sessions.
-
-An earlier rendering-only run hit `PermissionError` in group cleanup after its
-observations; a subsequent process inventory found no process carrying its
-private endpoint/thread. The final probe uses direct owned-child termination,
-checks every child exited, shuts down its local HTTP server, and completed cleanup.
-An account-read experiment with synthetic ChatGPT credentials failed with
-`workspace routing discovery failed` before account observation; it proves
-nothing about hot account reload. No production credentials were read.
-
-Claude's existing `claude_updates::deliver` uses its native messaging socket and
-`priority: next`, keeping drafts and requests in their native client. Its socket
-has no consumption acknowledgement: successful write remains uncertain. The
-[Claude hooks reference](https://code.claude.com/docs/en/hooks#stopfailure), read
-November 9, says StopFailure ignores normal output; it cannot directly retry a
-turn. `asyncRewake` is a separate wake mechanism, not acknowledgement of recovery.
-
-Codex 0.167.0's supplied-token login is marked unstable/internal. The initial
-credential-ownership objection is superseded by the continuation direction and
-native callback results above. The implementation keeps the existing broker as
-the credential authority.
-
-### Native drain counterexample — November 9 implementation pass
-
-The installed Codex 0.167.0 has provider-side admission: one SIGHUP begins a
-graceful drain, rejects new work with `-32600` / `serverShuttingDown`, and waits
-for admitted turns. This agrees with the [app-server errors reference](https://learn.chatgpt.com/docs/app-server#errors),
-read November 9. An observer idle check is unnecessary for admission, but drain
-alone does **not** satisfy native-client preservation.
-
-The credential-free, externally network-denied probe in
-`scratch/codex_drain_probe.py` runs a native PTY against a private app-server and
-loopback Responses endpoint:
-
-- **Racing input fails.** With one admitted model response held locally, SIGHUP
-  kept the server alive and a side connection's new turn received the documented
-  rejection. Typing `TYPED_DURING_DRAIN` and Enter in the original client submitted
-  `turn/steer`; that client exited **1** with:
-  `Error: turn/steer failed: Server is draining; retry after reconnecting (code -32600), data: {"reason":"serverShuttingDown"}`.
-  The server later exited after releasing the fixture response, but no completed
-  original turn was observed. The typed text never reached the model. Starting a
-  successor at the same endpoint did not restore the terminated client.
-- **Pending approval passes.** The original `item/commandExecution/requestApproval`
-  stayed answerable during drain. Answering in the original PTY ran the fixture's
-  `/bin/echo APPROVAL_EXECUTED`, completed the admitted turn, and allowed the
-  server to exit. The same client survived replacement and completed another
-  typed turn. Three local Responses requests occurred; this is no account-switch,
-  Loopflow lifecycle, or multiple-Session proof.
-
-Check: `uv run python scripts/test_network.py uv run --offline --script scratch/codex_drain_probe.py --codex /Users/jack/.local/bin/codex --output .lf/tmp/loo-811-protocol/final-drain [--approval] < /dev/null` — racing input FAIL (native client exit); approval PASS. Both runs reaped every owned child and closed their local HTTP server. Results and terminal/server logs: `.lf/tmp/loo-811-protocol/final-drain/`.
-
-A repeat approval probe reached cleanup and hung in `waitpid` while the PTY
-remained open. Terminating only that disposable probe closed its PTY; its Python
-and remaining Codex PID were then absent. The saved probe closes the PTY before
-waiting on children and bounds the post-kill wait. No production process was
-signalled.
-
-The drain result rules out that replacement design with this native client.
-The supplied-token implementation avoids drain; it does not make the lost-input
-counterexample a pass.
-
-### Managed-auth reload counterexample — November 9, pass 3
-
-`scratch/codex_auth_reload_probe.py` runs Codex 0.167.0 with a private HOME,
-file-backed synthetic managed ChatGPT logins, a private Unix socket and loopback
-workspace discovery. External egress is denied; no model turn or quota rejection
-is generated. Account reads succeed, eliminating the earlier discovery failure:
-
-- Initial `account/read` reports `first@example.test` / workspace `first`.
-- Replacing the file with changed tokens for **the same account**, then calling
-  `account/read {refreshToken:true}`, reports `rotated@example.test` / `first`.
-- Replacing the file with **another account**, `second`, leaves both ordinary
-  and forced-refresh reads reporting the rotated **first** account.
-- The second account's file remains byte-for-byte intact; the original server
-  stays alive. The provider child and HTTP worker both exit during cleanup.
-
-Check: `uv run python scripts/test_network.py uv run --offline --script scratch/codex_auth_reload_probe.py --codex /Users/jack/.local/bin/codex --output .lf/tmp/loo-811-protocol/auth-reload-control < /dev/null` — probe completed; same-account reload YES, cross-account reload NO. Results and server log are in that output directory.
-
-The first attempt's HTTP workspace origin failed validation; using a synthetic
-HTTPS routing origin made account reads succeed. No request is sent to that
-origin. The same-account control distinguishes a working refresh path from a
-broken fixture. This observation does not establish managed-token refresh or
-native-client preservation after a switch: no switch occurred.
-
-The [official auth reference](https://learn.chatgpt.com/docs/app-server#auth-endpoints),
-read November 9, describes forced managed refresh and a separate externally owned
-token mode. Upstream `AuthManager::refresh_token_with_reason` guards reload by
-the cached account ID; `get_account` calls that refresh then reads cached auth.
-These sources agree with the native result. Current source inventory:
-`openai/codex@9f04d886f3663b584fba87d6fd71001fb6f9fcf3`; downloaded sources are
-under `.lf/tmp/loo-811-protocol/`. The installed build's behavior is established
-by the probe, not inferred from that upstream revision.
-
-### Claude native correlation — November 9, pass 3
-
-`scratch/claude_retry_correlation_probe.py` ran Claude **2.1.321** (the installed
-version at this observation), in a disposable home and PTY with a synthetic API
-key, local Messages responses and external egress denied. No quota exhaustion
-or real login was used. Its SessionStart hook kept the native inbox token in
-process memory and sent one ordinary `priority: next` message with a chosen UUID.
-
-- Initial typed input completed through `UserPromptSubmit` and `Stop`.
-- The injected message retained the chosen UUID in the transcript's `user` row.
-  That row's **`promptId` differs from its UUID** and matches both the native
-  `UserPromptSubmit.prompt_id` and successful `Stop.prompt_id` for that turn.
-- A draft typed before dispatch remained editable. Appending `_AFTER_RETRY`
-  and submitting yielded `DRAFT_BEFORE_RETRY_AFTER_RETRY` intact, followed by a
-  third successful Stop with its own prompt ID. Exactly three local Messages
-  requests occurred, all on `claude-sonnet-5-5` (the native `sonnet` selection).
-- The original client stayed alive; it and the HTTP worker were reaped.
-  A subsequent PID-only probe found no process matching either disposable
-  probe or its `loo811-claude-` home prefix.
-
-Check: `uv run python scripts/test_network.py uv run python scratch/claude_retry_correlation_probe.py --claude /Users/jack/.local/bin/claude --output .lf/tmp/loo-811-protocol/claude-correlation-final < /dev/null` — correlation, retained draft and subsequent completed turn observed. Native transcript, hook inputs, local requests and terminal bytes are in that output directory.
-
-The [hooks reference](https://code.claude.com/docs/en/hooks#common-input-fields),
-read November 9, says transcripts can lag hooks. The surviving design therefore
-joins dispatch UUID → transcript user `promptId` → Stop `prompt_id`, retaining
-uncertainty until both records arrive. A socket write or unrelated Stop cannot
-mark continuation. Missing/ambiguous transcript rows remain uncertain, never
-trigger a resend. Model changes need native model-switch observations, not the
-launch default. This establishes receipt correlation, not rejected-turn safety,
-managed-login reload, approvals, simultaneous Sessions or Graph non-replay.
-
-Probe setup corrections: the private Claude config belongs inside
-`CLAUDE_CONFIG_DIR`; the synthetic API-key prompt required an affirmative choice.
-An initial cleanup tried to signal an already-exited process group, raised
-PermissionError and left its HTTP worker alive. Only the two disposable Python
-processes were terminated; the corrected probe polls the child before signalling.
-The successful final run and the later PID-only inventory found no leftovers.
-
-### Earlier product compression checks
-
-Before the admission cut, both `product-codex-compress/results.json` and
-`product-claude-compress/results.json` recorded six requests, two recoveries,
-correlated completion, intact drafts, one rejection per client and reaped
-clients/owners. They used synthetic logins and loopback inference. The native
-probe commands and earlier 43-test, DTO and Swift results above apply to that
-sending implementation, not the current wait-only behavior.
-
-Full pre-realignment plan and concept review text:
-`65686dbf98654371040f100b383d742df0dc49bd:scratch/interactive-limit-recovery.md`.
-Earlier investigation: `e8c777f9c:scratch/interactive-limit-recovery.md`,
-“Earlier reconciliation”; pre-curation drain notes: `f5b3539644f30b22842273bdba995077eb2bd905`.
-
-Realign reused the saved six-test/build logs and both `admission-wait-*/results.json`
-receipts: two native waits, no credential handoff or retry input, intact edited
-drafts, completed typed turns, clients/owners reaped. No runtime code changed or
-native probe reran. All Infrastructure memory and its Release child's top-level
-Markdown were read; no child context was omitted.
-
-Realign check: `git diff --check` — passed; `lf context` — both budgets fit.
+Earlier focused checks covered 43 selected recovery/routing/CLI tests, the DTO
+round trip and Desktop recovery control. Their full commands and limits are in
+the git source above. The later six-test focused run and candidate build in this
+plan cover the current waiting implementation. Merged main `7cf2d25b3` includes
+#1863, #1858, #1865 and #1854; broader merged-tree checks remain with gate.

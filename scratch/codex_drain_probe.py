@@ -32,12 +32,17 @@ parser.add_argument("--approval", action="store_true")
 parser.add_argument("--token-handoff", action="store_true")
 parser.add_argument("--control", action="store_true")
 parser.add_argument("--conditional-steer", action="store_true")
+parser.add_argument("--replace-server", action="store_true")
+parser.add_argument("--race", choices=("none", "preparation", "disconnected"), default="none")
 parser.add_argument("--quota", action="store_true")
 parser.add_argument("--refresh", action="store_true")
 parser.add_argument("--refresh-request", type=int, default=2)
 args = parser.parse_args()
 if args.conditional_steer:
     args.quota = True
+if args.replace_server:
+    args.quota = not args.approval
+    args.token_handoff = True
 if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
     raise RuntimeError("run through scripts/test_network.py")
 out = args.output.resolve()
@@ -135,7 +140,10 @@ class Model(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if (len(requests) == 1 and not approval) or (args.conditional_steer and len(requests) == 2):
+        if (len(requests) == 1 and not approval) or (
+            (args.conditional_steer or (args.replace_server and args.race == "preparation"))
+            and len(requests) == 2
+        ):
             held.set()
             if not release.wait(30):
                 return
@@ -180,10 +188,14 @@ class Model(http.server.BaseHTTPRequestHandler):
             ),
         ]
         for kind, data in events:
-            self.wfile.write(
-                f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
-            )
-            self.wfile.flush()
+            try:
+                self.wfile.write(
+                    f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
+                )
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                results["model_connection_closed"] = True
+                return
 
 
 model = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Model)
@@ -319,6 +331,101 @@ trust_level="trusted"
             )
         elif not args.quota:
             assert held.is_set(), "model never received admitted input"
+        if args.replace_server:
+            results["mechanism"] = "server replacement without drain"
+            results["race"] = args.race
+            results["original_turn"] = turn
+            if args.race == "preparation":
+                os.write(master, b"NEWER_BEFORE_REPLACEMENT")
+                read(0.3)
+                os.write(master, b"\r")
+                read(2)
+                assert held.is_set(), "newer native request did not reach model"
+            if not approval and args.race != "disconnected":
+                os.write(master, b"DRAFT_BEFORE_REPLACEMENT")
+                read(0.3)
+            # End only this disposable server. No drain, proxy, or TUI restart.
+            stop(provider)
+            endpoint.unlink(missing_ok=True)
+            if args.race == "disconnected":
+                os.write(master, b"TYPED_WHILE_DISCONNECTED")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            _auth(home, "second")
+            replacement = server()
+            successor = Client(endpoint)
+            connections.append(successor)
+            results["account_after_replacement"] = successor.call("account/read", {})
+            read(4)
+            results["client_alive_after_replacement"] = client.poll() is None
+            release.set()
+            results["resumed_thread"] = successor.call("thread/resume", {"threadId": thread})
+            if args.race == "none" and not approval:
+                retry = successor.start_turn(thread, "Run the disposable fixture.")
+                read(3)
+                results["retry_completed"] = any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == retry
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in successor.events
+                )
+            elif approval:
+                os.write(master, b"y")
+                read(0.3)
+                os.write(master, b"\r")
+                read(3)
+            else:
+                read(3)
+            results["request_count_before_subsequent_input"] = len(requests)
+            results["turns_before_subsequent_input"] = successor.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            if client.poll() is None:
+                os.write(master, b"_AFTER_REPLACEMENT")
+                read(0.3)
+                os.write(master, b"\r")
+                read(5)
+            results["client_alive"] = client.poll() is None
+            results["client_exit"] = client.poll()
+            results["requests"] = requests
+            results["request_accounts"] = request_accounts
+            results["successor_events"] = successor.events
+            results["native_turns"] = successor.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            turns = results["native_turns"]["thread"]["turns"]
+            results["interrupted_turns"] = [t["id"] for t in turns if t["status"] == "interrupted"]
+            results["completed_inputs"] = [
+                item["content"]
+                for t in turns
+                if t["status"] == "completed"
+                for item in t["items"]
+                if item["type"] == "userMessage"
+            ]
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in successor.events
+            )
+            results["draft_submitted_intact"] = (
+                "DRAFT_BEFORE_REPLACEMENT_AFTER_REPLACEMENT"
+                in json.dumps(results["completed_inputs"])
+            )
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            assert results["account_after_replacement"]["account"]["email"] == "second@example.test"
+            if approval:
+                assert turn in results["interrupted_turns"] and results["completed_commands"] == 0
+            elif args.race == "preparation":
+                assert results["interrupted_turns"], (
+                    "expected the admitted response to be interrupted"
+                )
+                assert results["draft_submitted_intact"]
+            elif args.race == "none":
+                assert results["retry_completed"] and results["draft_submitted_intact"]
+            raise SystemExit(0)
         if args.conditional_steer:
 
             def wait_for(predicate, label):
@@ -535,10 +642,26 @@ trust_level="trusted"
         model.shutdown()
         model.server_close()
         worker.join()
+        results["http_worker_reaped"] = not worker.is_alive()
         results["all_children_reaped"] = all(p.poll() is not None for p in children)
         (out / f"drain-{results['case']}-terminal.bin").write_bytes(transcript)
         (out / f"drain-{results['case']}-results.json").write_text(json.dumps(results, indent=2))
-        print(json.dumps({key: value for key, value in results.items() if key != "native_turns"}))
+        print(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in results.items()
+                    if key
+                    not in (
+                        "native_turns",
+                        "requests",
+                        "successor_events",
+                        "resumed_thread",
+                        "turns_before_subsequent_input",
+                    )
+                }
+            )
+        )
 
 assert results["client_survived_drain"], "native client exited on drain rejection"
 if args.quota:

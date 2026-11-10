@@ -38,7 +38,7 @@ fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult
     })
 }
 
-fn session_membership(session: &str) -> String {
+pub(super) fn session_membership(session: &str) -> String {
     format!(
         "{session}.primary_scope IS NULL
          AND ({session}.task_id=tw.id OR ({}))",

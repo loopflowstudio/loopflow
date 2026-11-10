@@ -230,11 +230,13 @@ fn hold_viewer_retirements(
     absent_since: Option<i64>,
 ) -> StoreResult<()> {
     let mut query = conn.prepare(&format!(
-        "SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
+        "WITH owned AS MATERIALIZED (
+             SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE transport_lf_process_id=?1
+         )
+         SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
          AND (?2 IS NULL OR h.due_at < ?2+?3)
-         AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.transport_lf_process_id=?1
-             AND s.id IN ({}))",
-        super::task_work::session_ids("h.task_id")
+         AND h.task_id IN (SELECT tw.id FROM owned s JOIN tasks tw ON ({}))",
+        super::task_work::session_membership("s")
     ))?;
     let tasks = query
         .query_map(params![owner, absent_since, WORKSPACE_GRACE], |r| {
@@ -464,6 +466,34 @@ mod tests {
             )
             .unwrap();
         assert!(held(&store, &task).is_empty());
+    }
+
+    #[test]
+    fn viewer_holds_do_not_scan_session_history_for_every_retirement() {
+        let (_home, store, task) = fixture();
+        let viewer = session_owner(&store, &task, "viewed");
+        store.reconcile_task_retirement(&task, 100, None).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        for n in 0..32 {
+            let other = TaskId::new();
+            store.conn.lock().unwrap().execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at)
+                 VALUES(?1,?2,?3,1,?4,?3,1,'completion-1')",
+                params![other.as_str(), repo.as_str(), format!("OTHER-{n}"), format!("/repo.other-{n}")],
+            ).unwrap();
+            store.reconcile_task_retirement(&other, 100, None).unwrap();
+            session_owner(&store, &other, &format!("other-{n}"));
+        }
+        crate::performance::testing::observe(&store.conn.lock().unwrap());
+        let (result, work) = crate::performance::testing::measure(|| {
+            store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)))
+        });
+        result.unwrap();
+        assert_eq!(store.task_retirement(&task).unwrap().unwrap().due_at, None);
+        assert!(
+            work.vm_steps < 50_000,
+            "viewer hold holds the write lock: {work:?}"
+        );
     }
 
     #[test]

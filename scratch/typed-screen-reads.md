@@ -10,10 +10,11 @@ the current checkout and reads the recorded primary Session and PR checks.
 The richer Desktop reads still have consumers. Task detail reuses the resolved
 Task through `registered_task_status`.
 
-Remaining: publication, CI repair as needed, merge and completion.
+Remaining: CI repair as needed, merge and completion. Ready PR: #1869.
 Review and affected checks passed. No product decision is pending. `scratch/questions.md` records
 reversible schema choices. The delivery sync on 2026-11-09 merged pinned main `7cf2d25b3`; conflicts in
 server docs, read dispatch and the schema fixture retain both sets of operations.
+The two nested Session fixtures include main's nullable transition field.
 
 ## Concept review — 2026-11-09
 
@@ -62,4 +63,5 @@ Publication checks on 2026-11-09:
 - Retried only Clippy, website and Swift through `scripts.test.run_plans`, retaining its resource checks after syspolicyd fell to 38% CPU: all passed (`.lf/tmp/gate/run-57776`). `cargo clippy --all-targets --jobs 4 -- -D warnings`; 73 website tests; Desktop build and 785 headless Swift tests; Swift multiplatform checks. No checks deferred except optional display diagnostics.
 - `target/debug/lf help --all` against the base's Clap definitions: adds only `lf plan board`, `lf task detail`, and `lf session card`.
 
-- Sync resolution: `cargo test -p loopflow --lib server::schema::tests::the_checked_in_schema_is_what_describe_prints --jobs 4` with `LF_*` unset and closed stdin: passed, 1 test; existing linker unwind-size warning. Full checks remain with delivery/CI.
+- Sync resolution: `cargo test -p loopflow --lib server::schema::tests::the_checked_in_schema_is_what_describe_prints --jobs 4` with `LF_*` unset and closed stdin: passed, 1 test; existing linker unwind-size warning.
+- After merging main `7cf2d25b3`, the same affected-suite command passed all four suites (`.lf/tmp/gate/run-62603`): 265 Rust tests, Clippy, 73 website tests, Desktop build, 797 headless Swift tests, architecture, formatting and multiplatform checks. No product failures or host-pressure interruption in this run.

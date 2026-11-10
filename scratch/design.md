@@ -25,7 +25,7 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 02:35 UTC,
+At November 10 02:41 UTC,
 `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at that same head.
 The last successful `lf task status LOO-718 --json` read, at 01:11 UTC,
@@ -34,9 +34,15 @@ Subsequent Task status reads stalled; current Graph positions remain unknown.
 Those attempts are recorded in
 `d42de1306069b17f43a9e61776c715c7b946dd25:scratch/design.md`.
 The fetched main
-(`7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`, fetched again at 02:35 UTC)
+(`7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`, fetched again at 02:41 UTC)
 contained neither `mobile.rs` nor `ticket.rs`. The inspected transport includes
 watch resumption; retain it.
+
+At November 10 03:16 UTC, the same PR query still returned `OPEN`, no merge
+date and no auto-merge at the same head. A fresh fetch advanced main to
+`6f7a6c9caf7f68554445df008593d71baf95cfbe`; `git ls-tree` still found neither
+`server/mobile.rs` nor `server/ticket.rs`. No implementation or remote
+acceptance can proceed against the planned transport yet.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.

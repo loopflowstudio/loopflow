@@ -125,26 +125,26 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
                 .unwrap();
 
             if mode == "-i" {
-                fs::write(home.path().join("check-service-tier"), "").unwrap();
+                fs::write(home.path().join("check-child-tiers"), "").unwrap();
             }
-            let mut args = vec![
-                mode,
-                "--setting",
-                "codex.service_tier=default",
-                "resume",
-                &session,
-            ];
+            let resume_tier = setting.map(|_| "default");
+            let mut args = vec![mode];
+            if resume_tier.is_some() {
+                args.extend(["--setting", "codex.service_tier=default"]);
+            }
+            args.extend(["resume", &session]);
             if mode == "-b" {
                 args.extend(["--message", "Resume tier probe"]);
             }
             run(&args);
-            assert_eq!(read("native-config.json")["serviceTier"], "default");
+            assert_eq!(
+                read("native-config.json")["serviceTier"].as_str(),
+                resume_tier
+            );
             if mode == "-i" {
-                let probe = read("native-tier-check.json");
-                assert_eq!(probe["initial"], "default");
-                assert_eq!(probe["retained"], probe["changed"]);
-                assert_eq!(probe["new"], "default");
-                assert_eq!(probe["fork"], "default");
+                let probe = read("native-child-tiers.json");
+                assert_eq!(probe["new"], resume_tier.unwrap_or("priority"));
+                assert_eq!(probe["fork"], resume_tier.unwrap_or("priority"));
             }
             assert_eq!(settled_live_agents(&database), 0);
             assert_eq!(
@@ -154,6 +154,132 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             run(&["unset", "--global", "codex.service_tier"]);
         }
     }
+}
+
+#[test]
+fn codex_service_tier_survives_live_reattachment() {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    let home = tempfile::tempdir().unwrap();
+    support::install_native_codex(&home.path().join("bin"));
+    fs::write(home.path().join("reattach-service-tier"), "").unwrap();
+    let command = |args: &[&str]| native_codex_command(repo.path(), home.path(), args);
+    let mut first = command(&[
+        "session",
+        "serve",
+        "--terminal",
+        "--",
+        env!("CARGO_BIN_EXE_lf"),
+        "-i",
+        "-a",
+        "codex",
+        "--setting",
+        "codex.service_tier=default",
+        ":",
+        "Change the conversation tier",
+    ])
+    .stdin(Stdio::piped())
+    .stdout(Stdio::null())
+    .stderr(Stdio::inherit())
+    .spawn()
+    .unwrap();
+    let mut resumed = None;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let read = |name: &str| -> serde_json::Value {
+            let path = home.path().join(name);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                if let Ok(bytes) = fs::read(&path) {
+                    if let Ok(value) = serde_json::from_slice(&bytes) {
+                        return value;
+                    }
+                }
+                assert!(Instant::now() < deadline, "missing {name}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+        let before = read("native-tier-before.json");
+        assert_eq!(before["serviceTier"], "default");
+        assert_eq!(read("native-tier.json"), "priority");
+        let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let identity = || {
+            database
+                .query_row(
+                    "SELECT s.id,p.id,p.pid,p.os_started_at,p.endpoint,s.provider_thread
+                     FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+                     WHERE p.completed_at IS NULL",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, u32>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    },
+                )
+                .unwrap()
+        };
+        let original = identity();
+        // The new viewer must reach the still-running terminal before it can
+        // ask the server for the tier. Restarting from saved history cannot pass.
+        resumed = Some(
+            command(&[
+                "-i",
+                "--setting",
+                "codex.service_tier=default",
+                "resume",
+                &original.0,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+        );
+        resumed
+            .as_mut()
+            .unwrap()
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(b"inspect tier\n")
+            .unwrap();
+        let after = read("native-tier-after.json");
+        assert_eq!(after["serviceTier"], "priority");
+        assert_eq!(after["thread"], before["thread"]);
+        assert_eq!(identity(), original, "same live server and conversation");
+        let launches = fs::read_to_string(home.path().join("native-argv.jsonl")).unwrap();
+        let servers = launches
+            .lines()
+            .map(|line| serde_json::from_str::<Vec<String>>(line).unwrap())
+            .filter(|args| args.iter().any(|arg| arg == "--listen"))
+            .count();
+        assert_eq!(servers, 1, "reattachment must not launch another server");
+    }));
+    // Release and reap the fixture even if an assertion failed.
+    fs::write(home.path().join("release"), "").unwrap();
+    let statuses: Vec<_> = std::iter::once(&mut first)
+        .chain(resumed.iter_mut())
+        .map(|child| child.wait().unwrap())
+        .collect();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(settled_live_agents(&database), 0);
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+    assert!(
+        statuses.iter().all(|status| status.success()),
+        "{statuses:?}"
+    );
 }
 
 #[test]

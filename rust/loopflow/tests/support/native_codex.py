@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import select
 import socket
 import struct
 import sys
@@ -127,8 +128,27 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
                         assert terminal.readline().strip() == "decline"
                 _send(stream, {"id": rpc["id"], "result": {"decision": "decline"}}, True)
             if rpc.get("method") == "turn/completed":
-                if (home / "check-service-tier").exists():
-                    _check_service_tier(stream, home, thread)
+                if (home / "reattach-service-tier").exists():
+                    initial = _request(stream, "thread/resume", {"threadId": thread})
+                    _request(stream, "thread/settings/update", {
+                        "threadId": thread, "serviceTier": "priority",
+                    })
+                    (home / "native-tier-before.json").write_text(json.dumps(initial))
+                    with open("/dev/tty") as terminal:
+                        deadline = time.monotonic() + 30
+                        while not select.select([terminal], [], [], .1)[0]:
+                            if (home / "release").exists():
+                                return
+                            assert time.monotonic() < deadline, "no reattached input"
+                        assert terminal.readline().strip() == "inspect tier"
+                    retained = _request(stream, "thread/resume", {"threadId": thread})
+                    (home / "native-tier-after.json").write_text(json.dumps(retained))
+                    deadline = time.monotonic() + 30
+                    while not (home / "release").exists():
+                        assert time.monotonic() < deadline, "reattached terminal not released"
+                        time.sleep(.02)
+                if (home / "check-child-tiers").exists():
+                    _check_child_tiers(stream, home)
                 if "TITLE_HOST" in os.environ:
                     (home / "args").write_text("\n".join(sys.argv[1:]))
                     (home / "ready").touch()
@@ -144,24 +164,19 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
                 return
 
 
-def _check_service_tier(stream: socket.socket, home: Path, thread: str) -> None:
-    def _request(method: str, params: dict) -> dict:
-        _send(stream, {"id": "tier-check", "method": method, "params": params}, True)
-        while True:
-            reply = json.loads(_message(stream))
-            if reply.get("id") == "tier-check":
-                assert "error" not in reply, reply
-                return reply["result"]
+def _request(stream: socket.socket, method: str, params: dict) -> dict:
+    _send(stream, {"id": "tier-check", "method": method, "params": params}, True)
+    while True:
+        reply = json.loads(_message(stream))
+        if reply.get("id") == "tier-check":
+            assert "error" not in reply, reply
+            return reply["result"]
 
-    initial = _request("thread/resume", {"threadId": thread})["serviceTier"]
-    changed = "default" if initial == "priority" else "priority"
-    _request("thread/settings/update", {"threadId": thread, "serviceTier": changed})
-    # An observer's subscription must not undo a deliberate conversation change.
-    retained = _request("thread/resume", {"threadId": thread})["serviceTier"]
-    fresh = _request("thread/start", {})
-    forked = _request("thread/fork", {"threadId": fresh["thread"]["id"]})
-    (home / "native-tier-check.json").write_text(json.dumps({
-        "initial": initial, "changed": changed, "retained": retained,
+
+def _check_child_tiers(stream: socket.socket, home: Path) -> None:
+    fresh = _request(stream, "thread/start", {})
+    forked = _request(stream, "thread/fork", {"threadId": fresh["thread"]["id"]})
+    (home / "native-child-tiers.json").write_text(json.dumps({
         "new": fresh["serviceTier"], "fork": forked["serviceTier"],
     }))
 
@@ -300,9 +315,7 @@ def _server(endpoint: str, home: Path) -> None:
                                 },
                             )
                             continue
-                        service_tier = params.get(
-                            "serviceTier", params.get("config", {}).get("service_tier", service_tier)
-                        )
+                        service_tier = params.get("serviceTier", service_tier)
                         tier_file.write_text(json.dumps(service_tier))
                         result = {"thread": {"id": thread, "turns": turns}, "serviceTier": service_tier}
                         if "cwd" in params:  # lf's own request, not a client's

@@ -349,10 +349,33 @@ struct ServerProtocolTests {
             #expect(groups[1] == name, "\(kind) must be named \(name) in Swift")
             #expect(described[kind] == fields, "\(kind): `lf server describe --json` has \(described[kind].map { $0.sorted() } ?? []), Swift encodes \(fields.sorted())")
         }
+        let events = try arms("SubscriptionEvent", tag: "kind", of: schema)
         for groups in try matches(#""([a-z]+(?:\.[a-z_]+)+)""#, in: protocolSource) {
             let kind = try #require(groups[1])
-            #expect(described[kind] != nil, "\(kind) is not in `lf server describe --json`")
+            #expect(described[kind] != nil || events[kind] != nil, "\(kind) is not in `lf server describe --json`")
         }
+    }
+
+    @Test func typedEventsCarryTheirPayloadAndUnknownKindsStayLocal() throws {
+        guard case .event(let id, let seq, .taskShipped(let task, _, let number, _, _)) = try message("event_shipped") else {
+            Issue.record("Missing ship event"); return
+        }
+        #expect(id == "task" && seq == 1 && number == 42)
+        #expect(task == "task_11111111111111111111111111111111")
+        guard case .event(_, _, .taskSteer(_, let steer, let comment)) = try message("event_steer") else {
+            Issue.record("Missing steer event"); return
+        }
+        #expect(steer.text == "Keep the examples.")
+        #expect(comment?.body == "Keep the examples.")
+        guard case .event(_, _, .graphStepFinished(_, _, let step)) = try message("event_step_finished") else {
+            Issue.record("Missing step event"); return
+        }
+        #expect(step.label == "implement" && step.outcome == "succeeded")
+        let unknown = Data(#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.occurrence","extra":true}}"#.utf8)
+        guard case .event(let unknownID, 2, .unknown(let kind)) = try JSONDecoder().decode(ServerMessage.self, from: unknown) else {
+            Issue.record("Unknown event closed the connection"); return
+        }
+        #expect(unknownID == "task" && kind == "future.occurrence")
     }
 
     /// A fixture the mirror neither encodes nor decodes is one it can drift from.

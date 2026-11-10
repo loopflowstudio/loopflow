@@ -306,8 +306,8 @@ pub fn carry_task_run(
         }
         Ok(())
     };
-    let step = match start {
-        TaskRunStart::Run(step) => step,
+    let (step, ships) = match start {
+        TaskRunStart::Run { step, ships } => (step, ships),
         TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
         TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
     };
@@ -317,6 +317,7 @@ pub fn carry_task_run(
         announce(&TaskRun::Running {
             issue: issue.clone(),
             run: step.clone(),
+            ships,
             graph_process: graph.clone(),
             log: log.map(Path::to_path_buf),
         })

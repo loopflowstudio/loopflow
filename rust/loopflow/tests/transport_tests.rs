@@ -6895,6 +6895,25 @@ fn server_startup_cancels_its_pending_installer_when_pane_closes() {
 }
 
 #[test]
+fn owned_program_does_not_inherit_the_desktop_pane_relay() {
+    let fixture = Fixture::new();
+    let mut serve = fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            "printf '%s %s' \"${LF_SERVER-unset}\" \"${LF_SERVER_STATUS-unset}\" > \"$HOME/relay-env\"; read -r answer",
+        ],
+    );
+    serve
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", fixture.home.path().join("status.json"));
+    let owner = fixture.owner(serve);
+    let _cleanup = StopOwner(&fixture, owner);
+    assert_eq!(fixture.wait_file("relay-env"), "unset unset");
+}
+
+#[test]
 fn server_reconnect_cancels_when_native_pane_closes() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(

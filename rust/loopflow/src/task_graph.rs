@@ -405,7 +405,7 @@ impl TaskGraph {
             }
         }];
         lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
+            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, as does `lf task run {issue}` with no interactive step left ahead, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
         ));
         lines.join("\n")
     }

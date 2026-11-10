@@ -558,8 +558,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`.
-    Run(String),
+    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
+    /// interactive step is left ahead, and the run may merge the PR.
+    Run { step: String, ships: bool },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -836,7 +837,7 @@ async fn start_task_run(
             graph.name
         )));
     }
-    Ok(TaskRunStart::Run(label))
+    Ok(TaskRunStart::Run { step: label, ships })
 }
 
 /// The run this process carried ended; settle a completion its arrival at
@@ -1951,10 +1952,9 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
 
 fn planning_stale(status: &TaskStatus) -> bool {
     status.planning_state != crate::store::PlanningState::Available
-        || status.observed_at.is_some_and(|at| {
-            time::OffsetDateTime::now_utc().unix_timestamp() - at
-                >= super::linear::LINEAR_SOFT_STALE_SECS
-        })
+        || status
+            .observed_at
+            .is_some_and(|at| crate::observe::deadline(at + super::linear::LINEAR_SOFT_STALE_SECS))
 }
 
 /// Sessions copied here from rented Machines this Task ran on.

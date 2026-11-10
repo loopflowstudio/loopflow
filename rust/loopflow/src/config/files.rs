@@ -286,7 +286,7 @@ pub(crate) fn lock(path: &Path) -> Result<File> {
 }
 
 pub(crate) fn read_text(path: &Path) -> Result<String> {
-    match super::observation::read_to_string(path) {
+    match crate::observe::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),

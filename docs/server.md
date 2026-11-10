@@ -118,7 +118,9 @@ The planned [remote attach contract](../rust/loopflow/src/server/README.md#remot
 lets a phone view an existing Session's terminal without starting or resuming a
 provider. The phone requests a ticket, then opens a separate terminal connection.
 The ticket works once, within 60 seconds, on the same authenticated device and
-account that requested it.
+account that requested it. Host sleep counts toward those 60 seconds. If the
+ticket expires or a connection attempt fails, request a fresh ticket from that
+device; a ticket cannot be reused or handed to another device.
 
 Local use needs no network listener. Keep the local socket private; remote
 clients require their own authenticated endpoint.

@@ -362,10 +362,11 @@ part of what a phone or bot client is offered.
   as its only JSON message. After `bridged {owner_lf_process_id}`, it speaks the
   [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
   as 22 base64url characters, opens one bridge, lasts 60 seconds and is bound
-  to the requesting client's Unix peer UID. Presenting a ticket consumes it
-  even when the UID does not match. An unknown, spent, expired or foreign ticket
-  is `not_found` with a null `id` and closes the connection.
-  Bridges do not occupy the 64 client slots.
+  to the requesting client's Unix peer UID on the local socket; remote clients
+  follow the [remote attach contract](#remote-attach-contract). Presenting a
+  ticket consumes it even when the UID does not match. An unknown, spent,
+  expired or foreign ticket is `not_found` with a null `id` and closes the
+  connection. Bridges do not occupy the 64 client slots.
   The owner is the LfProcess holding the Session's terminal (`lf session
   serve`), never the provider's AgentProcess beneath it. The server resolves the
   Session's current owner when it issues the ticket; resolution never starts a
@@ -378,15 +379,8 @@ part of what a phone or bot client is offered.
   `not_found {owner_lf_process_id, current_lf_process_id}`. Desktop's relays do
   this; `lf session resume` and `server::client::attach` perform both steps.
   Each terminal has its own connection, so readings never wait behind terminal
-  bytes and a control failure never closes a bridged terminal. The owner alone grants input/geometry,
-  handles bounded output continuation and revokes stale control. No automatic
-  owner replacement or raw-input replay. Desktop automatically reconnects the
-  exact owner with bounded backoff, keeping connection status in native chrome
-  outside terminal bytes. Recovery uses Resume for byte streams or a fresh
-  terminal screen and requests free claims without replacement. Newer viewers
-  retain input and geometry. Unavailable keeps the last screen marked stale;
-  Retry reconnects without preparing or resuming a provider. A connection
-  failure alone never means the Session ended.
+  bytes and a control failure never closes a bridged terminal. Follow
+  [terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
 
 ## Events alongside readings
 
@@ -802,7 +796,8 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 ### Terminal and provider recovery
 
 Terminal continuation addresses the exact owner, separately from Work reads.
-Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+The owner alone grants input and geometry and revokes stale control.
+Byte-stream viewers use Resume with a bounded output spool of 1 MiB and a 60-second
 reconnect grace; expired continuation falls back to a fresh screen from that
 owner. Terminal-mode viewers request a fresh screen. Uncertain input is
 never replayed. Recovery takes only free claims or those held by the viewer's
@@ -814,6 +809,12 @@ If the Session has a new owner, exact-owner attachment returns `not_found` with
 `owner_lf_process_id` and `current_lf_process_id`. Attaching by Session can reach
 the current owner; neither attachment starts or resumes a provider. A lost
 connection alone does not establish process death.
+
+Desktop reconnects to the exact owner with bounded backoff. Connection status
+stays outside terminal bytes; unavailability marks the last screen stale.
+Retry reconnects without preparing or resuming a provider. See
+[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+for the Desktop controls.
 
 The Loopflow Session, provider conversation, serving AgentProcess and viewer's
 control claims are distinct. `SessionRecord.transition` reports the latest

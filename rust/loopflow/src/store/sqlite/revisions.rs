@@ -84,6 +84,7 @@ mod tests {
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
+        "creation_receipts",
         "access_profiles",
         "pm_project_name_cutover",
         "planning_user",

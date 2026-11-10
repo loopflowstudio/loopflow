@@ -7,6 +7,45 @@ import Testing
 
 @Suite(.serialized)
 struct ServerClientTests {
+    @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
+        let peer = try ServerPeer()
+        let requests = Mutex<Int>(0)
+        let effects = Mutex<Int>(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            if requests.increment() < 7 {
+                respond(["type": "error", "id": message["id"]!, "code": "busy",
+                         "message": "server capacity reached; retry shortly",
+                         "data": ["limit": "retained_bytes", "max": 67108864]])
+            } else {
+                _ = effects.increment()
+                respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": "created"])
+            }
+            return true
+        }
+        let value = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
+        #expect(value == "\"created\"")
+        #expect(effects.get() == 1)
+    }
+
+    @Test(arguments: ["busy", "outcome_unknown"])
+    func aDispatchedFailureIsNeverRetried(code: String) async throws {
+        let peer = try ServerPeer()
+        let effects = Mutex<Int>(0)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            _ = effects.increment()
+            respond(["type": "error", "id": message["id"]!, "code": code,
+                     "message": "reply could not be delivered", "data": ["limit": "retained_bytes"]])
+            return true
+        }
+        do {
+            _ = try await ServerClient.write(.graphCustomize(directory: "/", name: "code"), location: peer.location)
+            Issue.record("A failed request succeeded")
+        } catch { #expect((error as? ServerError)?.code?.rawValue == code) }
+        #expect(effects.get() == 1)
+    }
+
     @Test func cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() async throws {
         let peer = try ServerPeer()
         let firstId = Mutex<String?>(nil)
@@ -382,7 +421,7 @@ extension Mutex where Value == Int {
     func increment() -> Int { lock.withLock { value += 1; return value } }
 }
 
-/// One same-account peer speaking revision 3. Each `serve` accepts one
+/// One same-account peer speaking revision 4. Each `serve` accepts one
 /// connection, welcomes it, then runs `handle` for every client message on a
 /// reader thread until the handler closes it or the client disconnects.
 private final class ServerPeer: @unchecked Sendable {
@@ -428,9 +467,9 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": 3, "server_revision": 3, "min_revision": 3, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": 4, "server_revision": 4, "min_revision": 4, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
-                    "limits": ["max_message": 33_554_432, "max_connections": 64],
+                    "limits": ["max_message": 33_554_432, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])
                 while let message = try connection.read() {
                     lock.withLock { messages.append(message) }

@@ -43,10 +43,10 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Graph process compiles its graph and all routing alternatives before the
-first step and holds them in memory. A direct conversation captures its selected
-Skill or inline prompt. Reconnect retains that conversation; a new Graph compiles
-current source. Current credentials and checkout contents remain live inputs to execution,
+A Graph process loads its graph and all routing alternatives before the first
+step and holds them in memory. Task runs use the Task's captured definition;
+a direct Graph launch compiles the selected source. A direct conversation captures
+its Skill or inline prompt. Reconnect retains that conversation. Current credentials and checkout contents remain live inputs to execution,
 not evidence that old captured intent changed.
 
 ## Record actual processes

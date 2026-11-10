@@ -70,8 +70,10 @@ lf task wait INF-123 --until terminal                   # block until it settles
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its planning holds Tasks, KRs and targets.
-A Task owns its checkout and its PR history, with one current PR. Every conversation and Graph attributed
-to it is equally its work; none is privileged.
+A Task owns its checkout and its PR history, with one current PR. Every
+conversation and Graph attributed to it is part of its work. The Task has one
+captured graph and position, advanced by `lf task run` and `lf ship`; independent
+Graph runs do not move that position.
 
 Process records an actual lf command process. LfSession keeps a continuable
 conversation, whether interactive or headless. A Graph is one lf process and

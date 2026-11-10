@@ -693,7 +693,7 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WaveDetailPane.swift` — streamed Wave plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
-- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; CLI execution launches
+- `LoopflowMac/Services/RegistryQueryLocal.swift` — shared Work through the local server; terminal launches and remote file streams through the CLI
 
 The shared `Loopflow` target contains models, queries, and reusable views. The
 `LoopflowMac` target contains AppKit, process management, menus, and other
@@ -813,19 +813,28 @@ library; GhosttyKit remains its native renderer.
 
 The [server boundary](../docs/dev/server.md) puts registration and updates under
 installation. First connection obtains the selected helper; later connections
-only reconnect. CLI commands and served writes use the same Rust mutation
-dispatcher for routing, defaults, effects and formatting, with an explicit
-directory and input/output/error streams. Each served write runs in a
-request-scoped worker, starts no ordinary CLI child and creates no Process row.
-Its response trace correlates diagnostics and effects in `logs/lf.log`; it grants
-no execution ownership or permission to retry. Canceling releases the client's
-wait, but an admitted mutation may still complete. A lost response is an unknown
-outcome: refresh authoritative state before another deliberate edit. Desktop
-never automatically resubmits it. Session-to-Task adoption uses this shared write
-path without launching work. Create-and-run and other execution launches retain
-their ordinary CLI path and existing Session/Graph owners;
-remote Machine streams retain their CLI transports. Desktop's UI automation
-remains app-owned.
+only reconnect. CLI commands and served writes call the same Rust operations,
+which return typed values. Each served mutation runs in a request-scoped worker
+with its directory and `CommandIo`; it creates no Process row for the request.
+Its response trace correlates diagnostics and effects in `logs/lf.log`.
+Task run and ship dispatch detached execution under existing Graph owners.
+Terminal launches and remote Task file streams retain their CLI transports;
+Desktop's UI automation remains app-owned.
+
+Canceling releases the client's wait, but an admitted mutation may still complete.
+After a lost response, refresh authoritative state before another deliberate edit.
+Task creation (including Session adoption) and new Session threads additionally
+have creation receipts. `CreationSubmissions` saves the exact submitted payload,
+request ID, original Machine and protocol version before sending; the payload
+contains the original repository directory. A single app recovery owner looks up
+receipts after restart and continues only absent or safely resumable submissions.
+The server derives `complete`, `continue` or `inspect`; Desktop does not infer
+continuation from milestones. `CreationPresentation` retires a submission when
+its Task or Session view mounts, including promotion. Cold recovery's Show result
+uses the same completion owner after displaying the resource; Inspect retains
+unconfirmed launches or conversation changes. Failed removal repeats lookup and
+presentation. No local milestone ledger is stored.
+See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
@@ -895,7 +904,7 @@ and placement JSON fields retain their existing bytes across these source rename
 
 Definition search keeps Graph and Workflow destinations separate, even for the
 same name. Planning selectors list only Workflows. Task reads expose
-`workflow_name`, `latest_graph_process`, `execution`, and `run_control` separately;
+`graph_name`, `latest_graph_process`, `execution`, and `run_control` separately;
 completed Graph processes retain their graph and identity. The Task subscription part
 supplies `graph_processes`, using the same execution details as CLI inspection.
 
@@ -1096,6 +1105,8 @@ windows and therefore needs a display session. It is not in gate or CI.
 which reads the event stream and ends the whole run, naming the test, when one
 test function outlives 300 s. Swift Testing's `.timeLimit` only records an
 issue; a test blocked on a child process still holds the run.
+CI passes `--skip-build` after its separate Rust and Swift builds so compilation
+does not consume the test deadline.
 
 On a pull request the Swift tests get 5 minutes after the build (161 s on
 2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes

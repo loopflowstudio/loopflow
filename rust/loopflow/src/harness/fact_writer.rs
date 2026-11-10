@@ -919,7 +919,7 @@ mod tests {
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
-            .replace_session_input(original.captured, next)
+            .replace_session_input(original.captured, next, None)
             .unwrap();
         hear(
             &mut decoder,
@@ -1224,7 +1224,7 @@ mod tests {
             let mut next = original.clone();
             next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
-                .replace_session_input(original.captured, next)
+                .replace_session_input(original.captured, next, None)
                 .unwrap();
             let current = store
                 .claim_session_attachment("conversation", Some(&middle), &a, false)
@@ -1300,6 +1300,14 @@ mod tests {
     #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
+        let turns = || {
+            store
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.provider_turn.is_some())
+                .collect::<Vec<_>>()
+        };
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut writer = writer(&store, &attachment);
             let mut decoder = CodexDecoder::default();
@@ -1319,7 +1327,7 @@ mod tests {
             for message in messages {
                 hear(&mut decoder, &mut writer, message);
             }
-            let before = store.session_history("conversation", 0, 0).unwrap();
+            let before = turns();
             assert_eq!(
                 before.last().unwrap().lf_process_id,
                 attachment.lf_process_id.as_ref().map(ToString::to_string)
@@ -1342,7 +1350,7 @@ mod tests {
                 &mut writer,
                 json!({"id":2,"result":{"turn":{"id":turn}}}),
             );
-            assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
+            assert_eq!(turns(), before);
         }
         let mut writer = writer(&store, &attachment);
         let mut current = CodexDecoder::default();
@@ -1394,7 +1402,7 @@ mod tests {
         let mut next = previous.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(previous.captured, next.clone())
+            .replace_session_input(previous.captured, next.clone(), None)
             .unwrap();
         let replacement = LfProcessId::new();
         sql.execute(

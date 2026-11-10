@@ -3852,6 +3852,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            None,
         )
         .unwrap();
         assert!(saved.linear_id.is_some());
@@ -4299,6 +4300,7 @@ fn task_create_reaches_linear_past_pending_exports_and_a_slow_provider() {
             Some("Reach Linear".into()),
             Some("Within the creation's own deadline".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            None,
         )
         .unwrap();
         let provider = runtime.block_on(state.lock());

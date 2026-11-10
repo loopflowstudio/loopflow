@@ -79,6 +79,14 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
+    /// The CLI's retained process or Session history, as display text.
+    #[serde(rename = "process.history")]
+    #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
+    ProcessHistory { id: String },
+    /// Look up a creation without starting or retrying it. Null confirms absence.
+    #[serde(rename = "creation.get")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::store::sqlite::creation::CreationReceipt>>()))]
+    CreationGet { request_id: String },
     /// `lf process list`: live Loopflow call trees.
     #[serde(rename = "process.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
@@ -351,6 +359,8 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
+            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
             Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
@@ -599,6 +609,15 @@ impl Read {
     /// A command that prints bare text (`config repo --path`) is a string.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         match self {
+            Self::ProcessHistory { id } => value(&super::history::render(
+                id,
+                false,
+                None,
+                super::session_history::SessionView::Summary,
+            )?),
+            Self::CreationGet { request_id } => {
+                value(&crate::engine::creation::lookup(request_id)?)
+            }
             Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)

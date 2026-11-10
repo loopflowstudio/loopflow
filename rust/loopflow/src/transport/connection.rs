@@ -36,6 +36,7 @@ struct Reading {
     input: bool,
     native_ready: bool,
     message: Option<String>,
+    transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +59,7 @@ impl Status {
                 input: false,
                 native_ready: false,
                 message: None,
+                transition: None,
             },
             stream: None,
             received: Vec::new(),
@@ -68,13 +70,10 @@ impl Status {
     }
 
     fn publish(&mut self, state: &'static str, input: bool, message: Option<&str>) {
-        self.reading = Reading {
-            generation: self.generation,
-            state,
-            input,
-            native_ready: self.reading.native_ready,
-            message: message.map(str::to_owned),
-        };
+        self.reading.generation = self.generation;
+        self.reading.state = state;
+        self.reading.input = input;
+        self.reading.message = message.map(str::to_owned);
         if self.stream.is_none() {
             self.refresh(); // A new connection receives the latest reading below.
         } else if let Err(error) = self.write_reading() {
@@ -287,15 +286,45 @@ impl Status {
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
                     let result = crate::server::client::bridge_existing(&session, &owner);
-                    let _ = send.send(result);
+                    // Presentation cannot prevent the terminal from reconnecting.
+                    let transition = crate::store::read_existing_registry()
+                        .ok()
+                        .flatten()
+                        .and_then(|store| {
+                            let current = store
+                                .sqlite
+                                .session_attachment(session.as_str())
+                                .ok()
+                                .flatten()?;
+                            store
+                                .sqlite
+                                .provider_transition(session.as_str())
+                                .ok()
+                                .flatten()
+                                .filter(|transition| {
+                                    transition.to_agent_process == current.agent_process_id
+                                })
+                        });
+                    let _ = send.send((result, transition));
                 });
                 loop {
                     if !self.wait(Duration::from_millis(50))? {
                         return Ok(None);
                     }
                     match receive.try_recv() {
-                        Ok(Ok(socket)) => return Ok(Some((socket, recovered))),
-                        Ok(Err(error)) => {
+                        Ok((Ok(socket), mut transition)) => {
+                            if let Some(next) = transition.as_mut() {
+                                if self.reading.transition.as_ref().is_some_and(|old| {
+                                    old.to_agent_process == next.to_agent_process
+                                        && old.to_provider_session == next.to_provider_session
+                                }) {
+                                    next.kind = crate::store::sqlite::provider_transitions::TransitionKind::Retained;
+                                }
+                            }
+                            self.reading.transition = transition;
+                            return Ok(Some((socket, recovered)));
+                        }
+                        Ok((Err(error), _)) => {
                             recovered = true;
                             reason = error.to_string();
                             break;

@@ -404,7 +404,7 @@ struct Reader<A, F> {
     database: PathBuf,
     read: F,
     args: A,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
     observations: Arc<Cache>,
     dependencies: Dependencies,
     store: Option<SharedStore>,
@@ -419,6 +419,17 @@ struct Reader<A, F> {
     sent: Option<[u8; 32]>,
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
+}
+
+// A served subscription may be cancelled while its async owner is shutting
+// down. Its private runtime has finished its blocking reads and must not wait
+// for runtime shutdown from that async worker.
+impl<A, F> Drop for Reader<A, F> {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -446,7 +457,7 @@ where
             read,
             args,
             select,
-            runtime: tokio::runtime::Runtime::new()?,
+            runtime: Some(tokio::runtime::Runtime::new()?),
             observations: Cache::shared(),
             dependencies: Dependencies::default(),
             store: None,
@@ -484,6 +495,8 @@ where
             let config = StorageConfig::sqlite(self.database.clone());
             match self
                 .runtime
+                .as_ref()
+                .expect("the reader owns its runtime until drop")
                 .block_on(crate::store::open_read_only_store(&config))
             {
                 Ok(opened) => {
@@ -536,6 +549,8 @@ where
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
                 None => self
                     .runtime
+                    .as_ref()
+                    .expect("the reader owns its runtime until drop")
                     .block_on((self.read)(self.store.clone(), self.args.clone())),
             });
             self.dependencies = dependencies;

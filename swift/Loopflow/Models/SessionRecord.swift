@@ -179,7 +179,39 @@ public struct SessionPreview: Codable, Hashable, Sendable {
     }
 }
 
+public enum ProviderTransitionKind: String, Codable, Sendable, Hashable {
+    case retained, resumed, forked, started
+}
+
+public struct ProviderTransition: Codable, Sendable, Hashable {
+    public let kind: ProviderTransitionKind
+    public let fromProviderSession: String?
+    public let toProviderSession: String
+    public let fromAgentProcess: AgentProcessId?
+    public let toAgentProcess: AgentProcessId
+    public let originalRunning: Bool?
+    public let seed: String?
+    public let observedAt: Int64
+
+    public var explanation: String {
+        switch kind {
+        case .retained: "Same process"
+        case .resumed: "Resumed in a new process"
+        case .forked: "Forked from \(fromProviderSession ?? "earlier conversation")" + (originalRunning == true ? "; original was running at fork" : "")
+        case .started: fromProviderSession == nil ? "New conversation" : "New conversation; earlier one left behind"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, seed
+        case fromProviderSession = "from_provider_session", toProviderSession = "to_provider_session"
+        case fromAgentProcess = "from_agent_process", toAgentProcess = "to_agent_process"
+        case originalRunning = "original_running", observedAt = "observed_at"
+    }
+}
+
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let transition: ProviderTransition?
     public let preview: SessionPreview?
     public let primaryScope: String?
     public let availability: SessionAvailability?
@@ -251,7 +283,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
-        case preview
+        case preview, transition
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
@@ -318,6 +350,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        transition = try values.decodeIfPresent(ProviderTransition.self, forKey: .transition)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)

@@ -79,8 +79,9 @@ lf task run ISSUE [GRAPH] -> place the worktree, take up GRAPH, the Wave's, the 
                          -> current, completed or stopped
 ```
 
-Every Graph naming a Task is equally its work; none is selected over
-another. `task run` returns to its launcher once its Graph process registers,
+Every Graph naming a Task is part of its work. Only a Task run advances its
+captured graph position; independent Graphs do not. `task run` returns to its
+launcher once its Graph process registers,
 leaving output in `logs/graph-<id>.log`; `-b` blocks and prints. The Graph process holds the cursor in memory and
 advances it from each step's exit; the position a step ran at is on that step
 Process's argv.
@@ -163,10 +164,11 @@ turn. Name, feedback, native identity and history survive reconnect and recovery
 A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
 the same action and availability reason.
 
-Ready saves feedback and keeps the conversation open. Complete persists its
-closed state and exact feedback before teardown. A Graph review returns
-feedback for the following decision; it never selects that decision's edge.
-Pane close, provider exit and readiness do not complete the review.
+Review takes place at the Task's interactive graph step in its conversation.
+Feedback alone starts no run and selects no edge; `lf task run` continues the
+Task after the review. Historical readiness and feedback fields remain readable,
+but there are no `session ready` or `session complete` commands. Pane closure
+and provider exit do not complete a Task review.
 
 The desktop terminal pool keys on stable LfSession identity. Rename, bind,
 reconnect and replacement retain the pane and draft when reusing that surface.
@@ -181,9 +183,10 @@ lf task run INF-124 incident  # explicit override
 lf graph example                    # with or without Task attribution
 ```
 
-The Graph process compiles the graph, every router and Xor alternative, and holds it
-with the cursor and return counts in memory. Definition changes affect new
-Graphs. A past Graph keeps the graph its Graph process recorded at launch. Backward edges stay finite graph structure; future loop passes are
+The Graph process holds the compiled graph, every router and Xor alternative,
+with its cursor and return counts in memory. A Task run uses the definition the
+Task took up; direct Graph launches compile current source. Definition changes
+affect newly selected graphs, not a Task's already captured one. A past Graph keeps the graph its Graph process recorded at launch. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
 Taking an Iterate edge updates the Graph process's cursor and return counters. The

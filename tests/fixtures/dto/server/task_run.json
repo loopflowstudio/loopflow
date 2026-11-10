@@ -1,1 +1,14 @@
-{"type":"request","id":"run-1","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","from":"implement","agent":"claude","approve":false},"select":null}
+{
+  "type": "request",
+  "id": "run-1",
+  "operation": {
+    "kind": "task.run",
+    "directory": "/repo",
+    "issue": "LOO-1",
+    "from": "implement",
+    "agent": "claude",
+    "approve": false,
+    "graph": null
+  },
+  "select": null
+}

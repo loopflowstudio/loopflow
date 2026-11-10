@@ -33,6 +33,42 @@ pub struct SessionRecovery {
 }
 
 impl SessionRecovery {
+    /// Wait observations may change; dispatch and its correlated result cannot
+    /// be undone by a worker that read the conversation before dispatch.
+    pub(crate) fn observe(&mut self, phase: &str, mut observation: Self) {
+        if phase == "dispatch" && self.request.is_none() && observation.request.is_some() {
+            *self = observation;
+            return;
+        }
+        if self.state == RecoveryState::Continued {
+            return;
+        }
+        if let Some(request) = &self.request {
+            if observation.request.as_ref() != Some(request)
+                || !matches!(phase, "reply" | "unconfirmed" | "settled")
+                || matches!(
+                    observation.state,
+                    RecoveryState::WaitingCapacity | RecoveryState::WaitingNative
+                )
+            {
+                return;
+            }
+            match (&self.retry_turn, &observation.retry_turn) {
+                (Some(turn), Some(other)) if turn != other => return,
+                (Some(turn), None) => observation.retry_turn = Some(turn.clone()),
+                _ => {}
+            }
+            if observation.state == RecoveryState::Continued && observation.retry_turn.is_none() {
+                return;
+            }
+        } else if observation.request.is_some() || self.state == RecoveryState::Uncertain {
+            return;
+        }
+        observation.model = observation.model.or_else(|| self.model.clone());
+        observation.account = self.account.clone().or(observation.account);
+        *self = observation;
+    }
+
     pub(crate) fn can_retry(&self) -> bool {
         self.request.is_none()
             && matches!(
@@ -241,6 +277,21 @@ mod tests {
             .with_session_attachment("reader", &attachment, || store
                 .record_session_recovery("reader", &recovery, "dispatch"))
             .unwrap());
+        let mut late = recovery.clone();
+        late.request = None;
+        late.state = RecoveryState::WaitingCapacity;
+        late.reason = "No capacity".into();
+        late.retry_at = Some(1234);
+        store
+            .record_session_recovery("reader", &late, "wait:late")
+            .unwrap();
+        // Reopening the store models a disconnected reader, with no in-memory
+        // worker state available to reconstruct dispatch.
+        let reader = SqliteStore::new(&home.path().join("db")).unwrap();
+        assert_eq!(
+            reader.session_recovery("reader").unwrap(),
+            Some(recovery.clone())
+        );
         recovery.request = Some("reconnected-attempt".into());
         assert!(!store
             .record_session_recovery("reader", &recovery, "dispatch")
@@ -259,13 +310,63 @@ mod tests {
                 .as_deref(),
             Some("attempt")
         );
+        recovery.request = Some("attempt".into());
+        recovery.state = RecoveryState::Uncertain;
+        recovery.reason = "Reply lost".into();
+        store
+            .record_session_recovery("reader", &recovery, "unconfirmed")
+            .unwrap();
+        store
+            .record_session_recovery("reader", &late, "wait:later")
+            .unwrap();
+        assert_eq!(
+            reader.session_recovery("reader").unwrap(),
+            Some(recovery.clone())
+        );
+        recovery.retry_turn = Some("native-retry".into());
+        recovery.state = RecoveryState::Recovering;
+        store
+            .record_session_recovery("reader", &recovery, "reply")
+            .unwrap();
+        recovery.state = RecoveryState::Continued;
+        recovery.reason = "The native retry completed".into();
+        store
+            .record_session_recovery("reader", &recovery, "settled")
+            .unwrap();
+        store
+            .record_session_recovery("reader", &late, "wait:after-completion")
+            .unwrap();
+        assert_eq!(
+            reader.session_recovery("reader").unwrap(),
+            Some(recovery.clone())
+        );
+
+        // A new rejection owns its own attempt. An old worker finishing later
+        // must not make it disappear or prevent a capacity recheck.
+        late.failed_turn = "second-failure".into();
+        store
+            .record_session_recovery("reader", &late, "rejected")
+            .unwrap();
+        store
+            .record_session_recovery("reader", &recovery, "wait:old-worker")
+            .unwrap();
+        assert_eq!(
+            reader.session_recovery("reader").unwrap(),
+            Some(late.clone())
+        );
+        store.request_session_recovery("reader").unwrap();
+        assert!(store.recovery_request_revision("reader").unwrap() > requested);
         let newer = store
-            .claim_session_attachment("reader", Some(&attachment), &process, false)
+            .claim_session_attachment("reader", Some(&attachment), &process, true)
             .unwrap();
         assert!(store
             .with_session_attachment("reader", &attachment, || store
                 .record_session_recovery("reader", &recovery, "stale"))
             .is_err());
+        store
+            .record_session_connection("reader", &newer, "fixture", &"thread".into())
+            .unwrap();
+        assert_eq!(store.session_recovery("reader").unwrap(), Some(late));
         store
             .record_session_connection("reader", &newer, "fixture", &"new-thread".into())
             .unwrap();

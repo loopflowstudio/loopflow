@@ -22,42 +22,42 @@ preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
 ## Limit recovery (LOO-747/811, reconciled 2026-11-09)
 
-LOO-747 (#1828, `90a82635fc`) recovers inside the Graph step without replay.
-Explicit models change accounts only; bare harnesses may change models/providers,
-then wait by wall clock. Holds override scoped order until full or `use auto`.
-One shared provider home means switches affect every open Session on the Machine.
+LOO-747 (#1828) owns Graph recovery without replay; interactive recovery stays
+in its Session. Shared-home switches can affect every open Session.
 
-LOO-811 now owns automatic interactive continuation and Desktop recovery;
-LOO-813/#1863 is complete opening/reconnect work. Account switching alone cannot
-establish continuation. Keep native history, selected model, drafts and approvals;
-rejected-before-work, uncertain delivery and completed effects need distinct handling.
+LOO-811 owns interactive continuation and Desktop recovery; LOO-813/#1863 is
+complete opening/reconnect work. Jack Heart: “Account switching alone is not
+acceptance.” Keep native history, selected model, drafts and approvals; distinguish
+rejection before work from uncertain delivery and completed effects.
 
-Codex 0.167.0 replacement kept an editable draft, but SIGHUP drain rejected racing
-`turn/steer` input with `serverShuttingDown`: client exit 1, input lost. Separately,
-an approval stayed answerable and its client completed input after replacement.
-Managed `account/read` forced refresh reloaded same-account token changes but kept
-the old account after a cross-account file switch; the new file stayed intact.
-Neither path supports recovery. External-token ownership and provider changes
-remain unselected.
+Codex 0.167.0 replacement kept drafts, but SIGHUP drain rejected racing
+`turn/steer`: client exit 1, input lost. Separately, approvals survived replacement.
+Forced managed refresh reloaded same-account changes, not a different account.
+Jack Heart: “server restarts are allowed; no requirement to retain the server PID.”
+Supplied tokens use the existing broker; native 401 callbacks passed on retry
+and later typed input.
+Handoff during an active response failed its control comparison; these results
+permit no claim that unrelated active work survives switching.
 
-Claude 2.1.321's inbox UUID joins through transcript user `promptId` (a different
-ID) to successful Stop `prompt_id`. A draft stayed editable and later completed.
-Transcripts may lag hooks: retain uncertainty until both records arrive; socket
-writes or unrelated Stops prove no continuation and never authorize resend.
-These network-contained synthetic probes reaped their children. They prove no
-managed-login continuation, rejected-turn safety or multiple-Session recovery.
-Automatic continuation and Desktop recovery remain unimplemented.
+Claude 2.1.321 joins inbox UUID → transcript user `promptId` → Stop `prompt_id`.
+Transcripts can lag hooks; socket writes and unrelated Stops prove no continuation
+or permission to resend. Immediate retries used the old token; a 31-second wait
+for its 30-second Keychain cache, then fresh account/history reads, passed.
+Waiting alone proves no adoption.
 
-November 8 checks exposed lookup selecting USER twice and same-login activation
-skipping repair. Scoped checks cover both items following switches, seeded repair
-and marker failure/retry. Native Keychain rejection, installed repair and
-unsuffixed-service acceptance remain unobserved. Scope: USER plus one eligible
-item, lexical choice assumed, third items untouched.
+Both two-client product probes passed with synthetic logins and loopback inference:
+correlated continuation, intact edited drafts, one rejection each, clients and
+owners reaped. Runtime continuation, served bulk retry and Desktop progress exist.
+Those probes were unbound and had no pending approval or completed Graph step;
+Task-bound bulk preservation, model/route variations and merged-tree gate remain.
+Release's entry-point lesson applies: observer probes do not establish Desktop
+bulk recovery or repair of the unresolved ordinary-typing incident.
 
-Also unobserved: running-client account changes, Codex refresh overwriting another
-login, Claude's no-model spent line clearing its cooldown when all windows read
-below 100%, and refresh invalidating rentals' earlier access tokens.
-Plans/probes/receipts: `87f6ba324:scratch/`; earlier: `d4941f0456`, this heading.
+Scoped Keychain checks cover USER plus one lexical legacy item; third untouched.
+Native write rejection, installed/unsuffixed repair, real token rotation, Codex
+overwriting another login, Claude no-model quota with healthy windows, and rental
+token invalidation remain unobserved.
+Plans/probes/results: `e8c777f9c:scratch/`; earlier: `d4941f0456`, this heading.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

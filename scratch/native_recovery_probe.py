@@ -1,7 +1,7 @@
 # /// script
 # dependencies = ["websockets>=15,<16"]
 # ///
-"""Exercise candidate recovery with two native TUIs and synthetic loopback responses."""
+"""Exercise recovery admission waits and native input with two isolated TUIs."""
 
 import argparse
 import fcntl
@@ -138,7 +138,7 @@ class Backend(http.server.BaseHTTPRequestHandler):
         requests.append(
             {"account": account, "input": request.get("input", request.get("messages"))}
         )
-        if account == "first":
+        if account == "first" and len(requests) <= 2:
             release.wait(30)
             data = json.dumps(
                 {
@@ -420,13 +420,23 @@ trust_level="trusted"
             os.write(fd, f"\x1b[200~DRAFT_{i}\x1b[201~".encode())
         read(1)
         release.set()
-        for _ in range(75):
+        for _ in range(45):
             read(1)
-            if all(b"RECOVERY_COMPLETED" in data for data in terminal):
+            results["sessions"] = json.loads(lf("session", "list", "--all", "--json"))
+            if len(results["sessions"]) == 2 and all(
+                (session.get("recovery") or {}).get("state") == "waiting_native"
+                and "cannot condition" in session["recovery"]["reason"]
+                for session in results["sessions"]
+            ):
                 break
-        results["recovered_both"] = all(b"RECOVERY_COMPLETED" in data for data in terminal)
-        read(2)
-        results["sessions"] = json.loads(lf("session", "list", "--all", "--json"))
+        results["admission_wait_both"] = len(results["sessions"]) == 2 and all(
+            (session.get("recovery") or {}).get("state") == "waiting_native"
+            and "cannot condition" in session["recovery"]["reason"]
+            and session["recovery"]["request"] is None
+            for session in results["sessions"]
+        )
+        assert results["admission_wait_both"], results["sessions"]
+        results["no_recovery_input"] = len(requests) == 2
         results["native_threads"] = []
         with sqlite3.connect(root / "machine/loopflow.db") as db:
             endpoints = db.execute(
@@ -452,21 +462,19 @@ trust_level="trusted"
             for i in range(2)
         )
         results["native_clients_alive"] = all(child.poll() is None for child in clients)
-        results["rejected_each_once"] = (
-            sum(request["account"] == "first" for request in requests) == 2
-        )
-        results["correlated_completion"] = all(
-            session.get("recovery", {}).get("state") == "continued"
-            for session in results["sessions"]
-        )
+        results["no_credential_handoff"] = all(request["account"] == "first" for request in requests)
+        results["typed_completion"] = all(b"RECOVERY_COMPLETED" in data for data in terminal)
+        results["only_typed_turns"] = len(requests) == 4
         results["requests"] = requests
         results["get_paths"] = get_paths
         assert (
-            results["recovered_both"]
+            results["admission_wait_both"]
+            and results["no_recovery_input"]
+            and results["no_credential_handoff"]
+            and results["only_typed_turns"]
+            and results["typed_completion"]
             and results["drafts_intact"]
             and results["native_clients_alive"]
-            and results["rejected_each_once"]
-            and results["correlated_completion"]
         )
     finally:
         release.set()

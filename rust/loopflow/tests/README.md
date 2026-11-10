@@ -958,7 +958,14 @@ executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
 
 `served_reads` covers CLI/server effect parity and concurrent request traces
-without request Process rows. The transport watch proof covers live Task
+without request Process rows. Its Task-bound bulk recovery check retains dispatch
+through delayed waits and reads correlated completion on a new served connection,
+without starting an owner or Graph. `session_recovery::` covers subsequent
+rejections and provider replacement; `harness::claude_recovery::` joins the native
+inbox UUID, prompt ID and Stop after reconnect. Native-admission acceptance still
+requires input arriving during credential preparation and immediately before
+dispatch, with drafts, approvals and completed effects intact. A native wait does
+not establish automatic continuation. The transport watch proof covers live Task
 changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.

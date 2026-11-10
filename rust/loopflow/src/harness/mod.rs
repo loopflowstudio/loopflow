@@ -2,8 +2,6 @@ pub mod agent_process;
 pub mod claude;
 mod claude_decode;
 #[cfg(unix)]
-mod claude_inbox;
-#[cfg(unix)]
 pub(crate) mod claude_recovery;
 pub(crate) mod claude_trust;
 #[cfg(unix)]

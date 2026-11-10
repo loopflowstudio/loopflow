@@ -391,12 +391,6 @@ pub(super) struct Recorder {
 }
 
 impl Recorder {
-    pub(super) fn adopt_route(&mut self, route: crate::provider_account::ProviderAccountRoute) {
-        self.observer.account = Some(route.account_id().clone());
-        self.route = Some(route);
-        // The next stream records usage and native affinity under the new login.
-        self.store = None;
-    }
     async fn new(mut observer: CodexObserver) -> Self {
         let route = match &observer.account {
             Some(account) => crate::provider_account::session_account_route(
@@ -559,7 +553,7 @@ impl Recorder {
                     if let Err(error) = self.recovery_tick(&mut writer).await {
                         tracing::warn!(%error, "Codex recovery remains pending");
                     }
-                    if !self.busy && self.update_request.is_none() && !self.recovery.pending() {
+                    if !self.busy && self.update_request.is_none() {
                         self.deliver_update(&mut writer).await;
                     }
                 }
@@ -596,7 +590,7 @@ impl Recorder {
                 self.busy = true;
                 // Only our update has a request to answer for it; every other
                 // turn came from the person's client.
-                if self.update_request.is_none() && !self.recovery.pending() {
+                if self.update_request.is_none() {
                     if let (Some(turn), Some((_, history))) = (
                         params.pointer("/turn/id").and_then(Value::as_str),
                         self.stream(),
@@ -1015,9 +1009,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn turns_a_client_started_are_recorded_with_their_origin() {
+    async fn client_turns_keep_their_origin_during_a_recovery_read() {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let (store, attachment, database) = fixture(home.path());
+        let origin = attachment.lf_process_id.as_ref().map(ToString::to_string);
+        assert!(origin.is_some());
         let client = client();
         let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
         let watching = tokio::spawn(observe(
@@ -1025,23 +1021,37 @@ mod tests {
             || {},
         ));
         let mut provider = subscribed(&listener).await;
-        send(&mut provider, turn("turn/started", "typed", "inProgress")).await;
-        send(&mut provider, turn("turn/completed", "typed", "completed")).await;
-        eventually(|| {
-            store
-                .session_history("conversation", 0, 0)
-                .unwrap()
-                .iter()
-                .any(|event| event.provider_turn.as_deref() == Some("typed"))
-        })
-        .await;
+        for id in ["typed", "typed-during-read"] {
+            if id == "typed-during-read" {
+                let mut failed = turn("turn/completed", "rejected", "failed");
+                failed["params"]["turn"]["error"] = json!({"codexErrorInfo":"usageLimitExceeded"});
+                send(&mut provider, failed).await;
+                let read = receive(&mut provider).await;
+                assert_eq!(read["method"], "thread/read");
+                // Hold the history reply while the native client submits input.
+            }
+            send(&mut provider, turn("turn/started", id, "inProgress")).await;
+            send(&mut provider, turn("turn/completed", id, "completed")).await;
+            eventually(|| {
+                store
+                    .session_turn_completed("conversation", &"native-thread".into(), id)
+                    .unwrap()
+            })
+            .await;
+        }
         drop(listener);
         drop(provider);
         end(client);
         watching.await.unwrap().unwrap();
-        assert!(store
-            .session_turn_completed("conversation", &"native-thread".into(), "typed")
-            .unwrap());
+        let history = store.session_history("conversation", 0, 0).unwrap();
+        for id in ["typed", "typed-during-read"] {
+            assert!(
+                history.iter().any(|event| {
+                    event.provider_turn.as_deref() == Some(id) && event.lf_process_id == origin
+                }),
+                "{id} lost its initiating Session"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -372,11 +372,14 @@ Running out of usage credits ("You're out of usage credits", Claude's
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
 and the step goes on with Opus on the same account, in the same conversation.
 
-Open Claude and Codex Sessions recover a turn rejected before work began on
-another eligible login for the selected model. Claude waits for its native
-credential cache to reload; Codex supplies the login to its existing private
-server. A failed native model keeps a short scoped hold even when a general
-usage poll shows room. Drafts stay in the client; uncertain work is never resent.
+Open Claude and Codex Sessions track rejected turns and check eligible logins
+for the selected model. A failed native model keeps a short scoped hold even
+when a general usage poll shows room. Drafts stay in the client; uncertain work
+is never resent.
+
+**Current implementation limit:** automatic cross-login continuation waits for
+native admission support. Recovery checks capacity but does not hand off Codex
+credentials or enqueue a Claude retry while newer input can race it. Automatic continuation on another eligible login remains unfinished.
 
 Desktop's **Recover affected sessions** checks waiting conversations together.
 See [Recover after a usage limit](sessions.md#recover-after-a-usage-limit) for
@@ -446,7 +449,9 @@ For Codex, `use` also restarts its shared background app-server if it still hold
 another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
-terminals run their own private app-server and keep their login until restarted.
+terminals run their own private app-server. A shared-home switch leaves their
+login unchanged. Automatic quota handoff currently waits for native admission
+support that protects newer input.
 An unreadable daemon login returns an error without restarting it; the selected
 login remains installed. Failed activity checks keep the grace period rather than
 ending it early. Expiry warns that restarting may interrupt remaining turns.
@@ -456,7 +461,7 @@ reconcile the daemon later.
 | | Codex | Claude |
 |---|---|---|
 | Where the home's login lives | `auth.json` | macOS Keychain item; `.credentials.json` elsewhere |
-| An lf process already running | keeps the login it started with until it restarts | follows the switch |
+| An lf process already running | keeps its login after a shared-home switch | follows the switch after its native credential cache reloads |
 | A turn in flight during a switch | may fail once; a headless run resumes it under the new account | continues |
 | Whose login the home holds | read from the login | asked of Claude once after Claude refreshes it |
 

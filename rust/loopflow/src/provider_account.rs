@@ -446,9 +446,8 @@ impl ProviderAccountRoute {
     /// Supply the private native server from the existing credential broker.
     /// The lock and native refresh complete before returning; no refresh grant
     /// enters the observer or a second credential store.
-    pub(crate) async fn codex_auth_tokens(
+    pub(crate) async fn refresh_codex_auth_tokens(
         &self,
-        refresh: bool,
     ) -> Result<secrecy::SecretString, ProviderAccountError> {
         let _lock = activation::lock_native_credential(Provider::Codex)?;
         let account = self.check_account().await?;
@@ -460,21 +459,19 @@ impl ProviderAccountRoute {
         let mut access = codex_access::resolve(&account, None)
             .await
             .map_err(|error| unavailable(error.to_string()))?;
-        if refresh {
-            let reply = access
-                .connection
-                .request_raw("account/read", serde_json::json!({"refreshToken":true}))
-                .await
-                .map_err(|_| unavailable("Native Codex token refresh failed".into()))?;
-            if reply.get("error").is_some() {
-                return Err(unavailable(
-                    "Native Codex token refresh was rejected".into(),
-                ));
-            }
-            access = codex_access::resolve(&account, None)
-                .await
-                .map_err(|error| unavailable(error.to_string()))?;
+        let reply = access
+            .connection
+            .request_raw("account/read", serde_json::json!({"refreshToken":true}))
+            .await
+            .map_err(|_| unavailable("Native Codex token refresh failed".into()))?;
+        if reply.get("error").is_some() {
+            return Err(unavailable(
+                "Native Codex token refresh was rejected".into(),
+            ));
         }
+        access = codex_access::resolve(&account, None)
+            .await
+            .map_err(|error| unavailable(error.to_string()))?;
         access
             .save_to(&account, self.account_home())
             .map_err(|error| unavailable(error.to_string()))?;

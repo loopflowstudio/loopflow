@@ -6,7 +6,6 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::claude_inbox::Inbox;
 use crate::provider_account::{self, LaunchCapacity};
 use crate::provider_auth::Provider;
 use crate::session_recovery::{claude_rejected_model, RecoveryState, SessionRecovery};
@@ -81,17 +80,105 @@ pub(crate) fn record_limit(input: &Value) -> Result<()> {
     store.with_provider_context(&adapter, thread, NativeBoundary::Turn, || {
         store.record_session_recovery(&adapter.session, &recovery, "rejected")
     })?;
-    if let (Ok(socket), Ok(token)) = (
-        std::env::var("CLAUDE_CODE_MESSAGING_SOCKET"),
-        std::env::var("CLAUDE_CODE_MESSAGING_TOKEN"),
-    ) {
-        let mut worker = Recovery {
-            detached: true,
-            ..Default::default()
-        };
-        worker.tick(&store, &adapter, thread, Path::new(path), &socket, &token)?;
-    }
+    let mut worker = Recovery {
+        detached: true,
+        ..Default::default()
+    };
+    worker.tick(&store, &adapter, thread, Path::new(path))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Recovery;
+    use crate::id::LfProcessId;
+    use crate::session_recovery::{RecoveryState, SessionRecovery};
+    use crate::store::sqlite::SqliteStore;
+    use serde_json::json;
+
+    #[test]
+    fn reconnect_settles_the_dispatched_prompt_despite_a_late_wait() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        store.test_session("reader", &crate::session_record::new_artifact_key());
+        let process = LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment("reader", None, &process, true)
+            .unwrap();
+        store
+            .record_session_connection("reader", &attachment, "fixture", &"thread".into())
+            .unwrap();
+        let adapter = store.reserve_steer_adapter("reader", &attachment).unwrap();
+        let mut fact = SessionRecovery {
+            agent_process_id: attachment.agent_process_id,
+            thread: "thread".into(),
+            failed_turn: "rejected".into(),
+            model: Some("sonnet".into()),
+            account: None,
+            state: RecoveryState::WaitingCapacity,
+            reason: "waiting".into(),
+            retry_at: None,
+            request: None,
+            retry_turn: None,
+        };
+        store
+            .record_session_recovery("reader", &fact, "rejected")
+            .unwrap();
+        let late = fact.clone();
+        fact.request = Some("inbox-uuid".into());
+        fact.state = RecoveryState::Uncertain;
+        store
+            .record_session_recovery("reader", &fact, "dispatch")
+            .unwrap();
+        store
+            .record_session_recovery("reader", &late, "wait:late")
+            .unwrap();
+        let path = home.path().join("transcript");
+        std::fs::write(
+            &path,
+            json!({"type":"user","uuid":"inbox-uuid","promptId":"retry"}).to_string(),
+        )
+        .unwrap();
+        store
+            .record_recovery_boundary("reader", "thread", "unrelated", "stopped", None)
+            .unwrap();
+        let reconnected = SqliteStore::new(&database).unwrap();
+        let mut observer = Recovery::default();
+        observer
+            .tick(&reconnected, &adapter, "thread", &path)
+            .unwrap();
+        assert_eq!(
+            reconnected.session_recovery("reader").unwrap(),
+            Some(fact.clone())
+        );
+        store
+            .record_recovery_boundary("reader", "thread", "retry", "stopped", None)
+            .unwrap();
+        observer
+            .tick(&reconnected, &adapter, "thread", &path)
+            .unwrap();
+        let completed = reconnected.session_recovery("reader").unwrap().unwrap();
+        assert_eq!(completed.state, RecoveryState::Continued);
+        assert_eq!(completed.request, fact.request);
+        assert_eq!(completed.retry_turn.as_deref(), Some("retry"));
+        store
+            .record_session_recovery("reader", &late, "wait:after-stop")
+            .unwrap();
+        assert_eq!(
+            reconnected.session_recovery("reader").unwrap(),
+            Some(completed)
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -117,8 +204,6 @@ impl Recovery {
         adapter: &SteerAdapter,
         thread: &str,
         path: &Path,
-        socket: &str,
-        token: &str,
     ) -> Result<()> {
         let Some(mut recovery) = store
             .session_recovery(&adapter.session)?
@@ -229,24 +314,18 @@ impl Recovery {
                     })?;
                 }
             }
-            let route = provider_account::session_recovery_route(
-                Provider::Claude,
-                &model,
-                Path::new(&session.cwd),
-                session.wave_id.as_ref(),
+            Ok::<_, anyhow::Error>(
+                provider_account::session_recovery_route(
+                    Provider::Claude,
+                    &model,
+                    Path::new(&session.cwd),
+                    session.wave_id.as_ref(),
+                )
+                .await?,
             )
-            .await?;
-            if let Some(route) = &route {
-                // Same owner/locks as an ordinary launch, without starting one.
-                let _lock = route
-                    .launch_as(&mut std::process::Command::new("claude"))
-                    .await?;
-                route.pin_session(&recovery.thread).await?;
-            }
-            Ok::<_, anyhow::Error>(route)
         });
-        let route = match route {
-            Ok(Some(route)) => route,
+        match route {
+            Ok(Some(_)) => (),
             result => {
                 recovery.state = RecoveryState::WaitingCapacity;
                 recovery.reason = "No eligible login is ready for this model".into();
@@ -273,39 +352,18 @@ impl Recovery {
                 return Ok(());
             }
         };
+        // The inbox queues behind native input and has no failed-prompt
+        // condition. A transcript read before sending cannot reserve that
+        // position, so neither switch the shared login nor enqueue a retry.
         recovery.retry_at = None;
         recovery.state = RecoveryState::WaitingNative;
-        recovery.reason = "Waiting for Claude to reload the selected login".into();
+        recovery.reason = "Claude cannot condition an inbox retry on this still-current rejected prompt; continue in the conversation".into();
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            store.record_session_recovery(&adapter.session, &recovery, "reload")
-        })?;
-        // Claude's native Keychain reader caches a login for 30 seconds. Inbox
-        // turns can reuse that cached token immediately after a shared switch.
-        // No credential lock is held while the native cache expires.
-        std::thread::sleep(Duration::from_secs(31));
-        if LaunchCapacity::read(store)?
-            .login("claude", None, true)
-            .is_none_or(|account| &account.account_id != route.account_id())
-        {
-            return Ok(());
-        }
-        // Account work may have taken time. A newer prompt supersedes this retry.
-        if claude_rejected_model(&transcript(path)?, &recovery.failed_turn).as_deref()
-            != Some(&model)
-        {
-            return Ok(());
-        }
-        let mut inbox = Inbox::connect(socket)?;
-        let request = uuid::Uuid::new_v4().to_string();
-        recovery.request = Some(request.clone());
-        recovery.state = RecoveryState::Uncertain;
-        recovery.reason = "Retry delivery is not yet confirmed by the native conversation".into();
-        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            if store.record_session_recovery(&adapter.session, &recovery, "dispatch")? {
-                inbox.send(token, thread, &request,
-                    "Continue the existing conversation after its usage-limit rejection. Use the work already recorded in this conversation; do not repeat completed actions or answer pending approvals.")?;
-            }
-            Ok(())
+            store.record_session_recovery(
+                &adapter.session,
+                &recovery,
+                &format!("admission:{}", uuid::Uuid::new_v4()),
+            )
         })?;
         Ok(())
     }

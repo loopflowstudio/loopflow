@@ -289,6 +289,117 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
 }
 
 #[test]
+fn served_bulk_recovery_keeps_task_identity_and_dispatched_attempts() {
+    use loopflow::lf::commands::write::Write;
+    use serde_json::json;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file(".lf/config.yaml", "default_agent: codex\n");
+    repo.stage_all();
+    repo.commit("Recovery fixture");
+    let mut ids = Vec::new();
+    let mut tasks = Vec::new();
+    for title in ["First recovery", "Second recovery"] {
+        let task: Value = serde_json::from_str(&read(
+            repo.path(),
+            home.path(),
+            &["task", "create", "--title", title, "--json"],
+            None,
+        ))
+        .unwrap();
+        let task = task["task"]["id"].as_str().unwrap().to_owned();
+        let session: Value = serde_json::from_str(&read(
+            repo.path(),
+            home.path(),
+            &["session", "resume", "--task", &task, "--prepare", "--json"],
+            None,
+        ))
+        .unwrap();
+        ids.push(session["id"].as_str().unwrap().to_owned());
+        tasks.push(task);
+    }
+    let database = home.path().join("loopflow.db");
+    let db = rusqlite::Connection::open(&database).unwrap();
+    let append = |id: &str, phase: &str, payload: &Value| {
+        db.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES(?1,'observed',?2,unixepoch(),?3)",
+            rusqlite::params![
+                id,
+                format!("recovery:thread:failed:{phase}"),
+                payload.to_string()
+            ],
+        )
+        .unwrap();
+    };
+    let mut attempts = Vec::new();
+    for (index, id) in ids.iter().enumerate() {
+        let agent = loopflow::id::AgentProcessId::new();
+        db.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [agent.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET agent_process_id=?2,provider_thread='thread' WHERE id=?1",
+            rusqlite::params![id, agent.as_str()],
+        )
+        .unwrap();
+        let mut fact = json!({"agent_process_id":agent,"thread":"thread","failed_turn":"failed",
+            "model":"fixture","account":null,"state":"waiting_capacity","reason":"No capacity",
+            "retry_at":null,"request":null,"retry_turn":null});
+        append(id, "rejected", &fact);
+        if index == 0 {
+            let wait = fact.clone();
+            fact["state"] = json!("uncertain");
+            fact["request"] = json!("attempt");
+            fact["reason"] = json!("Native reply lost");
+            append(id, "dispatch", &fact);
+            append(id, "wait:delayed", &wait);
+        }
+        attempts.push(fact);
+    }
+    let _server = Server::start(repo.path(), home.path());
+    let before = processes(&database);
+    let recover = || {
+        server_write(Write::SessionRecover {
+            directory: repo.path().to_owned(),
+            ids: ids.clone(),
+        })
+    };
+    let first = recover();
+    for (index, record) in first.as_array().unwrap().iter().enumerate() {
+        assert_eq!(record["id"], ids[index]);
+        assert_eq!(record["task_ids"], json!([tasks[index]]));
+        assert_eq!(record["recovery"], attempts[index]);
+    }
+    assert_eq!(first[0]["task_primary"], true);
+    assert_eq!(first[1]["task_primary"], true);
+    let requests = |id: &str| {
+        db.query_row(
+        "SELECT COUNT(*) FROM session_events WHERE session_id=?1 AND receipt_key LIKE 'quota_retry:%'",
+        [id], |row| row.get::<_, i64>(0)).unwrap()
+    };
+    assert_eq!(requests(&ids[0]), 0);
+    assert_eq!(requests(&ids[1]), 1);
+    attempts[0]["retry_turn"] = json!("native-retry");
+    attempts[0]["state"] = json!("continued");
+    append(&ids[0], "settled", &attempts[0]);
+    let second = recover(); // A new served connection reads the original result.
+    assert_eq!(second[0]["recovery"], attempts[0]);
+    assert_eq!(requests(&ids[0]), 0);
+    assert_eq!(requests(&ids[1]), 2);
+    assert_eq!(
+        processes(&database),
+        before,
+        "bulk recovery starts no owner or Graph"
+    );
+}
+
+#[test]
 fn served_session_adoption_matches_cli_without_new_execution() {
     use loopflow::lf::commands::write::Write;
     use loopflow::server::wire::Operation;
@@ -1836,6 +1947,11 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
     use loopflow::portfolio::PortfolioCommand;
     let path = |path: &Path| path.display().to_string();
     let (directory, words): (String, Vec<String>) = match write {
+        Write::SessionRecover { directory, ids } => {
+            let mut spelled = words(&["session", "recover", "--json"]);
+            spelled.extend(ids.iter().cloned());
+            (path(directory), spelled)
+        }
         Write::TaskCreate {
             directory,
             request_id,

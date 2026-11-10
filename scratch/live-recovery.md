@@ -5,10 +5,13 @@ November 8, 2026. Direction in the recovery conversation: "can we get that insta
 ## Remaining work
 
 [interactive-limit-recovery.md](interactive-limit-recovery.md) owns the expanded
-scope, replacement design, native Codex findings and preservation cases. Runtime continuation, served bulk recovery and Desktop progress are now
-implemented in the working tree. Two-client native product probes passed for
-both providers with synthetic logins and loopback responses; gate and demo retain
-the broader preservation and real-login checks.
+scope, supplied-token design, native findings and preservation cases. Runtime
+observations, served bulk recovery and Desktop progress are implemented on the
+branch. The November 9 admission repair removed unconditional interactive sends;
+automatic continuation remains unfinished. Earlier two-client native product
+probes passed for both providers with synthetic logins and loopback responses;
+current probes establish safe waits and editable drafts, not automatic recovery. The latest main merge
+still needs gate checks; broader preservation and real-login checks remain open.
 The supplied-token Codex path supersedes the earlier drain/reload blocker.
 The design holds the native callback and retry results and their limits.
 

@@ -77,13 +77,18 @@ in Session history. Only complete native evidence of a rejection before work
 permits continuation. A fixed dispatch receipt is written before native input;
 unknown delivery cannot be retried by reconnection or a Desktop request.
 
-Codex uses its private server's supplied-token API and answers refresh callbacks
-through the existing managed-account broker. Claude's detached failure worker
-finishes credential work independently of the hook, then waits for its native
-credential cache before using the inbox. Both keep the native client, thread,
-model and editor. A correlated successful native completion marks continuation.
+The projection folds each failed turn's dispatch and correlated result; a late
+wait cannot replace them or hide a subsequent rejection. Checking again cannot
+resend an attempt already dispatched.
 
-Focused checks: `session_recovery::`,
+Native admission remains missing: Codex has no conditional account-handoff/start
+operation, and Claude's inbox can queue behind newer input. Recovery checks
+capacity, then reports a native wait without switching credentials or sending.
+The existing broker still handles Codex same-account refresh callbacks, and the
+watchers still settle previously dispatched attempts by native correlation.
+
+Focused checks: `session_recovery::`, `harness::claude_recovery::`,
+`served_bulk_recovery_keeps_task_identity_and_dispatched_attempts`,
 `provider_account::account_first_tests::recovery_respects_capacity_even_for_a_preferred_login`,
 and Desktop's `sessionRecoveryControlKeepsUncertaintyVisible`. Gate also covers
 provider-account, native decoder, hook, Session projection, served mutation and

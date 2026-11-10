@@ -84,20 +84,41 @@ impl SqliteStore {
         session: &str,
     ) -> StoreResult<Option<crate::session_recovery::SessionRecovery>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let payload: Option<String> = conn
-            .query_row(
-                "SELECT e.payload FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-             WHERE e.session_id=?1 AND e.kind='observed' AND e.receipt_key LIKE 'recovery:%'
-             AND json_extract(e.payload,'$.thread')=s.provider_thread
-             AND json_extract(e.payload,'$.agent_process_id')=s.agent_process_id
-             ORDER BY e.seq DESC LIMIT 1",
-                [crate::id::canonical_session(session)],
-                |row| row.get(0),
-            )
-            .optional()?;
-        payload
-            .map(|payload| serde_json::from_str(&payload).map_err(Into::into))
-            .transpose()
+        // Select the latest failed turn by its first observation, not its last
+        // worker. Late facts for an older attempt cannot replace a new rejection.
+        // Writer fences still belong to the current owner; replacing that owner
+        // cannot erase dispatch for the same native conversation.
+        // One statement also keeps the selected attempt and its facts in the
+        // same snapshot when this reader runs outside a Work read transaction.
+        let mut query = conn.prepare(
+            "WITH facts AS (
+                SELECT e.seq,e.receipt_key,e.payload,
+                       json_extract(e.payload,'$.failed_turn') AS failed_turn
+                FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
+                WHERE e.session_id=?1 AND e.kind='observed' AND e.receipt_key LIKE 'recovery:%'
+                  AND json_extract(e.payload,'$.thread')=s.provider_thread
+             ), latest AS (
+                SELECT failed_turn FROM facts GROUP BY failed_turn ORDER BY MIN(seq) DESC LIMIT 1
+             )
+             SELECT receipt_key,payload FROM facts
+             WHERE failed_turn=(SELECT failed_turn FROM latest) ORDER BY seq",
+        )?;
+        let mut rows = query.query([crate::id::canonical_session(session)])?;
+        let mut recovery: Option<crate::session_recovery::SessionRecovery> = None;
+        while let Some(row) = rows.next()? {
+            let key: String = row.get(0)?;
+            let observation: crate::session_recovery::SessionRecovery =
+                serde_json::from_str(&row.get::<_, String>(1)?)?;
+            let prefix = format!("{}:", observation.key());
+            let Some(phase) = key.strip_prefix(&prefix) else {
+                continue;
+            };
+            match &mut recovery {
+                Some(recovery) => recovery.observe(phase, observation),
+                None => recovery = Some(observation),
+            }
+        }
+        Ok(recovery)
     }
 
     /// The dispatch phase has a fixed key for this failed turn, regardless of

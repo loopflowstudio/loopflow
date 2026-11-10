@@ -200,27 +200,28 @@ again. Connecting logins and setting routes: [Ops](ops.md).
 
 ## Recover after a usage limit
 
-Several Task conversations hit a usage limit while you have them open. Leave
-them open: Loopflow continues affected Claude and Codex Sessions on another
-eligible login for their selected model. Each keeps its native conversation,
-Task and history; you can keep typing in the same pane after recovery.
+In Desktop, **Recover affected sessions** checks eligible logins for waiting
+Claude and Codex conversations together. Each conversation shows its wait reason
+and any known capacity reset. Keep it open to retain history, editable drafts
+and pending approvals.
 
-In Desktop, **Recover affected sessions** appears beside affected Sessions.
-Choose it to retry recovery for those conversations together. Progress shows
-which Sessions are recovering, which have continued, and which are still
-waiting, with the reason for each wait. Changing the shared login alone does
-not mean a stopped turn has continued.
+**Automatic continuation is unfinished.** Recovery currently checks capacity
+and reports a wait; it cannot safely switch accounts and retry while new input
+can arrive. Continue from the open conversation.
+
+Checking again does not resend a dispatched retry. Its progress follows the
+original attempt, even after a reconnect. New input takes precedence over
+recovery of an older turn.
 
 | What is waiting | What happens next |
 |---|---|
 | No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
-| The native client is adopting a login | Claude waits for its credential cache to expire before continuing; Codex keeps its existing server and client. Drafts stay editable and approvals stay answerable. |
+| The native client cannot safely admit recovery | Recovery waits without changing credentials or queuing input behind newer work. Drafts stay editable and approvals stay answerable. |
 | A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
 
-A turn rejected by the provider before work began can retry automatically.
-Incomplete native history also stays uncertain. Completed tool actions and
-finished Graph steps are never replayed. Recovery
-keeps the selected model and respects the Session's account restrictions; it
+Incomplete native history stays uncertain. Recovery does not replay completed
+tool actions or finished Graph steps. Capacity checks use the selected model
+and respect the Session's account restrictions; recovery
 does not change your preferences or answer approvals for you. See
 [Subscriptions](subscriptions.md#when-an-account-runs-out) for account routing
 and the separate model fallback available to headless Graph steps.
@@ -241,8 +242,7 @@ Use a move when you want to choose another model or provider.
 to the Machine, not to a Session: `use` switches the shared login and holds
 launches there until the login fills up or `lf account use auto`.
 
-A running Codex keeps its login until quota recovery supplies another eligible
-login or an explicit `lf --account codex=<login> resume <session>` restarts it.
+A running Codex keeps its login. An explicit `lf --account codex=<login> resume <session>` restarts it.
 An explicit restart restores native history, but does not retain the old client's
 draft or pending approval.
 

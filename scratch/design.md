@@ -1,12 +1,8 @@
 # LOO-809: remote attach tickets
 
-Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract),
-linked from `docs/server.md`. This checkout contains the planned contract only.
-
-The listener, mobile settings and bulk protocol are outside this Task.
-The contract remains marked planned until implemented. Current local tickets
-consume on every attempt and expire using `Instant`; remote identity and expiry
-across host sleep are not implemented here.
+Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
+This checkout contains the planned contract only. The listener, mobile settings
+and bulk protocol are outside this Task.
 
 ## Transport dependency — November 10, 2026 UTC
 
@@ -32,14 +28,11 @@ head, with `mergeable: false`. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 `lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
 with PR #1812 open and settlement not armed.
-Implementation and remote acceptance remain blocked on LOO-718 landing.
-Landing that separate PR is outside this Task's scope. No product decision is
-missing.
 
-Graph decision: stop for the external transport dependency. The checkout still
-has only the UID-based store slated for deletion; modifying it would implement
-the wrong authority. Resume implementation against the landed shared store
-after LOO-718 lands. Publication, merge and Task completion remain outstanding.
+Graph decision: stop until LOO-718 lands, then recheck its shared store and resume
+implementation and remote acceptance. Landing that separate PR is outside this
+Task's scope. No product decision is missing. Publication, merge and Task
+completion remain outstanding.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
@@ -49,18 +42,19 @@ to older status reads.
 
 Integrating the inspected transport removes `server/service.rs::Ticket` and
 `Tickets`, the current UID-only store. Use its shared `server/ticket.rs`
-authority without retaining a second store. Carry forward the behavior covered
-by `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`: identity,
-consume-on-attempt, single use, expiry and sweeping. Add missing terminal cases
-to the shared-store tests; retain its bulk cases, service-level bridge tests and
-wire fixtures for the surviving protocol.
+authority without retaining a second store. Move the identity, consume-on-attempt,
+single-use, expiry and sweeping coverage from
+`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` to the shared-store
+tests, then delete that predecessor test. Retain bulk cases, service-level bridge
+tests and wire fixtures. Until the transport lands, leave the UID-only store
+alone: changing it would extend code this Task removes.
 
 ## Remaining implementation
 
-Recheck the landed revision before integrating. Restore terminal consume-on-attempt
-in the shared store without changing bulk redemption policy. Replace ticket timing
-with `SystemTime` so the 60-second deadline includes host sleep; leave unrelated
-throttles on `Instant`. Retain the transport's watch resumption.
+Restore terminal consume-on-attempt in the shared store without changing bulk
+redemption policy. Replace ticket timing with `SystemTime` so the 60-second
+deadline includes host sleep; leave unrelated throttles on `Instant`. Retain the
+transport's watch resumption.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.

@@ -93,3 +93,31 @@ agent, captures/replay, Codex/Claude/OpenCode harnesses, commit/PR launch, conte
 launch, settings launch, Session CLI/startup and session_launch_contract passed:
 448 Rust tests; architecture, fmt, Clippy with warnings denied, and website checks.
 Total 602s. Rust 1.99.1; log `/tmp/loo-816-publish-checks.log`. No feature repair.
+
+2026-11-09 demo decision pass 1: no hands-on demo happened because this run is
+headless and nobody is available. Advance on the preceding real-provider
+readbacks, public reattachment/resume checks and passing publication checks.
+Authenticated replies and typed native commands remain unobserved; that gap
+does not identify a repair to send to implementation. No personal reaction or
+approval is inferred. This pass launched no demo processes or private roots.
+
+## Gate — 2026-11-09
+
+Reviewed against checkout base `7cf2d25b3`, including the existing demo note.
+No code repair needed. Settings/catalog changes reach config and settings launch;
+AgentConfig propagation reaches prompt, Session, replay/capture and commit/PR
+launches; native Codex changes and its shared stand-in reach context launch,
+Session startup/CLI and session_launch_contract. Docs additionally require
+documented_commands; prompt preparation requires golden_prompt. Those last two
+were missing from the publication filter and are now covered.
+
+`uv run python scripts/test.py --reuse-passing --rust-filter '(test(config::) | test(prompt::) | test(agent::) | test(session_record::) | test(harness::codex) | test(harness::claude::) | test(harness::opencode::) | test(lf::commands::replay::) | test(ops::commit::) | test(ops::pr::) | test(context_launch_tests::) | test(settings_launch_tests::) | binary(session_launch_contract) | test(session_cli_tests::) | test(agent_startup_tests::) | test(documented_commands::) | binary(golden_prompt))'`: 453 Rust tests passed; architecture, inventory, CLI build, fmt and Clippy with warnings denied passed; website setup failed because PATH selected the old `~/.cargo/bin/lf`; log `/tmp/loo-816-gate-checks.log`.
+`PATH="$PWD/target/debug:$HOME/.cargo/bin:$PATH" uv run python scripts/test.py --base HEAD --website --reuse-passing`: passed (37s), using the candidate CLI; only website and architecture reran; log `/tmp/loo-816-gate-website.log`.
+Both commands ran with inherited `LF_*` unset and stdin closed. The known macOS
+test-linker unwind-table size warning recurred; no required check timed out.
+`git diff --check`: passed. No source changes followed verification.
+
+The full platform matrix remains with CI. Authenticated replies and typed native
+`/new`, `/fork`, `/fast` remain demo/review limits recorded above; the available
+automated acceptance passes. No new quality rule is needed: the two added checks
+and candidate-first PATH are already documented in the repository's test guides.

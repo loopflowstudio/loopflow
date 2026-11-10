@@ -10,10 +10,10 @@ the current checkout and reads the recorded primary Session and PR checks.
 The richer Desktop reads still have consumers. Task detail reuses the resolved
 Task through `registered_task_status`.
 
-Remaining: review and gate, then publication, CI repair as needed, merge
-and completion. No product decision is pending. `scratch/questions.md` records
-reversible schema choices. On 2026-11-09, fetched `origin/main` was
-`28b0af568`, already the branch's base; delivery still needs a fresh sync.
+Remaining: publication, CI repair as needed, merge and completion.
+Review and affected checks passed. No product decision is pending. `scratch/questions.md` records
+reversible schema choices. `lf sync` on 2026-11-09 completed without conflicts;
+`origin/main` remained `28b0af568`.
 
 ## Concept review — 2026-11-09
 
@@ -51,8 +51,13 @@ No production repair was needed. Full scenarios and limits: `scratch/qa.html`.
 - `scripts/test_desktop.sh --filter 'DTOFixtureTests/screenRead' --jobs 4 -Xswiftc -gnone`: passed; Desktop built headlessly and 3 tests passed.
 - `cargo test -p loopflow --lib lf::commands::screens::tests::`: passed, 4 tests; linker warned `__eh_frame section too large (max 16MB)`.
 - `cargo test -p loopflow --lib lf::tests::`: passed, 39 CLI parser/routing tests.
-- `cargo fmt` and `git diff --check`: passed after compression. Gate owns static analysis and the remaining affected suites.
+- `cargo fmt` and `git diff --check`: passed after compression and at publication.
 - `lf open --host desktop --file rust/loopflow/src/server/README.md --file docs/dev/server.md`: write-docs reported "task_09da292684f1441d9aa138b8f7710b35 has no workspace in this Desktop window; nothing changed."
 
 - `cargo build -p loopflow --bin lf`: passed during QA.
 - `scripts/test_desktop.sh --filter DesktopHeadlessTests/workStates --jobs 4 -Xswiftc -gnone`: passed during QA; one headless production-view check. No live-window walkthrough.
+
+Publication checks on 2026-11-09:
+- `scripts/test.py --reuse-passing --rust-filter` with the affected modules listed above: architecture, inventory, formatting, CLI build and 260 Rust tests passed (`.lf/tmp/gate/run-13283`). Clippy was stopped by the host-pressure monitor after syspolicyd held 375% CPU for three samples; no code diagnostic. Website and Swift had not started.
+- Retried only Clippy, website and Swift through `scripts.test.run_plans`, retaining its resource checks after syspolicyd fell to 38% CPU: all passed (`.lf/tmp/gate/run-57776`). `cargo clippy --all-targets --jobs 4 -- -D warnings`; 73 website tests; Desktop build and 785 headless Swift tests; Swift multiplatform checks. No checks deferred except optional display diagnostics.
+- `target/debug/lf help --all` against the base's Clap definitions: adds only `lf plan board`, `lf task detail`, and `lf session card`.

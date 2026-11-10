@@ -22,8 +22,6 @@ the new repository's sheet. Unconditional dismissal/navigation are removed.
 
 ## Remaining acceptance
 
-- Gate: affected Swift suites beyond the five focused tests below; reuse prior
-  results only for unchanged source and command plans.
 - Mounted cold-app recovery: lose an admitted creation answer, restart Desktop,
   and show the same Task/Session and first prompt without duplicate launch or
   prompt. Verify usable Inspect/Show result and clear the submission only after
@@ -175,3 +173,18 @@ Mounted acceptance remains open: both isolated app launches returned
 socket path limit. No mounted draft/cold-recovery or physical sleep/wake claim
 follows from these checks. Updated `.lf/skills/qa.md` with the working short-path
 setup and how to record empty-window results. No production repair in this step.
+
+## Publication check · 2026-11-09
+
+- `lf sync`: passed without conflicts against `origin/main` at `7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`; checkpoint `d2b01a94b` retains the QA notes and guidance.
+- `swift build --build-tests --package-path swift --jobs 4`: passed; log `/tmp/loo-810-publish-swift-build.log`.
+- `scripts/test_desktop.sh --skip-build --jobs 4 --filter 'CreationSubmissionTests|ProviderTransitionTests|WorkDestinationTests|WorkNavigationTests|WorkSelectionTests|WorkModelTests|WorkModelStreamTests'`: 162 tests in 7 suites passed, including all 14 late-reply cases; log `/tmp/loo-810-publish-swift.log`. Inherited `LF_*` and `GHOSTTY_RESOURCES_DIR` unset, stdin closed.
+- `LF_BIN="$PWD/target/debug/lf" uv run python website/dev.py sync-docs --source "$PWD/docs"`: passed using this checkout's built CLI; no tracked changes; log `/tmp/loo-810-publish-docs.log`.
+
+The earlier live QA transcript records the provider request ending with HTTP 401
+after its initial prompt was saved. Its single-launch/prompt observations do
+not establish a healthy provider conversation. Mounted cold recovery and
+configured-provider sleep/wake remain for interactive demo review.
+
+- The Rust acceptance command above, repeated after sync: 45/45 passed in 168.429 seconds (3 slow), including all five terminal cases, creation restart/retry, budgets, provider transitions, CLI/server parity and documented commands; log `/tmp/loo-810-publish-rust.log`.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check`: passed; Clippy log `/tmp/loo-810-publish-clippy.log`. No additional production changes were needed for publication.

@@ -328,8 +328,11 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         ))
         .unwrap();
         let id = session["id"].as_str().unwrap();
+        let alias = tempfile::tempdir().unwrap();
+        let checkout = alias.path().join("checkout");
+        std::os::unix::fs::symlink(repo.path(), &checkout).unwrap();
         let change = Write::TaskCreate {
-            directory: repo.path().to_owned(),
+            directory: checkout,
             session: Some(id.into()),
             title: Some("Keep the conversation".into()),
             request_id: format!("adoption-{served_first}"),
@@ -2894,7 +2897,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     );
     // An unrelated Task graph cannot confirm this creation's interrupted launch.
     let input = loopflow::engine::creation::TaskCreation {
-        directory: repo.path().into(),
+        directory: repo.path().canonicalize().unwrap(),
         title: Some("One Task".into()),
         request: None,
         wave: None,

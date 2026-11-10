@@ -896,6 +896,14 @@ Retained receipts cannot revive removed resources or reuse identities. Work,
 terminal and provider recovery stay separate; display grants no input, geometry
 or provider-launch authority.
 
+LOO-810's November 9 merged verification reproduced a late creation reply
+changing the current Task and dismissing a newer sheet. Recovery registration
+does not grant navigation authority: bind dismissal to the originating
+presentation and opening to unchanged navigation. Leaving and returning to the
+same destination, or reopening the same sheet, must still supersede that right.
+The repair's five focused Swift tests passed, including 14 late-reply cases;
+mounted draft retention and cold-app recovery remain unverified.
+
 Reservations must survive cancellation while blocking construction or mutations
 continue; counting queued bytes alone misses pending producers. LOO-810's
 64 MiB per connection and 256 MiB process budget count reservations/serialized
@@ -907,8 +915,10 @@ Observed provider identity, not process reservation, establishes a transition.
 Attach may report the same process without replacing provider-change history.
 Fork-source liveness is historical and dated. Unknown lineage stays unknown.
 November 8 focused checks cover restart-safe creation, bounded output and native
-Codex `/new`/resume; complete terminal acceptance and physical sleep/wake plus
-cold-app review remain. No latency, RSS or sustained-use improvement is measured.
+Codex `/new`/resume. November 9 merged verification passed 45 Rust checks,
+including all five terminal recovery cases and documented commands. These are
+headless protocol results; physical sleep/wake and mounted cold-app review remain.
+No latency, RSS or sustained-use improvement is measured.
 
 LOO-775 (November 9) found that recovery must retain queued frames with the
 resume token: receiving a baseline does not mean its consumer has applied it.

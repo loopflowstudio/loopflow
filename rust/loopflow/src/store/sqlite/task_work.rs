@@ -55,8 +55,12 @@ pub(super) fn session_ids(selector: &str) -> String {
 }
 
 pub(super) fn session_tasks(session: &str) -> String {
+    // Inventory asks this for every Session. Read the narrow checkout columns
+    // once, instead of revisiting full Task rows (including large briefs).
     format!(
-        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
+        "WITH task_memberships AS MATERIALIZED (
+            SELECT id,worktree,checkout_machine_id FROM tasks
+         ) SELECT tw.id FROM task_memberships tw WHERE {} ORDER BY tw.id",
         session_membership(session)
     )
 }

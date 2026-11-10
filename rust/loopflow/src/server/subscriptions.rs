@@ -188,6 +188,18 @@ impl Drop for Member {
 
 impl Delivery {
     pub(super) async fn run(mut self, id: String, outgoing: Outgoing) {
+        #[cfg(test)]
+        if let Some(mut pause) =
+            super::service::subscription_measurement::take_pause(&id, "terminal-delivery")
+        {
+            self.latest
+                .wait_for(|latest| latest.ended.is_some())
+                .await
+                .unwrap();
+            tokio::task::spawn_blocking(move || pause.wait())
+                .await
+                .unwrap();
+        }
         let result = self.deliver(&id, &outgoing).await;
         if let Err(failure) = result {
             let _ = deliver(

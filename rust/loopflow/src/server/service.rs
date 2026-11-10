@@ -484,10 +484,10 @@ async fn session(
                     ClientMessage::Checkpoint { id, checkpoint } => {
                         match inflight.get(&id).and_then(|entry| entry.checkpoints.as_ref()) {
                             Some(checkpoints) => {
-                                if !checkpoints.checkpoint(checkpoint) {
-                                    if let Some(entry) = inflight.remove(&id) { entry.task.abort(); }
-                                    send(&mut lines, &error(Some(id), ErrorCode::NotFound, "subscription has ended")).await?;
-                                }
+                                // A closed producer may still have its final reading and
+                                // Ended queued. Let delivery drain without acknowledging
+                                // a checkpoint that arrived after the final read.
+                                checkpoints.checkpoint(checkpoint);
                             }
                             None => send(&mut lines, &ServerMessage::error(Some(id.clone()), Error::new(ErrorCode::NotFound, "no live subscription has this ID").with(serde_json::json!({ "id": id })))).await?,
                         }
@@ -1430,6 +1430,93 @@ mod tests {
         assert_eq!(id, None);
         assert_eq!(code, ErrorCode::NotFound);
         client.ended().await;
+    }
+
+    #[test]
+    fn late_checkpoint_preserves_terminal_reading_and_end() {
+        with_empty_home(async {
+            let path =
+                std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
+            let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+            let repo = loopflow_test_support::TestRepo::new();
+            let task = crate::durable::TaskId::new();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: store
+                        .ensure_repository(repo.path().to_str().unwrap())
+                        .unwrap(),
+                    id: task.clone(),
+                    project_id: None,
+                    title: "Completed wait".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    [task.as_str()],
+                )
+                .unwrap();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let pause = super::subscription_measurement::pause("terminal", "terminal-delivery");
+            client
+                .send(&ClientMessage::Subscribe {
+                    id: "terminal".into(),
+                    operation: Read::TaskWait {
+                        issue: task.to_string(),
+                        until: crate::ops::task::TaskWaitUntil::Terminal,
+                    },
+                    select: None,
+                })
+                .await;
+            pause.entered.await.unwrap();
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 9,
+                })
+                .await;
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "barrier".into(),
+                    checkpoint: 1,
+                })
+                .await;
+            let barrier = client.receive().await.unwrap();
+            pause.release.send(()).unwrap();
+            assert!(
+                matches!(barrier, ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "barrier")
+            );
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Response { id, .. } if id == "terminal")
+            );
+            let ServerMessage::Reading { id, frame } = client.receive().await.unwrap() else {
+                panic!("final reading was lost")
+            };
+            assert_eq!(id, "terminal");
+            assert_eq!(frame["body"]["reached"], true);
+            assert!(frame["answers"].is_null());
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Ended { id } if id == "terminal")
+            );
+            client
+                .send(&ClientMessage::Checkpoint {
+                    id: "terminal".into(),
+                    checkpoint: 10,
+                })
+                .await;
+            assert!(
+                matches!(client.receive().await.unwrap(), ServerMessage::Error { id: Some(id), code: ErrorCode::NotFound, .. } if id == "terminal")
+            );
+            drop(client.writer);
+            drop(client.reader);
+            client.server.await.unwrap().unwrap();
+        });
     }
 
     #[test]

@@ -2629,14 +2629,12 @@ pub fn task_wait(
 ) -> OpsResult<Option<(TaskSnapshot, bool)>> {
     block_on_task(async {
         let store = task_store().await?;
-        let started = std::time::SystemTime::now();
+        let started = std::time::Instant::now();
         loop {
             let Some((task, reached)) = task_wait_condition(&store, issue, until).await? else {
                 return Ok(None);
             };
-            if reached
-                || timeout.is_some_and(|limit| started.elapsed().unwrap_or_default() >= limit)
-            {
+            if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
                 return Ok(Some((read_task_snapshot(&store, task).await?, reached)));
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;

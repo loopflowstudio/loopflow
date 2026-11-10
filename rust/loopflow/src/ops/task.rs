@@ -1913,12 +1913,13 @@ pub async fn read_task_status(
         .map_err(task_error)?
         .flatten()
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    let mut result = registered_task_status(store, task).await?;
-    result.planning_stale = planning_stale(&result);
-    Ok(result)
+    registered_task_status(store, task).await
 }
 
-async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+pub(crate) async fn registered_task_status(
+    store: &SharedStore,
+    task: Task,
+) -> OpsResult<TaskStatus> {
     let acquisition = store
         .sqlite
         .task_acquisition(&task.id)
@@ -2632,6 +2633,27 @@ pub fn task_wait_now(issue: &str, until: TaskWaitUntil) -> OpsResult<Option<(Tas
     })
 }
 
+/// Poll only the wait condition; construct the full status once on return.
+pub fn task_wait(
+    issue: &str,
+    until: TaskWaitUntil,
+    timeout: Option<std::time::Duration>,
+) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let started = std::time::Instant::now();
+        loop {
+            let Some((task, reached)) = task_wait_condition(&store, issue, until).await? else {
+                return Ok(None);
+            };
+            if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
+                return Ok(Some((read_task_snapshot(&store, task).await?, reached)));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    })
+}
+
 /// The Task `issue` names as it stands in `store`, and whether it has reached
 /// `until`; `None` when no Task has that name.
 pub async fn task_wait_reading(
@@ -2639,6 +2661,17 @@ pub async fn task_wait_reading(
     issue: &str,
     until: TaskWaitUntil,
 ) -> OpsResult<Option<(TaskSnapshot, bool)>> {
+    let Some((task, reached)) = task_wait_condition(store, issue, until).await? else {
+        return Ok(None);
+    };
+    Ok(Some((read_task_snapshot(store, task).await?, reached)))
+}
+
+async fn task_wait_condition(
+    store: &SharedStore,
+    issue: &str,
+    until: TaskWaitUntil,
+) -> OpsResult<Option<(Task, bool)>> {
     let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
         return Ok(None);
     };
@@ -2658,7 +2691,7 @@ pub async fn task_wait_reading(
         }
         TaskWaitUntil::Terminal => finished,
     };
-    Ok(Some((read_task_snapshot(store, task).await?, reached)))
+    Ok(Some((task, reached)))
 }
 
 /// Read the saved Task thread or save a comment without allocating execution state.

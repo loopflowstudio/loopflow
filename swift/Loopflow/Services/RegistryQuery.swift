@@ -56,6 +56,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?)
     case taskGet(directory: String, issue: String)
+    case taskDetail(directory: String, issue: String)
+    case sessionCard(id: String)
+    case planBoard(directory: String, wave: String?, task: String?, all: Bool)
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String)
@@ -118,6 +121,13 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
             }
             return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
+        case .taskDetail(_, let issue):
+            return ["task", "detail", issue, "--json"]
+        case .sessionCard(let id):
+            return ["session", "card", id, "--json"]
+        case .planBoard(_, let wave, let task, let all):
+            return ["plan", "board"] + argument(nil, wave) + argument("--task", task)
+                + (all ? ["--all"] : []) + ["--json"]
         case .taskGet(_, let issue):
             return ["task", "show", issue, "--json"]
         case .taskChanges(let issue, let base, let head):
@@ -220,6 +230,12 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit])
+        case .taskDetail(let directory, let issue):
+            TaggedFields("task.detail", ["directory": directory, "issue": issue])
+        case .sessionCard(let id):
+            TaggedFields("session.card", ["id": id])
+        case .planBoard(let directory, let wave, let task, let all):
+            TaggedFields("plan.board", ["directory": directory, "wave": wave, "task": task, "all": all])
         case .taskGet(let directory, let issue):
             TaggedFields("task.get", ["directory": directory, "issue": issue])
         case .taskChanges(let issue, let base, let head):

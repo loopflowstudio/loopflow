@@ -841,6 +841,9 @@ its Task or Session view mounts, including promotion. Cold recovery's Show resul
 uses the same completion owner after displaying the resource; Inspect retains
 unconfirmed launches or conversation changes. Failed removal repeats lookup and
 presentation. No local milestone ledger is stored.
+An earlier New Task reply leaves later navigation and a newer New Task sheet
+alone. Its result stays registered for recovery until presented; only the
+originating sheet can close, and opening the result requires unchanged navigation.
 See the [creation contract](../rust/loopflow/src/server/README.md#creation-receipts).
 
 The parts: the plan, the repository's Dashboard plans

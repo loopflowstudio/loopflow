@@ -1184,7 +1184,8 @@ impl Commands {
 impl TaskCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. }
+            Self::Detail { .. }
+            | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
             | Self::WatchFiles { .. }
@@ -1239,7 +1240,7 @@ impl WaveCommand {
 impl PlanCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. } => false,
+            Self::Board { .. } | Self::List { .. } => false,
         }
     }
 }
@@ -1248,6 +1249,7 @@ impl SessionCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::ObserveStatus { .. }
+            | Self::Card { .. }
             | Self::List { .. }
             | Self::Usage(_)
             | Self::Retention { .. } => false,
@@ -1833,6 +1835,14 @@ pub enum SessionCommand {
         #[command(subcommand)]
         cmd: Option<commands::history::HistoryCommand>,
     },
+    /// Read a recorded Session's card without attaching or taking input control
+    Card {
+        id: String,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// List Sessions
     List(SessionListArgs),
     /// Show direct provider-authored usage from recorded Session inputs
@@ -2118,6 +2128,14 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Read one Task, its PR, checks, Graphs, comments and current Session
+    Detail {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// List the open Tasks in the selected repository
     List {
         /// Only Tasks whose title or identifier contains this text
@@ -2536,7 +2554,8 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
-            Self::Show { issue, .. }
+            Self::Detail { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2571,7 +2590,8 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
-            Self::Show { issue, .. }
+            Self::Detail { issue, .. }
+            | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
@@ -2810,6 +2830,18 @@ pub enum PrCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PlanCommand {
+    /// Print compact Task rows for a board
+    Board {
+        wave: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        selection: crate::lf::Selection,
+    },
     /// Print each Wave's plan as Desktop shows it: every Task's section, condition and controls
     List {
         /// One Wave; omitted reads the repository's Waves

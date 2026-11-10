@@ -7,6 +7,61 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func screenReadsDecodeTheirCompletePayloads() throws {
+        let board = try JSONDecoder().decode(PlanBoard.self, from: loadFixtureData("plan_board.json"))
+        #expect(!board.tasks.items.isEmpty)
+        #expect(board.tasks.items[0].identifier == "W2-144")
+        let detail = try JSONDecoder().decode(TaskDetail.self, from: loadFixtureData("task_screen_detail.json"))
+        #expect(detail.checks?.failingChecks.first?.name == "rust-test")
+        #expect(detail.currentSession?.state == .unknown)
+        let card = try JSONDecoder().decode(SessionCard.self, from: loadFixtureData("session_card.json"))
+        #expect(card.liveness == .unknown)
+        #expect(card.controlHolder == nil)
+        #expect(card.lastLine == nil)
+    }
+
+    @Test func screenReadsRejectSelectedAnswers() throws {
+        var card = try #require(JSONSerialization.jsonObject(with: loadFixtureData("session_card.json")) as? [String: Any])
+        card.removeValue(forKey: "last_line")
+        let selected = try JSONSerialization.data(withJSONObject: card)
+        var detail = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_screen_detail.json")) as? [String: Any])
+        detail.removeValue(forKey: "pr")
+        let selectedDetail = try JSONSerialization.data(withJSONObject: detail)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskDetail.self, from: selectedDetail)
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SessionCard.self, from: selected)
+        }
+
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(PlanBoard.self, from: Data(#"{"tasks":{"state":"ok","items":[{"identifier":"LOO-1"}],"truncated":false}}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskDetail.self, from: Data(#"{"task":{"identifier":"LOO-1"}}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SessionCard.self, from: Data(#"{"liveness":"live"}"#.utf8))
+        }
+    }
+
+    @Test func screenReadOperationsKeepCliAndWireNames() throws {
+        let reads: [(ServedRead, String, [String])] = [
+            (.planBoard(directory: "/repo", wave: "product", task: nil, all: false),
+             "plan.board", ["plan", "board", "product", "--json"]),
+            (.taskDetail(directory: "/repo", issue: "LOO-1"),
+             "task.detail", ["task", "detail", "LOO-1", "--json"]),
+            (.sessionCard(id: "session_123"),
+             "session.card", ["session", "card", "session_123", "--json"]),
+        ]
+        for (read, kind, argv) in reads {
+            let data = try JSONEncoder().encode(read)
+            let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(object["kind"] as? String == kind)
+            #expect(read.argv == argv)
+        }
+    }
+
     @Test func sessionOpenIntentsDistinguishExplicitResumeFromPassiveReveal() throws {
         let data = try loadFixtureData("session_open_intents.json")
         let intents = try JSONDecoder().decode([SessionOpenIntent].self, from: data)

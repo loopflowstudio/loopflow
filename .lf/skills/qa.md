@@ -16,7 +16,10 @@ with computer use, a browser, a terminal or whatever reaches it the way a person
 would. Internal setters, test-only endpoints, mocks and fixtures do not count.
 
 For live server QA, build `cargo build -p loopflow --bin lf`, then use a fresh
-Git repository with a local Git identity and a private `LF_HOME`. Use that built
+Git repository with a local Git identity and a private `LF_HOME`. Put Desktop
+QA homes under a short path such as `/tmp/lf-qa-*`: macOS
+`$TMPDIR` can exceed the Desktop Unix socket path limit even though the shared
+server uses a short hashed socket. Use that built
 binary for every command below. Unset inherited
 `LF_*`; close CLI stdin. A private Machine initializes through ordinary commands:
 `lf task create --title 'Recover a report' --request-id qa-report --json`.
@@ -34,6 +37,9 @@ signing the bundle changes the CLI hash. Set `LF_DESKTOP` to the QA bundle ID
 when using `lf desktop state`; otherwise it addresses the installed app.
 Keep the private Machine and provider homes separate from normal Work. Record
 window-access failures separately from successful CLI or protocol checks.
+If computer use returns `cgWindowNotFound`, inspect the QA bundle with
+`lf desktop state --json`; an empty `windows` list establishes no mounted UI.
+Do not count a running app process or its background reads as a window test.
 Desktop readiness may register a private launchd server. After quitting the QA
 app, boot out only the label in that private Machine's `server.plist`; killing
 its PID alone lets launchd restart it. Unregister temporary QA app bundles too.
@@ -72,6 +78,11 @@ Run `lf server run` as a child with closed stdin; get its socket from
 `rust/loopflow/src/server/README.md` over that Unix socket. Exercise Swift
 encoding with the built `Loopflow` library's `ServerClientMessage` and
 `ServerOperation`; this checks live interoperability, not Desktop UI behavior.
+After building Desktop, compile a standalone probe importing `Loopflow` with
+`swiftc -I swift/.build/debug/Modules scratch/probe.swift swift/.build/debug/Loopflow.build/*.swift.o -o scratch/probe`.
+Send its encoded messages to the private socket and decode the live results
+with the production DTOs. Plan reads take a positional Wave:
+`lf plan board <wave> --all --json`; global `--wave` is context that `--all` ignores.
 Check the resulting state through the CLI as well as the socket. Dashboard
 queries accept `task:<id>`; hide/show members use that same selector.
 `lf desktop layout query:<id>` already prints JSON and takes no `--json` flag.

@@ -1,0 +1,50 @@
+{
+  "tasks": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "issue-now",
+        "identifier": "W2-144",
+        "title": "Make lf roadmap the machine-wide view",
+        "section": "backlog",
+        "state": "shipping",
+        "pr": null,
+        "waiting_on": null
+      },
+      {
+        "id": "issue-review",
+        "identifier": "W2-131",
+        "title": "Show the all-wave roadmap and launch or attach",
+        "section": "backlog",
+        "state": "unstarted",
+        "pr": {
+          "url": "https://github.com/loopflow/loopflow/pull/899"
+        },
+        "waiting_on": {
+          "owner": "user",
+          "reason": "merge pull request head abc1234 on GitHub"
+        }
+      },
+      {
+        "id": "issue-available",
+        "identifier": "W2-156",
+        "title": "Wave Chat consumes the roadmap snapshot",
+        "section": "backlog",
+        "state": "unstarted",
+        "pr": null,
+        "waiting_on": null
+      },
+      {
+        "id": "issue-later",
+        "identifier": "W2-141",
+        "title": "Now + Available work views \u2014 research",
+        "section": "done",
+        "state": "done",
+        "pr": null,
+        "waiting_on": null
+      }
+    ],
+    "truncated": false
+  },
+  "generated_at": "2026-07-15T00:00:00Z"
+}

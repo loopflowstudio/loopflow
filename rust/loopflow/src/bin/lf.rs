@@ -1041,16 +1041,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Reopen { .. } | TaskCommand::Complete { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Create {
-            request,
-            run,
-            graph,
-            json,
-            ..
-        } => {
+        TaskCommand::Create { .. } => {
             let mut stdin = std::io::stdin();
             let mut empty = std::io::empty();
-            let issue = loopflow::lf::commands::task_create::create(
+            loopflow::lf::commands::task_create::create(
                 repo,
                 command,
                 &mut loopflow::lf::commands::mutation::CommandIo {
@@ -1062,17 +1056,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     output: &mut std::io::stdout(),
                     error: &mut std::io::stderr(),
                 },
+                cli.batch,
+                cli.agent.as_deref(),
             )?;
-            if *run {
-                loopflow::lf::commands::task_create::start(
-                    cli,
-                    repo,
-                    &issue,
-                    graph.as_deref(),
-                    request.as_deref(),
-                    *json,
-                )?;
-            }
             Ok(())
         }
         TaskCommand::View { issue, once } => {

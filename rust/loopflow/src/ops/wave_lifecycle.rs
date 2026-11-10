@@ -240,7 +240,7 @@ pub(crate) fn commit_authored(main: &Path, paths: &[String], message: &str) -> A
 
 // ── Remove ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RemovalTask {
     pub id: String,
     pub identifier: String,
@@ -248,7 +248,7 @@ pub struct RemovalTask {
     pub started: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InitiativeArchive {
     pub wave: String,
     pub initiative: String,
@@ -257,7 +257,7 @@ pub struct InitiativeArchive {
 }
 
 /// The preview Desktop and the CLI render before removal, and the receipt after.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveRemoval {
     pub id: WaveId,
     pub name: String,
@@ -888,7 +888,7 @@ fn leftovers(removal: &WaveRemoval) -> Vec<String> {
 /// `lf wave rename --json`: the receipt Desktop and the CLI both show. `summary`
 /// holds what is left to do after the rename, one sentence per line; empty when
 /// nothing is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveRenamed {
     pub id: WaveId,
     pub from: String,
@@ -900,7 +900,7 @@ pub struct WaveRenamed {
     pub summary: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InitiativeRename {
     pub initiative: String,
     pub title: String,

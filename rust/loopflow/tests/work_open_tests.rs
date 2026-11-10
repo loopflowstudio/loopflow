@@ -280,7 +280,8 @@ fn standalone_task_link_resolves_by_folder_name() {
         repo.path(),
         None,
         &["task", "create", "--title", "Stand alone", "--json"],
-    ));
+    ))["task"]
+        .clone();
     let identifier = created["identifier"].as_str().unwrap();
     let url = format!("loopflow://{}/task/{identifier}", folder(repo.path()));
     let links = json(&lf(
@@ -428,7 +429,8 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
         repo.path(),
         None,
         &["task", "create", "--title", "Fresh work", "--json"],
-    ));
+    ))["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let log = host(bin.path(), "cmux", "OK workspace:7", 0);
     let report = json(&lf(

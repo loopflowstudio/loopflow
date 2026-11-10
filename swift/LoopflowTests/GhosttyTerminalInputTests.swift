@@ -4,6 +4,14 @@ import Foundation
 import SwiftUI
 import Testing
 #if canImport(GhosttyKit)
+import GhosttyKit
+#endif
+@testable import LoopflowMac
+@testable import Loopflow
+
+#if canImport(GhosttyKit)
+@Suite("Retained terminal mounts", .requiresDisplay, .serialized)
+struct GhosttyTerminalMountTests {
     @Test("An off-window representable cannot steal a displayed terminal")
     @MainActor
     func offWindowTerminalMount() async throws {
@@ -93,13 +101,8 @@ import Testing
         #expect(terminal.isDescendant(of: newMount))
         #expect(terminal.surface == surface)
     }
+}
 
-import GhosttyKit
-#endif
-@testable import LoopflowMac
-@testable import Loopflow
-
-#if canImport(GhosttyKit)
 /// Shell block behavior that needs no display, so it runs headless.
 @Suite("Embedded terminal shell blocks")
 struct GhosttyShellBlockTests {

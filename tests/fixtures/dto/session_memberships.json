@@ -69,7 +69,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -141,7 +142,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -205,7 +207,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -264,7 +267,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -333,7 +337,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -397,7 +402,8 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -468,6 +474,7 @@
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
-    "preview": null
+    "preview": null,
+    "transition": null
   }
 ]

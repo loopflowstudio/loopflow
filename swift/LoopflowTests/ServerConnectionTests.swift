@@ -29,6 +29,30 @@ struct ServerConnectionTests {
         #expect(connection.reading.title == "Read-only. Move here to type.")
     }
 
+    @Test func providerTransitionSurvivesTheStatusStreamAndWaitsForNativeReadiness() async throws {
+        let connection = ServerConnection()
+        defer { connection.stop() }
+        try connection.start { _ in }
+        let relay = try Relay(connection)
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/provider_transition.json")
+        let transition = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture))
+        var reading: [String: Any] = ["generation": 1, "state": "connected", "input": true,
+                                    "native_ready": false, "message": NSNull(), "transition": transition]
+        var bytes = try JSONSerialization.data(withJSONObject: reading)
+        bytes.append(10)
+        try relay.write(bytes)
+        try await wait { connection.reading.transition != nil }
+        #expect(!connection.reading.acceptsInput)
+        #expect(connection.reading.title == ServerConnectionReading.openingTitle)
+        reading["native_ready"] = true
+        bytes = try JSONSerialization.data(withJSONObject: reading)
+        bytes.append(10)
+        try relay.write(bytes)
+        try await wait { connection.reading.acceptsInput }
+        #expect(connection.reading.title == "Forked from earlier; original was running at fork")
+    }
+
     @Test func brokenStatusStreamPausesInputAndFreshStreamRestoresIt() async throws {
         let connection = ServerConnection()
         defer { connection.stop() }

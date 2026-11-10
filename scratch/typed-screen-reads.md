@@ -12,8 +12,8 @@ Task through `registered_task_status`.
 
 Remaining: publication, CI repair as needed, merge and completion.
 Review and affected checks passed. No product decision is pending. `scratch/questions.md` records
-reversible schema choices. `lf sync` on 2026-11-09 completed without conflicts;
-`origin/main` remained `28b0af568`.
+reversible schema choices. The delivery sync on 2026-11-09 merged pinned main `7cf2d25b3`; conflicts in
+server docs, read dispatch and the schema fixture retain both sets of operations.
 
 ## Concept review — 2026-11-09
 
@@ -61,3 +61,5 @@ Publication checks on 2026-11-09:
 - `scripts/test.py --reuse-passing --rust-filter` with the affected modules listed above: architecture, inventory, formatting, CLI build and 260 Rust tests passed (`.lf/tmp/gate/run-13283`). Clippy was stopped by the host-pressure monitor after syspolicyd held 375% CPU for three samples; no code diagnostic. Website and Swift had not started.
 - Retried only Clippy, website and Swift through `scripts.test.run_plans`, retaining its resource checks after syspolicyd fell to 38% CPU: all passed (`.lf/tmp/gate/run-57776`). `cargo clippy --all-targets --jobs 4 -- -D warnings`; 73 website tests; Desktop build and 785 headless Swift tests; Swift multiplatform checks. No checks deferred except optional display diagnostics.
 - `target/debug/lf help --all` against the base's Clap definitions: adds only `lf plan board`, `lf task detail`, and `lf session card`.
+
+- Sync resolution: `cargo test -p loopflow --lib server::schema::tests::the_checked_in_schema_is_what_describe_prints --jobs 4` with `LF_*` unset and closed stdin: passed, 1 test; existing linker unwind-size warning. Full checks remain with delivery/CI.

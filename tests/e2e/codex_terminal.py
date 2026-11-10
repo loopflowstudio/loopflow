@@ -459,9 +459,16 @@ trust_level="trusted"
             "SELECT count(*) FROM session_events WHERE session_id=? AND kind='completed'",
             (session_id,),
         ).fetchone()[0]
-        live = database.execute(
-            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
-        ).fetchone()[0]
+        # The renderer exits before its private server's observer records teardown.
+        deadline = time.monotonic() + 5
+        while True:
+            live = database.execute(
+                "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
+            ).fetchone()[0]
+            if live == 0:
+                break
+            assert time.monotonic() < deadline, f"{live} provider(s) did not settle"
+            time.sleep(0.05)
     assert any(b"NATIVE_STEER_BETWEEN_TURNS" in request for request in Model.requests)
     steers = subprocess.run(
         [str(lf), "session", "steers", session_id, "--json"],
@@ -475,7 +482,6 @@ trust_level="trusted"
     assert any(b"NATIVE_TOOL_DONE" in request for request in Model.requests)
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed
-    assert live == 0, live
     rollouts = list(native.glob("sessions/*/*/*/rollout-*.jsonl"))
     assert len(rollouts) == 1, rollouts
     events = [json.loads(line) for line in rollouts[0].read_text().splitlines()]
@@ -529,10 +535,10 @@ def _follow_new_thread(
             "SELECT provider_thread FROM agent_sessions WHERE id=?", (session_id,)
         ).fetchone()[0]
         moves = database.execute(
-            "SELECT json_extract(payload,'$.provider_thread'),"
-            "json_extract(payload,'$.next_provider_thread'),json_extract(payload,'$.source') "
+            "SELECT json_extract(payload,'$.transition.from_provider_session'),"
+            "json_extract(payload,'$.transition.to_provider_session'),json_extract(payload,'$.source') "
             "FROM session_events WHERE session_id=? "
-            "AND json_extract(payload,'$.type')='agent_session_selected'",
+            "AND json_extract(payload,'$.type')='provider_transition'",
             (session_id,),
         ).fetchall()
         answered = database.execute(

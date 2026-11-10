@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 3: one connection per client,
+//! Carrier-independent server protocol, revision 4: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only. Each carrier delimits messages its own way; the Unix socket
 //! carries one JSON object per line.
@@ -10,9 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 3;
+pub const REVISION: u32 = 4;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 3;
+pub const MIN_REVISION: u32 = 4;
 pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
@@ -200,6 +200,8 @@ pub struct ConnectedClient {
     pub connected_at: String,
     /// Requests the connection has sent, subscriptions included.
     pub requests: u64,
+    pub open: usize,
+    pub retained_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -207,6 +209,8 @@ pub struct ConnectedClient {
 pub struct Limits {
     pub max_message: usize,
     pub max_connections: usize,
+    pub max_open: usize,
+    pub max_retained_bytes: usize,
 }
 
 impl ServerMessage {
@@ -326,7 +330,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":3,"min_revision":3}"#
+            r#"{"type":"hello","revision":4,"min_revision":4}"#
         )
         .is_err());
         assert!(

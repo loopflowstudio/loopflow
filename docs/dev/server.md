@@ -1,8 +1,8 @@
 # Clients, servers and execution destinations
 
-Jack Heart selected separate Machine, server and installation responsibilities
-on November 4, 2026. LOO-593 implements the local boundary; LOO-718 supplies the
-mobile client and remote admission.
+Machine routing, client access and installation have separate owners. The local
+client connection is implemented; LOO-718 covers the mobile client and remote
+admission.
 
 ## Start from the action
 
@@ -21,8 +21,8 @@ client credential, not another execution destination or another Machine record.
 ## One concrete path
 
 Install Loopflow, open Desktop, and keep editing a Session. Installation prepares
-the local server; Desktop connects without a separate setup command. To continue
-from a phone, explicitly enable remote client access and pair it with the host.
+the local server; Desktop connects without a separate setup command. Remote
+client access and phone pairing are planned in LOO-718.
 Connecting a client does not rent a worker, move a Task, or select another provider.
 
 If the server is replaced during an unfinished draft and a running Graph,
@@ -49,7 +49,7 @@ CLI mutation ─ mutation dispatcher ─────────┴─ engine op
 server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph owners
 server attach ─ exact existing Session owner ─ provider / PTY
 
-Desktop execution launch ─ ordinary CLI ─ existing Session / Graph owners
+Desktop terminal preparation/launch ─ ordinary CLI ─ existing Session owners
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -75,14 +75,21 @@ attribution. `journal::request` carries tracing and diagnostics into nested
 blocking work; the response trace correlates diagnostics and effects in
 `logs/lf.log`. It is neither an execution owner nor a durable retry receipt.
 Canceling releases the client's wait, but an admitted mutation may still complete.
-A lost reply means outcome unknown: refresh authoritative state before another
-deliberate edit, and never automatically replay the request.
+A lost reply means outcome unknown. For `task.create` and `session.new`, look up
+the durable creation receipt. Its derived `disposition` is `complete`, `continue`
+or `inspect`; only confirmed absence or `continue` permits resubmitting the
+identical request. The handler rechecks continuation under its request lock. For other writes,
+refresh authoritative state before another deliberate edit. The
+[client contract](../../rust/loopflow/src/server/README.md#client-contract)
+defines persistence, receipt lookup, admission budgets and recovery by error scope.
 
-Session-to-Task adoption (`task.create`) shares its creation function with the CLI and launches no work.
+`task.create` shares its creation function and receipt with the CLI, covering
+both new Tasks and Session adoption; `run` requests the Task's Graph launch.
 `task.run` and `task.ship` start the same command a terminal would, detached
 under its own execution owner, and answer the typed value that process reports
-(`engine/launch.rs`); the request never carries the run. Create-and-run and
-Session launches retain their ordinary CLI path and existing Session/Graph owners. Ghostty rendering and app-owned automation retain
+(`engine/launch.rs`); the request never carries the run. Desktop's Work operations
+use the shared protocol; execution stays with existing Session/Graph owners.
+Ghostty rendering and app-owned automation retain
 their boundaries.
 The server adds no scheduler, Work database, viewer registry or provider supervisor.
 
@@ -98,69 +105,10 @@ An operation's API kind, its `lf` spelling and any setting for it share one
 name (`task.create` is `lf task create`); the nouns are Loopflow's primitives.
 Old spellings live in `lf/aliases.rs` for one release.
 
-| API kind | CLI | Engine |
-| --- | --- | --- |
-| `task.get` | `lf task show <issue>` | read |
-| `task.detail` | `lf task detail <issue>` | read |
-| `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
-| `task.changes` | `lf task changes <issue>` | read |
-| `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
-| `task.context` | `lf task context <issue>` | read |
-| `task.runs` | `lf task runs <issue>` | read |
-| `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
-| `task.create` | `lf task create --session <id>` | write |
-| `task.run` | `lf task run <issue>` | `engine::task` |
-| `task.ship` | `lf ship` | `engine::task` |
-| `task.hold` | `lf task hold <issue>` | `engine::task` |
-| `task.steer` | `lf task steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
-| `task.report` | `lf task report <issue> <message>` | `engine::task` |
-| `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
-| `task.update` | `lf task update <issue>` | write |
-| `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
-| `session.list` | `lf session list` | read |
-| `session.card` | `lf session card <id>` | read |
-| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
-| `session.usage` | `lf session usage` (`lf usage`) | read |
-| `session.history` | `lf session history` (`lf history`) | read |
-| `session.retention` | `lf session retention` | read |
-| `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
-| `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
-| `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
-| `wave.plan` | `lf wave plan <wave>` | read |
-| `wave.create` | `lf wave create` | write |
-| `wave.sync` | `lf wave sync <wave>` | write |
-| `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
-| `plan.list` | `lf plan list` | read |
-| `plan.board` | `lf plan board` | read |
-| `repo.plan` | `lf repo plan` | read |
-| `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
-| `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
-| `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
-| `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
-| `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
-| `process.get` | `lf process show <id>` | read |
-| `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
-| `process.list` | `lf process list` | read |
-| `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
-| `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
-| `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
-| `config.theme` | none; Appearance's theme file | `engine::config` |
-| `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
-| `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
-| `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
-| `checkout.commit`, `.sync`, `.create` | `lf commit`, `lf sync`, `lf wt create` | write; `engine::checkout::commit`, `sync` (detached unless `--plan`, `--continue`, `--abort`), `create` |
-| `account.list`, `.next` | `lf account [<login|provider>]`, `lf account next` | read; `engine::account::list`, `next` |
-| `account.connect`, `.disconnect`, `.set`, `.use`, `.pause`, `.unpause`, `.redeem_reset` | `lf account connect`, `disconnect`, `set`, `use`, `pause`, `unpause`, `redeem-reset` | write; `engine::account::connect`, `disconnect`, `set`, `activate`, `pause`, `redeem_reset` (none prompts) |
-| `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
-| `skill.list` | `lf list [<path>…]` | read; `engine::skill::list` |
-| `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
-| `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
-| `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
-| `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
-| `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
-
-"CLI handler; not served" is an operation only the CLI dispatcher runs today;
-its kind fixes the name a served version keeps.
+The [operation reference](../../rust/loopflow/src/server/README.md#local-protocol-revision-4)
+lists the served kinds and their CLI equivalents. `lf server describe --json`
+generates their schemas and result types from this build. App automation remains
+CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
 
 For a board, Task detail or Session card, use the
 [screen reads](../../rust/loopflow/src/server/README.md#read-a-screens-data).
@@ -199,7 +147,7 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `tests/fixtures/dto/server/` speak revision 3: one connection per client,
+under `tests/fixtures/dto/server/` speak revision 4: one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
 Unix socket. A revision-1 client is answered in its own framing with
 `incompatible` and nothing else. Machine identity fields, `LF_HOME`, SSH routing

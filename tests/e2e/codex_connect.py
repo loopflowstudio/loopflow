@@ -800,7 +800,7 @@ def _live_attachment_contract(
             timeout=30,
         )
         assert created.returncode == 0, created.stderr
-        task = json.loads(created.stdout)["id"]
+        task = json.loads(created.stdout)["task"]["id"]
         # Retain a historical Workflow instance; the Session below is real,
         # Task-attributed execution, not a seeded Process or conversation.
         graph = {

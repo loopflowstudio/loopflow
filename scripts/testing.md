@@ -21,6 +21,15 @@ CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
 aliases are covered separately by the `cli_discovery::` integration suite.
 
+Creation receipt changes also run `test(local_planning::)`,
+`test(context_launch_tests::)`, `test(settings_launch_tests::)` and
+`binary(session_lifecycle_tests)`. Served-write changes run
+`test(lf::commands::write::tests::)`. Provider transition recording reaches
+`test(process::runtime::tests::)`, `test(harness::codex_connection::tests::)`,
+`test(harness::fact_writer::tests::)` and
+`test(store::sqlite::sessions::metadata_tests::)`: recovery owners, turn attribution
+and metadata reads over historical detail all depend on it.
+
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
 lookup completes in a deterministic output test; a live attachment can miss that
@@ -51,6 +60,9 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
+Dependency and bundled-resource changes also require the
+[third-party inventory refresh and Python check](README.md#third-party-inventory),
+even when no Python paths changed.
 On macOS it builds the CLI before isolated Python checkout-refresh proofs, so
 native archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in

@@ -13,21 +13,17 @@ Only bulk tickets have direct store coverage; terminal consume-on-attempt
 coverage is missing. Background expiry already releases abandoned bulk
 reservations.
 The server tree is unchanged from the previously inspected
-`23b48c659d574d32c0a2356deaec37a9be43cb22`; the current shared store still
-checks admission before removing a ticket and uses `Instant` for all expiry.
+`23b48c659d574d32c0a2356deaec37a9be43cb22`.
 
 At November 10 22:38 UTC, GitHub reports PR #1812 open and unmerged at
 `f7f6a50bec1afca7d9dda456c998d82c23aa71ad`, with no auto-merge. This newer
-revision has not been inspected; the code findings above describe the earlier
-revision only. Freshly fetched
-main remains `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
+revision has not been inspected. Freshly fetched main remains
+`454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
 or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.
-Implementation remains blocked on LOO-718 landing, not on a product decision
-or Desktop visual inspection.
 
-LOO-718 must land before implementation and delivery; reinspect its shared store
-and authenticated endpoints then. Landing that PR is outside this Task's scope;
-no product decision is missing.
+Implementation and delivery wait for LOO-718 to land; reinspect its shared store
+and authenticated endpoints then. Landing that PR is outside this Task's scope.
+No product decision is missing; Desktop visual inspection remains for QA.
 
 Earlier status reads and inspection references are in
 `1325549f96cb65e22e580d1e35095296fd43d5c0:scratch/design.md`, including the
@@ -61,7 +57,7 @@ planned/local-only wording and describe local/remote admission binding.
 Keep exact-owner selection and recovery together for both transports; keep
 the running-owner prerequisite and missing-owner error beside the remote example.
 The phone overview keeps connection steps; the server README owns protocol
-details and shared owner recovery, avoiding duplicate contracts.
-Desktop visual inspection remains for QA; opening results are in `questions.md`.
+details and shared owner recovery, avoiding duplicate contracts. Desktop opening
+results are in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

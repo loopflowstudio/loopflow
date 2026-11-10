@@ -6,19 +6,24 @@ and bulk protocol are outside this Task.
 
 ## Transport dependency — November 10, 2026 UTC
 
-Inspected PR #1812 at `23b48c659d574d32c0a2356deaec37a9be43cb22`: both
+Inspected PR #1812 at `2b52aef839da5fccdc5bb9769b3f95e6ea1d2a52`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
 Only bulk tickets have direct store coverage; terminal consume-on-attempt
 coverage is missing. Background expiry already releases abandoned bulk
 reservations.
+The server tree is unchanged from the previously inspected
+`23b48c659d574d32c0a2356deaec37a9be43cb22`; the current shared store still
+checks admission before removing a ticket and uses `Instant` for all expiry.
 
-At November 10 22:01 UTC, GitHub reports PR #1812 open and unmerged at
-`2b52aef839da5fccdc5bb9769b3f95e6ea1d2a52`, with no auto-merge. Freshly fetched
+At November 10 22:38 UTC, GitHub reports PR #1812 open and unmerged at
+`f7f6a50bec1afca7d9dda456c998d82c23aa71ad`, with no auto-merge. This newer
+revision has not been inspected; the code findings above describe the earlier
+revision only. Freshly fetched
 main remains `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
-or `server/ticket.rs`. The new PR head has not been inspected; code findings
-above describe the previously inspected revision. Implementation remains blocked
-on LOO-718 landing, not on a product decision or Desktop visual inspection.
+or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.
+Implementation remains blocked on LOO-718 landing, not on a product decision
+or Desktop visual inspection.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;

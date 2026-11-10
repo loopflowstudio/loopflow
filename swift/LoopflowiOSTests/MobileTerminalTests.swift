@@ -271,7 +271,7 @@ final class MobileTerminalTests: XCTestCase {
         workspace.suspend()
         controller.update(theme: .light)
         await workspace.restoreForegroundSession()
-        await settle()
+        try await waitForState(.viewing, in: workspace)
         controller.update(theme: .light)
         XCTAssertEqual(workspace.state, .viewing)
         XCTAssertEqual(field.text, "arrived later")
@@ -284,7 +284,7 @@ final class MobileTerminalTests: XCTestCase {
         field.sendActions(for: .editingChanged)
         XCTAssertEqual(controller.terminal.getSelection(), "Loopflow")
         workspace.requestControl()
-        await settle()
+        try await waitForState(.controlling, in: workspace)
         controller.update(theme: .light)
         XCTAssertTrue(finder.isHidden)
         XCTAssertFalse(controller.terminal.hasActiveSelection)
@@ -1182,12 +1182,21 @@ final class MobileTerminalTests: XCTestCase {
         controller.view.layoutIfNeeded()
         let task = try await FixtureClient().workingTasks()[0]
         await workspace.open(task)
-        await settle()
+        try await waitForState(.viewing, in: workspace)
         workspace.requestControl()
-        await settle()
+        try await waitForState(.controlling, in: workspace)
         controller.update(theme: .light)
-        XCTAssertEqual(workspace.state, .controlling)
         return (workspace, client, controller)
+    }
+
+    private func waitForState(_ expected: MobileConnectionState, in workspace: MobileWorkspace) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while workspace.state != expected, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        guard workspace.state == expected else {
+            throw RegistryQueryError("Expected Session state \(expected), received \(workspace.state)")
+        }
     }
 
     private func settle() async {

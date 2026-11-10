@@ -264,8 +264,11 @@ impl Delivery {
                 acknowledged = true;
             }
             let pending = *lock(&self.pending);
+            let fresh = latest
+                .reading
+                .as_ref()
+                .is_some_and(|reading| reading.generation >= pending.generation);
             if let Some(reading) = latest.reading {
-                let fresh = reading.generation >= pending.generation;
                 let unseen_failure = latest.ended.as_ref().is_some_and(Result::is_err)
                     && reading.frame["unavailable"].is_string()
                     && sent != Some(reading.identity);
@@ -299,9 +302,9 @@ impl Delivery {
                     sent = Some(reading.identity);
                 }
             }
-            // A join during an admitted read still needs its own fresh baseline
-            // before it can consume occurrences from the shared reader.
-            if sent.is_none() && latest.ended.is_none() {
+            // Joins and checkpoints can withhold an admitted reading. Keep its
+            // occurrences queued until the consumer receives the fresh state.
+            if (!fresh || sent.is_none()) && latest.ended.is_none() {
                 self.latest.changed().await?;
                 continue;
             }
@@ -728,6 +731,99 @@ mod tests {
             }
             task.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn a_pending_checkpoint_keeps_events_after_their_reading() {
+        use super::{Events, Latest, Pending, Reading, Retained};
+        use std::sync::Mutex;
+
+        let reading = |generation| {
+            let frame = serde_json::json!({
+                "answers": null, "unavailable": null, "body": generation
+            });
+            Arc::new(Reading {
+                generation,
+                identity: crate::lf::commands::subscribe::identity(None, frame.get("body"))
+                    .unwrap(),
+                frame,
+                _retained: Arc::new(Retained::empty()),
+            })
+        };
+        let (latest, receiver) = tokio::sync::watch::channel(Latest {
+            ready: true,
+            reading: Some(reading(1)),
+            events: 0,
+            ended: None,
+        });
+        let (events, pending_events) = tokio::sync::broadcast::channel(16);
+        let pending = Arc::new(Mutex::new(Pending {
+            generation: 1,
+            checkpoint: None,
+        }));
+        let delivery = Delivery {
+            latest: receiver,
+            pending: pending.clone(),
+            events: pending_events,
+            delivered_events: 0,
+        };
+        let (outgoing, mut messages) = Outbox::new();
+        let run = delivery.run("ordered".into(), outgoing, Vec::new(), None);
+        tokio::pin!(run);
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Response { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Reading { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+
+        // A checkpoint arrives while the preceding read is still in flight.
+        *pending.lock().unwrap() = Pending {
+            generation: 3,
+            checkpoint: Some(9),
+        };
+        events
+            .send(Arc::new(Events {
+                items: vec![crate::server::wire::SubscriptionEvent::Unknown],
+                _retained: Arc::new(Retained::empty()),
+            }))
+            .unwrap();
+        latest.send_modify(|latest| {
+            latest.reading = Some(reading(2));
+            latest.events = 1;
+        });
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(
+            messages.try_recv().is_err(),
+            "events must wait for the withheld reading"
+        );
+
+        latest.send_modify(|latest| {
+            latest.reading = Some(reading(3));
+            latest.ended = Some(Ok(()));
+        });
+        assert!(futures_util::poll!(&mut run).is_pending());
+        let ServerMessage::Reading { frame, .. } = receive(&mut messages).await else {
+            panic!("event overtook its reading");
+        };
+        assert_eq!(frame["answers"], 9);
+        assert_eq!(frame["body"], 3);
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Event { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Ended { .. }
+        ));
+        run.await;
     }
 
     #[tokio::test]

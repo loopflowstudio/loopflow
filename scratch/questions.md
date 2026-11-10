@@ -1,0 +1,1 @@
+Sync choice: retain main’s shared-reader delivery and use a bounded 16-batch event channel per demand. Each consumer starts at the current published edge; overflow ends that consumer with an error instead of dropping occurrences silently.

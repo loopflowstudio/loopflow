@@ -25,33 +25,20 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 02:41 UTC,
+At November 10 03:18 UTC,
 `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
-returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at that same head.
-The last successful `lf task status LOO-718 --json` read, at 01:11 UTC,
-reported `feature` at `demo`, with PR #1812 open and settlement not armed.
-Subsequent Task status reads stalled; current Graph positions remain unknown.
-Those attempts are recorded in
-`d42de1306069b17f43a9e61776c715c7b946dd25:scratch/design.md`.
-The fetched main
-(`7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`, fetched again at 02:41 UTC)
-contained neither `mobile.rs` nor `ticket.rs`. The inspected transport includes
-watch resumption; retain it.
-
-At November 10 03:16 UTC, the same PR query still returned `OPEN`, no merge
-date and no auto-merge at the same head. A fresh fetch advanced main to
+returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at the same head.
+The 03:16 UTC fetch advanced main to
 `6f7a6c9caf7f68554445df008593d71baf95cfbe`; `git ls-tree` still found neither
-`server/mobile.rs` nor `server/ticket.rs`. No implementation or remote
-acceptance can proceed against the planned transport yet.
+`server/mobile.rs` nor `server/ticket.rs`.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
-Implementation remains blocked on that dependency. The checkout and planned
-contract remain ready for continuation after LOO-718 lands.
+Keep this checkout and planned contract for continuation after LOO-718 lands.
 
-Earlier dependency observations and revision comparisons are in
-`475a0a485477161a02f05d4ed35d9dd798b5f012:scratch/design.md` and
-`d791b6f0c218bedf5c774f1ad8016636bc89fed2:scratch/design.md`.
+Earlier observations, stalled Task status reads and revision comparisons are
+recorded in `cb1f9faf1d249c8dba15bdd69b6208ca113c98f5:scratch/design.md`.
+The repeated dependency history is condensed here; the remaining work follows.
 
 ## Delete — do not maintain
 
@@ -68,7 +55,7 @@ wire fixtures for the surviving protocol.
 Recheck the landed revision before integrating. Restore terminal consume-on-attempt
 in the shared store without changing bulk redemption policy. Replace ticket timing
 with `SystemTime` so the 60-second deadline includes host sleep; leave unrelated
-throttles on `Instant`.
+throttles on `Instant`. Retain the transport's watch resumption.
 
 After integration, update the docs' planned/local-only wording to match the
 implemented endpoint.

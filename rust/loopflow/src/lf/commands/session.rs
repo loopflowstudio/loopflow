@@ -17,6 +17,9 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     if let SessionCommand::Serve { terminal, argv } = command {
         return crate::transport::serve(argv, *terminal);
     }
+    if let SessionCommand::Card { id, .. } = command {
+        return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
+    }
     if let SessionCommand::List(args) = command {
         return list_sessions(args);
     }
@@ -159,7 +162,10 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List(_) | SessionCommand::Usage(_) | SessionCommand::Retention { .. } => {
+        SessionCommand::Card { .. }
+        | SessionCommand::List(_)
+        | SessionCommand::Usage(_)
+        | SessionCommand::Retention { .. } => {
             unreachable!("reads return before any runtime")
         }
         SessionCommand::Move {

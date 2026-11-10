@@ -149,3 +149,9 @@ headless `-b` run; both are null when the run failed after the Task was filed.
 repository (`--no-wave`); `default` is Rust's resolution and the setting that
 chose it, which Desktop's New Task sheet shows instead of rebuilding it. Rust and
 Swift decode both.
+
+`plan_board.json`, `task_screen_detail.json` and `session_card.json` pin the
+complete screen reads. Rust tests in `lf::commands::screens` round-trip them;
+Swift's `DTOFixtureTests` decodes them and rejects selected, incomplete answers.
+The board omits runtime payloads; detail retains observed checks, PR and Graphs;
+a card with unknown liveness invents neither a control holder nor preview text.

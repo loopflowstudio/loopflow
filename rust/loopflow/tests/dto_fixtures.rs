@@ -1349,6 +1349,15 @@ fn session_recovery_round_trips_the_failed_turn_and_wait() {
     );
     assert_eq!(recovery.failed_turn, "rejected-turn");
     assert_eq!(serde_json::to_value(recovery).unwrap(), raw["recovery"]);
+    for key in ["model", "account", "retry_at", "request", "retry_turn"] {
+        let mut incomplete = raw["recovery"].clone();
+        incomplete.as_object_mut().unwrap().remove(key);
+        assert!(
+            serde_json::from_value::<loopflow::session_recovery::SessionRecovery>(incomplete)
+                .is_err(),
+            "missing {key} was accepted"
+        );
+    }
 }
 
 #[test]

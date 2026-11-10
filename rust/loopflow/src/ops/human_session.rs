@@ -387,6 +387,7 @@ pub struct SessionPage<T = SessionRecord> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionRecord {
+    #[serde(deserialize_with = "Option::deserialize")]
     pub recovery: Option<crate::session_recovery::SessionRecovery>,
     pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<crate::session::SessionPreview>,

@@ -352,7 +352,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        recovery = try values.decodeIfPresent(SessionRecovery.self, forKey: .recovery)
+        recovery = try values.decode(SessionRecovery?.self, forKey: .recovery)
         transition = try values.decodeIfPresent(ProviderTransition.self, forKey: .transition)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
@@ -381,6 +381,39 @@ extension SessionRecord {
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(recovery, forKey: .recovery)
+        try values.encode(transition, forKey: .transition)
+        try values.encode(preview, forKey: .preview)
+        try values.encode(primaryScope, forKey: .primaryScope)
+        try values.encode(availability, forKey: .availability)
+        try values.encode(programStatus, forKey: .programStatus)
+        try values.encode(agentProcessId, forKey: .agentProcessId)
+        try values.encode(taskPrimary, forKey: .taskPrimary)
+        try values.encode(taskIds, forKey: .taskIds)
+        try values.encode(id, forKey: .id)
+        try values.encode(interactive, forKey: .interactive)
+        try values.encode(work, forKey: .work)
+        try values.encode(workspace, forKey: .workspace)
+        try values.encode(waveId, forKey: .waveId)
+        try values.encode(workPath, forKey: .workPath)
+        try values.encode(actions, forKey: .actions)
+        try values.encode(title, forKey: .title)
+        try values.encode(titleSource, forKey: .titleSource)
+        try values.encode(graphMembership, forKey: .graphMembership)
+        try values.encode(detail, forKey: .detail)
+        try values.encode(provider, forKey: .provider)
+        try values.encode(account, forKey: .account)
+        try values.encode(model, forKey: .model)
+        try values.encode(blocked, forKey: .blocked)
+        try values.encode(cwd, forKey: .cwd)
+        try values.encode(state, forKey: .state)
+        try values.encode(readySummary, forKey: .readySummary)
+        try values.encode(openArgv, forKey: .openArgv)
+        try values.encode(terminalIds, forKey: .terminalIds)
     }
 }
 
@@ -419,5 +452,33 @@ public struct SessionRecovery: Codable, Sendable, Hashable {
         case failedTurn = "failed_turn"
         case retryAt = "retry_at"
         case retryTurn = "retry_turn"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        agentProcessId = try values.decode(AgentProcessId.self, forKey: .agentProcessId)
+        thread = try values.decode(AgentSessionId.self, forKey: .thread)
+        failedTurn = try values.decode(String.self, forKey: .failedTurn)
+        model = try values.decode(String?.self, forKey: .model)
+        account = try values.decode(String?.self, forKey: .account)
+        state = try values.decode(State.self, forKey: .state)
+        reason = try values.decode(String.self, forKey: .reason)
+        retryAt = try values.decode(Int64?.self, forKey: .retryAt)
+        request = try values.decode(String?.self, forKey: .request)
+        retryTurn = try values.decode(String?.self, forKey: .retryTurn)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(agentProcessId, forKey: .agentProcessId)
+        try values.encode(thread, forKey: .thread)
+        try values.encode(failedTurn, forKey: .failedTurn)
+        try values.encode(model, forKey: .model)
+        try values.encode(account, forKey: .account)
+        try values.encode(state, forKey: .state)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(retryAt, forKey: .retryAt)
+        try values.encode(request, forKey: .request)
+        try values.encode(retryTurn, forKey: .retryTurn)
     }
 }

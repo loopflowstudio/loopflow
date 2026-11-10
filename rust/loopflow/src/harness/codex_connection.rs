@@ -894,7 +894,7 @@ async fn rpc_within(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::{observe, CodexObserver};
     use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
@@ -908,6 +908,23 @@ mod tests {
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
     type Provider = WebSocketStream<UnixStream>;
+
+    pub(in crate::harness) async fn recovery_fixture(
+        home: &Path,
+    ) -> (SqliteStore, super::Recorder) {
+        let (store, attachment, database) = fixture(home);
+        let observer = observer(home, database, attachment, std::process::id());
+        let recorder = super::Recorder::new(observer).await;
+        store
+            .record_session_connection(
+                "conversation",
+                &recorder.observer.attachment,
+                "codex",
+                &"native-thread".into(),
+            )
+            .unwrap();
+        (store, recorder)
+    }
 
     fn fixture(home: &Path) -> (SqliteStore, SessionAttachment, PathBuf) {
         let database = home.join("store.db");

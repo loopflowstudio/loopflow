@@ -595,3 +595,143 @@ impl Recorder {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Prepared, RecoveryGate};
+    use crate::harness::codex_connection::tests::recovery_fixture;
+    use crate::provider_account::{new_account, parse_account_id, ProviderAccountRoute};
+    use crate::provider_auth::Provider;
+    use crate::session_recovery::{RecoveryState, SessionRecovery};
+    use crate::store::Store;
+    use futures_util::StreamExt;
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio_tungstenite::{tungstenite::protocol::Role, WebSocketStream};
+
+    #[tokio::test]
+    async fn cancelled_installation_retains_late_or_lost_reply_without_releasing_retry() {
+        for reply in ["success", "error", "lost"] {
+            let home = tempfile::tempdir().unwrap();
+            let (store, mut recorder) = recovery_fixture(home.path()).await;
+            let shared = Arc::new(Store::from_sqlite_for_test(store.clone()));
+            let account = parse_account_id("replacement").unwrap();
+            shared
+                .upsert_provider_account(&new_account(
+                    Provider::Codex,
+                    account.clone(),
+                    home.path().join("login"),
+                    None,
+                ))
+                .await
+                .unwrap();
+            let route = ProviderAccountRoute::shared(
+                Provider::Codex,
+                account.clone(),
+                Arc::clone(&shared),
+                home.path().join("login"),
+                false,
+            );
+            let mut recovery = SessionRecovery {
+                agent_process_id: recorder.observer.attachment.agent_process_id.clone(),
+                thread: recorder.observer.thread.clone(),
+                failed_turn: "rejected".into(),
+                model: Some("model".into()),
+                account: None,
+                state: RecoveryState::WaitingNative,
+                reason: "waiting".into(),
+                retry_at: None,
+                request: None,
+                retry_turn: None,
+            };
+            store
+                .record_session_recovery("conversation", &recovery, "rejected")
+                .unwrap();
+            let gate = RecoveryGate::new("conversation", &recovery).unwrap();
+            let prompt = gate.prompt();
+            // The envelope carries a disposable socket, never a real login.
+            let encoded = prompt
+                .strip_prefix("<lf-recovery:")
+                .unwrap()
+                .split_once('>')
+                .unwrap()
+                .0;
+            let envelope: Value = serde_json::from_str(encoded).unwrap();
+            let mut hook =
+                std::os::unix::net::UnixStream::connect(envelope["socket"].as_str().unwrap())
+                    .unwrap();
+            writeln!(hook, "{}", json!({"prompt":prompt,"session_id":recovery.thread,"hook_event_name":"UserPromptSubmit"})).unwrap();
+            recovery.request = Some(gate.attempt().into());
+            recovery.state = RecoveryState::Recovering;
+            store
+                .record_session_recovery("conversation", &recovery, "dispatch")
+                .unwrap();
+            let admission = gate.accept().unwrap();
+            recovery.retry_turn = Some("retry".into());
+            recorder.recovery.preparing = Some(std::thread::spawn(move || {
+                Ok(Prepared {
+                    admission,
+                    route,
+                    recovery,
+                    tokens: secrecy::SecretString::new(
+                        json!({"accessToken":"synthetic","chatgptAccountId":"replacement"})
+                            .to_string(),
+                    ),
+                })
+            }));
+            while !recorder.recovery.preparing.as_ref().unwrap().is_finished() {
+                tokio::task::yield_now().await;
+            }
+            let (client, server) = tokio::net::UnixStream::pair().unwrap();
+            let (mut writer, _) = WebSocketStream::from_raw_socket(client, Role::Client, None)
+                .await
+                .split();
+            let mut native = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+            recorder.recovery_tick(&mut writer).await.unwrap();
+            let sent = native.next().await.unwrap().unwrap();
+            let sent: Value = serde_json::from_str(sent.to_text().unwrap()).unwrap();
+            assert_eq!(sent["method"], "account/login/start");
+            // Native cancellation happens after the account installation was sent.
+            hook.shutdown(std::net::Shutdown::Write).unwrap();
+            recorder.recovery_tick(&mut writer).await.unwrap();
+            assert_eq!(
+                store
+                    .session_recovery("conversation")
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                RecoveryState::Uncertain
+            );
+            if reply != "lost" {
+                let rpc = if reply == "success" {
+                    json!({"id":sent["id"],"result":{"type":"chatgptAuthTokens"}})
+                } else {
+                    json!({"id":sent["id"],"error":{"code":-32603,"message":"failed"}})
+                };
+                recorder.recovery_message(&rpc, &mut writer).await.unwrap();
+                let mut response = String::new();
+                hook.read_to_string(&mut response).unwrap();
+                assert!(response.is_empty(), "cancelled retry was released");
+            }
+            let pinned = shared
+                .provider_session_account(Provider::Codex, &recorder.observer.thread)
+                .await
+                .unwrap();
+            assert_eq!(pinned, (reply == "success").then_some(account));
+            for _ in 0..2 {
+                recorder.recovery_tick(&mut writer).await.unwrap();
+            }
+            let retained = store.session_recovery("conversation").unwrap().unwrap();
+            assert_eq!(retained.state, RecoveryState::Uncertain);
+            assert!(retained.request.is_some());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), native.next())
+                    .await
+                    .is_err(),
+                "installation or input was resent"
+            );
+        }
+    }
+}

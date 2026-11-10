@@ -16343,6 +16343,7 @@
             "program_status": null,
             "provider": "codex",
             "ready_summary": "The design now reflects Jack's requested changes.",
+            "recovery": null,
             "state": "unknown",
             "task_ids": [
               "task_00000000000000000000000000000001"

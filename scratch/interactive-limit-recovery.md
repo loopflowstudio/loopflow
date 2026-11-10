@@ -52,18 +52,10 @@ Unsupported cases retain their wait or uncertainty. New input either wins with
 no old retry or follows an admitted recovery. The two-Task served/native bulk,
 held-lock cancellation and approval cases pass; they do not replace gate or demo.
 
-1. Gate: cover distinct models/restricted routes, simultaneous reports, no capacity and
-   later reset. Unsupported or incomplete native history stays waiting/uncertain.
-   Gate owns affected lifecycle, transport, account, decoder/hook, Session/projection,
-   DTO and Swift suites, including lost replies, reconnect, `/new`, repeated limits
-   and earlier effects. Include cancellation after a Codex installation has been
-   sent, lost/late installation replies and retained refresh grants: held-lock
-   cancellation proves no account change only before installation starts.
-   The new ContextMoment also reaches `lf::tests::`,
-   `cli_discovery::` and retained-hook checks; route attribution reaches
-   `process::runtime::tests::`, `harness::{codex_connection,fact_writer}::tests::`
-   and Session metadata tests. `scripts/test.py --list` reaches architecture,
-   Python, Rust, website and headless Swift; use a focused Rust filter at gate.
+1. Publication checks passed after the fixture repairs below. Runtime admission,
+   restricted routes, distinct models, repeated reports, hold expiry, lost/late
+   installation replies and retained attempts have focused coverage; the affected
+   lifecycle, transport, hook, projection, DTO and Swift checks also ran.
 2. Demo/review: rendered Desktop, physical keyboard input after reopen and the
    installed/real-login observations below. No production switch or installation
    occurred in the disposable checks.
@@ -80,6 +72,30 @@ other observations remain in [live-recovery.md](live-recovery.md). No isolated
 real-login environment was available. Headless checks continue in disposable
 environments; configured observations and judgment of the complete experience
 remain for demo/review. No new product decision is needed for reversible work.
+
+### Publication review — November 9
+
+Review repaired required nullable recovery decoding in Rust and Swift, including
+encoding nulls and completing inline/screen/server fixtures. Added a disposable
+Codex socket/store test for cancellation after login is sent: late success pins
+the new account, error/lost replies retain uncertainty, and none releases or
+resends the retry. The route test now covers repeated reports and hold expiry.
+No retry algorithm changed. `lf sync` merged cleanly; remote main remained
+`8155d1fcde597154ee9746ad72280bf6687a7da8` at the later publication read.
+
+All commands used inherited LF_* unset and closed stdin; Rust used stable 1.99.1
+and canonical TMPDIR. Full commands/filters are in the named local logs.
+
+- `scripts/test.py --reuse-passing --rust-filter` (affected selection; `.lf/tmp/loo-811-expanded-publish-gate.log`) — architecture, 654 Python + one separate observation check and 73 website checks passed. Initial Rust compile caught the new test reaching a private type; moved it into that type's unit tests. The 801-test Desktop run found one absent recovery key in a screen fixture; completed screen, inline and server fixtures.
+- `cargo nextest run -p loopflow` (same selection plus context/schema/screen callers; `.lf/tmp/loo-811-publish-rust.log`) — 869/870 passed; the only failure was generated schema example key order. Regenerated with `target/debug/lf server describe --json`; the focused schema rerun passed. Existing grace-expiry transport test passed in 63.394s; no timeout or leak. New cancellation, repeated-limit and expiry tests passed.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed; `.lf/tmp/loo-811-publish-final-checks.log`. Existing large `__eh_frame` linker warning occurred in test linking, not clippy.
+- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DTOFixtureTests|sessionRecovery|uncertainRecovery'` — 59 passed after fixture repair; same final-check log. The full build also reported main's existing nil-coalescing warning in TaskWorkView.
+- `scripts/check_swift_multiplatform_boundaries.py`, `cargo fmt --check`, `git diff --check` — passed. `scripts/third_party.py refresh` updated the Cargo.lock input hash; Python inventory tests passed.
+
+Prior six-case native QA remains applicable: production edits in this review
+change DTO decoding/encoding, not native dispatch or credentials. Rendered
+Desktop, ordinary physical typing after reopen, installed and real-login checks
+remain for demo. This publication neither merges nor completes the Task.
 
 ### QA — November 9, merged candidate
 
@@ -98,10 +114,8 @@ reads across a private-server restart passed without provider login or seeded ro
 - `uv run python .lf/tmp/loo-811-qa-expanded/check_receipts.py` — six matching candidate receipts, seven successful-scenario roots removed, zero remaining probe processes, nine scoped Keychain items absent. The failed setup's root is also absent.
 - `git diff --check`, `lf context` — passed after the report and skill edits; both context budgets fit. Broader suites and clippy remain at gate.
 
-The report and QA skill now retain the working setup. Gate still owns its matrix
-above, including cancellation after native installation is sent. Rendered Desktop,
-physical typing after reopen and installed/real-login recovery remain unverified.
-No publication, installation or Graph advancement occurred in QA.
+QA changed no runtime code. Publication checks are recorded above; rendered
+Desktop, physical typing and installed/real-login recovery remain unverified.
 
 ### Concept review — November 9, after runtime integration
 

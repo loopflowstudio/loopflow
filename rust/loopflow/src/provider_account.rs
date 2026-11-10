@@ -4565,6 +4565,23 @@ mod account_first_tests {
             .unwrap()
             .unwrap();
         assert_eq!(route.account_id().as_str(), "second");
+        record_session_limit(
+            Provider::Codex,
+            &parse_account_id("first").unwrap(),
+            "gpt-5",
+            stated("You've hit your usage limit"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            session_recovery_route(Provider::Codex, "gpt-5", Path::new("/"), None)
+                .await
+                .unwrap()
+                .unwrap()
+                .account_id()
+                .as_str(),
+            "second"
+        );
         drop(guard);
         let restricted =
             selection::AccountSelection::from_flags(&[], &["codex=first@".into()]).unwrap();
@@ -4610,6 +4627,19 @@ mod account_first_tests {
                 .as_str(),
             "first"
         );
+        let limits = store.provider_account_limits(Some("codex")).await.unwrap();
+        assert!(!account_route_eligible(
+            &account,
+            &limits,
+            Some("gpt-5"),
+            now_unix()
+        ));
+        assert!(account_route_eligible(
+            &account,
+            &limits,
+            Some("gpt-5"),
+            now_unix() + DEFAULT_COOLDOWN_SECS + RESET_GRACE_SECS + 1,
+        ));
     }
 
     fn stated(line: &str) -> crate::agent::SpentLimit {

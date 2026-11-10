@@ -22,13 +22,18 @@ pub struct SessionRecovery {
     pub agent_process_id: crate::id::AgentProcessId,
     pub thread: AgentSessionId,
     pub failed_turn: String,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub model: Option<String>,
     /// The login that received the rejected turn, retained after handoff.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub account: Option<ProviderAccountId>,
     pub state: RecoveryState,
     pub reason: String,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub retry_at: Option<i64>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub request: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub retry_turn: Option<String>,
 }
 

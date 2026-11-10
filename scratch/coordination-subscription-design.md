@@ -155,3 +155,81 @@ demand registry and independent consumer delivery. Keep `Subscription`, Reader's
 separate runtime, snapshot/config/retry logic and CLI/embedding entry points.
 Remove the two hypothetical executor tests in `subscription_measurement.rs` once
 production-path saturation coverage replaces them. Keep frozen copies unchanged.
+
+## Source handoff and remaining comparison
+
+The implementation and focused regressions are complete. The repeated CPU
+comparison remains optimize step 4; there is no optimized candidate timing claim.
+
+A concurrent `lf pr open` checkpoint (`1a1caa37d`) captured the in-progress source
+and scratch. It is retained; `cbbf33f2d` completes cleanup and terminal delivery
+on the active branch. A source-only stack makes the two changes independently
+reviewable without rewriting that checkpoint:
+
+- `c7c32ad1137f5ff3d40ca5ad8ce266376b122e66`: orphaned TaskUpdates candidates,
+  based on frozen `17c304389`.
+- `397bceec1d864aa049b292a3b9b87195cf59a99b`: complete shared subscriptions,
+  based on the TaskUpdates repair. Its seven affected source/docs files match
+  active HEAD. Local refs are `refs/loopflow/checkpoints/task-update-candidates-20261109`
+  and `refs/loopflow/checkpoints/subscription-sharing-20261109`.
+
+The drop owner covers queued closure destruction and a runtime that has stopped
+accepting blocking jobs. Normal cleanup uses the existing blocking pool; only
+shutdown rejection uses an ordinary thread and joins it. A deterministic test
+waits for actual destruction on that path. Runtime shutdown joins the ordinary
+cleanup jobs in the production fixture. Existing measurement counters and their
+close-before-destruction limitation remain unchanged; include both tail windows.
+
+Checks (LF variables cleared and test stdin closed):
+
+- `cargo test -p loopflow --lib -- server::subscriptions::tests:: server::service::tests:: --test-threads=1 --nocapture`: 28 passed, no background panics. The unchanged TaskUpdates/core subscription subsets contributed 22 passing tests in the preceding combined run; its shared-path shutdown panics were repaired and rerun above.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed on the final source. `git diff --check`: passed. The linker emitted its existing large `__eh_frame` warning; execution succeeded.
+
+Gate retains the broader served-read and owner-continuity boundary checks.
+The two hypothetical executor tests were deleted; saturation now passes through
+production Session subscriptions and nested SQLite work with both outer slots
+occupied. The queued setup cancellation regression is enabled and passes.
+
+For step 4, build an optimized test fixture from this source, leaving the frozen
+server untouched (one cargo command at a time):
+
+```sh
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test --release -p loopflow --lib subscription_ --no-run --message-format=json < /dev/null > /tmp/subscription-sharing-20261109/release-build.jsonl
+uv run python - <<'PY'
+import json
+from pathlib import Path
+import shutil
+root = Path('/tmp/subscription-sharing-20261109')
+artifacts = [json.loads(line) for line in (root / 'release-build.jsonl').read_text().splitlines() if line.startswith('{')]
+binary = next(row['executable'] for row in reversed(artifacts) if row.get('reason') == 'compiler-artifact' and row.get('target', {}).get('name') == 'loopflow' and row.get('profile', {}).get('test') and row.get('executable'))
+shutil.copy2(binary, root / 'candidate-release')
+PY
+uv run python /tmp/subscription-sharing-20261109/compare.py /tmp/subscription-sharing-20261109/candidate-release --output /tmp/subscription-sharing-20261109/paired --rounds 5
+```
+
+The orchestrator calls the unchanged frozen `focus-v1.py::_sample`: five pairs
+at each 1/16-client shape, alternating binary order, shape order and quiet/active
+window order. It checks every frozen driver/helper and baseline binary hash,
+records candidate source/binary hashes, and saves each raw sample separately.
+The only fixture edit wires one production registry across its connections;
+seeding, probes, counters, windows, runtime defaults and writer remain unchanged.
+Run fresh baseline and candidate samples in those pairs; do not compare the debug
+smoke's CPU to the optimized baseline. Keep full outputs, writer receipts, child
+CPU and both tails. Path pilots use the unchanged `paths-v1.py` with
+`BENCH_KIND=process`, `task-same`, or `task-distinct` and the flags already recorded
+in `subscription-followup.md`; repeat both binaries before claiming a timing gain.
+No long matrix ran in this implementation step.
+
+Bounded smoke: the unchanged frozen `focus-v1.py` ran the debug candidate once
+at 1 and 16 clients with ordinary defaults. Both passed: two admission/checkpoint
+projections, ten active projections for ten retained writes, zero quiet
+projections, zero quiet/active frames, title and unrecorded-exit delivery, and
+both cleanup tails without SQL/projections. Each ended with 5/5 SQLite opens/
+closes, 2/2 reader runtimes (cold + cohort), 35/35 runtime threads, 2/2 wake
+threads, and FDs/threads back at 17/20. Receipts, full initial readings and source/
+binary hashes: `/tmp/subscription-sharing-20261109/smoke/` and
+`smoke-provenance.json`. These work counts establish sharing and cleanup in the
+fixture; debug CPU is not an optimized-baseline comparison. Both fixture
+processes and their writer/provider stand-ins exited. All 17 preserved research/
+measurement artifacts match the parent backup; the frozen baseline and five
+scripts match `freeze.json`.

@@ -43,3 +43,16 @@ research and measurement/review artifacts, backed up at
 `/tmp/loopflow-coordination-artifacts-before-sharing`. Initial `lf context`:
 50,496/12,000 tokens and 223,936/98,304 bytes. Retain those artifacts and limits;
 curation cannot meet the targets while retaining their required content.
+
+A concurrent checkpoint, `1a1caa37d7fe9864677d954924a7befb926a31a1`, has the
+subject “lf pr open: prepare branch” and captured in-progress source plus scratch.
+No attribution is inferred from its Git identity. Keep that history. Separate
+source-only commits under `refs/loopflow/checkpoints/` isolate the TaskUpdates
+repair and complete sharing change without moving any branch or checkout; the
+active branch's final source matches them. Comparison instructions distinguish
+that review stack from the active history and debug smoke from optimized timing.
+
+After the handoff notes, `lf context` reported 52,231/12,000 tokens and
+231,650/98,304 bytes (over by 40,231 tokens and 133,346 bytes). Required research
+and measurement preservation still prevents meeting both limits. The final
+query is saved at `/tmp/subscription-sharing-20261109/context-final.txt`.

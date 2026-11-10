@@ -25,14 +25,20 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 01:11 UTC,
+At November 10 01:21 UTC, rechecked at 01:56 UTC,
 `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at that same head.
-`lf task status LOO-718 --json` still reports `feature` at `demo`, with
-PR #1812 open and settlement not armed.
+The last successful `lf task status LOO-718 --json` read, at 01:11 UTC,
+reported `feature` at `demo`, with PR #1812 open and settlement not armed.
+The 01:21 UTC Task status read timed out after 30 seconds; current Graph position
+is unknown. GitHub's PR state was read successfully at both checks.
+At 01:56 UTC, `lf task status LOO-718 --json` also timed out after 20 seconds;
+the LOO-809 status read was interrupted after it stalled. The Task status
+service supplied no fresh Graph position for either Task.
 The fetched main
-(`7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`) contained neither `mobile.rs` nor
-`ticket.rs`. The inspected transport includes watch resumption; retain it.
+(`7cf2d25b3f01de2e7148c0d15b1dbe2d2ae445c8`, fetched again at 01:56 UTC)
+contained neither `mobile.rs` nor `ticket.rs`. The inspected transport includes
+watch resumption; retain it.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.

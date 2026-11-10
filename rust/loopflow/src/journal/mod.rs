@@ -1277,12 +1277,12 @@ pub(crate) fn process_receipt_path(lf_home: &Path, locator: &str) -> PathBuf {
 }
 
 pub(crate) fn read_process_receipt(path: &Path) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
+    let text = match crate::observe::read_to_string(path) {
+        Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let receipt: ProcessReceipt = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    let receipt: ProcessReceipt = serde_json::from_str(&text).map_err(std::io::Error::other)?;
     if receipt.schema_version != 1 {
         return Err(std::io::Error::other("unsupported Process receipt schema"));
     }

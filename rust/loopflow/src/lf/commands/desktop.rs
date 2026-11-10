@@ -718,7 +718,6 @@ pub(crate) fn subscribe_plans(
 ) -> Result<Option<Subscription>> {
     super::subscribe::start(
         (),
-        super::subscribe::Wake::every(super::subscribe::PLANNING_CLOCK),
         move |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)

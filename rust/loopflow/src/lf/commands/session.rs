@@ -364,16 +364,8 @@ pub(crate) fn subscribe_list(
         search: filter.search.clone(),
         interactive: filter.interactive,
     };
-    // A clock tick rereads every summary only when an AgentProcess lived or
-    // died, a Session went quiet long enough to become available, or a
-    // persistent checkout appeared or vanished.
-    let subscribed =
-        super::subscribe::Wake::every(super::subscribe::ACTIVITY_CLOCK).probing(|store| {
-            Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
-        });
     super::subscribe::start(
         args,
-        subscribed,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,

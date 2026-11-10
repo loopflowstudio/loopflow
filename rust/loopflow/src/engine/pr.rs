@@ -6,7 +6,6 @@
 //! `pr.request_review` read and ask for its reviews on the provider.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -499,10 +498,7 @@ pub fn request_review(
 }
 
 fn gh(repo: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new("gh")
-        .args(args)
-        .current_dir(repo)
-        .output()
+    crate::observe::github(repo, args)
         .map_err(|error| Error::new(ErrorCode::Unavailable, format!("gh: {error}")))
 }
 

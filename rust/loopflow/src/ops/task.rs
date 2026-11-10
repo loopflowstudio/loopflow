@@ -1951,10 +1951,9 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
 
 fn planning_stale(status: &TaskStatus) -> bool {
     status.planning_state != crate::store::PlanningState::Available
-        || status.observed_at.is_some_and(|at| {
-            time::OffsetDateTime::now_utc().unix_timestamp() - at
-                >= super::linear::LINEAR_SOFT_STALE_SECS
-        })
+        || status
+            .observed_at
+            .is_some_and(|at| crate::observe::deadline(at + super::linear::LINEAR_SOFT_STALE_SECS))
 }
 
 /// Sessions copied here from rented Machines this Task ran on.

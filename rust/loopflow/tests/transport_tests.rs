@@ -416,10 +416,10 @@ read -r answer < /dev/tty
         while self
             .sql()
             .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
-                r.get::<_, bool>(0)
+                r.get::<_, Option<bool>>(0)
             })
             .unwrap()
-            != viewed
+            != Some(viewed)
         {
             assert!(
                 Instant::now() < deadline,

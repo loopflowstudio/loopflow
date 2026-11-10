@@ -180,6 +180,8 @@ pub struct AgentConfig {
     /// Claude Chrome integration. `None` sends no flag so Claude's own
     /// configuration decides; an explicit choice sends `--chrome`/`--no-chrome`.
     pub chrome: Option<bool>,
+    /// Initial Codex tier; omission leaves provider configuration in charge.
+    pub codex_service_tier: Option<crate::config::CodexServiceTier>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -255,6 +257,7 @@ impl std::fmt::Debug for AgentConfig {
                 &format_args!("({} bytes)", self.task_prompt.len()),
             )
             .field("agent", &self.agent)
+            .field("codex_service_tier", &self.codex_service_tier)
             .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
@@ -871,6 +874,9 @@ pub fn build_codex_thread_start_params(
     headless: bool,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
+    if let Some(tier) = launch.codex_service_tier {
+        params.insert("serviceTier".into(), tier.as_str().into());
+    }
     let instructions = system_prompt_with_structured_replies(launch);
     if !instructions.is_empty() {
         params.insert(

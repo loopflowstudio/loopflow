@@ -33,6 +33,25 @@ pub struct UserConfig {
     pub name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CodexServiceTier {
+    #[serde(alias = "standard")]
+    Default,
+    #[serde(alias = "fast")]
+    Priority,
+}
+
+impl CodexServiceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Priority => "priority",
+        }
+    }
+}
+
 /// Resolve a display name from personal Loopflow configuration or Git's
 /// user.name in `directory`.
 fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {

@@ -9,6 +9,10 @@ Run **LoopflowiOS** on your iPhone. The app opens the Machine connection screen;
 connect over Tailscale, open a Task, then choose **Use keyboard** to type into
 its running Session. Paste and **New line** preserve multiline input; Return submits.
 
+The app icon uses Desktop's artwork. After changing `LoopflowMac/AppIcon.icns`,
+regenerate the opaque iOS asset from the repository root:
+`xcrun swift scripts/ios-icon.swift`.
+
 For offline UI testing only, add `--fixture` to the launch arguments. This uses
 the native terminal renderer with a simulated editor: no shell, provider or
 Loopflow Session runs, and no commands execute. UI tests opt into it individually.

@@ -6649,14 +6649,17 @@ printf 'output-final\r\n'
         remote_address: Some(remote_address),
         executable: env!("CARGO_BIN_EXE_lf").into(),
     };
+    let service_log_path = root.join("swift/.build/mobile-service.log");
+    let service_log = std::fs::File::create(&service_log_path).unwrap();
     let launch = || {
         fixture
             .command(&["server", "run"])
             .env("PATH", &path)
             .env("HTTPS_PROXY", "http://127.0.0.1:1")
             .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .env("RUST_LOG", "loopflow::server::remote=debug")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(service_log.try_clone().unwrap())
             .spawn()
             .unwrap()
     };
@@ -6775,8 +6778,9 @@ printf 'output-final\r\n'
         .collect();
     assert!(
         result.success(),
-        "Native acceptance failed; inspect {}",
-        log_path.display()
+        "Native acceptance failed; inspect {} and {}",
+        log_path.display(),
+        service_log_path.display()
     );
     assert!(
         stopped && restarted,

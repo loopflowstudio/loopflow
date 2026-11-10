@@ -304,7 +304,9 @@ creation model, recovers the same receipt, opens its recorded terminal, and type
 into it. It also saves that request for later, reloads it and opens it while
 preserving a separate unsent draft. Rust asserts exactly three provider launches
 (initial, explicit continuation, new Task) and every exact submission. The native
-log is `swift/.build/mobile-acceptance.log`.
+log is `swift/.build/mobile-acceptance.log`; the isolated server's connection
+diagnostics remain in `swift/.build/mobile-service.log`, including after a
+failed handshake or service restart.
 
 For an actual provider, use the same host/Simulator variables, additionally set
 `LOOPFLOW_MOBILE_CLAUDE` to the absolute path of an already signed-in Claude CLI,

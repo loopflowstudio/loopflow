@@ -260,8 +260,9 @@ struct MachineAddressView: View {
                 let connected = try await RemoteMobileClient.connect(endpoint: endpoint, replacing: replacing)
                 try Task.checkCancellation()
                 onConnected(connected)
-            } catch is CancellationError { }
-            catch { self.error = machineConnectionMessage(error) }
+            } catch {
+                if !Task.isCancelled { self.error = machineConnectionMessage(error) }
+            }
         }
     }
 }

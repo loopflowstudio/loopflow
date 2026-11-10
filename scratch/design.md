@@ -15,8 +15,9 @@ reservations.
 The server tree is unchanged from the previously inspected
 `2b52aef839da5fccdc5bb9769b3f95e6ea1d2a52`.
 
-At November 10 23:15 UTC, GitHub reports PR #1812 open and unmerged at
-that revision, with no auto-merge. Freshly fetched main remains
+At November 10 23:52 UTC, GitHub reports PR #1812 open and unmerged at
+`f3ff3041d0718ddc16dad51bc9a384c44ab2fe9a`, with no auto-merge. This newer
+revision has not been inspected. Freshly fetched main remains
 `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
 or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.
 

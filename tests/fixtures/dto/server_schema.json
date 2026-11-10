@@ -9934,6 +9934,34 @@
         },
         {
           "additionalProperties": false,
+          "description": "Connection-local ordering; never a replay or reading checkpoint.",
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/SubscriptionEvent"
+            },
+            "id": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "seq",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The subscription's last reading was its answer (`task.wait` reached\nits state); nothing follows for `id`.",
           "properties": {
             "id": {
@@ -11470,6 +11498,104 @@
         "migration_error"
       ],
       "type": "object"
+    },
+    "SubscriptionEvent": {
+      "description": "An occurrence within the Tasks included in a subscription reading.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "task.shipped",
+              "type": "string"
+            },
+            "merge_commit": {
+              "type": "string"
+            },
+            "number": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pr_id": {
+              "type": "string"
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "pr_id",
+            "number",
+            "url",
+            "merge_commit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "comment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskComment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The thread entry when this direction came from a retained comment."
+            },
+            "kind": {
+              "const": "task.steer",
+              "type": "string"
+            },
+            "steer": {
+              "$ref": "#/$defs/Steer"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "steer",
+            "comment"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "graph_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            "kind": {
+              "const": "graph.step_finished",
+              "type": "string"
+            },
+            "step": {
+              "$ref": "#/$defs/GraphStepProcess"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "graph_process_id",
+            "step"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "SubscriptionFrame": {
       "description": "One line of a subscription.",

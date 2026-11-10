@@ -17,8 +17,8 @@ Task's planned wire contract; bulk redemption answers `admitted`.
 
 That revision shares `server/ticket.rs` between terminal and bulk transfer,
 leaves foreign attempts unconsumed and expires tickets with `Instant`, contrary to this
-Task's consume-on-attempt and host-sleep requirements. It has already removed
-the UID-only store. `Admission::Local` follows a same-effective-UID check on
+Task's consume-on-attempt and host-sleep requirements.
+`Admission::Local` follows a same-effective-UID check on
 every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
@@ -41,17 +41,12 @@ to older status reads.
 
 The inspected transport revision already replaces `server/service.rs::Ticket`
 and `Tickets` with `server/ticket.rs` and deletes
-`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`. Restore its terminal
-single-use, foreign-attempt consumption and lifetime coverage in the shared-store
-tests. Retain bulk cases, service-level bridge tests and wire fixtures. The
-UID-only implementation in this checkout remains unchanged until transport lands.
+`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`. Keep that cut;
+restore the terminal coverage below on the shared store. Retain bulk cases,
+service-level bridge tests and wire fixtures. Do not extend the UID-only store
+while waiting for transport to land.
 
 ## Implementation and acceptance
-
-The in-place docs in `docs/server.md` (Phone access) and
-`rust/loopflow/src/server/README.md` (Remote attach contract)
-include the request/redemption example, identity binding, expiry and retry
-behavior; the general attach section distinguishes the local socket's UID rule.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Through authenticated client and bridge connections, test that
@@ -70,11 +65,8 @@ planned/local-only wording and replace the general attach section's UID-only
 description with the local/remote admission binding. Keep same-device ticket
 use, exact-owner recovery and attachment without provider launch.
 
-Desktop visual inspection remains deferred to display-capable QA; opening
-results are in `questions.md`. It does not block headless implementation.
-
-Keep recovery behavior in the shared recovery section; the remote contract
-and general attach section link there so local and remote clients follow one
-set of owner, input and reconnect rules.
+Keep recovery rules in the shared recovery section to avoid maintaining them
+separately for local and remote clients. Desktop visual inspection remains for
+display-capable QA; opening results are in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

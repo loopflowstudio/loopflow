@@ -10,26 +10,26 @@
   &quot;seq&quot;: 1,
   &quot;event&quot;: {
     &quot;kind&quot;: &quot;task.steer&quot;,
-    &quot;task_id&quot;: &quot;task_186c1e90c4ed4ecc8510289e6834bdad&quot;,
+    &quot;task_id&quot;: &quot;task_26b7a22fdc1d479fa0fdad746e317b72&quot;,
     &quot;steer&quot;: {
-      &quot;id&quot;: &quot;5d0e24fd-b87d-4ece-a8bd-d22231feffb4&quot;,
+      &quot;id&quot;: &quot;e9b4f954-9802-4089-a06e-9bea2fc0fb3a&quot;,
       &quot;sequence&quot;: 1,
-      &quot;source&quot;: &quot;comment:d830cd10-523a-4aa3-8036-581737cad23d&quot;,
+      &quot;source&quot;: &quot;comment:a0a3c57c-f690-4596-ac47-d4175d1ebeb3&quot;,
       &quot;revision&quot;: &quot;local&quot;,
       &quot;author&quot;: {
         &quot;kind&quot;: &quot;named&quot;,
         &quot;id&quot;: &quot;Event QA&quot;
       },
-      &quot;text&quot;: &quot;Comment d830cd10-523a-4aa3-8036-581737cad23d by Event QA:\n\nKeep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:d830cd10-523a-4aa3-8036-581737cad23d --&gt;&quot;
+      &quot;text&quot;: &quot;Comment a0a3c57c-f690-4596-ac47-d4175d1ebeb3 by Event QA:\n\nKeep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:a0a3c57c-f690-4596-ac47-d4175d1ebeb3 --&gt;&quot;
     },
     &quot;comment&quot;: {
-      &quot;id&quot;: &quot;d830cd10-523a-4aa3-8036-581737cad23d&quot;,
-      &quot;body&quot;: &quot;Keep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:d830cd10-523a-4aa3-8036-581737cad23d --&gt;&quot;,
+      &quot;id&quot;: &quot;a0a3c57c-f690-4596-ac47-d4175d1ebeb3&quot;,
+      &quot;body&quot;: &quot;Keep the examples. λ\nSecond line.\n\n&lt;!-- loopflow-requester:\&quot;Event QA\&quot; --&gt;\n\n&lt;!-- loopflow-steer:a0a3c57c-f690-4596-ac47-d4175d1ebeb3 --&gt;&quot;,
       &quot;author&quot;: {
         &quot;kind&quot;: &quot;person&quot;,
         &quot;name&quot;: &quot;Event QA&quot;
       },
-      &quot;created_at&quot;: &quot;2026-11-10T02:30:53.823883Z&quot;
+      &quot;created_at&quot;: &quot;2026-11-10T02:58:52.943482Z&quot;
     }
   }
 }</pre></details><details><summary>Real Graph exit</summary><pre>{
@@ -38,21 +38,27 @@
   &quot;seq&quot;: 4,
   &quot;event&quot;: {
     &quot;kind&quot;: &quot;graph.step_finished&quot;,
-    &quot;task_id&quot;: &quot;task_186c1e90c4ed4ecc8510289e6834bdad&quot;,
-    &quot;graph_process_id&quot;: &quot;b055392a-82b3-4cfc-95bc-87e26b9320e2&quot;,
+    &quot;task_id&quot;: &quot;task_26b7a22fdc1d479fa0fdad746e317b72&quot;,
+    &quot;graph_process_id&quot;: &quot;0251c910-c14a-4a24-aafd-21b6e928cc89&quot;,
     &quot;step&quot;: {
-      &quot;lf_process_id&quot;: &quot;f48e439b-50f6-490b-a7a3-4b1fd97d8232&quot;,
+      &quot;lf_process_id&quot;: &quot;567d2f74-862c-44fb-b341-6fc1632641d7&quot;,
       &quot;label&quot;: &quot;help&quot;,
       &quot;key&quot;: 0,
       &quot;iterations&quot;: [
         []
       ],
-      &quot;started_at&quot;: 1794277859,
-      &quot;completed_at&quot;: 1794277859,
+      &quot;started_at&quot;: 1794279536,
+      &quot;completed_at&quot;: 1794279536,
       &quot;outcome&quot;: &quot;succeeded&quot;,
       &quot;exit_code&quot;: 0
     }
   }
+}</pre></details><details><summary>Empty comment</summary><pre>{
+  &quot;type&quot;: &quot;error&quot;,
+  &quot;id&quot;: &quot;empty&quot;,
+  &quot;code&quot;: &quot;invalid&quot;,
+  &quot;message&quot;: &quot;Task comment cannot be empty&quot;,
+  &quot;data&quot;: null
 }</pre></details><details><summary>Admission refusal</summary><pre>{
   &quot;type&quot;: &quot;error&quot;,
   &quot;id&quot;: &quot;burst-1&quot;,
@@ -62,12 +68,6 @@
     &quot;limit&quot;: &quot;retained_bytes&quot;,
     &quot;max&quot;: 67108864
   }
-}</pre></details><details><summary>Empty comment</summary><pre>{
-  &quot;type&quot;: &quot;error&quot;,
-  &quot;id&quot;: &quot;empty&quot;,
-  &quot;code&quot;: &quot;invalid&quot;,
-  &quot;message&quot;: &quot;Task comment cannot be empty&quot;,
-  &quot;data&quot;: null
 }</pre></details><pre>Swift decoded 16 live readings, 20 steer events, and 2 Graph step events.
 </pre><p><a href="qa-transcript.jsonl">Complete command and socket transcript</a> · <a href="qa_events.py">Walkthrough driver</a> · <a href="qa_swift_probe.swift">Swift probe</a></p>
 <h2>What QA uncovered</h2><p><strong>Task checkout starts a background primary conversation when a provider CLI is installed.</strong> Several early walkthroughs left terminal owners and Codex observers after their command-only Graphs completed. Inspection traced this to existing <code>ops/human_session/primary.rs</code> behavior, outside the typed-event change. All processes belonging to those disposable checkouts were stopped. The driver now isolates CODEX_HOME and CLAUDE_CONFIG_DIR and stops private terminal owners and descendants. The complete walkthrough was rerun with that setup.</p>
@@ -75,4 +75,4 @@
 <h2>What remains unchecked</h2><div class="limit"><p><strong>Live task.shipped, including a ship leaving a plan.</strong> This requires an actual recorded GitHub merge. Publishing and landing are outside this QA step; no synthetic merge was substituted. Existing focused tests cover the store-level scenario, but that is not a live walkthrough.</p>
 <p><strong>Desktop presentation and automatic client recovery.</strong> This was a headless protocol walkthrough, not a mounted window session or an end-to-end ServerClient recovery probe. It does not establish board animation, thread presentation, focus, or interaction. New UI consumers are outside this Task.</p>
 <p><strong>Fault injection and maximum load.</strong> Unknown event kinds, sequence gaps, 256-event overflow, and slow-reader timeout were not produced by the live server. Prior focused tests recorded in the design cover client gap and unknown-kind handling. Affected-suite gate and CI remain later steps.</p></div>
-<h2>End state</h2><p>CLI and socket state agreed. All eight burst comments remained after rejecting empty input. Foreground servers were stopped and reaped; private terminal owners and descendants were stopped separately. No unresolved typed-event defect was found in the exercised scenarios.</p><p>Private state retained for inspection: <code>/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo802-qa-4i079yqo</code>. The compiled Swift probe was removed after use; source and transcripts remain.</p><footer>Build under review: bd76f4cf3. This step did not publish, land, or move the Task’s Graph.</footer></main></html>
+<h2>End state</h2><p>CLI and socket state agreed. All eight burst comments remained after rejecting empty input. Foreground servers were stopped and reaped; private terminal owners and descendants were stopped separately. No unresolved typed-event defect was found in the exercised scenarios.</p><p>Private state retained for inspection: <code>/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo802-qa-uaivf6d3</code>. The compiled Swift probe was removed after use; source and transcripts remain.</p><footer>Build under review: d5bba3db5. This step did not publish, land, or move the Task’s Graph.</footer></main></html>

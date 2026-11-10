@@ -61,6 +61,7 @@
     this Task. The event contract and ordered Swift stream are implemented.</p>
   <div role="group" aria-label="Scenario">
     <button type="button" data-scene="normal" aria-pressed="true">Live comment</button>
+    <button type="button" data-scene="ship" aria-pressed="false">Leave a plan</button>
     <button type="button" data-scene="gap" aria-pressed="false">Delivery gap</button>
     <button type="button" data-scene="recovery" aria-pressed="false">Reconnect</button>
   </div>
@@ -72,17 +73,21 @@
   <p>Existing merge records, steers and step exits supply occurrences in the reading’s
     snapshot. Subscription-local observation and bounded delivery suffice; no second
     event log, replay cursor or execution owner is needed.</p>
+  <p>The recorded live QA covered comments, Graph exits and reconnection. A ship
+    leaving a plan has store-level coverage; a real recorded merge remains the next
+    demonstration. Mounted UI and maximum-load behavior are not established by that QA.</p>
   <h2>Review questions, resolved by the existing design</h2>
   <ol>
     <li>Does “shipped” mean Auto-Ship approval? No: it means a recorded PR merge.</li>
     <li>Should reopening animate old occurrences? No: start with current state.</li>
-    <li>Is a product choice still open? None found. Next demonstrate a live comment,
-      a ship leaving a plan and recovery after missed occurrences.</li>
+    <li>Is a product choice still open? None found. Advance to the remaining review
+      and gate; demonstrate a real recorded merge leaving a plan during verification.</li>
   </ol>
 </main>
 <script>
   const scenes = {
     normal: ['reading [comment 7] → task.steer(comment 7)', '“Keep the examples.” appears once. The reading restores the thread; the event can draw attention to the arrival without requesting another read.'],
+    ship: ['reading [Task A] → reading [] → task.shipped(Task A, PR 42)', 'A departing Task still supplies its final observed merge. A board consumer can retain the previous card long enough to animate its departure. Adding an already-shipped Task to the plan starts quietly; this UI is illustrative.'],
     gap: ['seq 4 → seq 6 → end event streams', 'Stop incremental reactions for every event consumer on the connection; reopen for a fresh reading. An unknown kind ends only its event subscription. Reading-only watches remain connected.'],
     recovery: ['disconnect → subscribe(resume: null) → reading [comments 7, 8]', 'The thread includes direction received while offline without replaying arrival animations. A newly included Task also starts quietly. Event sequences start again on the new connection.']
   };

@@ -136,7 +136,8 @@ def main():
     git("add", ".")
     git("commit", "-m", "Prepare event walkthrough")
     git("push", "-u", "origin", "main")
-    record("environment", {"base": str(BASE), "branch_binary": str(BIN)})
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    record("environment", {"base": str(BASE), "branch_binary": str(BIN), "revision": revision})
     # Ordinary released-client state before the branch first opens this Machine.
     prior = json.loads(run(["session", "resume", "--prepare", "--json"], binary="/Applications/Loopflow.app/Contents/MacOS/lf"))
     record("released_session", prior)

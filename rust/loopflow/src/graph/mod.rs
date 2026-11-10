@@ -726,7 +726,7 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
 pub(crate) fn graph_sources_in(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
     let root = repo.join(".lf/graphs");
     let mut sources = BTreeMap::<String, PathBuf>::new();
-    if !crate::observe::exists(&root) {
+    if !crate::observe::is_dir(&root) {
         return Ok(sources);
     }
     let mut pending: Vec<_> = crate::observe::read_dir(&root)?.into_iter().rev().collect();

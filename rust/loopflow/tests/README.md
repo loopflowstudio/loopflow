@@ -885,6 +885,9 @@ must retain Wave identity before projecting accepted plans.
 Changes to served observation or subscription wake tracking also run
 `session_record::activity::tests::` and `ops::task_execution::tests::`: quiet
 and stale-sample deadlines must advance Task status without new rows.
+Changes to observed definition files or directory traversal also run
+`graph_discovery_tests::` and `skills::catalog::tests::`: builtin definitions
+must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
 `world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment

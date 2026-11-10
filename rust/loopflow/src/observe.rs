@@ -553,6 +553,27 @@ mod tests {
     }
 
     #[test]
+    fn graph_discovery_observes_a_file_replaced_by_a_directory() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().join(".lf/graphs");
+        std::fs::create_dir(root.parent().unwrap()).unwrap();
+        std::fs::write(&root, "not a directory").unwrap();
+        let cache = Arc::new(Cache::default());
+        let read = || crate::graph::graph_sources_in(repo.path()).unwrap();
+        let (before, dependencies) = cache.capture(read);
+        assert!(before.is_empty());
+
+        std::fs::remove_file(&root).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("example.yaml"), "[]").unwrap();
+        assert!(read().contains_key("example"));
+        assert!(cache.capture(read).0.is_empty());
+        refresh(&cache);
+        assert!(dependencies.changed());
+        assert!(cache.capture(read).0.contains_key("example"));
+    }
+
+    #[test]
     fn graph_discovery_observes_a_directory_replaced_by_a_symlink() {
         let repo = tempfile::tempdir().unwrap();
         let directory = repo.path().join(".lf/graphs/group");

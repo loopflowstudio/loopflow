@@ -1,8 +1,0 @@
-  PID  PPID STARTED                      STAT COMM
- 4994     1 Tue Nov 10 10:24:39 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
-38507 38007 Mon Nov  9 12:06:32 2026     Ss   /Users/jack/.local/bin/lf
-49149 38767 Mon Nov  9 12:06:38 2026     Ts   /Applications/Loopflow.app/Contents/MacOS/lf
-87183     1 Mon Nov  9 08:19:00 2026     Ss   /Applications/Loopflow.app/Contents/MacOS/lf
-90401 87436 Mon Nov  9 08:19:01 2026     Ts   /Applications/Loopflow.app/Contents/MacOS/lf
-87436 87183 Mon Nov  9 08:19:00 2026     Ss+  codex
-38767 38507 Mon Nov  9 12:06:32 2026     Ss+  codex

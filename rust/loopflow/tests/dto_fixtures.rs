@@ -1293,7 +1293,7 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 #[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =
+    let receipts: Vec<loopflow::engine::creation::TaskCreateReceipt> =
         serde_json::from_str(json).unwrap();
     assert_eq!(receipts[0].graph.as_deref(), Some("code"));
     assert!(receipts[0].session_id.is_some());
@@ -1335,4 +1335,15 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
         ]
     );
     assert_eq!(serde_json::to_value(intents).unwrap(), wire);
+}
+
+#[test]
+fn creation_recovery_dispositions_round_trip() {
+    let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
+    let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
+        serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
 }

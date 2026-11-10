@@ -48,7 +48,8 @@ boundary executors remain domain-specific because their settlement rules differ.
 - **Skill runner:** execute one reusable instruction set through one provider
   harness and leave local evidence.
 - **Graph composition:** sequence Skill and mechanical Command nodes, route Xor
-  branches and follow backward edges. Every step is autonomous.
+  branches and follow backward edges. `interactive:` marks the steps where a
+  person takes part; Task runs stop there for their conversation.
 - **Durable planning:** preserve Wave and Task intent across crashes;
   each Task Graph is a fresh Graph process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
@@ -133,7 +134,7 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | --- | --- |
 | Repository | Wave membership |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
-| Task | Worktree, optional PR and every associated Session, Graph and Process; no Graph is privileged |
+| Task | Worktree, optional PR, captured graph and position, and every associated Session, Graph and Process; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
@@ -197,7 +198,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Wave planning row, issue, durable disposition and worktree/delivery facts |
 | `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
-| `projects` | A Wave's planning: stable Linear Project identity, status, Graph and planning facts |
+| `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
 ### Conversation and attachment lifetime
@@ -263,10 +264,11 @@ the Wave's goal and memory reach it as ordinary Wave context.
 
 A Task's primary is one of its own conversations, named by
 `tasks.primary_session_id`; its row carries no scope mark and it stays a Task
-member. `lf resume --task ISSUE` keeps the chosen primary, else selects the
-sole unfinished interactive conversation, else the most recently used by
-native human input, then last opening. It creates one when the Task has none.
-Opening an exact Session leaves the Task's primary unchanged.
+member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
+selects an unfinished interactive member by latest native human input, falling
+back to interactive opening and creation time; it creates one when none exists.
+`lf session bind` selects the primary explicitly. Opening an exact Session leaves
+an already selected Task primary unchanged.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs

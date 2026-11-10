@@ -199,7 +199,8 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let created = json(
         repo.path(),
         &["task", "create", "--title", "Hold a Task", "--json"],
-    );
+    )["task"]
+        .clone();
     let id = created["id"].as_str().unwrap();
     let placed = json(repo.path(), &["checkout", id, "--json"]);
     let worktree = Path::new(placed["worktree"].as_str().unwrap());

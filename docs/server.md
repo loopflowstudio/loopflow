@@ -31,8 +31,9 @@ Keep a Task list open while Desktop reconnects: live Work updates resume
 automatically from the last retained reading. An unchanged list does not need
 to be downloaded again. If Work changed or the server restarted, Desktop receives
 a complete current reading. If recovery fails, the window reports unavailability
-and retries. Changes submitted before the connection dropped are never repeated
-automatically; check the current Work before submitting them again.
+and retries. Task and Session creations recover through their saved request and
+server receipt. Other changes submitted before the connection dropped are never
+repeated automatically; check the current Work before submitting them again.
 
 Desktop reconnects automatically to the same Session owner when the server is
 replaced or its connection drops. Its native status row shows **Reconnecting…**;
@@ -52,6 +53,40 @@ running Graphs retain their owners; settled, unviewed Sessions can end after
 their configured grace. See [Sessions](sessions.md#come-back-to-a-conversation).
 Logout or reboot ends live processes; [resume from saved history](sessions.md#after-a-crash-or-reboot)
 afterward.
+
+## Recover a submitted creation
+
+Submit once. When the Task or conversation appears, Desktop clears the saved
+submission. If Desktop closes before showing the result, reopening recovers it
+on the original Machine. **Show result** displays the recovered Task or Session
+and clears the submission after it appears. Switching repositories or opening
+another window does not submit it somewhere else.
+
+This recovery also covers **Create Task from this conversation** and starting a
+new thread in an existing Session. Desktop saves each submitted request on this
+device before sending it. If saving fails, the form stays open with the error
+and nothing is sent. This saves submitted creations, not an editable offline
+queue; submissions do not sync to other devices.
+
+The server's receipt determines what happened. Desktop checks it after reconnect
+or app restart, and sends the identical creation again only when the server
+confirms it is absent or safe to continue. An unavailable server leaves the
+submission unresolved. Once Desktop presents a confirmed result, it removes the
+saved request.
+
+**Task created; start unconfirmed** means the Task exists but its launch has not
+been confirmed. Open the Task and inspect its status and Graph history before
+starting anything. Desktop keeps this submission available for inspection and
+does not launch it again. Recovering a receipt for a removed Task does not
+recreate it.
+
+**Conversation change unconfirmed** means a new-thread request was interrupted
+while stopping the earlier provider. **Inspect** shows the conversation and its
+receipt; recovery does not repeat the stop. Newer input also prevents finishing
+an older unpublished conversation change.
+
+Other changes have no automatic retry contract. If their reply is lost, refresh
+the affected Work to see what happened before making another change.
 
 ## Updates and disabled background access
 

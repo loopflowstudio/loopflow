@@ -576,8 +576,10 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 Planned for [Phone access](../../../../docs/server.md#phone-access).
 
 Connect to the host's authenticated `/v1/machine` WebSocket, complete
-`hello`/`welcome`, and request `session.attach` with a Session ID from
-`session.list`. A null `owner_lf_process_id` selects its current terminal owner:
+[`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
+with a Session ID from `session.list`. A Session without a running terminal
+owner returns `not_found {session}`; attachment never starts or resumes a
+provider. A null `owner_lf_process_id` selects the current terminal owner:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
@@ -594,9 +596,7 @@ endpoint and send `attach` first, without `hello`:
 
 After `bridged`, use the [binary owner protocol](../transport/README.md).
 Keep `/v1/machine` for requests and live Work updates; each terminal has its
-own bridge.
-
-For reconnection and exact-owner attachment, follow
+own bridge. For reconnection and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 
 Both connections must authenticate as the same Tailscale node stable ID and

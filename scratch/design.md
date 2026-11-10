@@ -23,11 +23,16 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 18:58 UTC, GitHub reports PR #1812 open and unmerged at the same
+At November 10 19:35 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The `lf task status LOO-718 --json` recheck still places the
+The November 10 19:35 UTC `lf task status LOO-718 --json` read still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
+
+The checkout still uses the UID-bound `service.rs::Tickets`: redemption removes
+the ticket before checking identity, but expiry uses `Instant`. Remote identity
+binding and host-sleep expiry remain unimplemented; the docs label the remote
+contract as planned.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;
@@ -67,6 +72,11 @@ use, exact-owner recovery and attachment without provider launch.
 
 Keep the exact-owner parameter, mismatch and recovery rules together in the
 shared recovery section so local and remote callers use one contract.
+Keep the missing-owner error beside the remote example's owner prerequisite,
+so attachment requirements and their failure appear together.
+The shipping docs are `docs/server.md` and `rust/loopflow/src/server/README.md`;
+the remote example links the handshake and states the running-owner prerequisite
+and missing-owner result. Reuse these docs during implementation.
 Desktop visual inspection remains for display-capable QA; opening results are
 in `questions.md`.
 

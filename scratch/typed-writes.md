@@ -59,3 +59,10 @@ advance; this review changed no implementation direction.
   `scratch/qa.html` has transcripts and limits. No scoped defect found; remote
   SSH and live Desktop windows were not exercised. Private servers were reaped
   and launched Graphs completed. Gate still owns the automated affected suites.
+
+- Publish gate (2026-11-09): `lf sync` passed with no new upstream commits.
+  `uv run python scripts/test.py --reuse-passing --rust-filter 'test(server::schema::) | test(server::service::) | test(lf::commands::write::) | test(lf::commands::desktop::) | test(lf::commands::session::) | test(lf::tests::) | test(engine::) | binary(lf) | binary(served_reads)'`
+  passed: 136 Rust tests, architecture, formatting, CLI build, clippy with
+  warnings denied, and website checks; 281 seconds. Inherited `LF_*` were
+  unset, stdin closed, and the candidate CLI was first on PATH. Logs are in
+  `.lf/tmp/gate/run-75271/`. `git diff --check` passed. CI owns the full matrix.

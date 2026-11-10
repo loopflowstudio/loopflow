@@ -23,16 +23,17 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 10:11 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with `mergeable: false`. Freshly fetched main is
+At November 10 10:49 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeStateStatus: DIRTY` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-`lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
+The fresh `lf task status LOO-718 --json` still places the transport Task at `feature/demo`,
 with PR #1812 open and settlement not armed.
 
-Implementation and remote acceptance depend on LOO-718's authenticated transport
-landing, followed by a recheck of its shared store. Landing that separate PR is
-outside this Task's scope. No product decision is missing. Publication, merge
-and Task completion remain outstanding.
+The next Graph decision is blocked on LOO-718 landing: this checkout lacks its
+shared ticket store and authenticated endpoints. Recheck that store after landing,
+then implement and run remote acceptance before publication, merge and completion.
+Landing the separate transport PR is outside this Task's scope; no product
+decision is missing.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
@@ -57,7 +58,7 @@ deadline includes host sleep; leave unrelated throttles on `Instant`. Retain the
 transport's watch resumption.
 
 After integration, update the docs' planned/local-only wording to match the
-implemented endpoint. Read both shipping docs from this checkout:
+implemented endpoint in both shipping docs:
 `docs/server.md` (Phone access) and `rust/loopflow/src/server/README.md`
 (Remote attach contract).
 
@@ -70,11 +71,8 @@ or local/remote mismatch fails and consumes the terminal ticket. Check expiry at
 and unchanged bulk-transfer redemption behavior. Local UID tests alone cannot
 satisfy these checks.
 
-Desktop review and opening results are in `questions.md`.
+Desktop visual inspection remains for QA; opening results are in `questions.md`.
 
-Keep the remote exchange self-contained; link to the existing owner protocol
-instead of repeating it. The UID-only store stays untouched until its replacement
-lands, so this compression changes prose only.
-
-`git diff --check` — clean; `lf context` — within both scratch limits. Prose only;
-no build or tests needed.
+Compression consolidates the dependency decision; code cuts await the surviving
+store. `git diff --check` — clean; `lf context` — within both scratch limits.
+Prose-only edits; no build or tests needed.

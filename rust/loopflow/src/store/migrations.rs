@@ -1466,6 +1466,32 @@ mod tests {
     }
 
     #[test]
+    fn task_update_revision_upgrade_preserves_existing_counters() {
+        let conn = open();
+        apply_before_migration(&conn, "task_update_revision");
+        conn.execute("UPDATE store_revisions SET revision=41", [])
+            .unwrap();
+        let counters = || {
+            conn.prepare("SELECT domain,revision FROM store_revisions WHERE domain!='task_updates' ORDER BY domain")
+                .unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        let before = counters();
+        apply_pending_migrations(&conn);
+        assert_eq!(counters(), before);
+        assert_eq!(
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='task_updates'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn task_session_promotion_releases_shared_scope_but_preserves_permanent_binds() {
         let conn = open();
         apply_before_migration(&conn, "task_session_promotion");

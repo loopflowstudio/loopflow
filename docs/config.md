@@ -1044,6 +1044,11 @@ another private preference file. The first LF write adds `/lf.config.local.yaml`
 to the repository's private Git exclude file if needed. It preserves existing
 ignore rules and does not edit the committed `.gitignore`. An already tracked
 file needs to be removed from tracking before Git can ignore it.
+LF checks tracking before writing private settings. Reads load the current file
+without running Git protection diagnostics on each polling tick, and see edits
+on the next read. A tracked private file remains readable, but LF refuses to
+write it until it is removed from the index. Worktree path resolution can still
+use Git; this does not make every settings operation Git-free.
 
 ### What happens when a Wave is renamed?
 

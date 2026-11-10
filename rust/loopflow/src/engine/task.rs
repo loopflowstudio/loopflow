@@ -9,7 +9,7 @@
 //! spelling there over SSH; nothing falls back to local execution.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -268,13 +268,10 @@ pub fn waited(issue: &str, until: TaskWaitUntil) -> Result<Waited> {
 /// `lf task wait`: read until the Task reaches `until` or `timeout` passes,
 /// and return the last reading.
 pub fn wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> Result<Waited> {
-    let started = Instant::now();
-    loop {
-        let reading = waited(issue, until)?;
-        if reading.reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
-            return Ok(reading);
-        }
-        std::thread::sleep(Duration::from_secs(1));
+    match crate::ops::task::task_wait(issue, until, timeout) {
+        Ok(Some((task, reached))) => Ok(Waited { reached, task }),
+        Ok(None) => Err(missing(issue)),
+        Err(error) => Err(Error::refused(&error.into(), ErrorCode::Unavailable)),
     }
 }
 

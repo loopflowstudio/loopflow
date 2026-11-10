@@ -79,7 +79,9 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
     Ok(store.sqlite.creation_receipt(id)?)
 }
 
-pub fn create(id: &str, input: TaskCreation) -> Result<TaskCreateReceipt> {
+pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
+    // CLI and served callers may spell the same checkout through different paths.
+    input.directory = crate::repo::require_repo_root(&input.directory, "task create")?;
     let identity = identity("task.create", id, &input, input.run)?;
     let _lock = lock(id)?;
     let store = Arc::new(

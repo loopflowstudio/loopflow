@@ -23,10 +23,10 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 17:45 UTC, GitHub reports PR #1812 open and unmerged at the same
-head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
+At November 10 18:21 UTC, GitHub reports PR #1812 open and unmerged at the same
+head, with `mergeable: false`. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
-The implementation `lf task status LOO-718 --json` recheck still places the
+The realign `lf task status LOO-718 --json` recheck still places the
 transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
@@ -65,8 +65,9 @@ planned/local-only wording and replace the general attach section's UID-only
 description with the local/remote admission binding. Keep same-device ticket
 use, exact-owner recovery and attachment without provider launch.
 
-Keep recovery rules in the shared recovery section to avoid maintaining them
-separately for local and remote clients. Desktop visual inspection remains for
+Keep exact-owner mismatch and recovery rules in the shared recovery section;
+the attach API and remote contract link there instead of repeating them.
+Desktop visual inspection remains for
 display-capable QA; opening results are in `questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

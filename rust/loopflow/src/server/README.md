@@ -372,12 +372,9 @@ part of what a phone or bot client is offered.
   Session's current owner when it issues the ticket; resolution never starts a
   provider. A Session with no running owner is `not_found {session}`; an owner
   whose endpoint is gone is `not_found {owner_lf_process_id}`: it ended, at
-  issue or when the ticket is presented. When the owner ends, the bridge closes,
-  and attaching again by the same Session reaches its next owner, as after `lf
-  install`. A client that reconnects only to the owner it had passes it as
-  `owner_lf_process_id`; a Session now owned by another LfProcess is then
-  `not_found {owner_lf_process_id, current_lf_process_id}`. Desktop's relays do
-  this; `lf session resume` and `server::client::attach` perform both steps.
+  issue or when the ticket is presented. When the owner ends, the bridge closes.
+  Pass `owner_lf_process_id` to attach only to that owner, as Desktop's relays do.
+  `lf session resume` and `server::client::attach` perform both ticket steps.
   Each terminal has its own connection, so readings never wait behind terminal
   bytes and a control failure never closes a bridged terminal. Follow
   [terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.

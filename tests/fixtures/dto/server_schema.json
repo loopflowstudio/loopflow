@@ -15743,7 +15743,8 @@
               {
                 "$ref": "#/$defs/TaskOwnership"
               }
-            ]
+            ],
+            "description": "Moving a Task changes its Wave membership or its Machine ownership."
           }
         },
         {

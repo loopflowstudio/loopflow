@@ -61,10 +61,20 @@ attribution and recoverable outcomes. Session owners own providers, PTYs,
 terminal output and input/geometry claims. Graph processes own Graph execution.
 CLI operations can run without the server. Desktop owns rendering and UI actions.
 
+Subscriptions carry complete readings of current state and typed events for
+occurrences such as a Task shipping, a steer arriving or a Graph step finishing.
+Clients can use an event payload to animate a change or append a thread entry
+without re-reading. Events have connection-local sequence numbers and no replay
+cursor; a gap or reconnect requires a fresh reading before incremental updates
+continue. The [event contract](../../rust/loopflow/src/server/README.md#events-alongside-readings)
+defines sequencing and recovery alongside reading checkpoint resumption.
+
 Every shared native Work read, write and subscription uses this server. Desktop
 links no Loopflow Rust library or C bridge. Served writes and CLI handlers call
 the same shared Rust functions, which return typed values: `Write::run`
-(`lf/commands/write.rs`) returns the value as the response, and the CLI
+(`lf/commands/write.rs`) keeps each write's declared result type through
+dispatch, and that type supplies its `x-result` schema. The server serializes
+the value into `response.result`, and the CLI
 (`lf/commands/mutation.rs`) prints it with `--json` or renders it as text. The
 server runs a write in a request-scoped worker with the request's directory,
 without starting a CLI child, parsing standard output or changing
@@ -109,6 +119,12 @@ The [operation reference](../../rust/loopflow/src/server/README.md#local-protoco
 lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
+
+For a board, Task detail or Session card, use the
+[screen reads](../../rust/loopflow/src/server/README.md#read-a-screens-data).
+Each returns its own complete DTO in both the CLI and API. Swift clients send
+`select: null`; field selection is for clients that consume arbitrary JSON.
+Desktop's outline keeps `plan.list` for its runtime data.
 
 ## Installation owns registration
 

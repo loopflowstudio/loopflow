@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::observe::{Cache, Dependencies};
+use crate::server::wire::SubscriptionEvent;
 use crate::store::changes::StoreChanges;
 use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
@@ -150,7 +151,7 @@ where
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
-        if let Some(frame) = step.frame {
+        if let Some(frame) = step.update.frame {
             if stdout
                 .write_all(&frame)
                 .and_then(|()| stdout.flush())
@@ -178,6 +179,8 @@ pub enum Transport {
     Pull {
         wake: Box<dyn Fn() + Send + Sync>,
         select: Option<Vec<String>>,
+        /// Collect Task occurrences before selection, alongside the same snapshot.
+        events: bool,
     },
 }
 
@@ -205,18 +208,29 @@ where
 {
     match transport {
         Transport::Stdio => run(args, read).map(|()| None),
-        Transport::Pull { wake, select } => start_pull(args, read, wake, select).map(Some),
+        Transport::Pull {
+            wake,
+            select,
+            events,
+        } => start_pull(args, read, wake, select, events).map(Some),
     }
 }
 
 /// A subscription served inside this process. It takes checkpoints, never argument
-/// changes: a client with new arguments subscriptions again. [`Subscription::pull`] reads on
-/// the caller's thread and returns the frame that command would print next.
+/// changes: a client with new arguments subscribes again. [`Subscription::pull`] reads on
+/// the caller's thread and returns the reading with its occurrences.
 /// Dropping it ends the subscription.
 pub struct Subscription {
     inbox: Arc<dyn Inbox>,
-    pull: Mutex<Box<dyn FnMut() -> Option<Vec<u8>> + Send>>,
+    pull: Mutex<Box<dyn FnMut() -> SubscriptionUpdate + Send>>,
     ended: Arc<AtomicBool>,
+}
+
+/// A reading and its occurrences leave the pinned snapshot together.
+#[derive(Debug, Default)]
+pub struct SubscriptionUpdate {
+    pub frame: Option<Vec<u8>>,
+    pub events: Vec<SubscriptionEvent>,
 }
 
 impl std::fmt::Debug for Subscription {
@@ -232,10 +246,10 @@ impl Subscription {
         self.inbox.checkpoint(checkpoint);
     }
 
-    /// The newest changed frame, or `None` when nothing changed since the last
-    /// pull. Any read snapshot is released before this returns. A subscription that
+    /// The newest changed frame and observed occurrences; either can be empty.
+    /// Any read snapshot is released before this returns. A subscription that
     /// fails or panics returns its error as a last frame.
-    pub fn pull(&self) -> Option<Vec<u8>> {
+    pub fn pull(&self) -> SubscriptionUpdate {
         let mut pull = self
             .pull
             .lock()
@@ -291,6 +305,7 @@ fn start_pull<A, T, F, Fut>(
     read: F,
     wake: Box<dyn Fn() + Send + Sync>,
     select: Option<Vec<String>>,
+    events: bool,
 ) -> Result<Subscription>
 where
     A: DeserializeOwned + Clone + Send + 'static,
@@ -301,6 +316,7 @@ where
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
     let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
+    reader.observer = events.then(crate::server::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
     std::thread::spawn(move || {
@@ -334,27 +350,30 @@ where
     });
     let ended = Arc::new(AtomicBool::new(false));
     let failed = ended.clone();
-    let pull = move || -> Option<Vec<u8>> {
+    let pull = move || -> SubscriptionUpdate {
         if failed.load(Ordering::Acquire) {
-            return None;
+            return SubscriptionUpdate::default();
         }
         let stepped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.step()));
         let error = match stepped {
             Ok(Ok(step)) => {
                 lock(&shared).pull_at = Some(step.wake);
                 shared.1.notify_all();
-                return step.frame;
+                return step.update;
             }
             Ok(Err(error)) => format!("{error:#}"),
             Err(panic) => format!("subscription panicked: {}", panic_message(&panic)),
         };
         failed.store(true, Ordering::Release);
-        encode(&SubscriptionFrame::<()> {
-            answers: None,
-            unavailable: Some(error),
-            body: None,
-        })
-        .ok()
+        SubscriptionUpdate {
+            frame: encode(&SubscriptionFrame::<()> {
+                answers: None,
+                unavailable: Some(error),
+                body: None,
+            })
+            .ok(),
+            events: Vec::new(),
+        }
     };
     Ok(Subscription {
         inbox,
@@ -399,8 +418,7 @@ fn wait<A>(shared: &Shared<A>, wake: Instant) {
 
 /// What one step of a subscription did.
 struct Step {
-    /// The frame to send, when the result changed or a request was answered.
-    frame: Option<Vec<u8>>,
+    update: SubscriptionUpdate,
     /// The subscription has answered what it was asked and ends.
     closing: bool,
     /// When to step again unless the mailbox has a reason sooner.
@@ -437,6 +455,7 @@ struct Reader<A, F> {
     sent: Option<[u8; 32]>,
     /// The dotted paths each body keeps; none keeps it whole.
     select: Option<Vec<String>>,
+    observer: Option<crate::server::events::Observer>,
 }
 
 impl<A, T, F, Fut> Reader<A, F>
@@ -464,6 +483,7 @@ where
             read,
             args,
             select,
+            observer: None,
             runtime: reader_runtime()?,
             observations: Cache::shared(),
             dependencies: Dependencies::default(),
@@ -535,7 +555,7 @@ where
                             && (changed || observed_changes))
                 }
             };
-        let mut frame = None;
+        let mut update = SubscriptionUpdate::default();
         if due {
             #[cfg(test)]
             let _projection = Stage::new("projection");
@@ -563,12 +583,15 @@ where
                     .block_on((self.read)(self.store.clone(), self.args.clone())),
             });
             self.dependencies = dependencies;
-            let (unavailable, body) = match reading.and_then(|body| {
-                let body = serde_json::to_value(body)?;
-                Ok(match &self.select {
-                    Some(paths) => crate::engine::select::select(&body, paths),
-                    None => body,
-                })
+            let reading = reading.and_then(|body| Ok(serde_json::to_value(body)?));
+            if let (Some(observer), Some(store), Ok(body)) =
+                (&mut self.observer, &self.store, &reading)
+            {
+                update.events = observer.read(&store.sqlite, body)?;
+            }
+            let (unavailable, body) = match reading.map(|body| match &self.select {
+                Some(paths) => crate::engine::select::select(&body, paths),
+                None => body,
             }) {
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
@@ -577,7 +600,7 @@ where
             self.cost = began.elapsed();
             let identity = identity(unavailable.as_deref(), body.as_ref())?;
             if self.force || self.sent != Some(identity) {
-                frame = Some(encode(&SubscriptionFrame {
+                update.frame = Some(encode(&SubscriptionFrame {
                     answers: self.answers,
                     unavailable,
                     body: body.as_ref(),
@@ -601,7 +624,7 @@ where
             now + CHECK
         };
         Ok(Step {
-            frame,
+            update,
             closing,
             wake,
         })
@@ -791,7 +814,7 @@ mod tests {
             wakes
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if let Some(frame) = subscription.pull() {
+            if let Some(frame) = subscription.pull().frame {
                 return serde_json::from_slice(&frame).unwrap();
             }
         }
@@ -822,6 +845,7 @@ mod tests {
                     let _ = sender.send(());
                 }),
                 None,
+                false,
             )
             .unwrap();
             (subscription, wakes)
@@ -895,6 +919,7 @@ mod tests {
                 let _ = sender.send(());
             }),
             None,
+            false,
         )
         .unwrap();
         let agent = |expected: &str| {
@@ -955,7 +980,7 @@ mod tests {
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {
             wakes.recv_timeout(Duration::from_secs(2)).unwrap();
-            assert!(subscription.pull().is_none());
+            assert!(subscription.pull().frame.is_none());
         }
         assert_eq!(reads.load(Ordering::Relaxed), before);
         assert!(!home.path().join("loopflow.db").exists());
@@ -1002,6 +1027,7 @@ mod tests {
                 let _ = sender.send(());
             }),
             None,
+            false,
         )
         .unwrap();
         let agent = |expected: serde_json::Value| {

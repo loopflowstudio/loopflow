@@ -6,12 +6,12 @@ use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::Result;
 use serde_json::Value;
-use tokio::sync::{watch, Notify};
+use tokio::sync::{broadcast, watch, Notify};
 use tokio::task::AbortHandle;
 
 use super::outbox::{Materializing, Outbox, Retained};
 use super::service::{deliver, lock, reading_checkpoint, unavailable};
-use super::wire::ServerMessage;
+use super::wire::{ServerMessage, SubscriptionEvent, MAX_MESSAGE};
 use crate::engine::Error;
 use crate::lf::commands::{read::Read, subscribe::Subscription};
 
@@ -36,6 +36,7 @@ struct Demand {
     requested: Arc<Mutex<Requested>>,
     wake: Arc<Notify>,
     latest: watch::Receiver<Latest>,
+    events: broadcast::Sender<Arc<Events>>,
     cancelled: Arc<AtomicBool>,
     task: AbortHandle,
     consumers: AtomicUsize,
@@ -45,7 +46,14 @@ struct Demand {
 struct Latest {
     ready: bool,
     reading: Option<Arc<Reading>>,
+    events: u64,
     ended: Option<Result<(), Arc<Error>>>,
+}
+
+#[derive(Debug)]
+struct Events {
+    items: Vec<SubscriptionEvent>,
+    _retained: Arc<Retained>,
 }
 
 #[derive(Debug)]
@@ -53,7 +61,7 @@ struct Reading {
     generation: u64,
     frame: Value,
     identity: [u8; 32],
-    _retained: Retained,
+    _retained: Arc<Retained>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +83,8 @@ pub(super) struct Member {
 pub(super) struct Delivery {
     latest: watch::Receiver<Latest>,
     pending: Arc<Mutex<Pending>>,
+    events: broadcast::Receiver<Arc<Events>>,
+    delivered_events: u64,
 }
 
 impl Subscriptions {
@@ -99,6 +109,7 @@ impl Subscriptions {
                 let wake = Arc::new(Notify::new());
                 let cancelled = Arc::new(AtomicBool::new(false));
                 let (latest, receiver) = watch::channel(Latest::default());
+                let (events, _) = broadcast::channel(16);
                 let task = tokio::spawn(
                     Producer {
                         registry: Arc::downgrade(self),
@@ -108,6 +119,7 @@ impl Subscriptions {
                         wake: wake.clone(),
                         cancelled: cancelled.clone(),
                         latest,
+                        events: events.clone(),
                     }
                     .run(query, select),
                 );
@@ -115,6 +127,7 @@ impl Subscriptions {
                     requested,
                     wake,
                     latest: receiver,
+                    events,
                     cancelled,
                     task: task.abort_handle(),
                     consumers: AtomicUsize::new(0),
@@ -130,9 +143,16 @@ impl Subscriptions {
         }));
         drop(requested);
         demand.wake.notify_one();
-        let delivery = Delivery {
-            latest: demand.latest.clone(),
-            pending: pending.clone(),
+        let delivery = {
+            // Publication holds this watch lock while enqueueing occurrences.
+            // A joining consumer starts at the current edge, without replay.
+            let latest = demand.latest.borrow();
+            Delivery {
+                latest: demand.latest.clone(),
+                pending: pending.clone(),
+                events: demand.events.subscribe(),
+                delivered_events: latest.events,
+            }
         };
         Ok((
             Member {
@@ -244,8 +264,11 @@ impl Delivery {
                 acknowledged = true;
             }
             let pending = *lock(&self.pending);
+            let fresh = latest
+                .reading
+                .as_ref()
+                .is_some_and(|reading| reading.generation >= pending.generation);
             if let Some(reading) = latest.reading {
-                let fresh = reading.generation >= pending.generation;
                 let unseen_failure = latest.ended.as_ref().is_some_and(Result::is_err)
                     && reading.frame["unavailable"].is_string()
                     && sent != Some(reading.identity);
@@ -278,6 +301,34 @@ impl Delivery {
                     answered = pending.generation;
                     sent = Some(reading.identity);
                 }
+            }
+            // Joins and checkpoints can withhold an admitted reading. Keep its
+            // occurrences queued until the consumer receives the fresh state.
+            if (!fresh || sent.is_none()) && latest.ended.is_none() {
+                self.latest.changed().await?;
+                continue;
+            }
+            while self.delivered_events < latest.events {
+                let events = self.events.try_recv().map_err(|_| {
+                    anyhow::anyhow!(
+                        "subscription fell behind its events; subscribe again for current state"
+                    )
+                })?;
+                let reservation = outgoing.wait().await?;
+                reservation.batch();
+                for event in &events.items {
+                    outgoing
+                        .deliver(
+                            ServerMessage::Event {
+                                id: id.into(),
+                                seq: 0,
+                                event: event.clone(),
+                            },
+                            reservation.clone(),
+                        )
+                        .await?;
+                }
+                self.delivered_events += 1;
             }
             if let Some(ended) = latest.ended {
                 return match ended {
@@ -341,6 +392,7 @@ struct Producer {
     wake: Arc<Notify>,
     cancelled: Arc<AtomicBool>,
     latest: watch::Sender<Latest>,
+    events: broadcast::Sender<Arc<Events>>,
 }
 
 impl Producer {
@@ -429,22 +481,22 @@ impl Producer {
             let headroom = Materializing::reserve().await?;
             let job = tokio::task::spawn_blocking(move || {
                 if cancel.load(Ordering::Acquire) {
-                    return (None, headroom);
+                    return (Default::default(), headroom);
                 }
                 #[cfg(test)]
                 if let Some(pause) = &mut pause {
                     pause.wait();
                 }
-                let frame = crate::journal::request::isolate(|| {
+                let update = crate::journal::request::isolate(|| {
                     if force {
                         pull.checkpoint(generation);
                     }
                     pull.pull()
                 });
-                (frame, headroom)
+                (update, headroom)
             });
             let queued = Queued(job.abort_handle());
-            let (frame, headroom) = job.await?;
+            let (update, headroom) = job.await?;
             drop(queued);
             applied = generation;
             if cancelled.load(Ordering::Acquire) {
@@ -452,8 +504,17 @@ impl Producer {
             }
             let mut reason = None;
             let mut last = false;
-            if let Some(frame) = frame {
-                let retained = headroom.retain(frame.len())?;
+            let mut bytes = update.frame.as_ref().map_or(0, Vec::len);
+            for event in &update.events {
+                bytes += serde_json::to_vec(event)?.len() + 1024;
+                anyhow::ensure!(
+                    bytes <= MAX_MESSAGE,
+                    "subscription event batch exceeds retained bytes; subscribe again for current state"
+                );
+            }
+            let retained = Arc::new(headroom.retain(bytes)?);
+            let mut reading = None;
+            if let Some(frame) = update.frame {
                 let mut frame: Value = serde_json::from_slice(&frame)?;
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
@@ -461,13 +522,25 @@ impl Producer {
                 let identity =
                     crate::lf::commands::subscribe::identity(reason.as_deref(), frame.get("body"))?;
                 frame["answers"] = Value::Null;
+                reading = Some(Arc::new(Reading {
+                    generation,
+                    frame,
+                    identity,
+                    _retained: retained.clone(),
+                }));
+            }
+            if reading.is_some() || !update.events.is_empty() {
                 latest.send_modify(|latest| {
-                    latest.reading = Some(Arc::new(Reading {
-                        generation,
-                        frame,
-                        identity,
-                        _retained: retained,
-                    }))
+                    if let Some(reading) = reading {
+                        latest.reading = Some(reading);
+                    }
+                    if !update.events.is_empty() {
+                        let _ = self.events.send(Arc::new(Events {
+                            items: update.events,
+                            _retained: retained,
+                        }));
+                        latest.events += 1;
+                    }
                 });
             }
             if subscription.ended() {
@@ -502,7 +575,7 @@ mod tests {
 
     async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
         let frame = messages.recv().await.unwrap();
-        let message = serde_json::from_str(&frame.line).unwrap();
+        let message = serde_json::from_str(&frame.payload.into_line(&mut 0).unwrap()).unwrap();
         drop(frame.reservation);
         let _ = frame.delivered.send(());
         message
@@ -592,6 +665,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn events_survive_coalescing_or_end_a_lagging_consumer() {
+        use super::{Events, Latest, Pending, Retained};
+        use crate::server::wire::SubscriptionEvent;
+        use crate::work::task::{TaskId, TaskPrId};
+        use std::sync::Mutex;
+
+        for count in [2, 17] {
+            let (latest, receiver) = tokio::sync::watch::channel(Latest::default());
+            let (events, pending_events) = tokio::sync::broadcast::channel(16);
+            let delivery = Delivery {
+                latest: receiver,
+                pending: Arc::new(Mutex::new(Pending {
+                    generation: 1,
+                    checkpoint: None,
+                })),
+                events: pending_events,
+                delivered_events: 0,
+            };
+            // Several publications happen before this consumer can deliver.
+            for number in 1..=count {
+                latest.send_modify(|latest| {
+                    events
+                        .send(Arc::new(Events {
+                            items: vec![SubscriptionEvent::TaskShipped {
+                                task_id: TaskId::parse("task_11111111111111111111111111111111")
+                                    .unwrap(),
+                                pr_id: TaskPrId::new(),
+                                number,
+                                url: format!("https://example.com/pull/{number}"),
+                                merge_commit: number.to_string(),
+                            }],
+                            _retained: Arc::new(Retained::empty()),
+                        }))
+                        .unwrap();
+                    latest.ready = true;
+                    latest.events += 1;
+                });
+            }
+            latest.send_modify(|latest| latest.ended = Some(Ok(())));
+            let (outgoing, mut messages) = Outbox::new();
+            let task = tokio::spawn(delivery.run("events".into(), outgoing, Vec::new(), None));
+            assert!(matches!(
+                receive(&mut messages).await,
+                ServerMessage::Response { .. }
+            ));
+            if count == 2 {
+                for expected in 1..=count {
+                    assert!(matches!(
+                        receive(&mut messages).await,
+                        ServerMessage::Event {
+                            event: SubscriptionEvent::TaskShipped { number, .. }, ..
+                        } if number == expected
+                    ));
+                }
+                assert!(matches!(
+                    receive(&mut messages).await,
+                    ServerMessage::Ended { .. }
+                ));
+            } else {
+                assert!(matches!(
+                    receive(&mut messages).await,
+                    ServerMessage::Error { .. }
+                ));
+            }
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pending_checkpoint_keeps_events_after_their_reading() {
+        use super::{Events, Latest, Pending, Reading, Retained};
+        use std::sync::Mutex;
+
+        let reading = |generation| {
+            let frame = serde_json::json!({
+                "answers": null, "unavailable": null, "body": generation
+            });
+            Arc::new(Reading {
+                generation,
+                identity: crate::lf::commands::subscribe::identity(None, frame.get("body"))
+                    .unwrap(),
+                frame,
+                _retained: Arc::new(Retained::empty()),
+            })
+        };
+        let (latest, receiver) = tokio::sync::watch::channel(Latest {
+            ready: true,
+            reading: Some(reading(1)),
+            events: 0,
+            ended: None,
+        });
+        let (events, pending_events) = tokio::sync::broadcast::channel(16);
+        let pending = Arc::new(Mutex::new(Pending {
+            generation: 1,
+            checkpoint: None,
+        }));
+        let delivery = Delivery {
+            latest: receiver,
+            pending: pending.clone(),
+            events: pending_events,
+            delivered_events: 0,
+        };
+        let (outgoing, mut messages) = Outbox::new();
+        let run = delivery.run("ordered".into(), outgoing, Vec::new(), None);
+        tokio::pin!(run);
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Response { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Reading { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+
+        // A checkpoint arrives while the preceding read is still in flight.
+        *pending.lock().unwrap() = Pending {
+            generation: 3,
+            checkpoint: Some(9),
+        };
+        events
+            .send(Arc::new(Events {
+                items: vec![crate::server::wire::SubscriptionEvent::Unknown],
+                _retained: Arc::new(Retained::empty()),
+            }))
+            .unwrap();
+        latest.send_modify(|latest| {
+            latest.reading = Some(reading(2));
+            latest.events = 1;
+        });
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(
+            messages.try_recv().is_err(),
+            "events must wait for the withheld reading"
+        );
+
+        latest.send_modify(|latest| {
+            latest.reading = Some(reading(3));
+            latest.ended = Some(Ok(()));
+        });
+        assert!(futures_util::poll!(&mut run).is_pending());
+        let ServerMessage::Reading { frame, .. } = receive(&mut messages).await else {
+            panic!("event overtook its reading");
+        };
+        assert_eq!(frame["answers"], 9);
+        assert_eq!(frame["body"], 3);
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Event { .. }
+        ));
+        assert!(futures_util::poll!(&mut run).is_pending());
+        assert!(matches!(
+            receive(&mut messages).await,
+            ServerMessage::Ended { .. }
+        ));
+        run.await;
+    }
+
+    #[tokio::test]
     async fn timestamp_only_refresh_does_not_send_unsolicited_sibling_readings() {
         use super::{Latest, Pending, Reading};
         use std::sync::Mutex;
@@ -599,6 +834,8 @@ mod tests {
         let (outgoing, mut messages) = Outbox::new();
         let delivery = Delivery {
             latest: receiver,
+            events: tokio::sync::broadcast::channel(16).1,
+            delivered_events: 0,
             pending: Arc::new(Mutex::new(Pending {
                 generation: 1,
                 checkpoint: None,
@@ -616,11 +853,12 @@ mod tests {
                 generation,
                 frame,
                 identity,
-                _retained: super::Retained::empty(),
+                _retained: Arc::new(super::Retained::empty()),
             })
         };
         latest.send_replace(Latest {
             ready: true,
+            events: 0,
             reading: Some(reading(1, 10)),
             ended: None,
         });
@@ -634,6 +872,7 @@ mod tests {
         ));
         latest.send_replace(Latest {
             ready: true,
+            events: 0,
             reading: Some(reading(2, 20)),
             ended: Some(Ok(())),
         });
@@ -655,11 +894,12 @@ mod tests {
             crate::lf::commands::subscribe::identity(Some("snapshot failed"), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
+            events: 0,
             reading: Some(Arc::new(Reading {
                 generation: 1,
                 frame,
                 identity,
-                _retained: super::Retained::empty(),
+                _retained: Arc::new(super::Retained::empty()),
             })),
             ended: Some(Err(Arc::new(crate::engine::Error::new(
                 crate::engine::ErrorCode::Unavailable,
@@ -669,6 +909,8 @@ mod tests {
         let (outgoing, mut messages) = Outbox::new();
         let delivery = Delivery {
             latest: receiver,
+            events: tokio::sync::broadcast::channel(16).1,
+            delivered_events: 0,
             pending: Arc::new(Mutex::new(Pending {
                 generation: 2,
                 checkpoint: Some(9),
@@ -701,13 +943,14 @@ mod tests {
         let identity = crate::lf::commands::subscribe::identity(reason.as_deref(), None).unwrap();
         let (latest, receiver) = tokio::sync::watch::channel(Latest {
             ready: true,
+            events: 0,
             reading: Some(Arc::new(Reading {
                 generation: 1,
                 frame: serde_json::json!({
                     "answers": null, "unavailable": reason, "body": null
                 }),
                 identity,
-                _retained: super::Retained::empty(),
+                _retained: Arc::new(super::Retained::empty()),
             })),
             ended: None,
         });
@@ -719,6 +962,8 @@ mod tests {
         let task = tokio::spawn(
             Delivery {
                 latest: receiver,
+                events: tokio::sync::broadcast::channel(16).1,
+                delivered_events: 0,
                 pending: pending.clone(),
             }
             .run("failed".into(), outgoing, Vec::new(), None),
@@ -855,7 +1100,7 @@ mod tests {
                     let stopped = runtime.handle().clone();
                     drop(runtime);
                     let subscription = sessions().subscribe(None, || {}).unwrap();
-                    assert!(subscription.pull().is_some());
+                    assert!(subscription.pull().frame.is_some());
                     (super::Held(Some(subscription)), stopped)
                 })
                 .await

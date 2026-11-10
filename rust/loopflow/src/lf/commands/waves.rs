@@ -697,32 +697,27 @@ pub fn show(
     observe: bool,
 ) -> Result<()> {
     let directory = std::env::current_dir()?;
+    let roadmap = show_snapshot(&directory, wave, task, all, observe)?;
     if json {
-        let shown = show_json(&directory, wave, task, all, observe)?;
+        let shown = serde_json::to_value(roadmap)?;
         println!("{}", super::subscribe::selected_answer(&shown)?);
-        return Ok(());
-    }
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, observe).await?;
+    } else {
         print_roadmap(&roadmap);
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
-/// What `lf wave show --json` prints in `directory`.
-pub(crate) fn show_json(
+/// What `lf wave show` prints in `directory`.
+pub(crate) fn show_snapshot(
     directory: &Path,
     wave: Option<&str>,
     task: Option<&str>,
     all: bool,
     observe: bool,
-) -> Result<serde_json::Value> {
+) -> Result<RoadmapSnapshot> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, observe).await?;
-        Ok(serde_json::to_value(roadmap)?)
+        show_roadmap(store.as_ref(), directory, wave, task, all, observe).await
     })
 }
 

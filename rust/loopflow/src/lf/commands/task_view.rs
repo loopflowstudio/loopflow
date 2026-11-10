@@ -25,6 +25,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
         repo,
         issue,
         subscribe::Transport::Pull {
+            events: false,
             wake: Box::new(|| {}),
             select: None,
         },
@@ -37,7 +38,7 @@ pub fn run(repo: &Path, issue: Option<&str>, once: bool) -> Result<()> {
     let mut selected_step = 0usize;
     let mut log = None;
     loop {
-        if let Some(bytes) = subscribing.pull() {
+        if let Some(bytes) = subscribing.pull().frame {
             let frame: Value = serde_json::from_slice(&bytes)?;
             unavailable = frame["unavailable"].as_str().map(str::to_owned);
             if !frame["body"].is_null() {

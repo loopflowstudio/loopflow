@@ -1058,6 +1058,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
             }
         },
         super::super::subscribe::Transport::Pull {
+            events: false,
             wake: Box::new(|| {}),
             select: None,
         },
@@ -1082,7 +1083,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
         {
             return Ok(());
         }
-        if let Some(bytes) = subscribing.pull() {
+        if let Some(bytes) = subscribing.pull().frame {
             let frame: Value = serde_json::from_slice(&bytes)?;
             if let Some(error) = frame["unavailable"].as_str() {
                 eprintln!("Work selection unavailable: {error}");

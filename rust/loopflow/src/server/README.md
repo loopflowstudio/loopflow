@@ -52,7 +52,15 @@ rather than the connection. The root accepts any message either side sends;
 `$defs` holds `ClientMessage`, `ServerMessage`, `Hello`, `Welcome`, `Read`,
 `Write`, `ServerOperation` and every type they reach, and `x-revision` and
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
-on the wire, and `x-result` beside it names what `response.result` carries. Where a recorded exchange exists, `examples` holds the request's operation and `x-result-example` what it answered, from the same fixtures the tests check. A
+on the wire, and `x-result` beside it names what `response.result` carries.
+For a write, that schema derives from the Rust type the operation returns.
+For example, `task.ship` returns `TaskShip`: its `state` is `shipping`,
+`already_shipping` or `at_end`, with the fields described by that variant.
+`lf --task <issue> ship --json` prints the same result. Use the operation's
+`x-result` to decode it; `response.result` adds no extra result-type tag.
+
+Where a recorded exchange exists, `examples` holds the request's operation and
+`x-result-example` what it answered, from the same fixtures the tests check. A
 subscription frame's `body` refers to `$defs/Untyped`, because its shape is the
 `x-result` of the read that opened it. The serialize contract keeps a nullable
 field required, as both sides send it.
@@ -187,6 +195,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | API kind | CLI | Engine |
 | --- | --- | --- |
 | `task.get` | `lf task show <issue>` | read |
+| `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
@@ -204,6 +213,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
+| `session.card` | `lf session card <id>` | read |
 | `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -218,6 +228,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `wave.sync` | `lf wave sync <wave>` | write |
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
+| `plan.board` | `lf plan board` | read |
 | `repo.plan` | `lf repo plan` | read |
 | `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
 | `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
@@ -290,7 +301,8 @@ part of what a phone or bot client is offered.
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
-  the existing complete `answers/unavailable/body` subscription frame. `checkpoint
+  the existing complete `answers/unavailable/body` subscription frame. Typed
+  [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint
   {id,checkpoint}` asks for a reading now; the next reading's `answers` carries
   that consumer's newest requested number, changed or not; numbers need not
   increase. Concurrent checkpoints coalesce. The answer comes from a read begun
@@ -308,8 +320,8 @@ part of what a phone or bot client is offered.
   same read without receiving an unchanged complete reading; see
   [Reconnect a watch](#reconnect-a-watch). `task.wait {issue,
   until}` (`submitted` or `terminal`) reads `{reached, task}` whenever the Task
-  changes; after the reading whose `reached` is true the server sends `ended
-  {id}` and nothing more for it. Requested once, it is that reading now, as
+  changes; after the reading whose `reached` is true and its events, the server
+  sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
 - The core loop is `engine::task`, which the CLI handlers call too.
   `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
@@ -378,6 +390,140 @@ part of what a phone or bot client is offered.
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
 
+## Events alongside readings
+
+Watch a Task to keep its current state visible and react when something happens.
+After the `hello`/`welcome` exchange above, subscribe with `resume: null`:
+
+```text
+→ {"type":"subscribe","id":"task","operation":{"kind":"task.get","directory":"/repo","issue":"LOO-1"},"select":null,"resume":null}
+← {"type":"response","id":"task","trace_id":"…","result":null}
+← {"type":"reading","id":"task","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
+```
+
+The reading supplies the current Task. An `event {id,seq,event}` on that
+subscription describes an occurrence with a typed payload: a Task shipped, a
+steer arrived, or a Graph step finished. A board can animate the ship; a Task
+thread can append the arriving entry from its payload without requesting the
+whole reading again. A reading remains a complete state replacement, and an
+event is neither a replacement reading nor a patch to one. Loading an already
+shipped Task does not mean it just shipped.
+
+`task.get`, `task.wait`, `plan.list` and `desktop.view.list` deliver events for
+Tasks in their complete reading, even when `select` hides those fields. A Task
+leaving a plan still delivers its final observed occurrences; a newly included
+Task starts with a baseline. Other subscription kinds currently carry readings
+only.
+
+| `event.kind` | Payload |
+| --- | --- |
+| `task.shipped` | `task_id`, `pr_id`, `number`, `url`, `merge_commit`: a recorded PR merge |
+| `task.steer` | `task_id`, `steer {id,sequence,source,revision,author,text}`, `comment`: immutable direction and the original `TaskComment` when present (`null` for other direction) |
+| `graph.step_finished` | `task_id`, `graph_process_id`, `step`: the same `GraphStepProcess` as a Task reading, including its recorded outcome |
+
+`task.shipped` means a PR merge was recorded, not that Auto-Ship was enabled or
+the Task was completed. `graph.step_finished` includes failed and interrupted
+steps; inspect `step.outcome` before presenting a successful finish.
+
+```json
+{"type":"event","id":"task","seq":1,"event":{"kind":"task.steer","task_id":"task_11111111111111111111111111111111","steer":{"id":"11111111-1111-1111-1111-111111111111","sequence":7,"source":"comment-7","revision":"1","author":{"kind":"user"},"text":"Keep the examples."},"comment":null}}
+```
+
+A changed reading precedes the occurrences observed with it. Use the PR, steer
+or step identity to avoid appending content already present in that reading.
+For a comment steer, append `comment` by its own ID; its body is the original
+thread text, while `steer.text` includes the context sent to providers.
+Overlapping subscriptions can deliver the same occurrence with different
+`seq` values. Deduplicate by occurrence identity if they feed the same view;
+the delivery sequence is not an occurrence ID.
+Events are never coalesced. A subscription that exceeds the bounded pending
+batch ends with an error; reopen it for a fresh reading.
+
+`id` identifies the subscription. `seq` orders event frames across the whole
+connection, starting at 1 and increasing once per delivered event, including
+events for other subscriptions; track it before routing
+frames by `id`. Readings, confirmation checkpoints and opaque reading tokens
+have separate meanings. Never use an event sequence as a reading checkpoint or
+compare it across connections. A single subscription's sequence numbers need
+not be consecutive because other subscriptions share the connection.
+
+Keep the last complete reading as the recovery baseline. If event delivery has
+a gap, stop applying incremental event updates and request a fresh reading for
+every event-consuming subscription on that connection. After a disconnect,
+subscribe with `resume: null` to obtain a complete current reading before
+continuing event-driven updates.
+Replace state from that reading without replaying animations or appending its
+entries again. There is no event replay cursor: events missed while disconnected
+are recovered as current state, not delivered as historical notifications.
+
+Clients that only display readings can continue using reading checkpoint
+resumption below. A checkpoint can suppress an unchanged reading; it cannot
+establish that no events were missed. Event frames belong to the subscription's
+lifetime and stop when it ends or is cancelled. Unknown event kinds must not
+break unrelated subscriptions; recover the affected state with a fresh reading
+if the client cannot apply an event.
+
+Swift's `ServerClient.subscribeEvents` delivers readings and typed occurrences
+in one ordered stream and reconnects event consumers with `resume: null`. A gap
+ends all event-consuming streams on that connection; an unknown kind ends only
+its event-consuming subscription. Reopen the ended stream to get current state.
+Reading-only consumers ignore event frames and retain checkpoint resumption.
+
+## Read a screen's data
+
+```sh
+lf plan board --json             # compact Task rows for a board
+lf task detail LOO-1 --json       # the selected Task and its supporting detail
+lf session card session_123 --json # a recorded Session's current card
+```
+
+Run these in the repository's checkout, replacing the Task and Session IDs
+with ones from your Work. Each command prints the same JSON value its API
+operation returns in `response.result`.
+
+| Read | Contents |
+| --- | --- |
+| `plan.board` | `tasks` evidence with each Task's `id`, `identifier`, `title`, `section`, `state`, `pr.url` and nullable `waiting_on` actor/reason; `generated_at` |
+| `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
+| `session.card` | Session, liveness, control holder and last line |
+
+Use `section` to place a Task in Backlog, Working, Autonomous, Done or
+Abandoned; `state` describes its progress within that grouping. To populate a
+board row's detail, request `task.detail`; for its Session, request `session.card`.
+A card observes the Session: reading it does not resume a provider, attach a
+terminal or claim input control. Its `liveness` is `live`, `dead` or `unknown`;
+`control_holder` is the recorded occupied terminal ID, never an input token.
+`last_line` is the final nonempty line of the current provider preview, or null
+when there is none; the Session's preview retains its source and observation time.
+
+These are one-shot reads. `plan board` takes the same optional Wave, `--task`
+and `--all` filters as `plan list`. Unreadable planning remains unavailable
+rather than an empty board. `waiting_on` is null outside waiting or blocked
+conditions. `task.detail` includes the planning `task`, derived `state` and
+`section`, nullable `pr`, `checks`, `comments` and `current_session`, plus
+`graph_processes`. Checks are the recorded required-check observation, pinned
+by `head_sha` and `observed_at`, with aggregate state and named failing checks;
+null means checks have not been observed. `current_session` is the Task's
+recorded primary conversation, not whichever run started most recently.
+
+Each read has its own Rust DTO mirrored in Swift. Typed clients send
+`select: null` and decode the read's complete DTO, with no field defaults.
+Use the host's `lf server describe --json` for operation arguments and the
+`x-result` schema. Missing optional data, such as a Task with no PR or current
+Session, is represented by the DTO's optional fields; do not manufacture a PR,
+Session or live owner.
+
+`select` remains useful for scripts and agents that consume arbitrary JSON.
+A selected `plan.list` response cannot be decoded as the board DTO, and
+selecting fields out of any typed response can make it undecodable. Request
+the screen read when a typed client needs a smaller payload. Desktop's
+outline continues to use `plan.list` for its richer runtime data.
+
+Handle failures through the [protocol error codes](#local-protocol-revision-4).
+Check the named Task or Session when it cannot be found. If the host cannot
+answer, retain any previous display as stale and retry the read after recovery;
+an unavailable Session card does not establish that the Session ended.
+
 ## Reconnect a watch
 
 After reconnecting and completing `hello`/`welcome`, resume the `session.list`
@@ -410,8 +556,8 @@ Desktop holds one connection per server location for the app's lifetime, opened
 on first use and reopened on the next request after a loss with bounded backoff
 (100 ms doubling to 3.2 s). Its subscriptions share that connection. Losing it
 fails every pending request as outcome unknown. A watch with a received reading
-keeps its stream and queued frames, reconnects, and resumes from that reading's
-token. A complete reading replaces it when the token is unknown. The newest
+keeps its stream and queued frames and reconnects. Reading-only watches resume
+from that reading's token; event consumers request a fresh baseline. A complete reading replaces it when the token is unknown. The newest
 unanswered confirmation retries and covers earlier requests; writes never retry.
 Cancelling the watch cancels recovery. A watch without a baseline, a server refusal, or a slow
 consumer that overflows its frame queue ends the stream; the window then opens a
@@ -506,7 +652,10 @@ Last Work readings may remain visible as stale data. Resubscribe to every needed
 read with its retained reading and opaque checkpoint, as described in
 [Reconnect a watch](#reconnect-a-watch). An unchanged reading needs no replacement;
 a changed reading or invalid checkpoint yields a complete current reading.
-There is no missed-event replay or universal event log. Coalescing replaces only complete
+For subscriptions that consume typed events, follow
+[event recovery](#events-alongside-readings) and request a fresh baseline after a
+gap or reconnect. There is no missed-event replay or universal event log.
+Coalescing replaces only complete
 readings of the same subscription; checkpoint answers, errors and the final
 reading before `ended` retain their ordering.
 

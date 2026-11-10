@@ -1913,12 +1913,13 @@ pub async fn read_task_status(
         .map_err(task_error)?
         .flatten()
         .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    let mut result = registered_task_status(store, task).await?;
-    result.planning_stale = planning_stale(&result);
-    Ok(result)
+    registered_task_status(store, task).await
 }
 
-async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+pub(crate) async fn registered_task_status(
+    store: &SharedStore,
+    task: Task,
+) -> OpsResult<TaskStatus> {
     let acquisition = store
         .sqlite
         .task_acquisition(&task.id)

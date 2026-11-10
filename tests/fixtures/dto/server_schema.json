@@ -816,6 +816,17 @@
         }
       ]
     },
+    "BoardPr": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "BrowserDetails": {
       "additionalProperties": false,
       "properties": {
@@ -2772,7 +2783,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
+                "$ref": "#/$defs/PlanBoardTask"
               },
               "type": "array"
             },
@@ -2818,7 +2829,7 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/RoadmapTask"
+                "$ref": "#/$defs/ProjectSummary"
               },
               "type": "array"
             },
@@ -2857,6 +2868,52 @@
       ]
     },
     "Evidence3": {
+      "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
+      "oneOf": [
+        {
+          "description": "The source answered. `truncated` says a cap hid older items, so a full\npage never reads as \"that was all there was\".",
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/RoadmapTask"
+              },
+              "type": "array"
+            },
+            "state": {
+              "const": "ok",
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "state",
+            "items",
+            "truncated"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The source could not be read. Never rendered as emptiness.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Evidence4": {
       "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
       "oneOf": [
         {
@@ -5972,6 +6029,70 @@
       ],
       "type": "string"
     },
+    "PlanBoard": {
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "tasks": {
+          "$ref": "#/$defs/Evidence"
+        }
+      },
+      "required": [
+        "tasks",
+        "generated_at"
+      ],
+      "type": "object"
+    },
+    "PlanBoardTask": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoardPr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "section": {
+          "$ref": "#/$defs/TaskSection"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "waiting_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextMove"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "title",
+        "section",
+        "state",
+        "pr",
+        "waiting_on"
+      ],
+      "type": "object"
+    },
     "PlanStatus": {
       "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
       "properties": {
@@ -7372,6 +7493,91 @@
                 "$ref": "#/$defs/SessionPage"
               }
             ]
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf plan board`: compact Task rows for a board.",
+          "properties": {
+            "all": {
+              "type": "boolean"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "plan.board",
+              "type": "string"
+            },
+            "task": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "wave",
+            "task",
+            "all"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanBoard"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task detail <issue>`: one Task and its supporting detail.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.detail",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDetail"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf session card <id>`: a passive reading of one recorded Session.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.card",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionCard"
           }
         },
         {
@@ -9129,7 +9335,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence2",
+          "$ref": "#/$defs/Evidence3",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -9728,6 +9934,34 @@
         },
         {
           "additionalProperties": false,
+          "description": "Connection-local ordering; never a replay or reading checkpoint.",
+          "properties": {
+            "event": {
+              "$ref": "#/$defs/SubscriptionEvent"
+            },
+            "id": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "seq",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The subscription's last reading was its answer (`task.wait` reached\nits state); nothing follows for `id`.",
           "properties": {
             "id": {
@@ -9914,6 +10148,37 @@
         "task_id",
         "identifier",
         "title"
+      ],
+      "type": "object"
+    },
+    "SessionCard": {
+      "properties": {
+        "control_holder": {
+          "description": "The recorded occupied terminal, never an input-control credential.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_line": {
+          "description": "Last nonempty line of the current provider preview, not terminal scrollback.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "liveness": {
+          "$ref": "#/$defs/SessionLiveness"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRecord"
+        }
+      },
+      "required": [
+        "session",
+        "liveness",
+        "control_holder",
+        "last_line"
       ],
       "type": "object"
     },
@@ -10192,6 +10457,14 @@
         "surface"
       ],
       "type": "object"
+    },
+    "SessionLiveness": {
+      "enum": [
+        "live",
+        "dead",
+        "unknown"
+      ],
+      "type": "string"
     },
     "SessionOpenIntent": {
       "description": "Whether opening may take control, start a thread, or only reveal history.",
@@ -11226,6 +11499,104 @@
       ],
       "type": "object"
     },
+    "SubscriptionEvent": {
+      "description": "An occurrence within the Tasks included in a subscription reading.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "task.shipped",
+              "type": "string"
+            },
+            "merge_commit": {
+              "type": "string"
+            },
+            "number": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pr_id": {
+              "type": "string"
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "pr_id",
+            "number",
+            "url",
+            "merge_commit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "comment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TaskComment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The thread entry when this direction came from a retained comment."
+            },
+            "kind": {
+              "const": "task.steer",
+              "type": "string"
+            },
+            "steer": {
+              "$ref": "#/$defs/Steer"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "steer",
+            "comment"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "graph_process_id": {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            "kind": {
+              "const": "graph.step_finished",
+              "type": "string"
+            },
+            "step": {
+              "$ref": "#/$defs/GraphStepProcess"
+            },
+            "task_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "task_id",
+            "graph_process_id",
+            "step"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SubscriptionFrame": {
       "description": "One line of a subscription.",
       "properties": {
@@ -11693,6 +12064,33 @@
       ],
       "type": "object"
     },
+    "TaskChecks": {
+      "description": "Recorded required checks, pinned to the observed PR head. Null means unobserved.",
+      "properties": {
+        "failing_checks": {
+          "items": {
+            "$ref": "#/$defs/CiCheck"
+          },
+          "type": "array"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/CiState"
+        }
+      },
+      "required": [
+        "head_sha",
+        "state",
+        "failing_checks",
+        "observed_at"
+      ],
+      "type": "object"
+    },
     "TaskComment": {
       "properties": {
         "author": {
@@ -11921,6 +12319,76 @@
         "graph",
         "session_id",
         "milestone"
+      ],
+      "type": "object"
+    },
+    "TaskDetail": {
+      "properties": {
+        "checks": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskChecks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comments": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskComments"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "graph_processes": {
+          "items": {
+            "$ref": "#/$defs/GraphProcessDetail"
+          },
+          "type": "array"
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "section": {
+          "$ref": "#/$defs/TaskSection"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskSummary"
+        }
+      },
+      "required": [
+        "task",
+        "section",
+        "state",
+        "pr",
+        "checks",
+        "graph_processes",
+        "comments",
+        "current_session"
       ],
       "type": "object"
     },
@@ -14316,7 +14784,7 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence4",
           "description": "This Wave's Machine-local Session history, newest first."
         },
         "metric_portfolio": {
@@ -14327,14 +14795,14 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence2"
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence2"
+          "$ref": "#/$defs/Evidence3"
         },
         "unavailable_tasks": {
           "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
@@ -14565,7 +15033,7 @@
           "$ref": "#/$defs/ProjectReadiness"
         },
         "projects": {
-          "$ref": "#/$defs/Evidence"
+          "$ref": "#/$defs/Evidence2"
         },
         "unavailable_tasks": {
           "items": {
@@ -15749,7 +16217,8 @@
               {
                 "$ref": "#/$defs/TaskOwnership"
               }
-            ]
+            ],
+            "description": "Moving a Task changes its Wave membership or its Machine ownership."
           }
         },
         {

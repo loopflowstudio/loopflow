@@ -6454,6 +6454,17 @@ fn mobile_machine_codex_acceptance() {
 
 #[cfg(target_os = "macos")]
 fn mobile_native_acceptance(provider: Option<(&str, &Path)>) {
+    // The test binary's constructor deliberately replaces HOME and installs a
+    // Keychain stand-in. Real-provider checks must opt into the caller's account
+    // explicitly; never undo isolation for ordinary fixtures.
+    let account = provider.map(|_| {
+        let home = std::env::var("LOOPFLOW_MOBILE_ACCOUNT_HOME")
+            .expect("real-provider acceptance requires LOOPFLOW_MOBILE_ACCOUNT_HOME");
+        let path = std::env::var("LOOPFLOW_MOBILE_ACCOUNT_PATH")
+            .expect("real-provider acceptance requires LOOPFLOW_MOBILE_ACCOUNT_PATH");
+        assert!(Path::new(&home).is_absolute() && Path::new(&home).is_dir());
+        (home, path)
+    });
     let simulator = std::env::var("LOOPFLOW_MOBILE_SIMULATOR").unwrap();
     let endpoint = std::env::var("LOOPFLOW_MOBILE_ENDPOINT").unwrap();
     let host_status: Value = serde_json::from_slice(
@@ -6499,7 +6510,8 @@ printf '\r\naccepted: %s\r\n' "$answer"
             _ => unreachable!("the opt-in tests name their provider"),
         };
         fixture.named_provider(name, &format!(
-            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexec {} {options} \"$@\"\n",
+            "#!/bin/sh\nif [ \"$1\" != --version ]; then printf '%s\\n' \"$$\" >> \"$LF_HOME/launches\"; fi\nexport PATH={}\nexec {} {options} \"$@\"\n",
+            shlex::try_quote(&account.as_ref().unwrap().1).unwrap(),
             shlex::try_quote(executable.to_str().unwrap()).unwrap()
         ))
     } else {
@@ -6543,16 +6555,19 @@ printf '\r\naccepted: %s\r\n' "$answer"
         ],
     );
     command.env("PATH", &path);
-    if provider.is_some() {
+    if let Some((home, _)) = &account {
         // The CLI uses its normal account without copying or inspecting secrets.
         // LF_HOME still isolates every Loopflow record and process.
-        command.env("HOME", std::env::var_os("HOME").unwrap());
+        command.env("HOME", home);
         command.env_remove("CLAUDECODE");
     }
     let owner = fixture.owner(command);
     let _cleanup = StopOwner(&fixture, owner.clone());
     let expected_launches = if provider.is_some_and(|(name, _)| name == "codex") {
-        2
+        // Config discovery uses one short-lived stdio app-server before the
+        // retained app-server and native TUI. Wait for all three before taking
+        // the baseline; otherwise the TUI looks like a reconnect-time restart.
+        3
     } else {
         1
     };

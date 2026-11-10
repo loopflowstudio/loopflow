@@ -308,7 +308,11 @@ log is `swift/.build/mobile-acceptance.log`.
 
 For an actual provider, use the same host/Simulator variables, additionally set
 `LOOPFLOW_MOBILE_CLAUDE` to the absolute path of an already signed-in Claude CLI,
-and select `mobile_machine_claude_acceptance`. This explicitly uses the configured
+and select `mobile_machine_claude_acceptance`. Set
+`LOOPFLOW_MOBILE_ACCOUNT_HOME="$HOME"` and `LOOPFLOW_MOBILE_ACCOUNT_PATH="$PATH"`
+before starting Cargo: ordinary tests replace HOME and install a Keychain stand-in.
+Only the explicitly selected provider uses this account and original PATH; the
+Machine registry and other fixture programs remain isolated. This uses the configured
 account for a new conversation in a disposable repository. Tools, MCP servers and
 unmanaged customizations are disabled; no existing conversation is resumed and
 no credential is copied. The provider uses its normal home while all Loopflow

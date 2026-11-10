@@ -8,6 +8,46 @@ import XCTest
 
 @MainActor
 final class MobileTaskCreationTests: XCTestCase {
+    func testSheetKeepsUnsavedInstructionsUntilStorageRecovers() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        XCTAssertFalse(model.hasUnsavedChanges)
+        model.editText("Keep this unsaved idea on screen")
+        XCTAssertTrue(model.hasUnsavedChanges, "Protect edits before the autosave runs")
+        try FileManager.default.removeItem(at: store.url)
+        try FileManager.default.createDirectory(at: store.url, withIntermediateDirectories: true)
+        XCTAssertFalse(model.saveDraft())
+        let view = Color.clear.sheet(isPresented: .constant(true)) {
+            MobileNewTaskView(model: model, theme: .light, onOpen: { _ in XCTFail("No Task was requested") })
+        }
+        try await capture(view, name: "new-task-storage-recovery") { window in
+            let clock = ContinuousClock()
+            let presentedDeadline = clock.now + .seconds(3)
+            while window.rootViewController?.presentedViewController == nil && clock.now < presentedDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let sheet = try XCTUnwrap(window.rootViewController?.presentedViewController)
+            let protectedDeadline = clock.now + .seconds(3)
+            while !sheet.isModalInPresentation && clock.now < protectedDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(sheet.isModalInPresentation, "A swipe must not discard instructions that failed to save")
+            try FileManager.default.removeItem(at: store.url)
+            XCTAssertTrue(model.saveDraft())
+            let savedDeadline = clock.now + .seconds(3)
+            while sheet.isModalInPresentation && clock.now < savedDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertFalse(sheet.isModalInPresentation, "Saving restores ordinary sheet dismissal")
+            XCTAssertEqual(try store.load().text, "Keep this unsaved idea on screen")
+            XCTAssertFalse(MobileTaskCreation(client: client, store: store).hasUnsavedChanges)
+            XCTAssertTrue(client.requests.isEmpty)
+        }
+    }
+
     func testTaskReadKeepsRecoveryAcrossRestartUntilPresentation() async throws {
         let client = try await CreationClient()
         let store = temporaryStore()

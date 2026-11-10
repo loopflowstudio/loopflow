@@ -83,6 +83,7 @@ struct MobileNewTaskView: View {
             }
         }
         .tint(theme.palette.accentInk)
+        .interactiveDismissDisabled(model.hasUnsavedChanges)
         .task { await model.prepare() }
         .task(id: model.draft.text) {
             do { try await Task.sleep(for: .milliseconds(350)); _ = model.saveDraft() }

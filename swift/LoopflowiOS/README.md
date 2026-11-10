@@ -126,6 +126,8 @@ a newer one or change its destination.
 The request retains its original Machine and repository even after changing connections;
 reconnect that Machine to recover it. A failed local draft save prevents sending.
 Drafts are protected local files excluded from backup; the saved Machine identity stays in Keychain.
+Swiping New Task closed waits until its current draft is saved. If a local save
+fails, the sheet keeps your text visible; Close retries saving before dismissing.
 
 Choose **Save for later** to keep an unresolved request and start a different
 draft. This does not cancel work on the Machine. **Saved requests** retains the

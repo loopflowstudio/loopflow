@@ -65,13 +65,13 @@ protocol MobileTaskCreationClient {
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
 }
 
-struct MobileSavedTaskRequest: Codable, Identifiable {
+struct MobileSavedTaskRequest: Codable, Identifiable, Equatable {
     let submission: MobileTaskSubmission
     var outcome: MobileTaskOutcome?
     var id: UUID { submission.id }
 }
 
-struct MobileTaskDraft: Codable {
+struct MobileTaskDraft: Codable, Equatable {
     var text = ""
     var directory = ""
     var machineID: String?
@@ -126,6 +126,7 @@ final class MobileTaskCreation: Identifiable {
     private let client: any MobileTaskCreationClient
     private let store: MobileTaskDraftStore
     private(set) var draft = MobileTaskDraft()
+    private var savedDraft = MobileTaskDraft()
     private(set) var context: MobileCreationContext?
     private(set) var busy = false
     private(set) var error: String?
@@ -134,7 +135,7 @@ final class MobileTaskCreation: Identifiable {
     init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application) {
         self.client = client
         self.store = store
-        do { draft = try store.load() }
+        do { draft = try store.load(); savedDraft = draft }
         catch {
             storageUnavailable = true
             self.error = "Couldn’t read your saved draft. Close this sheet and try again. It hasn’t been overwritten."
@@ -149,6 +150,7 @@ final class MobileTaskCreation: Identifiable {
     }
 
     var settled: Bool { draft.outcome.map { $0.state != .inProgress } ?? false }
+    var hasUnsavedChanges: Bool { draft != savedDraft }
 
     var instructionsTooLong: Bool {
         guard draft.text.utf8.count <= 32_768,
@@ -174,7 +176,7 @@ final class MobileTaskCreation: Identifiable {
 
     private func persist(_ next: MobileTaskDraft) -> Bool {
         guard !storageUnavailable else { return false }
-        do { try store.save(next); draft = next; return true }
+        do { try store.save(next); draft = next; savedDraft = next; return true }
         catch { self.error = "Couldn’t save your changes on this phone. \(error.localizedDescription)"; return false }
     }
 

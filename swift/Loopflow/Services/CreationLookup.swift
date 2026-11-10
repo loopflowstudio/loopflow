@@ -39,4 +39,3 @@ public struct CreationLookup: Codable, Sendable {
         try fields.encode(updatedAt, forKey: .updatedAt)
     }
 }
-

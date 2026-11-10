@@ -23,7 +23,7 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At November 10 15:51 UTC, GitHub reports PR #1812 open and unmerged at the same
+At November 10 16:29 UTC, GitHub reports PR #1812 open and unmerged at the same
 head, with `mergeable: CONFLICTING` and no auto-merge. Freshly fetched main is
 `9c3403a885356276c52c345b426dc9d7b4714be7`; both transport files remain absent.
 The accompanying `lf task status LOO-718 --json` recheck still places the
@@ -31,10 +31,7 @@ transport Task at `feature/demo`, with PR #1812 open and settlement not armed.
 
 LOO-718 must land before implementation and delivery; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope;
-no product decision is missing. Remote identity binding, terminal
-consume-on-attempt in the shared store, and expiry across host sleep remain
-unimplemented here. The existing local store consumes tickets before checking
-UID and uses `Instant`; its tests do not exercise remote authentication.
+no product decision is missing.
 
 Earlier dependency observations are in
 `811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/design.md`, including references
@@ -62,15 +59,15 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior. Leave unrelated throttles on `Instant` and retain watch
 resumption.
 
-Read the intended behavior in both edited shipping docs before implementation:
-`docs/server.md` (Phone access) and `rust/loopflow/src/server/README.md`
-(Remote attach contract). After integration, remove their planned/local-only
-wording to match the implemented endpoint. The docs cover same-device ticket
+After integration, update `docs/server.md` (Phone access) and
+`rust/loopflow/src/server/README.md` (Remote attach contract): remove their
+planned/local-only wording and replace the general attach section's UID-only
+description with the local/remote admission binding. Keep same-device ticket
 use, exact-owner recovery and attachment without provider launch.
 
 Desktop visual inspection remains for QA; opening results are in `questions.md`.
 
-The remote contract links to the shared recovery rules so owner and control
-semantics stay in one place. The phone overview marks the whole flow as planned.
+Keep recovery behavior in the shared recovery section; the remote contract
+links there rather than repeating owner and provider rules.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

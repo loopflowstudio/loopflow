@@ -607,9 +607,8 @@ Keep `/v1/machine` for requests and live Work updates; each terminal has its
 own bridge.
 
 To reconnect to a specific owner, pass its ID as `owner_lf_process_id` instead
-of null. The same [terminal and provider recovery](#terminal-and-provider-recovery)
-rules apply: a changed owner returns `not_found`, and attachment never starts or
-resumes a provider.
+of null and follow the shared
+[terminal and provider recovery](#terminal-and-provider-recovery) rules.
 
 Both connections must authenticate as the same Tailscale node stable ID and
 user ID; another device on the same account does not match. Neither the ticket,

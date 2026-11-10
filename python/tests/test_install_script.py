@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import platform
 import plistlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,7 @@ def _stage_build_artifacts(root: Path) -> None:
         plistlib.dumps({"CFBundleExecutable": "Loopflow", "CFBundleName": "Loopflow"})
     )
     (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
+    shutil.copytree(SCRIPTS_DIR.parent / "swift/LaunchAgents", root / "swift/LaunchAgents")
 
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
@@ -116,6 +118,11 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
     assert (spec.macos_dir / "lf").exists()
     assert not (spec.macos_dir / "lfd").exists()
     assert (spec.contents_dir / "Frameworks" / "Sparkle.framework" / "Versions" / "B").is_dir()
+    service = plistlib.loads(
+        (spec.contents_dir / "Library/LaunchAgents/com.loopflow.server.plist").read_bytes()
+    )
+    assert (spec.app_path / service["BundleProgram"]).is_file()
+    assert service["ProgramArguments"] == ["lf", "server", "run"]
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"

@@ -316,7 +316,10 @@ impl Host {
 
     fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
         let output = crate::os_process::bounded_output(
-            Command::new(&self.binary).args(args),
+            // The macOS app otherwise chooses GUI mode under launchd.
+            Command::new(&self.binary)
+                .env("TAILSCALE_BE_CLI", "1")
+                .args(args),
             Duration::from_secs(15),
         )
         .context("Tailscale did not respond; open it and check its connection")?;
@@ -381,6 +384,28 @@ fn permits_peer(who: &Value, owner: &Owner) -> Option<super::ticket::Admission> 
 mod tests {
     use super::{owner_from_status, permits_peer, Configuration};
     use serde_json::json;
+
+    #[test]
+    fn app_executable_answers_status_without_a_terminal() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("Tailscale");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nif [ \"$TAILSCALE_BE_CLI\" = 1 ]; then\n  printf '%s' '{\"BackendState\":\"Running\"}'\nelse\n  printf '%s' 'The Tailscale GUI failed to start'\nfi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let host = super::Host {
+            binary,
+            dns: "host.example.ts.net".into(),
+        };
+        assert_eq!(
+            host.json(&["status", "--json"]).unwrap()["BackendState"],
+            "Running"
+        );
+    }
 
     #[test]
     fn admission_requires_a_different_user_owned_device_of_the_saved_owner() {

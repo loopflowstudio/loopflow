@@ -6,7 +6,7 @@ linked from `docs/server.md`. This checkout contains the planned contract only.
 The listener, mobile settings and bulk protocol are outside this Task.
 Keep the contract marked planned until implemented.
 
-## Transport dependency — November 9, 2026 UTC
+## Transport dependency — November 10, 2026 UTC
 
 The 22:46 UTC realign check inspected PR #1812 head
 `73826eaf005d00e1aeae26dd1cf2a91cf5f72981`. It supplies
@@ -25,17 +25,20 @@ every Unix socket connection. The shared-store tests cover bulk single use,
 foreign attempts remaining redeemable, expiry and sweeping; they do not cover
 the terminal consume-on-attempt requirement.
 
-At 23:55 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
+At November 9 23:58 and November 10 00:32 UTC,
+`gh pr view 1812 --json state,mergedAt,headRefOid,autoMergeRequest`
 returned `OPEN`, `mergedAt: null` and `autoMergeRequest: null` at that same head.
-The last successful Task status read (22:04 UTC) placed LOO-718's `feature`
-Graph at `demo`; later reads did not respond. The 23:55 UTC fetch of main
+`lf task status LOO-718 --json` answered on this pass: its `feature` Graph
+remains at `demo`, with PR #1812 open and settlement not armed.
+Both fetches of main
 (`28b0af568d120b56113c0dfb0eff9439d0c014d5`) contained neither `mobile.rs` nor
 `ticket.rs`. The inspected transport includes watch resumption; retain it.
 
 Implementation and remote acceptance depend on LOO-718's merged transport.
 Landing that PR is outside this Task's scope. No product decision is missing.
-The implement pass remains blocked on this unchanged dependency; no code was
-changed and no build or tests ran.
+Implementation and authenticated acceptance remain pending that dependency.
+The local code still uses UID-bound tickets and `Instant`; the docs correctly
+mark the remote exchange as planned. No code repair or new test run was needed.
 
 Earlier dependency observations and revision comparisons are in
 `475a0a485477161a02f05d4ed35d9dd798b5f012:scratch/design.md`.

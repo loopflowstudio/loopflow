@@ -112,6 +112,12 @@ lists the served kinds and their CLI equivalents. `lf server describe --json`
 generates their schemas and result types from this build. App automation remains
 CLI-only; a served operation calls the same Rust owner as its CLI equivalent.
 
+For a board, Task detail or Session card, use the
+[screen reads](../../rust/loopflow/src/server/README.md#read-a-screens-data).
+Each returns its own complete DTO in both the CLI and API. Swift clients send
+`select: null`; field selection is for clients that consume arbitrary JSON.
+Desktop's outline keeps `plan.list` for its runtime data.
+
 ## Installation owns registration
 
 One installation authority selects the executable, reconciles its OS registration

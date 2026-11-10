@@ -195,6 +195,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | API kind | CLI | Engine |
 | --- | --- | --- |
 | `task.get` | `lf task show <issue>` | read |
+| `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
@@ -212,6 +213,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
+| `session.card` | `lf session card <id>` | read |
 | `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -226,6 +228,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `wave.sync` | `lf wave sync <wave>` | write |
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
+| `plan.board` | `lf plan board` | read |
 | `repo.plan` | `lf repo plan` | read |
 | `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
 | `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
@@ -385,6 +388,61 @@ part of what a phone or bot client is offered.
   retain input and geometry. Unavailable keeps the last screen marked stale;
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
+
+## Read a screen's data
+
+```sh
+lf plan board --json             # compact Task rows for a board
+lf task detail LOO-1 --json       # the selected Task and its supporting detail
+lf session card session_123 --json # a recorded Session's current card
+```
+
+Run these in the repository's checkout, replacing the Task and Session IDs
+with ones from your Work. Each command prints the same JSON value its API
+operation returns in `response.result`.
+
+| Read | Contents |
+| --- | --- |
+| `plan.board` | `tasks` evidence with each Task's `id`, `identifier`, `title`, `section`, `state`, `pr.url` and nullable `waiting_on` actor/reason; `generated_at` |
+| `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
+| `session.card` | Session, liveness, control holder and last line |
+
+Use `section` to place a Task in Backlog, Working, Autonomous, Done or
+Abandoned; `state` describes its progress within that grouping. To populate a
+board row's detail, request `task.detail`; for its Session, request `session.card`.
+A card observes the Session: reading it does not resume a provider, attach a
+terminal or claim input control. Its `liveness` is `live`, `dead` or `unknown`;
+`control_holder` is the recorded occupied terminal ID, never an input token.
+`last_line` is the final nonempty line of the current provider preview, or null
+when there is none; the Session's preview retains its source and observation time.
+
+These are one-shot reads. `plan board` takes the same optional Wave, `--task`
+and `--all` filters as `plan list`. Unreadable planning remains unavailable
+rather than an empty board. `waiting_on` is null outside waiting or blocked
+conditions. `task.detail` includes the planning `task`, derived `state` and
+`section`, nullable `pr`, `checks`, `comments` and `current_session`, plus
+`graph_processes`. Checks are the recorded required-check observation, pinned
+by `head_sha` and `observed_at`, with aggregate state and named failing checks;
+null means checks have not been observed. `current_session` is the Task's
+recorded primary conversation, not whichever run started most recently.
+
+Each read has its own Rust DTO mirrored in Swift. Typed clients send
+`select: null` and decode the read's complete DTO, with no field defaults.
+Use the host's `lf server describe --json` for operation arguments and the
+`x-result` schema. Missing optional data, such as a Task with no PR or current
+Session, is represented by the DTO's optional fields; do not manufacture a PR,
+Session or live owner.
+
+`select` remains useful for scripts and agents that consume arbitrary JSON.
+A selected `plan.list` response cannot be decoded as the board DTO, and
+selecting fields out of any typed response can make it undecodable. Request
+the screen read when a typed client needs a smaller payload. Desktop's
+outline continues to use `plan.list` for its richer runtime data.
+
+Handle failures through the [protocol error codes](#local-protocol-revision-4).
+Check the named Task or Session when it cannot be found. If the host cannot
+answer, retain any previous display as stale and retry the read after recovery;
+an unavailable Session card does not establish that the Session ended.
 
 ## Reconnect a watch
 

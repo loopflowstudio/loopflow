@@ -16,8 +16,8 @@ reservations.
 The server tree is unchanged from the previously inspected
 `3f1a7d434736779139695ba4c91ebf8245c4e121`.
 
-At November 11 07:18 UTC, GitHub still reports PR #1812 open and unmerged
-at that head. Freshly fetched main is now
+At November 11 07:20 and 07:53 UTC, GitHub still reports PR #1812 open and unmerged
+at that head. Freshly fetched main remains
 `f7faf56f91b8f1054f985612583c362167650ca5`,
 still without `server/mobile.rs` or `server/ticket.rs`.
 `lf task status LOO-718 --json` still places it at `feature`'s `demo` step,

@@ -217,7 +217,8 @@ impl SqliteStore {
     }
 
     /// Managed conversations whose last boundary was a turn end, on a live
-    /// AgentProcess the server can reach; only `session` when given.
+    /// AgentProcess the server can reach; only `session` when given. Driven
+    /// from unfinished processes: every Session ever recorded is far more.
     pub(crate) fn idle_conversations(
         &self,
         session: Option<&str>,
@@ -227,7 +228,8 @@ impl SqliteStore {
             "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
                 s.work_source,p.pid,p.os_started_at
-             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             FROM processes p INDEXED BY processes_unfinished
+             JOIN agent_sessions s ON s.agent_process_id=p.id
              JOIN steer_adapters a ON a.agent_process_id=p.id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
              WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL

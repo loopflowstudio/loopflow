@@ -1,6 +1,7 @@
 //! Task updates for a native Session, read at its turn boundaries. Receipts
 //! live in the Session history; they are delivery evidence, never a cursor.
 use std::collections::{BTreeSet, HashMap};
+use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,6 +17,40 @@ use crate::work::task::comment::TaskCommentAuthor;
 
 /// An update shares the hook's context budget with steers and the block.
 const UPDATE_BYTES: usize = 4_000;
+
+/// The `task_updates` revision at which a Session's last read found no news,
+/// by database and Session. Every boundary reads, and rebuilding Task history
+/// costs tens of milliseconds; until a Task change moves the revision the
+/// answer is the same.
+type QuietKey = (String, String);
+static QUIET_AT: Mutex<Option<HashMap<QuietKey, i64>>> = Mutex::new(None);
+
+fn quiet_key(store: &SqliteStore, session_id: &str) -> Option<QuietKey> {
+    let conn = store.conn.lock().expect("store mutex poisoned");
+    let path = conn.path().filter(|path| !path.is_empty())?.to_string();
+    Some((path, session_id.to_string()))
+}
+
+fn quiet_at(key: Option<&QuietKey>) -> Option<i64> {
+    QUIET_AT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()?
+        .get(key?)
+        .copied()
+}
+
+fn set_quiet_at(key: Option<QuietKey>, revision: Option<i64>) {
+    let Some(key) = key else {
+        return;
+    };
+    let mut quiet = QUIET_AT.lock().unwrap_or_else(PoisonError::into_inner);
+    let quiet = quiet.get_or_insert_with(HashMap::new);
+    match revision {
+        Some(revision) => quiet.insert(key, revision),
+        None => quiet.remove(&key),
+    };
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct TaskUpdate {
@@ -74,6 +109,11 @@ pub(crate) fn read(store: &SqliteStore, session_id: &str) -> StoreResult<Option<
         return Ok(None);
     };
     if !session.interactive || session.completed_at.is_some() {
+        return Ok(None);
+    }
+    let revision = store.task_update_revision()?;
+    let quiet = quiet_key(store, session_id);
+    if quiet_at(quiet.as_ref()) == Some(revision) {
         return Ok(None);
     }
     let previous = store.latest_task_update(session_id)?;
@@ -153,14 +193,17 @@ pub(crate) fn read(store: &SqliteStore, session_id: &str) -> StoreResult<Option<
         facts.insert(task, observation);
     }
     if !baseline && lines.is_empty() {
+        set_quiet_at(quiet, Some(revision));
         return Ok(None);
     }
     let observation = serde_json::to_value(&facts)?;
     let key = format!("{:x}", Sha256::digest(serde_json::to_vec(&observation)?));
     if baseline {
         store.record_task_update(session_id, &key, "baseline", &observation)?;
+        set_quiet_at(quiet, Some(revision));
         return Ok(None);
     }
+    set_quiet_at(quiet, None);
     let mut body = String::new();
     for (shown, line) in lines.iter().enumerate() {
         if body.len() + line.len() + 1 > UPDATE_BYTES {

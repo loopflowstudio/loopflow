@@ -135,12 +135,17 @@ A Claude Code 2.1.322 transcript read the same day ends a turn with an
 so `end_turn` with nothing after it is the signal and `turn_duration` a
 confirmation.
 
-One reader per harness (`transcript/claude.rs`, `transcript/codex.rs`) turns a
+One reader per harness (`transcript/{claude,codex,pi,opencode}.rs`) turns a
 transcript's rows into `Turn`s, for `lf history show` and the live reading
 alike: one turn from what woke the agent until it hands back, with its id,
 state, model and usage, and the requests and agent work inside it as items.
-Pi and OpenCode transcripts keep no turn ends, so their turns open at each
-request and have no state. On demand, `lf session list` and `lf session card`
+Pi ends a turn at an assistant message whose `stopReason` is not `toolUse`;
+OpenCode at a completed assistant message whose `finish` is not
+`tool-calls`, or its `idle` row. OpenCode keeps every conversation in one
+SQLite store, read-only here: its `session_message` rows are the messages
+`opencode session export` writes, and a query on them took about 4 ms on
+November 11, 2026 where the export took 490 ms, so history and the live
+reading both query the store and no reader runs a subprocess. On demand, `lf session list` and `lf session card`
 give that reader the transcript's tail for every live conversation
 (`transcript/live.rs`): the conversation's turn is the transcript's last one.
 When the transcript leaves that turn open and lf recorded a completion under
@@ -153,50 +158,62 @@ server keeps one filesystem watch per provider home (`transcript/watch.rs`),
 as does a CLI `lf session list --subscribe`, which reads in its own process;
 an event makes the shared observation cache read that transcript within a
 second, a thirty-second reconcile catches a missed one, and every
-subscription reading it shares the one reading. Raw conversations are
-`claude` or `codex` processes with no `lf` or provider ancestor
-(`transcript/raw.rs`). A Claude process is paired with the conversation its
+subscription reading it shares the one reading. Pi's root is
+`~/.pi/agent/sessions`; OpenCode's whole home is watched, and any write to
+its store or its write-ahead log hints every OpenCode reading. Raw
+conversations are `claude`, `codex`, `pi` or `opencode` processes with no
+`lf` or provider ancestor (`transcript/raw.rs`); Pi runs as `node` with Pi's
+CLI as its script. A Claude process is paired with the conversation its
 `sessions/<pid>.json` in Claude's home names; Claude rewrites that file on
 `/clear` and `/resume`. A process without one takes the newest transcript
 written in its directory since it started that no other live Claude process
-names. Codex has no such file, so the newest rule pairs it. One whose conversation an ended Session recorded lists
+names. Codex, Pi and OpenCode have no such file, so the newest rule pairs
+them: Pi's newest session file under its directory's
+`sessions/--<path>--/`, OpenCode's newest `session_v2` row for the
+directory. One whose conversation an ended Session recorded lists
 under that Session's title. Claude's kernel process name is its version, so its
 executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
 
 A bare run in a Task's checkout counts toward that Task, and the cost-per-PR
 work (LOO-732) reads per-turn `usage` and `completed` rows from the store.
-For Claude and Codex the transcript is the only writer of `usage` rows
-(`transcript/facts.rs`): one row per turn id, holding that turn's tokens and
-model, not a running total. It is written when a Stop hook fires, for each
-ended turn at the transcript's end, and again when the provider exits, for
-every turn; a turn that has a row keeps it. When a hook fires before the
+The transcript is the only writer of `usage` rows (`transcript/facts.rs`):
+one row per turn id, holding that turn's tokens and model, not a running
+total. It is written at each Stop moment (Claude's and Codex's Stop hook, Pi's
+`agent_settled`, OpenCode's `session.execution.succeeded`), for each ended
+turn at the transcript's end, and again when the provider exits, for every
+turn; a turn that has a row keeps it. When a hook fires before the
 transcript shows the turn's end (not measured for either provider), that
 turn's row lands at the next turn's end or at exit. The live stream (`harness/fact_writer.rs`) writes
-`started` and `completed` and no longer `usage` for these two; Pi and
-OpenCode keep the stream's `usage` rows. At exit, each turn the store holds
+`started` and `completed` and no `usage`. Pi's stream names a turn by lf's
+own request id, which Pi's session file never holds, so a Pi turn's `usage`
+row (Pi's entry id) and its stream `completed` row carry different ids; the
+exit read matches them by time. At exit, each turn the store holds
 no completion for also gets a `completed` row, dated when the turn ended. A
 last turn the transcript leaves open was cut off, since its provider is gone:
 it is written `interrupted`, ended at the transcript's last row. A turn's
 completion is already recorded when one carries its id (Claude's request row,
 Codex's turn, the same ids the live stream uses) or was observed while it
 ran, since the live recording folds queued input into one turn; that second
-test is by time and is the one place times still match turns. Usage rows
-carry no `cost_usd`: tokens come first, input, cache read, cache write and
-output kept apart, and dollar accounting is later work. The live `result`'s
+test is by time and is the one place times still match turns. Claude and
+Codex usage rows carry no `cost_usd`: tokens come first, input, cache read,
+cache write and output kept apart, and dollar accounting is later work. Pi
+and OpenCode report each model call's cost, so their rows carry the turn's
+sum as `cost_usd`. The live `result`'s
 `total_cost_usd` is kept on Claude's stream-written `completed` row as
 `cost_usd`, the process's running total. Not written: anything for a raw
 conversation, which is listed but not tracked. What each transcript carried
-on November 10, 2026 (Claude Code 2.1.322, Codex 0.167.0):
+on November 10 and 11, 2026 (Claude Code 2.1.322, Codex 0.167.0, Pi's
+session format 3, OpenCode 2.2.1):
 
-| Fact | Claude | Codex |
-| --- | --- | --- |
-| Tokens | each `assistant` message's `usage` | `token_count`, last and total |
-| Model | `message.model` | `turn_context.model` |
-| Turn wall time | `turn_duration.durationMs`, not on every turn | `task_complete.duration_ms`, `turn_aborted.duration_ms` |
-| Stop reason | `message.stop_reason`, `system` rows of subtype `api_error` | `turn_aborted` |
-| Provider version | `version` on every row | `session_meta.cli_version` |
-| Cost, model time | none per turn; totals in `cost-state` | none |
+| Fact | Claude | Codex | Pi | OpenCode |
+| --- | --- | --- | --- | --- |
+| Tokens | each `assistant` message's `usage` | `token_count`, last and total | each `assistant` message's `usage` | each `assistant` message's `tokens` |
+| Model | `message.model` | `turn_context.model` | `message.model` | `model.id` |
+| Turn wall time | `turn_duration.durationMs`, not on every turn | `task_complete.duration_ms`, `turn_aborted.duration_ms` | none; `durationMs` per model call | none; `time.created` and `time.completed` per message |
+| Stop reason | `message.stop_reason`, `system` rows of subtype `api_error` | `turn_aborted` | `stopReason`, `errorMessage` | `finish`, `error`, `idle.outcome` |
+| Provider version | `version` on every row | `session_meta.cli_version` | `session.version` (format only) | `session_v2.version` |
+| Cost, model time | none per turn; totals in `cost-state` | none | `usage.cost.total` per call | `cost` per message |
 
 Claude's `cost-state` row holds `totalCostUSD`, `totalAPIDuration` and
 per-model usage and cost. It was the last row of 24 of the 60 newest

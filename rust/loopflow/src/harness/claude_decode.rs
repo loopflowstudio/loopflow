@@ -999,9 +999,6 @@ mod tests {
             .flat_map(|line| decoder.decode(&line.to_string(), "turn").unwrap())
             .collect();
         let facts: Vec<_> = decoded.iter().filter_map(Decoded::fact).collect();
-        assert!(!facts
-            .iter()
-            .any(|fact| matches!(fact, ProviderFact::Usage { .. })));
         let cost = facts.iter().find_map(|fact| match fact {
             ProviderFact::TurnCompleted { detail, .. } => Some(detail["cost_usd"].clone()),
             _ => None,

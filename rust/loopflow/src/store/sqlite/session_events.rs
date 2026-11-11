@@ -163,25 +163,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// The turn last recorded starting in `thread`, and when, in Unix seconds.
-    pub(crate) fn last_started_turn(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-    ) -> StoreResult<Option<(String, i64)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT provider_turn,observed_at FROM session_events
-                 WHERE session_id=?1 AND provider_thread=?2 AND kind='started'
-                   AND provider_turn IS NOT NULL
-                 ORDER BY seq DESC LIMIT 1",
-                params![session, thread],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?)
-    }
-
     /// When turn `turn` of `thread` was recorded complete, and its status.
     pub(crate) fn recorded_turn_end(
         &self,

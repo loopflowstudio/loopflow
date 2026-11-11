@@ -319,17 +319,20 @@ pub fn emit_block(
         if let Err(error) = recorded {
             gap.note("turn evidence", &error);
         }
-        // The transcript is the only writer of Claude and Codex usage rows;
-        // the exit read writes any turn this misses.
-        if yielded {
-            match hook_store(&delivery.home) {
-                Ok(store) => crate::transcript::facts::record_session(
-                    &store,
-                    &adapter.session,
-                    crate::transcript::facts::Moment::TurnEnd,
-                ),
-                Err(error) => gap.note("turn usage", &error),
-            }
+    }
+    // The transcript is the only writer of usage rows; the exit read writes
+    // any turn this misses. Pi and OpenCode reach Stop with no hook name.
+    if let (Some(adapter), true) = (
+        &adapter,
+        moment == crate::context_block::ContextMoment::Stop && yielded != Some(false),
+    ) {
+        match hook_store(&delivery.home) {
+            Ok(store) => crate::transcript::facts::record_session(
+                &store,
+                &adapter.session,
+                crate::transcript::facts::Moment::TurnEnd,
+            ),
+            Err(error) => tracing::warn!(%error, "cannot record turn usage at this turn end"),
         }
     }
     if moment == crate::context_block::ContextMoment::Stop {

@@ -1,23 +1,21 @@
 //! A conversation's per-turn usage and completion, written to the store from
-//! its transcript. For Claude and Codex the transcript is the only writer of
-//! `usage` rows: one per turn id, with the turn's tokens and model, written
-//! when the turn ends and again when the provider exits. A turn that has a
-//! row keeps it.
+//! its transcript. The transcript is the only writer of `usage` rows: one per
+//! turn id, with the turn's tokens and model, written when the turn ends and
+//! again when the provider exits. A turn that has a row keeps it.
 //!
 //! At exit a last turn the transcript leaves open was cut off: its usage is
 //! written as it stands, and it is completed as `interrupted` at the
 //! transcript's last row. Completions are written only for turns Loopflow
 //! recorded no end for, so a launch with no live stream still counts.
 //!
-//! A transcript gives no cost: Claude's `cost-state` row is a total, not a
-//! turn's.
-
-use std::path::Path;
+//! Pi and OpenCode report each model call's cost, so their rows carry the
+//! turn's; Claude's `cost-state` row is a total, not a turn's, and Codex
+//! reports none.
 
 use serde_json::{json, Value};
 
 use super::live::TurnState;
-use super::{seconds, unix_seconds, Turn};
+use super::{seconds, Source, Turn};
 use crate::harness::HarnessKind;
 use crate::id::AgentSessionId;
 use crate::store::sqlite::SqliteStore;
@@ -52,14 +50,13 @@ fn record_current(store: &SqliteStore, session: &str, moment: Moment) -> anyhow:
     ) else {
         return Ok(0);
     };
-    let Some((harness, transcript)) = super::live::locate(store, &conversation, &launched.cwd)?
-    else {
+    let Some((harness, source)) = super::live::locate(store, &conversation, &launched.cwd)? else {
         return Ok(0);
     };
     let thread = &conversation.thread;
     Ok(match moment {
-        Moment::TurnEnd => record_ended(store, session, harness, thread, &transcript)?,
-        Moment::Exit => record(store, session, harness, thread, &transcript)?,
+        Moment::TurnEnd => record_ended(store, session, harness, thread, &source)?,
+        Moment::Exit => record(store, session, harness, thread, &source)?,
     })
 }
 
@@ -72,10 +69,10 @@ fn record_ended(
     session: &str,
     harness: HarnessKind,
     thread: &AgentSessionId,
-    transcript: &Path,
+    source: &Source,
 ) -> StoreResult<usize> {
     let mut written = 0;
-    for turn in super::live::last_turns(harness, transcript) {
+    for turn in super::live::last_turns(harness, source) {
         if let (Some(_), Some(ended)) = (&turn.started_at, seconds(&turn.ended_at)) {
             written += usize::from(usage(store, session, thread, &turn, ended)?);
         }
@@ -91,18 +88,10 @@ fn record(
     session: &str,
     harness: HarnessKind,
     thread: &AgentSessionId,
-    transcript: &Path,
-) -> StoreResult<usize> {
-    let Some(read) = super::ended_reader(harness) else {
-        return Ok(0);
-    };
-    let rows = super::json_lines(transcript).collect::<Vec<_>>();
-    let turns = read(&rows);
-    let last_row = || {
-        rows.iter()
-            .rev()
-            .find_map(|row| unix_seconds(&row["timestamp"]))
-    };
+    source: &Source,
+) -> anyhow::Result<usize> {
+    let turns = super::read(harness, source)?;
+    let last_row = || source.last_written();
     let recorded = store.session_completions(session, thread)?;
     let mut written = 0;
     for turn in &turns {
@@ -157,8 +146,8 @@ fn covers(turns: &[Turn], turn: &str, at: i64, started: Option<i64>, ended: i64)
 
 fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i64) -> Value {
     let status = match turn.state {
-        Some(TurnState::Ended) => "completed",
-        Some(TurnState::Interrupted | TurnState::Running) | None => "interrupted",
+        TurnState::Ended => "completed",
+        TurnState::Interrupted | TurnState::Running => "interrupted",
     };
     let mut detail = json!({
         "status": status,
@@ -183,7 +172,7 @@ fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i6
 mod tests {
     use super::*;
     use crate::session::SessionEventKind;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -219,7 +208,15 @@ mod tests {
         let (_home, store) = store();
         let thread = AgentSessionId::from("5d1a7f0e-2c41-4f43-9a51-0d3b8f6c9e10");
         let path = fixture("claude_turn.jsonl");
-        let record = || record(&store, "conversation", HarnessKind::Claude, &thread, &path);
+        let record = || {
+            record(
+                &store,
+                "conversation",
+                HarnessKind::Claude,
+                &thread,
+                &Source::File(path.clone()),
+            )
+        };
         assert_eq!(record().unwrap(), 1);
         assert_eq!(record().unwrap(), 0);
 
@@ -248,8 +245,15 @@ mod tests {
         let thread = AgentSessionId::from("5d1a7f0e-2c41-4f43-9a51-0d3b8f6c9e10");
         let whole = std::fs::read_to_string(fixture("claude_turn.jsonl")).unwrap();
         let path = home.path().join("transcript.jsonl");
-        let ended =
-            |path: &Path| record_ended(&store, "conversation", HarnessKind::Claude, &thread, path);
+        let ended = |path: &Path| {
+            record_ended(
+                &store,
+                "conversation",
+                HarnessKind::Claude,
+                &thread,
+                &Source::File(path.into()),
+            )
+        };
 
         // Still running: nothing yet.
         let running = whole.lines().take(6).collect::<Vec<_>>().join("\n");
@@ -266,7 +270,14 @@ mod tests {
 
         // The exit read finds the row and adds only the completion nothing recorded.
         assert_eq!(
-            record(&store, "conversation", HarnessKind::Claude, &thread, &path).unwrap(),
+            record(
+                &store,
+                "conversation",
+                HarnessKind::Claude,
+                &thread,
+                &Source::File(path.clone())
+            )
+            .unwrap(),
             1
         );
         assert_eq!(rows(&store, SessionEventKind::Usage).len(), 1);
@@ -282,7 +293,15 @@ mod tests {
         // The second turn's `task_complete` is not written yet.
         let open = whole.lines().take(9).collect::<Vec<_>>().join("\n");
         std::fs::write(&path, format!("{open}\n")).unwrap();
-        let ended = || record_ended(&store, "conversation", HarnessKind::Codex, &thread, &path);
+        let ended = || {
+            record_ended(
+                &store,
+                "conversation",
+                HarnessKind::Codex,
+                &thread,
+                &Source::File(path.clone()),
+            )
+        };
         assert_eq!(ended().unwrap(), 1);
         assert_eq!(rows(&store, SessionEventKind::Usage)[0].0, "turn-1");
         std::fs::write(&path, &whole).unwrap();
@@ -299,7 +318,7 @@ mod tests {
             "conversation",
             HarnessKind::Codex,
             &thread,
-            &fixture("codex_rollout.jsonl"),
+            &Source::File(fixture("codex_rollout.jsonl")),
         )
         .unwrap();
         assert_eq!(written, 2);
@@ -333,7 +352,7 @@ mod tests {
             "conversation",
             HarnessKind::Codex,
             &thread,
-            &fixture("codex_rollout.jsonl"),
+            &Source::File(fixture("codex_rollout.jsonl")),
         )
         .unwrap();
         assert_eq!(written, 2);
@@ -382,7 +401,15 @@ mod tests {
             row("attachment", "00:30", json!({})),
         ];
         std::fs::write(&path, lines.join("\n")).unwrap();
-        let record = || record(&store, "conversation", HarnessKind::Claude, &thread, &path);
+        let record = || {
+            record(
+                &store,
+                "conversation",
+                HarnessKind::Claude,
+                &thread,
+                &Source::File(path.clone()),
+            )
+        };
         assert_eq!(record().unwrap(), 1);
         assert_eq!(record().unwrap(), 0);
 
@@ -423,7 +450,7 @@ mod tests {
     fn one_live_completion_covers_the_turns_queued_into_it() {
         let turn = |id: &str, from: &str, to: &str| Turn {
             id: Some(id.into()),
-            state: Some(TurnState::Ended),
+            state: TurnState::Ended,
             started_at: Some(from.into()),
             ended_at: Some(to.into()),
             model: None,
@@ -442,5 +469,39 @@ mod tests {
         let covered = |turn: &Turn| covers(&turns, "a", observed, at(turn).0, at(turn).1);
         assert!(covered(&turns[1]));
         assert!(!covered(&turns[2]));
+    }
+
+    #[test]
+    fn a_pi_session_writes_each_turn_with_its_cost_and_completion() {
+        let (home, store) = store();
+        let path = home.path().join("session.jsonl");
+        let thread = AgentSessionId::from(path.display().to_string().as_str());
+        let entries = [
+            json!({"type":"session","version":3,"id":"s","cwd":"/work"}),
+            json!({"type":"message","id":"u1","parentId":"s","timestamp":"2026-11-10T16:25:00Z",
+                "message":{"role":"user","content":"List files"}}),
+            json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-10T16:25:09Z",
+                "message":{"role":"assistant","model":"gemini-4-argon","stopReason":"stop",
+                    "usage":{"input":10,"output":5,"cacheRead":90,"cacheWrite":0,
+                        "cost":{"total":0.25}},
+                    "content":[{"type":"text","text":"Two files."}]}}),
+        ];
+        let text = entries
+            .iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>();
+        std::fs::write(&path, text).unwrap();
+        let source = Source::File(path);
+        let record = || record(&store, "conversation", HarnessKind::Pi, &thread, &source);
+        assert_eq!(record().unwrap(), 1);
+        assert_eq!(record().unwrap(), 0);
+        let usage = rows(&store, SessionEventKind::Usage);
+        assert_eq!((usage[0].0.as_str(), usage[0].1), ("u1", 1_794_327_909));
+        assert_eq!(usage[0].2["provider"], "pi");
+        assert_eq!(usage[0].2["usage"]["cost_usd"], 0.25);
+        assert_eq!(usage[0].2["usage"]["total_input_tokens"], 100);
+        let completed = rows(&store, SessionEventKind::Completed);
+        assert_eq!(completed[0].2["status"], "completed");
+        assert_eq!(completed[0].2["started_at"], 1_794_327_900);
     }
 }

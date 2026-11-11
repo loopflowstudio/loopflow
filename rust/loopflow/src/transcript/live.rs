@@ -1,8 +1,7 @@
 //! A conversation's current or last turn, read from the end of its provider's
-//! transcript at the moment someone asks. Only Claude and Codex keep turn
-//! ends there. A transcript shows neither a question the agent asked nor a
-//! permission prompt until it is answered, so a turn waiting on one reads as
-//! running.
+//! transcript at the moment someone asks. A transcript shows neither a
+//! question the agent asked nor a permission prompt until it is answered, so a
+//! turn waiting on one reads as running.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -11,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{rfc3339, seconds, Turn};
+use super::{rfc3339, seconds, Source, Turn};
 use crate::harness::HarnessKind;
 use crate::store::sqlite::{CurrentConversation, SqliteStore};
 
@@ -22,7 +21,8 @@ const FIRST: u64 = 128 * 1024;
 /// visible part.
 const TAIL: u64 = 8 * 1024 * 1024;
 
-/// Rows that can carry a turn boundary, model or usage; others are not parsed.
+/// Claude and Codex rows that can carry a turn boundary, model or usage;
+/// others are not parsed. Every Pi row is: its entries chain through parents.
 const MARKERS: [&[u8]; 5] = [
     b"\"type\":\"user\"",
     b"\"type\":\"assistant\"",
@@ -30,6 +30,13 @@ const MARKERS: [&[u8]; 5] = [
     b"\"type\":\"event_msg\"",
     b"\"type\":\"turn_context\"",
 ];
+
+fn markers(harness: HarnessKind) -> &'static [&'static [u8]] {
+    match harness {
+        HarnessKind::Pi => &[],
+        _ => &MARKERS,
+    }
+}
 
 /// A conversation's current or last turn: a transcript `Turn` without what
 /// was said in it.
@@ -97,28 +104,14 @@ impl SessionTurn {
         self.state != TurnState::Running
     }
 
-    /// `None` for a turn of a transcript that keeps no turn ends.
-    fn of(turn: Turn) -> Option<Self> {
-        Some(Self {
+    fn of(turn: Turn) -> Self {
+        Self {
             id: turn.id,
-            state: turn.state?,
+            state: turn.state,
             started_at: turn.started_at,
             ended_at: turn.ended_at,
             model: turn.model,
             usage: turn.usage,
-        })
-    }
-
-    /// A turn Loopflow recorded starting at `at`, in Unix seconds: all there
-    /// is for a harness whose transcript keeps no turn ends.
-    pub(crate) fn started(id: String, at: i64) -> Self {
-        Self {
-            id: Some(id),
-            state: TurnState::Running,
-            started_at: rfc3339(at),
-            ended_at: None,
-            model: None,
-            usage: None,
         }
     }
 
@@ -162,21 +155,23 @@ fn tokens(count: u64) -> String {
     }
 }
 
-/// The current or last turn of the transcript at `path`; `None` when it
-/// shows none, keeps no turn ends, or cannot be read.
-pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<SessionTurn> {
-    last_turns(harness, path).pop().and_then(SessionTurn::of)
+/// The current or last turn of `source`; `None` when it shows none or cannot
+/// be read.
+pub(crate) fn read_turn(harness: HarnessKind, source: &Source) -> Option<SessionTurn> {
+    last_turns(harness, source).pop().map(SessionTurn::of)
 }
 
-/// The turns at the end of the transcript at `path`, through its last one:
-/// as few as the window that holds that turn's start shows.
-pub(super) fn last_turns(harness: HarnessKind, path: &Path) -> Vec<Turn> {
-    let Some(read) = super::ended_reader(harness) else {
-        return Vec::new();
+/// The turns at the end of `source`, through its last one: for a file, as
+/// few as the window that holds that turn's start shows.
+pub(super) fn last_turns(harness: HarnessKind, source: &Source) -> Vec<Turn> {
+    let path = match source {
+        Source::File(path) => path,
+        Source::OpenCode { .. } => return super::read(harness, source).unwrap_or_default(),
     };
+    let read = super::reader(harness);
     let mut limit = FIRST;
     loop {
-        let Ok((rows, whole)) = tail(path, limit) else {
+        let Ok((rows, whole)) = tail(path, limit, markers(harness)) else {
             return Vec::new();
         };
         let turns = read(&rows);
@@ -190,7 +185,7 @@ pub(super) fn last_turns(harness: HarnessKind, path: &Path) -> Vec<Turn> {
 /// Complete rows among a file's last `limit` bytes, and whether that was the
 /// whole file: a row cut by the window's start, or still being written at its
 /// end, is left out.
-fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
+fn tail(path: &Path, limit: u64, markers: &[&[u8]]) -> std::io::Result<(Vec<Value>, bool)> {
     let mut file = fs::File::open(path)?;
     let size = file.metadata()?.len();
     let start = size.saturating_sub(limit);
@@ -211,9 +206,10 @@ fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
     let rows = bytes[begin..end]
         .split(|byte| *byte == b'\n')
         .filter(|line| {
-            MARKERS
-                .iter()
-                .any(|marker| line.windows(marker.len()).any(|window| window == *marker))
+            markers.is_empty()
+                || markers
+                    .iter()
+                    .any(|marker| line.windows(marker.len()).any(|window| window == *marker))
         })
         .filter_map(|line| serde_json::from_slice(line).ok())
         .collect();
@@ -222,23 +218,20 @@ fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
 
 // -- Finding a conversation's transcript --
 
-/// The transcript file of `conversation`, which a Session ran in `cwd`;
-/// `None` when its harness keeps none here or it is gone.
+/// The transcript of `conversation`, which a Session ran in `cwd`; `None`
+/// when it is gone.
 pub(crate) fn locate(
     store: &SqliteStore,
     conversation: &CurrentConversation,
     cwd: &Path,
-) -> anyhow::Result<Option<(HarnessKind, PathBuf)>> {
+) -> anyhow::Result<Option<(HarnessKind, Source)>> {
     let Some(harness) = HarnessKind::parse(&conversation.provider) else {
         return Ok(None);
     };
     Ok(
         match super::locate(store, harness, &conversation.thread, cwd)? {
-            super::Located::Found {
-                source: super::Source::File(path),
-                ..
-            } => Some((harness, path)),
-            _ => None,
+            super::Located::Found { source, .. } => Some((harness, source)),
+            super::Located::Gone(_) => None,
         },
     )
 }
@@ -264,6 +257,10 @@ mod tests {
             .join(name)
     }
 
+    fn file(path: impl Into<PathBuf>) -> Source {
+        Source::File(path.into())
+    }
+
     /// The fixture's first `rows` lines, then `partial` bytes of the next.
     fn cut(name: &str, rows: usize, partial: usize) -> tempfile::NamedTempFile {
         let text = fs::read_to_string(fixture(name)).unwrap();
@@ -279,7 +276,7 @@ mod tests {
 
     #[test]
     fn a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message() {
-        let turn = read_turn(HarnessKind::Claude, &fixture("claude_turn.jsonl")).unwrap();
+        let turn = read_turn(HarnessKind::Claude, &file(fixture("claude_turn.jsonl"))).unwrap();
         assert_eq!(
             turn,
             SessionTurn {
@@ -304,8 +301,8 @@ mod tests {
     #[test]
     fn a_claude_turn_waiting_on_a_tool_runs_even_with_its_last_line_half_written() {
         // Through the tool result, then half of the final answer's row.
-        let file = cut("claude_turn.jsonl", 6, 120);
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
+        let cut = cut("claude_turn.jsonl", 6, 120);
+        let turn = read_turn(HarnessKind::Claude, &file(cut.path())).unwrap();
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:37.000Z"));
         assert_eq!(turn.ended_at, None);
@@ -315,19 +312,19 @@ mod tests {
 
     #[test]
     fn an_interrupted_claude_turn_says_so() {
-        let file = cut("claude_turn.jsonl", 6, 0);
-        let mut text = fs::read_to_string(file.path()).unwrap();
+        let cut = cut("claude_turn.jsonl", 6, 0);
+        let mut text = fs::read_to_string(cut.path()).unwrap();
         text.push_str(r#"{"type":"user","userType":"external","timestamp":"2026-11-10T16:26:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#);
         text.push('\n');
-        fs::write(file.path(), text).unwrap();
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
+        fs::write(cut.path(), text).unwrap();
+        let turn = read_turn(HarnessKind::Claude, &file(cut.path())).unwrap();
         assert_eq!(turn.state, TurnState::Interrupted);
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:26:00.000Z"));
     }
 
     #[test]
     fn a_codex_turn_counts_the_growth_of_its_running_total() {
-        let turn = read_turn(HarnessKind::Codex, &fixture("codex_rollout.jsonl")).unwrap();
+        let turn = read_turn(HarnessKind::Codex, &file(fixture("codex_rollout.jsonl"))).unwrap();
         assert_eq!(turn.id.as_deref(), Some("turn-2"));
         assert_eq!(turn.state, TurnState::Ended);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
@@ -345,8 +342,8 @@ mod tests {
 
     #[test]
     fn a_codex_turn_with_its_last_line_half_written_is_running() {
-        let file = cut("codex_rollout.jsonl", 9, 40);
-        let turn = read_turn(HarnessKind::Codex, file.path()).unwrap();
+        let cut = cut("codex_rollout.jsonl", 9, 40);
+        let turn = read_turn(HarnessKind::Codex, &file(cut.path())).unwrap();
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
         assert_eq!(turn.usage.unwrap().input_tokens, 25000);
@@ -357,25 +354,64 @@ mod tests {
         let text = fs::read_to_string(fixture("codex_rollout.jsonl")).unwrap();
         // Start inside the second turn's first token report.
         let from = text.find("\"total_tokens\":45900").unwrap();
-        let (rows, _) = tail(&fixture("codex_rollout.jsonl"), (text.len() - from) as u64).unwrap();
+        let (rows, _) = tail(
+            &fixture("codex_rollout.jsonl"),
+            (text.len() - from) as u64,
+            &MARKERS,
+        )
+        .unwrap();
         let turn = super::super::codex::read(&rows).pop().unwrap();
         assert_eq!(turn.started_at, None);
-        assert_eq!(turn.state, Some(TurnState::Ended));
+        assert_eq!(turn.state, TurnState::Ended);
         assert_eq!(turn.usage.unwrap().input_tokens, 25000);
     }
 
     #[test]
-    fn a_transcript_with_no_turn_ends_gives_no_current_turn() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        fs::write(file.path(), "{\"type\":\"message\",\"id\":\"a\"}\n").unwrap();
-        assert_eq!(read_turn(HarnessKind::Pi, file.path()), None);
+    fn a_pi_turn_calling_tools_runs_until_its_answer_even_half_written() {
+        let entry = |id: &str, parent: &str, at: &str, message: Value| {
+            serde_json::json!({"type":"message","id":id,"parentId":parent,
+                "timestamp":format!("2026-11-10T16:{at}Z"),"message":message})
+            .to_string()
+        };
+        let call = |stop: &str| {
+            serde_json::json!({"role":"assistant","model":"gemini-4-argon","stopReason":stop,
+                "usage":{"input":10,"output":5,"cacheRead":90,"cacheWrite":0,"cost":{"total":0.1}},
+                "content":[{"type":"text","text":"ok"}]})
+        };
+        let rows = [
+            r#"{"type":"session","version":3,"id":"s","cwd":"/work"}"#.to_owned(),
+            entry(
+                "u1",
+                "s",
+                "25:00",
+                serde_json::json!({"role":"user","content":"List files"}),
+            ),
+            entry("a1", "u1", "25:03", call("toolUse")),
+        ];
+        let cut = tempfile::NamedTempFile::new().unwrap();
+        let last = entry("a2", "a1", "25:09", call("stop"));
+        fs::write(cut.path(), format!("{}\n{}", rows.join("\n"), &last[..40])).unwrap();
+        let turn = read_turn(HarnessKind::Pi, &file(cut.path())).unwrap();
+        assert_eq!(turn.id.as_deref(), Some("u1"));
+        assert_eq!(turn.state, TurnState::Running);
+
+        fs::write(cut.path(), format!("{}\n{last}\n", rows.join("\n"))).unwrap();
+        let turn = read_turn(HarnessKind::Pi, &file(cut.path())).unwrap();
+        assert_eq!(turn.state, TurnState::Ended);
+        assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:25:09Z"));
+        assert_eq!(turn.usage.unwrap().input_tokens, 200);
     }
 
     #[test]
-    fn a_recorded_start_runs_until_its_recorded_end() {
-        let mut turn = SessionTurn::started("t".into(), 1_794_327_900);
-        assert_eq!(turn.state, TurnState::Running);
-        assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00Z"));
+    fn an_open_turn_ends_where_loopflow_recorded_its_end() {
+        let mut turn = SessionTurn {
+            id: Some("t".into()),
+            state: TurnState::Running,
+            started_at: rfc3339(1_794_327_900),
+            ended_at: None,
+            model: None,
+            usage: None,
+        };
         assert_eq!(turn.describe(1_794_327_900 + 134), "turn running 2m14s");
         assert!(!turn.handed_back());
         turn.close(1_794_327_960, Some("completed"));

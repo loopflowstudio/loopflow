@@ -151,14 +151,13 @@ fn turn_line(turn: &Turn) -> String {
     let at = |at: &Option<String>| transcript::seconds(at).map(minute);
     let ended = at(&turn.ended_at).map(|at| format!(" {at}"));
     let state = match turn.state {
-        Some(TurnState::Running) => Some("running".to_owned()),
-        Some(TurnState::Ended) => Some(format!("ended{}", ended.unwrap_or_default())),
-        Some(TurnState::Interrupted) => Some(format!("interrupted{}", ended.unwrap_or_default())),
-        None => None,
+        TurnState::Running => "running".to_owned(),
+        TurnState::Ended => format!("ended{}", ended.unwrap_or_default()),
+        TurnState::Interrupted => format!("interrupted{}", ended.unwrap_or_default()),
     };
     [
         Some(turn.at().map_or_else(|| "turn".to_owned(), minute)),
-        state,
+        Some(state),
         turn.model.clone(),
         turn.usage.map(|usage| usage.describe()),
     ]

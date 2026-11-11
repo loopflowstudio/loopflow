@@ -43,11 +43,11 @@ pub(crate) use claude::is_user_input;
 /// request, model call and tool between.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
-    /// The provider's name for it, which Loopflow's own recording of the turn
-    /// uses too: Claude's request row, Codex's turn.
+    /// The provider's name for it: Claude's request row, Codex's turn, Pi's
+    /// entry, OpenCode's user message. Loopflow's own recording uses the same
+    /// name for all but Pi's.
     pub id: Option<String>,
-    /// Absent when the transcript keeps no turn ends (Pi, OpenCode).
-    pub state: Option<live::TurnState>,
+    pub state: live::TurnState,
     /// RFC 3339; absent when the turn began before the rows read.
     pub started_at: Option<String>,
     /// RFC 3339; absent while it runs.
@@ -123,15 +123,51 @@ impl Turn {
 }
 
 /// Where a recorded conversation's text can be read.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Source {
     File(PathBuf),
-    /// OpenCode keeps history in its own store, exported by its CLI from the
-    /// conversation's directory.
+    /// OpenCode keeps every conversation in one SQLite store.
     OpenCode {
-        cwd: PathBuf,
+        store: PathBuf,
         id: String,
     },
+}
+
+impl Source {
+    /// The file whose writes change what the source holds.
+    pub(crate) fn path(&self) -> &Path {
+        match self {
+            Self::File(path) | Self::OpenCode { store: path, .. } => path,
+        }
+    }
+
+    /// Unix seconds of the last thing written to the conversation.
+    fn last_written(&self) -> Option<i64> {
+        match self {
+            Self::File(path) => json_lines(path)
+                .filter_map(|row| unix_seconds(&row["timestamp"]))
+                .last(),
+            Self::OpenCode { store, id } => opencode::last_written(store, id),
+        }
+    }
+}
+
+/// Where a harness keeps its conversations on this Machine, for the shared
+/// home. Pi honors `PI_CODING_AGENT_DIR`, OpenCode `XDG_DATA_HOME`.
+pub(crate) fn home(harness: HarnessKind) -> PathBuf {
+    let user = || dirs::home_dir().unwrap_or_default();
+    let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    match harness {
+        HarnessKind::Claude => native_home(Provider::Claude, None),
+        HarnessKind::Codex => native_home(Provider::Codex, None),
+        HarnessKind::Pi => set("PI_CODING_AGENT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| user().join(".pi/agent")),
+        HarnessKind::OpenCode => set("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| user().join(".local/share"))
+            .join("opencode"),
+    }
 }
 
 /// Why a recorded conversation has no readable transcript here.
@@ -177,6 +213,7 @@ pub(crate) fn locate(
     id: &AgentSessionId,
     cwd: &Path,
 ) -> Result<Located> {
+    let gone = |home: PathBuf| Located::Gone(Gap::FileMissing { home });
     let provider = match harness {
         HarnessKind::Claude => Provider::Claude,
         HarnessKind::Codex => Provider::Codex,
@@ -189,19 +226,23 @@ pub(crate) fn locate(
                     home: None,
                 }
             } else {
-                Located::Gone(Gap::FileMissing {
-                    home: path.parent().map(Path::to_path_buf).unwrap_or_default(),
-                })
+                gone(path.parent().map(Path::to_path_buf).unwrap_or_default())
             });
         }
         HarnessKind::OpenCode => {
-            return Ok(Located::Found {
-                source: Source::OpenCode {
-                    cwd: cwd.to_path_buf(),
-                    id: id.as_str().to_owned(),
-                },
-                home: None,
-            })
+            let home = home(harness);
+            let store = opencode::store(&home);
+            return Ok(if store.is_file() {
+                Located::Found {
+                    source: Source::OpenCode {
+                        store,
+                        id: id.as_str().to_owned(),
+                    },
+                    home: Some(home),
+                }
+            } else {
+                gone(home)
+            });
         }
     };
     let Some(home) = conversation_home(store, provider, id)? else {
@@ -212,7 +253,7 @@ pub(crate) fn locate(
             source: Source::File(path),
             home: Some(home),
         },
-        None => Located::Gone(Gap::FileMissing { home }),
+        None => gone(home),
     })
 }
 
@@ -246,35 +287,27 @@ fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathB
 /// Every turn of a transcript, oldest first.
 pub(crate) fn read(harness: HarnessKind, source: &Source) -> Result<Vec<Turn>> {
     let path = match source {
-        Source::OpenCode { cwd, id } => return Ok(opencode::turns(&opencode::export(cwd, id)?)),
+        Source::OpenCode { store, id } => {
+            return Ok(opencode::read(&opencode::messages(store, id)?))
+        }
         Source::File(path) => path,
     };
     let file =
         fs::File::open(path).with_context(|| format!("open transcript {}", path.display()))?;
-    let rows = rows(file).collect::<Vec<_>>();
-    Ok(match harness {
-        HarnessKind::Claude => claude::read(&rows),
-        HarnessKind::Codex => codex::read(&rows),
-        HarnessKind::Pi => pi::turns(&rows),
-        HarnessKind::OpenCode => anyhow::bail!("OpenCode keeps no transcript file"),
-    })
-}
-
-/// Whether a harness's transcript keeps turn ends: its last turn is then the
-/// conversation's current one.
-pub(crate) fn keeps_turn_ends(harness: HarnessKind) -> bool {
-    ended_reader(harness).is_some()
+    Ok(reader(harness)(&rows(file).collect::<Vec<_>>()))
 }
 
 /// Reads a transcript's rows into its turns.
 type Reader = fn(&[Value]) -> Vec<Turn>;
 
-/// The reader for a harness whose transcript keeps turn ends.
-fn ended_reader(harness: HarnessKind) -> Option<Reader> {
+/// The reader of a harness's transcript rows. OpenCode keeps rows in SQLite,
+/// read as the messages `opencode session export` writes.
+fn reader(harness: HarnessKind) -> Reader {
     match harness {
-        HarnessKind::Claude => Some(claude::read),
-        HarnessKind::Codex => Some(codex::read),
-        HarnessKind::Pi | HarnessKind::OpenCode => None,
+        HarnessKind::Claude => claude::read,
+        HarnessKind::Codex => codex::read,
+        HarnessKind::Pi => pi::read,
+        HarnessKind::OpenCode => opencode::read,
     }
 }
 
@@ -584,6 +617,64 @@ pub(crate) fn seconds(at: &Option<String>) -> Option<i64> {
     unix_seconds(&Value::String(at.clone()?))
 }
 
+/// One turn's model calls as Pi and OpenCode report each: input apart from
+/// cache, cache reads, cache writes, output and reasoning tokens, and cost.
+#[derive(Debug, Default)]
+struct Calls {
+    /// Which turn the calls belong to, by its position.
+    turn: usize,
+    counts: [u64; 5],
+    /// Absent once a call reports none.
+    cost: Option<f64>,
+    calls: usize,
+    model: Option<String>,
+}
+
+impl Calls {
+    fn count(&mut self, turn: usize, counts: [u64; 5], cost: Option<f64>, model: Option<&str>) {
+        if self.turn != turn {
+            *self = Self {
+                turn,
+                ..Self::default()
+            };
+        }
+        self.counts = [0, 1, 2, 3, 4].map(|i| self.counts[i] + counts[i]);
+        self.cost = match self.calls {
+            0 => cost,
+            _ => self.cost.zip(cost).map(|(sum, cost)| sum + cost),
+        };
+        self.calls += 1;
+        if let Some(model) = model {
+            self.model = Some(model.to_owned());
+        }
+    }
+
+    /// Put the turn's usage so far on `turn`, and the same as its store row.
+    fn write(&self, turn: &mut Turn, provider: &str) {
+        let [input, cache_read, cache_write, output, reasoning] = self.counts;
+        let total = input + cache_read + cache_write;
+        turn.model = self.model.clone();
+        turn.usage = Some(live::TurnUsage {
+            input_tokens: total,
+            cached_input_tokens: cache_read,
+            output_tokens: output,
+        });
+        let usage = crate::chat::types::TurnUsage {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            total_input_tokens: Some(total),
+            reasoning_tokens: Some(reasoning),
+            cache_read_tokens: Some(cache_read),
+            cache_write_tokens: Some(cache_write),
+            model: self.model.clone(),
+            cost_usd: self.cost,
+            ..Default::default()
+        };
+        turn.receipt.usage =
+            serde_json::json!({"provider": provider, "final": true, "usage": usage});
+    }
+}
+
 /// Builds turns in transcript order.
 #[derive(Debug, Default)]
 struct Turns {
@@ -598,10 +689,10 @@ impl Turns {
     fn open(&mut self) -> Option<&mut Turn> {
         self.turns
             .last_mut()
-            .filter(|turn| turn.state == Some(live::TurnState::Running))
+            .filter(|turn| turn.state == live::TurnState::Running)
     }
 
-    fn push(&mut self, id: Option<String>, state: Option<live::TurnState>, at: Option<String>) {
+    fn push(&mut self, id: Option<String>, state: live::TurnState, at: Option<String>) {
         self.turns.push(Turn {
             id,
             state,
@@ -617,11 +708,11 @@ impl Turns {
     /// A person's request starts a turn; one still open ends there, superseded.
     fn start(&mut self, id: Option<String>, at: Option<String>) {
         if let Some(turn) = self.open() {
-            turn.state = Some(live::TurnState::Interrupted);
+            turn.state = live::TurnState::Interrupted;
             turn.ended_at = at.clone();
         }
         self.woke = None;
-        self.push(id, Some(live::TurnState::Running), at);
+        self.push(id, live::TurnState::Running, at);
     }
 
     /// A row that is no person's request arrived: with no turn open, it starts
@@ -638,12 +729,12 @@ impl Turns {
     fn current(&mut self) -> &mut Turn {
         if self.open().is_none() {
             if let Some((id, at)) = self.woke.take() {
-                self.push(id, Some(live::TurnState::Running), at);
+                self.push(id, live::TurnState::Running, at);
             } else if let Some(turn) = self.turns.last_mut() {
-                turn.state = Some(live::TurnState::Running);
+                turn.state = live::TurnState::Running;
                 turn.ended_at = None;
             } else {
-                self.push(None, Some(live::TurnState::Running), None);
+                self.push(None, live::TurnState::Running, None);
             }
         }
         self.turns.last_mut().expect("a turn was just ensured")
@@ -651,24 +742,17 @@ impl Turns {
 
     fn end(&mut self, state: live::TurnState, at: Option<String>) {
         let turn = self.current();
-        turn.state = Some(state);
+        turn.state = state;
         turn.ended_at = at;
     }
 
-    /// A request in a transcript that keeps turn ends: part of the open turn,
-    /// or of the next one to open.
+    /// A request: part of the open turn, or of the next one to open.
     fn request(&mut self, at: Option<String>, text: String, from: RequestSource) {
         let request = TurnItem::Request(Request { at, text, from });
         match self.open() {
             Some(turn) => turn.items.push(request),
             None => self.waiting.push(request),
         }
-    }
-
-    /// A request in a transcript that keeps no turn ends: each opens a turn.
-    fn ask(&mut self, at: Option<String>, text: String, from: RequestSource) {
-        self.push(None, None, at.clone());
-        self.item(TurnItem::Request(Request { at, text, from }));
     }
 
     fn item(&mut self, item: TurnItem) {
@@ -735,7 +819,7 @@ impl Turns {
     fn finish(mut self) -> Vec<Turn> {
         if !self.waiting.is_empty() {
             if self.turns.is_empty() {
-                self.push(None, None, None);
+                self.push(None, live::TurnState::Ended, None);
             } else {
                 let waiting = std::mem::take(&mut self.waiting);
                 self.turns

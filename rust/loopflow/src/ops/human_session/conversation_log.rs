@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn opencode_log_keeps_conversation_and_failures_only() {
-        let export = serde_json::json!({"messages":[
+        let messages = serde_json::json!([
             {"type":"user","text":"Fix the build\n\n<lf:loopflow>rules</lf:loopflow>"},
             {"type":"synthetic","text":"injected file"},
             {"type":"assistant","content":[
@@ -241,8 +241,8 @@ mod tests {
                 {"type":"text","text":"Checking status."},
                 {"type":"tool","id":"c1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"listing output"}]}},
                 {"type":"tool","id":"c2","name":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
-        ]});
-        let text = &render(&transcript::opencode::turns(&export));
+        ]);
+        let text = &render(&transcript::opencode::read(messages.as_array().unwrap()));
         assert!(text.contains("## user\n\nFix the build"));
         assert!(text.contains("## assistant\n\nChecking status."));
         assert!(text.contains(r#"- tool: bash {"command":"ls"}"#));

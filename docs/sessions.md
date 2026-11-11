@@ -133,8 +133,8 @@ One the provider started on its own is found in its home and becomes a Session
 the first time you resume it: from then on it lists, renames, binds and resumes
 like any other.
 
-A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
-`--fork` to leave it running.
+A raw `claude`, `codex`, `pi` or `opencode` still open on it isn't one lf can
+stop; close it, or `--fork` to leave it running.
 
 From its first message until it closes, it shows up in `lf session list` for
 its checkout under its provider ID, marked `raw`, with its current turn
@@ -161,11 +161,12 @@ session_675c…   detached  LOO-472     CI under five          last turn ended 3
 ```
 
 This works for every conversation on the Machine: a Task's, one a bare
-`lf implement` started, and a plain `claude` or `codex` lf never launched.
-lf reads the end of the provider's own transcript at the moment you ask:
-Claude's under `~/.claude/projects`, Codex's rollout files under
-`~/.codex/sessions`. Nothing runs between questions, and lf never writes into
-those directories. The turn is the transcript's last one for a conversation lf
+`lf implement` started, and a plain `claude`, `codex`, `pi` or `opencode` lf
+never launched. lf reads the end of the provider's own transcript at the
+moment you ask: Claude's under `~/.claude/projects`, Codex's rollout files
+under `~/.codex/sessions`, Pi's session files under `~/.pi/agent/sessions`,
+and OpenCode's store, `~/.local/share/opencode/opencode.db`, opened read-only.
+Nothing runs between questions, and lf never writes into those directories. The turn is the transcript's last one for a conversation lf
 launched too; when the transcript leaves that turn open and lf recorded its
 end, lf's record closes it.
 

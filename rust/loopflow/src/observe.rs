@@ -22,7 +22,7 @@ enum Fact {
     Deadline(i64),
     Clock,
     /// A conversation's current turn from its transcript's end.
-    Turn(crate::harness::HarnessKind, PathBuf),
+    Turn(crate::harness::HarnessKind, crate::transcript::Source),
     /// Conversations open on this Machine that Loopflow never launched.
     RawConversations,
 }
@@ -145,8 +145,8 @@ impl Fact {
             Self::Deadline(at) => {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
-            Self::Turn(harness, path) => {
-                Answer::Turn(crate::transcript::live::read_turn(*harness, path))
+            Self::Turn(harness, source) => {
+                Answer::Turn(crate::transcript::live::read_turn(*harness, source))
             }
             Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
@@ -249,7 +249,7 @@ impl Cache {
         let entries = self.entries.lock().expect("observation cache");
         for (fact, entry) in entries.iter() {
             let hinted = match fact {
-                Fact::Turn(_, watched) => path.is_none_or(|path| watched == path),
+                Fact::Turn(_, watched) => path.is_none_or(|path| watched.path() == path),
                 Fact::RawConversations => created || path.is_none(),
                 _ => false,
             };
@@ -441,12 +441,20 @@ pub(crate) fn process(pid: u32) -> io::Result<Option<OsProcess>> {
     restored(answer)
 }
 
-/// The current or last turn of the transcript at `path`.
+/// The current or last turn of a conversation's transcript.
 pub(crate) fn transcript_turn(
     harness: crate::harness::HarnessKind,
-    path: &Path,
+    source: &crate::transcript::Source,
 ) -> Option<crate::transcript::live::SessionTurn> {
-    let Answer::Turn(answer) = read(Fact::Turn(harness, absolute(path))) else {
+    use crate::transcript::Source;
+    let source = match source {
+        Source::File(path) => Source::File(absolute(path)),
+        Source::OpenCode { store, id } => Source::OpenCode {
+            store: absolute(store),
+            id: id.clone(),
+        },
+    };
+    let Answer::Turn(answer) = read(Fact::Turn(harness, source)) else {
         unreachable!("a transcript returns its turn")
     };
     answer

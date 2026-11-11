@@ -1,7 +1,8 @@
 # LOO-822 docs assumptions
 
-- Live raw `claude`/`codex` conversations list in plain `lf session list` for
-  their checkout, marked `raw`, without creating a Session.
+- Live raw `claude`, `codex`, `pi` and `opencode` conversations list in plain
+  `lf session list` for their checkout, marked `raw`, without creating a
+  Session.
 - Raw rows carry no actions and empty `open_argv`; they join an unpaged list,
   and `--task` (their checkout's Task) and `--available` (turn not running),
   but not `--orphan`, `--blocked`, `--on`, `--search`, `--history`, `--page`.
@@ -16,8 +17,12 @@
 - A live completion counts for a transcript turn at exit when it carries the
   turn's id, or was observed within 2 s after a turn that began at or after
   its own turn. The live line matches by id only.
-- Claude's cost is kept on the stream's `completed` row as `cost_usd`; usage
-  rows have none. Open for a person: keep it there, or leave it unrecorded.
+- Claude's cost is kept on the stream's `completed` row as `cost_usd`; its
+  usage rows have none. Open for a person: keep it there, or leave it
+  unrecorded. Pi and OpenCode usage rows carry the turn's `cost_usd` from
+  their transcripts.
+- OpenCode is read from its SQLite store, not `opencode session export`;
+  open whether reading its internal schema is acceptable long-term.
 - A request that woke nothing (a local command's output, a notification no
   model call followed) is an item of the turn before it.
 - `lf` ancestors are recognized by name: `lf`, `lf-*`, `*-lf`. A provider

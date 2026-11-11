@@ -76,12 +76,12 @@ pub(super) fn read(rows: &[Value]) -> Vec<Turn> {
                 turn.receipt.usage = receipt;
                 turn.model = tally.model.clone();
                 if message["stop_reason"] == "end_turn" {
-                    turn.state = Some(TurnState::Ended);
+                    turn.state = TurnState::Ended;
                     turn.ended_at = stamp();
                 }
             }
             Some("system") => match (row["subtype"].as_str(), turns.turns.last_mut()) {
-                (Some("turn_duration"), Some(turn)) if turn.state == Some(TurnState::Ended) => {
+                (Some("turn_duration"), Some(turn)) if turn.state == TurnState::Ended => {
                     turn.receipt.duration_ms = row["durationMs"].as_u64();
                 }
                 (Some("api_error"), Some(turn)) if turn.ended_at.is_none() => {
@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(turns.len(), 2);
         // The launch message woke the agent and is the turn's first item.
         assert_eq!(turns[0].id.as_deref(), Some("u1"));
-        assert_eq!(turns[0].state, Some(TurnState::Ended));
+        assert_eq!(turns[0].state, TurnState::Ended);
         let TurnItem::Request(launch) = &turns[0].items[0] else {
             panic!("{:?}", turns[0].items[0]);
         };
@@ -285,7 +285,7 @@ mod tests {
             ("Now ship", RequestSource::Person)
         );
         assert_eq!(turns[1].at(), Some(1_794_326_700));
-        assert_eq!(turns[1].state, Some(TurnState::Running));
+        assert_eq!(turns[1].state, TurnState::Running);
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
             user("u1", "00:00", "Pick a color".into()),
             assistant("m1", "00:05", "tool_use", question),
         ];
-        assert_eq!(read(&rows)[0].state, Some(TurnState::Running));
+        assert_eq!(read(&rows)[0].state, TurnState::Running);
     }
 
     #[test]
@@ -318,7 +318,7 @@ mod tests {
                 .iter()
                 .map(|turn| (
                     turn.id.as_deref(),
-                    turn.state.unwrap(),
+                    turn.state,
                     turn.usage.unwrap().output_tokens
                 ))
                 .collect::<Vec<_>>(),
@@ -338,7 +338,7 @@ mod tests {
         let turns = read(&rows);
         assert_eq!(
             (turns.len(), turns[2].id.as_deref(), turns[2].state),
-            (3, Some("n1"), Some(TurnState::Running))
+            (3, Some("n1"), TurnState::Running)
         );
         assert_eq!(turns[2].started_at.as_deref(), Some("2026-11-10T16:05:00Z"));
         assert_eq!(turns[1].requests().count(), 1);

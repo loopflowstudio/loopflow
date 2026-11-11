@@ -61,7 +61,7 @@ Session's raw input events, including which account it actually ran on.
 `--instructions` explains which instructions were included and which were left out.
 
 Conversation text stays with its provider: `session history show` reads it from Claude,
-Codex or Pi transcript files or `opencode session export`, and lf stores none of
+Codex or Pi transcript files or OpenCode's own store, and lf stores none of
 it. Each turn, from what woke the agent until it handed back, prints one line
 and then what was asked and done in it:
 
@@ -76,8 +76,7 @@ It builds with cargo.
 
 `--json` gives each turn its `id`, `state`, `started_at`, `ended_at`, `model`,
 `usage` and `items`, where an item is a `request` or something the `agent` did.
-Pi and OpenCode keep no turn ends, so their turns open at each request and
-have no state. When a transcript is gone, it prints the recorded turns (time, status, final
+When a transcript is gone, it prints the recorded turns (time, status, final
 answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.

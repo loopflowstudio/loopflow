@@ -2,23 +2,28 @@
 //! are hints: they make the shared observation cache read a changed
 //! transcript's turn again, and its reconcile interval catches what they miss.
 //! Every subscription reading that transcript shares the one reading.
+//!
+//! OpenCode writes every conversation into one SQLite store, so any write to
+//! it hints each OpenCode conversation read; one read costs a query on that
+//! store, a few milliseconds.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 use notify::{RecursiveMode, Watcher};
 
+use crate::harness::HarnessKind;
 use crate::observe::Cache;
-use crate::provider_account::activation::native_home;
-use crate::provider_auth::Provider;
 
-/// Watch Claude's and Codex's shared homes until the returned watchers drop.
-/// A home that is missing or cannot be watched is logged and left to the
-/// reconcile interval.
+/// Watch each harness's shared home until the returned watchers drop. A home
+/// that is missing or cannot be watched is logged and left to the reconcile
+/// interval.
 pub(crate) fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
     [
-        native_home(Provider::Claude, None).join("projects"),
-        native_home(Provider::Codex, None).join("sessions"),
+        super::home(HarnessKind::Claude).join("projects"),
+        super::home(HarnessKind::Codex).join("sessions"),
+        super::home(HarnessKind::Pi).join("sessions"),
+        super::home(HarnessKind::OpenCode),
     ]
     .iter()
     .filter(|root| root.is_dir())
@@ -50,22 +55,33 @@ fn hint(cache: &Cache, event: notify::Result<notify::Event>) {
     };
     let created = event.kind.is_create();
     for path in transcripts(&event.paths) {
+        // A new OpenCode conversation is a row, not a file; raw discovery
+        // finds it at its own interval.
+        let created = created && path.extension().is_some_and(|ext| ext == "jsonl");
         cache.hint_transcript(Some(&path), created);
     }
 }
 
-/// FSEvents may name a file by its resolved path; facts keep the spelling
-/// they were read with, so both are hinted.
+/// The transcripts `paths` change: a `.jsonl` file, or OpenCode's store for
+/// a write to it or its log. FSEvents may name a file by its resolved path;
+/// facts keep the spelling they were read with, so both are hinted.
 fn transcripts(paths: &[PathBuf]) -> Vec<PathBuf> {
     paths
         .iter()
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "jsonl")
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?;
+            if name.ends_with(".jsonl") {
+                return Some(path.clone());
+            }
+            let store = name.strip_suffix("-wal").unwrap_or(name);
+            (store == "opencode.db").then(|| path.with_file_name(store))
         })
         .flat_map(|path| {
-            let resolved = path.canonicalize().ok().filter(|resolved| resolved != path);
-            std::iter::once(path.clone()).chain(resolved)
+            let resolved = path
+                .canonicalize()
+                .ok()
+                .filter(|resolved| *resolved != path);
+            std::iter::once(path).chain(resolved)
         })
         .collect()
 }
@@ -88,7 +104,8 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, format!("{RUNNING}\n")).unwrap();
         let cache = Arc::new(Cache::default());
-        let read = || crate::observe::transcript_turn(HarnessKind::Claude, &path);
+        let source = crate::transcript::Source::File(path.clone());
+        let read = || crate::observe::transcript_turn(HarnessKind::Claude, &source);
 
         let subscribers = (0..8).map(|_| cache.capture(read)).collect::<Vec<_>>();
         assert!(subscribers
@@ -130,7 +147,15 @@ mod tests {
             PathBuf::from("/nowhere/a.jsonl"),
             PathBuf::from("/nowhere/a"),
             PathBuf::from("/nowhere/settings.json"),
+            PathBuf::from("/nowhere/opencode.db-wal"),
+            PathBuf::from("/nowhere/opencode.db-shm"),
         ]);
-        assert_eq!(found, [PathBuf::from("/nowhere/a.jsonl")]);
+        assert_eq!(
+            found,
+            [
+                PathBuf::from("/nowhere/a.jsonl"),
+                PathBuf::from("/nowhere/opencode.db")
+            ]
+        );
     }
 }

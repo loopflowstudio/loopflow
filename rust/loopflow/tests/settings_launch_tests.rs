@@ -45,6 +45,55 @@ const CODEX_NATIVE: &str = concat!(
 );
 
 #[test]
+fn unknown_personal_preferences_do_not_stop_graph_commands() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(&[], Some(home.path()));
+    let preferences = "default_agent: codex\nfuture: {enabled: true}\nclaude: {model: opus, future: true}\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
+    fs::write(home.path().join("config.yaml"), preferences).unwrap();
+    for args in [
+        vec!["--context", "graph", "auto"],
+        vec!["config", "settings", "--skill", "implement", "--json"],
+    ] {
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if args[0] == "config" {
+            let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(settings[0]["settings"]["agent"]["value"], "claude:fable");
+            assert_eq!(settings[0]["settings"]["claude.model"]["value"], "opus");
+        }
+    }
+    assert_eq!(
+        fs::read_to_string(home.path().join("config.yaml")).unwrap(),
+        preferences
+    );
+    let output = command(
+        repo.path(),
+        home.path(),
+        &["set", "--global", "future", "true"],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    fs::write(
+        home.path().join("config.yaml"),
+        "yolo: perhaps\nfuture: true\n",
+    )
+    .unwrap();
+    assert!(
+        !command(repo.path(), home.path(), &["--context", "graph", "auto"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
 fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own_agent() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);

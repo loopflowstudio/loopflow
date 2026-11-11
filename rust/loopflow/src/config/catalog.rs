@@ -232,6 +232,12 @@ definitions! {
 
 definitions! {
     #[derive(schemars::JsonSchema)]
+    ClaudeConfig, CLAUDE_DEFINITIONS, "claude.", {};
+    model: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Starting model for bare claude; explicit harness:model selections win, and unset inherits Claude configuration";
+}
+
+definitions! {
+    #[derive(schemars::JsonSchema)]
     CodexConfig, CODEX_DEFINITIONS, "codex.", {};
     service_tier: Option<super::CodexServiceTier> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Codex launch tier: default (standard) or priority (fast); unset inherits provider configuration";
 }
@@ -249,6 +255,7 @@ definitions! {
     yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
     chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
     codex: CodexConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Codex launch preferences; omitted values inherit provider configuration";
+    claude: ClaudeConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Claude launch preferences; omitted values inherit provider configuration";
     isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
     summaries: Vec<SummaryConfig> = "[]", Launch, AppendReset, ReferencedAssets, Inactive, Agents, "Parsed summary requests; no runtime consumer";
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
@@ -284,6 +291,7 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
         .iter()
         .chain(CONTEXT_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
+        .chain(CLAUDE_DEFINITIONS)
 }
 
 /// The definition owning `key`, in any spelling `config::keys` accepts.

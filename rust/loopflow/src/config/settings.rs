@@ -195,6 +195,13 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
     insert(&mut check, path, value.clone());
     let parsed = serde_yaml_ng::from_value::<Config>(check)
         .map_err(|error| invalid(format!("{}: {error}", path.join("."))))?;
+    if let Some(model) = &parsed.claude.model {
+        if model.trim().is_empty() {
+            return Err(invalid(
+                "claude.model needs a model name, such as opus or fable",
+            ));
+        }
+    }
     if let Some(stream) = parsed.stream.as_deref() {
         if !["stable", "preview", "dev"].contains(&stream) {
             return Err(invalid("stream must be stable, preview or dev"));
@@ -477,6 +484,45 @@ fn leaves(value: &Value, path: &mut Vec<String>, result: &mut Vec<(Vec<String>, 
     }
 }
 
+// Files can be shared by different lf versions. Filter their unknown preferences
+// before validation; explicit setters and invocation overrides remain strict.
+fn _discard_unknown_file_settings(
+    value: &mut Value,
+    path: &mut Vec<String>,
+    file: &std::path::Path,
+) {
+    let Some(map) = value.as_mapping_mut() else {
+        return;
+    };
+    map.retain(|key, value| {
+        let Some(key) = key.as_str() else {
+            return true; // Validation reports non-string keys.
+        };
+        path.push(key.to_owned());
+        let parts: Vec<_> = path.iter().map(String::as_str).collect();
+        let known = match parts.as_slice() {
+            ["skills"] | ["skills", _] | ["graphs"] | ["graphs", _]
+            | ["graphs", _, "steps"] | ["graphs", _, "steps", _] => true,
+            parts => {
+                let preference = match parts {
+                    ["skills", _, preference @ ..]
+                    | ["graphs", _, "steps", _, preference @ ..] => preference,
+                    _ => parts,
+                };
+                super::catalog::definition(&preference.join("."))
+                    .is_some_and(|definition| definition.accepts(preference))
+            }
+        };
+        if known {
+            _discard_unknown_file_settings(value, path, file);
+        } else {
+            tracing::warn!(path = %file.display(), key = %path.join("."), "ignoring unknown LF configuration key");
+        }
+        path.pop();
+        known
+    });
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
@@ -536,6 +582,12 @@ pub fn resolve_layers(
     for layer in layers.iter().chain(&invocation) {
         let mut layer = layer.clone();
         super::normalize_context(&mut layer.value);
+        if matches!(
+            layer.source,
+            ConfigSource::Personal | ConfigSource::Repository
+        ) {
+            _discard_unknown_file_settings(&mut layer.value, &mut Vec::new(), &layer.path);
+        }
         if layer.value.is_null() {
             continue;
         }
@@ -942,6 +994,83 @@ mod tests {
         }));
         skill
     }
+
+    #[test]
+    fn file_reads_ignore_unknown_preferences_without_losing_known_neighbors() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let values = "default_agent: codex\nfuture: {enabled: true}\nclaude: {model: opus, future: true}\ncontext: {docs: [README.md], future: true}\nskills: {implement: {agent: 'claude:fable', future: true}}\ngraphs: {release: {steps: {write-code: {yolo: true, future: true}}}}";
+        for source in [ConfigSource::Personal, ConfigSource::Repository] {
+            let declaration = layer(source, SettingScope::Global, values);
+            let resolved =
+                resolve_layers(std::slice::from_ref(&declaration), Some(&occurrence())).unwrap();
+            assert_eq!(resolved.config.agent().unwrap(), "claude:fable");
+            assert_eq!(resolved.config.claude.model.as_deref(), Some("opus"));
+            assert_eq!(resolved.config.context.docs, ["README.md"]);
+            assert!(resolved.config.yolo);
+            assert!(resolved.settings.keys().all(|key| !key.contains("future")));
+            assert!(declaration.value.get("future").is_some());
+        }
+        for values in [
+            "yolo: perhaps\nfuture: true",
+            "claude: {model: [], future: true}",
+        ] {
+            assert!(resolve_layers(
+                &[layer(ConfigSource::Personal, SettingScope::Global, values)],
+                None,
+            )
+            .is_err());
+        }
+        assert!(resolve_layers(
+            &[layer(
+                ConfigSource::CommandLine,
+                SettingScope::Global,
+                "future: true"
+            )],
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claude_model_uses_normal_precedence_without_selecting_a_harness() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let layers = [
+            layer(
+                ConfigSource::Repository,
+                SettingScope::Repository,
+                "claude: {model: sonnet}",
+            ),
+            layer(
+                ConfigSource::Personal,
+                SettingScope::Global,
+                "default_agent: codex\nclaude: {model: opus}",
+            ),
+        ];
+        let resolved = resolve_layers(&layers, None).unwrap();
+        assert_eq!(resolved.config.agent().unwrap(), "codex");
+        assert_eq!(resolved.config.claude.model.as_deref(), Some("opus"));
+        assert_eq!(
+            resolved.settings["claude.model"].value.as_str(),
+            Some("opus")
+        );
+        let mut skill = Skill::named("kickoff");
+        skill.agent = Some("claude:fable".into());
+        assert_eq!(
+            resolve_layers(&layers, Some(&skill))
+                .unwrap()
+                .config
+                .agent()
+                .unwrap(),
+            "claude:fable"
+        );
+        for invalid in ["''", "' '", "null", "{}"] {
+            assert!(
+                super::parse_value("claude.model", invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
     #[test]
     fn codex_service_tier_is_optional_and_typed() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();

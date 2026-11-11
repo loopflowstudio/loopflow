@@ -1278,11 +1278,18 @@ release:
                 .as_deref(),
             Some("code")
         );
-        for invalid in ["planning: {provider: git}\n", "agnet: claude\n"] {
-            std::fs::write(&wave, invalid).unwrap();
-            let error = load_wave_config(Some(repo.path()), Some("infra")).unwrap_err();
-            assert!(error.to_string().contains(wave.to_str().unwrap()));
-        }
+        std::fs::write(&wave, "planning: {provider: git}\n").unwrap();
+        let error = load_wave_config(Some(repo.path()), Some("infra")).unwrap_err();
+        assert!(error.to_string().contains(wave.to_str().unwrap()));
+        std::fs::write(&wave, "agnet: claude\n").unwrap();
+        assert_eq!(
+            load_wave_config(Some(repo.path()), Some("infra"))
+                .unwrap()
+                .unwrap()
+                .agent()
+                .unwrap(),
+            "codex"
+        );
         assert!(load_config(Some(repo.path())).is_ok());
         let repo_config = repo.path().join(".lf/config.yaml");
         std::fs::write(&repo_config, "session: {terminal: ghostty}\n").unwrap();

@@ -200,6 +200,21 @@ Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
 
+QA fixes (November 11; both were on main before this branch):
+
+- A new Session on a Task got every earlier Task steer again. `reconcile`
+  (`store/sqlite/steers.rs`) now skips a shared steer saved before the
+  Session started that another Session was already handed (`emitted`); a
+  steer saved after it started, or still pending for no Session, arrives.
+  Its lookup is indexed by `steer_deliveries_steer`
+  (`migrations/steer_delivery_lookups.sql`, this branch's one migration).
+- OpenCode wrote a new `context-manifest.md` on every model step (20 files in
+  40 s). The manifest is named by its content hash
+  (`context_block::write_manifest`), so an unchanged checkout reuses one file
+  on every harness.
+- `store::sqlite::steers::tests::a_new_task_session_skips_steers_an_earlier_session_read`,
+  `context_block::tests::repeated_requests_over_unchanged_files_write_one_manifest` — pass
+
 Checks (November 11, on the bare rule):
 
 - After merging main (#1881 moved server fixtures under `rust/loopflow/tests/`): `cargo test -p loopflow --lib server::schema` — 7 pass; Swift test paths already point at the new directory

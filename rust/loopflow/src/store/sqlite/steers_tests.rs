@@ -529,6 +529,72 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
 }
 
 #[test]
+fn a_new_task_session_skips_steers_an_earlier_session_read() {
+    let (_home, store, adapter) = fixture();
+    let save = |source: &str, text: &str| {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            source,
+            "1",
+            &Author::Named("Author".into()),
+            text,
+        )
+        .unwrap();
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,worktree,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1','/task',1);
+            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1);
+            UPDATE agent_sessions SET cwd='/task';",
+        )
+        .unwrap();
+    save("read", "Already read");
+    store
+        .emit_session_steers(&adapter, "native", "tool", |batch, _, _| {
+            Ok(rendered(batch))
+        })
+        .unwrap();
+    let batch = store.session_steers("session", 0, 32).unwrap().items[0]
+        .batch_id
+        .clone()
+        .unwrap();
+    store.confirm_session_steers(&adapter, &[batch], 2).unwrap();
+    // Pending for no Session when the next one starts.
+    save("unread", "Never read");
+    store.test_session("next", &crate::session_record::new_artifact_key());
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE steers SET created_at=unixepoch()-10;
+            UPDATE agent_sessions SET cwd='/task',created_at=unixepoch()-5 WHERE id='next';",
+        )
+        .unwrap();
+    let texts = |page: crate::steer::SessionSteerPage| {
+        page.items
+            .into_iter()
+            .map(|item| item.steer.text)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts(store.session_steers("next", 0, 32).unwrap()),
+        ["Never read"]
+    );
+    save("later", "Saved after it started");
+    let page = store.session_steers("next", 0, 32).unwrap();
+    assert_eq!(page.pending, 2);
+    assert_eq!(texts(page), ["Never read", "Saved after it started"]);
+}
+
+#[test]
 fn migration_preserves_released_event_copies_and_planning_receipts() {
     use crate::store::migrations::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();

@@ -84,6 +84,12 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 - Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
   migration rewrites them.
 
+- The load guidance in `AGENTS.md` ("**Load:** one Machine runs hundreds of
+  concurrent agents…") and `builtins/task/skill/implement.md` ("Write for the
+  load it will carry") appeared uncommitted in this checkout from another
+  Session during publish; `lf sync` checkpointed it into this branch. Kept in
+  PR #1879; move it to its own PR if it shouldn't land with LOO-821.
+
 # LOO-835
 
 - Pi's bash guard starts `lf __context-block --moment tool-group` for every

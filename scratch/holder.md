@@ -738,29 +738,25 @@ relay's `handoff()`; the restart test now refuses `ESC[2J`.
 
 ### Still wrong, after the QA fixes
 
-Fixed since: a holder is one LfProcess (id from pid + OS start time, written
-when a server starts or adopts it, settled by the server that spawned it;
-`held_terminals_list_one_holder_process`). A view whose agent exited while no
-server ran prints `The agent exited with 3.` and exits 3; the registry now
-settles adopted exits before answering views. The leaked QA holder came from an
-earlier draft of `a_held_pane_reads_reconnecting…` (an endless 0.2 s tick
-loop); the transport `Fixture` now kills every holder its store recorded on
-drop. Malformed `lf session attach` args name the expected form.
+Fixed since: a holder is one LfProcess (id from pid + OS start time). The
+server that spawns it writes the row and settles it from `wait`; a server that
+adopts it at startup writes the row, keeps one idle request connection, and
+settles it with no outcome when that closes (the store allows only
+succeeded/failed/interrupted, and nobody saw the exit). Both go through
+`holder::client::settle`; the holder's idle-out counts running terminals only,
+so the watch connection never keeps it. `held_terminals_list_one_holder_process`
+covers one row per holder and the adopted holder's row ending after SIGKILL
+(it kills rather than idles; the path is the same socket close). A view whose
+agent exited while no server ran prints `The agent exited with 3.` and exits 3.
+The transport `Fixture` kills every holder its store recorded on drop.
+Malformed `lf session attach` args name the expected form.
 
-Fixed since: a server that adopts a holder at startup keeps one idle request
-connection to it and, when that closes, settles the holder's row with no
-outcome (the store allows only succeeded/failed/interrupted, and nobody saw the
-exit); a completed holder row is then forgotten. `held_terminals_list_one_holder_process`
-kills the adopted holder and requires no unfinished row. One thread per adopted
-holder, not per terminal. Gap: a holder that did not answer at startup is not
-watched.
+Remaining: a holder that did not answer at startup is never adopted, so if it
+exits later its row stays unfinished (`lf ps` still hides it by OS identity).
+Its terminals are skipped too (`Registry::adopt` logs and continues), so
+that view is stuck until a server restart. Open choice: retry unanswered
+holders from the registry loop, or leave both.
 
-Compress (after d695dacce): holder row writes share one `write`; rest kept.
-`transport_tests -- held_terminals_list_one_holder_process held_session_survives` 2 passed.
-
-Compress (after 6dc4041fa): the two settle helpers are one, `settle(pid,
-started, Option<ExitStatus>)`.
-
-Checks (after that): `transport_tests -- held_ a_held` 5 passed; `--lib --
+Checks (after 50ae64b2a): `transport_tests -- held_ a_held` 5 passed; `--lib --
 transport:: holder::` 85 passed; clippy clean; `documented_commands::` passed
 before 6dc4041fa (no command changed since).

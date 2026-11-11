@@ -5,7 +5,7 @@ import SwiftUI
 /// Changes that Desktop shows beside it open over it.
 struct TaskWorkspaceView: View {
     enum Face: String, Identifiable {
-        case brief, changes
+        case brief, changes, runs
         var id: String { rawValue }
     }
 
@@ -32,8 +32,9 @@ struct TaskWorkspaceView: View {
                         Button("Brief", systemImage: "doc.text") { face = .brief }
                     }
                     Button("Changes", systemImage: "plusminus") { face = .changes }
+                    Button("Runs", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { face = .runs }
                 } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("Brief and Changes")
+                    .accessibilityLabel("Brief, Changes and Runs")
             }
         }
         .sheet(item: $face) { face in
@@ -42,6 +43,7 @@ struct TaskWorkspaceView: View {
                     switch face {
                     case .brief: TaskBriefView(client: client, task: task, theme: theme).navigationTitle("Brief")
                     case .changes: TaskChangesView(client: client, task: task, theme: theme).navigationTitle("Changes")
+                    case .runs: TaskRunsView(client: client, task: task, theme: theme).navigationTitle("Runs")
                     }
                 }
                 .navigationBarTitleDisplayMode(.inline)
@@ -226,6 +228,99 @@ struct TaskChangesView: View {
     }
 }
 
+/// Each Graph that ran for the Task, newest first, with what every step did.
+struct TaskRunsView: View {
+    let client: RemoteMobileClient
+    let task: WorkViewPlan.Content
+    let theme: ThemeDefinition
+    @State private var status = Loaded<WorkFrame.TaskStatusReading>.loading
+
+    var body: some View {
+        Group {
+            switch status {
+            case .loading: ProgressView()
+            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .value(let status) where status.graphProcesses.isEmpty:
+                ContentUnavailableView("No runs yet", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+            case .value(let status):
+                List {
+                    ForEach(status.graphProcesses.sorted { $0.entry.updatedAt > $1.entry.updatedAt }, id: \.entry.id) { run in
+                        Section {
+                            ForEach(run.steps, id: \.lfProcessId) { step in
+                                HStack {
+                                    Text(step.label).font(Typography.body(15)).foregroundStyle(theme.palette.text)
+                                    Spacer()
+                                    Text(step.outcome ?? (step.completedAt == nil ? "running" : "finished"))
+                                        .font(Typography.caption(13))
+                                        .foregroundStyle(theme.palette.textSecondary)
+                                }
+                                .listRowBackground(theme.palette.background)
+                            }
+                        } header: {
+                            Text("\(run.entry.name) · \(run.entry.state.rawValue)")
+                                .font(Typography.strong(14))
+                                .foregroundStyle(theme.palette.textSecondary)
+                                .textCase(nil)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .refreshable { await load() }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.background)
+        .task { await load() }
+    }
+
+    private func load() async {
+        do { status = .value(try await client.status(task: task.work.id)) } catch {
+            status = .failed(machineConnectionMessage(error))
+        }
+    }
+}
+
+/// One file as it stands in the Task's checkout.
+struct TaskFileView: View {
+    let client: RemoteMobileClient
+    let task: WorkViewPlan.Content
+    let path: String
+    let theme: ThemeDefinition
+    @State private var file = Loaded<TaskFileSnapshot>.loading
+
+    var body: some View {
+        Group {
+            switch file {
+            case .loading: ProgressView()
+            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .value(let file):
+                if let content = file.content {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(content)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(theme.palette.text)
+                            .textSelection(.enabled)
+                            .padding(12)
+                    }
+                } else {
+                    ContentUnavailableView("Can’t show this file", systemImage: "doc")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.background)
+        .navigationTitle((path as NSString).lastPathComponent)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        do { file = .value(try await client.file(task: task.work.id, path: path)) } catch {
+            file = .failed(machineConnectionMessage(error))
+        }
+    }
+}
+
 struct TaskDiffView: View {
     let client: RemoteMobileClient
     let task: WorkViewPlan.Content
@@ -266,6 +361,11 @@ struct TaskDiffView: View {
         .background(theme.palette.background)
         .navigationTitle((path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink("Whole file") { TaskFileView(client: client, task: task, path: path, theme: theme) }
+            }
+        }
         .task { await load() }
     }
 

@@ -39,6 +39,15 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         try await decode(WorkFrame.TaskStatusReading.self, read(.taskGet(directory: "/", issue: task)))
     }
 
+    /// The Machine's Waves that are still in use.
+    func waves() async throws -> [MobileWave] {
+        try await decode([MobileWave].self, read(.waveList)).filter { $0.retiredAt == nil && $0.status != "abandoned" }
+    }
+
+    func file(task: String, path: String) async throws -> TaskFileSnapshot {
+        try await decode(TaskFileSnapshot.self, read(.taskFile(issue: task, path: path)))
+    }
+
     func changes(task: String) async throws -> TaskChangesSnapshot {
         try await decode(TaskChangesSnapshot.self, read(.taskChanges(issue: task, base: "parent", head: nil)))
     }
@@ -159,6 +168,21 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     private func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {
         try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
+    }
+}
+
+/// A Wave as the nav offers it: a name within one repository.
+struct MobileWave: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let status: String
+    /// The repository's path on the Machine.
+    let repo: String
+    let retiredAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, status, repo
+        case retiredAt = "retired_at"
     }
 }
 

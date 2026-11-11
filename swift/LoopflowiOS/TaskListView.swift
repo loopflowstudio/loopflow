@@ -19,14 +19,20 @@ enum TaskFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    var expression: String {
+    private var states: [String] {
         switch self {
-        case .started: "kind:task state:working or kind:task state:autonomous"
-        case .available: "kind:task state:available"
-        case .busy: "kind:task state:busy"
-        case .backlog: "kind:task state:backlog"
-        case .done: "kind:task state:done"
+        case .started: ["working", "autonomous"]
+        case .available: ["available"]
+        case .busy: ["busy"]
+        case .backlog: ["backlog"]
+        case .done: ["done"]
         }
+    }
+
+    /// The view expression for these Tasks, within one Wave when `wave` names it.
+    func expression(wave: String?) -> String {
+        let scope = wave.map { "wave:\($0) " } ?? ""
+        return states.map { "\(scope)kind:task state:\($0)" }.joined(separator: " or ")
     }
 }
 
@@ -39,11 +45,16 @@ final class TaskFeed {
     private(set) var error: String?
     /// Repository names by durable ID, filled in as readings name them.
     private(set) var names: [String: String] = [:]
+    /// Repository paths on the Machine by durable ID, which is how Waves name their repository.
+    private(set) var paths: [String: String] = [:]
+    private(set) var waves: [MobileWave] = []
     var filter = TaskFilter.started
+    /// The Wave whose Tasks are listed; nil lists every Wave's.
+    var wave: String?
     /// The last reading under each filter, shown at once while the Machine answers.
     private struct Saved: Codable {
         let repositories: [RepositoryTasks]
-        let names: [String: String]
+        let paths: [String: String]
     }
     @ObservationIgnored private var waiting: Perf.Wait?
     @ObservationIgnored private let client: RemoteMobileClient
@@ -59,7 +70,10 @@ final class TaskFeed {
         waiting = Perf.begin("tasks_current")
         if let saved = try? JSONDecoder().decode(Saved.self, from: Data(contentsOf: savedURL)) {
             repositories = saved.repositories
-            names.merge(saved.names) { _, saved in saved }
+            for (id, path) in saved.paths where paths[id] == nil {
+                paths[id] = path
+                names[id] = URL(fileURLWithPath: path).lastPathComponent
+            }
             loaded = true
             Perf.launch("tasks_saved")
         } else {
@@ -67,7 +81,7 @@ final class TaskFeed {
             loaded = false
         }
         do {
-            let observation = try await client.observeTasks(expression: filter.expression)
+            let observation = try await client.observeTasks(expression: filter.expression(wave: wave))
             guard current == generation, !Task.isCancelled else { observation.close(); return }
             self.observation = observation
             reader = Task { [weak self] in
@@ -119,25 +133,28 @@ final class TaskFeed {
     /// Removes what this Machine's readings left on the phone.
     func forget() {
         stop()
-        for filter in TaskFilter.allCases { try? FileManager.default.removeItem(at: savedURL(filter)) }
+        let saved = (try? FileManager.default.contentsOfDirectory(at: .cachesDirectory, includingPropertiesForKeys: nil)) ?? []
+        for file in saved where file.lastPathComponent.hasPrefix("tasks-\(client.savedMachine.machineID)-") {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
-    private var savedURL: URL { savedURL(filter) }
-
-    private func savedURL(_ filter: TaskFilter) -> URL {
-        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue).json")
+    private var savedURL: URL {
+        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
     }
 
     private func save() {
-        try? JSONEncoder().encode(Saved(repositories: repositories, names: names))
+        try? JSONEncoder().encode(Saved(repositories: repositories, paths: paths))
             .write(to: savedURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     private func name(_ ids: [String]) async {
         for id in ids where names[id] == nil {
             guard let path = try? await client.repositoryPath(id: id) else { continue }
+            paths[id] = path
             names[id] = URL(fileURLWithPath: path).lastPathComponent
         }
+        if waves.isEmpty, let found = try? await client.waves() { waves = found }
     }
 }
 
@@ -194,7 +211,17 @@ struct TaskListView: View {
         feed.repositories.contains { $0.repository == repository } ? repository : ""
     }
 
-    private var title: String { shown.isEmpty ? "All repositories" : name(shown) }
+    private var title: String {
+        guard !shown.isEmpty else { return "All repositories" }
+        guard let wave = waves.first(where: { $0.id == feed.wave }) else { return name(shown) }
+        return "\(name(shown)) · \(wave.name)"
+    }
+
+    /// The shown repository's Waves; a Wave is chosen within a repository, as on Desktop.
+    private var waves: [MobileWave] {
+        guard let path = feed.paths[shown] else { return [] }
+        return feed.waves.filter { $0.repo == path }.sorted { $0.name < $1.name }
+    }
 
     var body: some View {
         NavigationStack {
@@ -272,8 +299,14 @@ struct TaskListView: View {
                         Picker("Show", selection: $feed.filter) {
                             ForEach(TaskFilter.allCases) { Text($0.title).tag($0) }
                         }
+                        if !waves.isEmpty {
+                            Picker("Wave", selection: $feed.wave) {
+                                Text("Every Wave").tag(String?.none)
+                                ForEach(waves) { Text($0.name).tag(String?.some($0.id)) }
+                            }
+                        }
                     } label: {
-                        Image(systemName: feed.filter == .started
+                        Image(systemName: feed.filter == .started && feed.wave == nil
                             ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                     .accessibilityLabel("Show")
@@ -301,7 +334,8 @@ struct TaskListView: View {
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
-        .task(id: [feed.filter.rawValue, String(scenePhase == .active)]) {
+        .onChange(of: shown) { feed.wave = nil }
+        .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }
     }

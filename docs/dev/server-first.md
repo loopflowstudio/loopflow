@@ -115,13 +115,14 @@ that cannot reach it logs a gap and lets the turn continue.
 
 ## Pieces
 
-Each is one Task and one PR. The first five do not depend on each other.
+Each is one Task and one PR. The first four do not depend on each other.
+Desktop already sends pane status as `session.status` writes on its server
+connection, with no process per pane.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs | |
 | Hooks call the server, not the store | Store opens inside turn boundaries | |
-| Desktop sends pane status on its server connection | One `session observe-status` per pane | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |

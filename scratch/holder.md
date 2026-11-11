@@ -787,3 +787,32 @@ test, `session_lifecycle_tests`.
 Compress (November 11): `Handoff::connect` keeps one `LazyLock` gap;
 `Hosted::pass` got its doc back. `transport_tests -- a_held_view_meeting_another_build
 a_held_terminal_with_no_view a_held_conversation_has_no_idle` 3 passed; clippy clean.
+
+## Concept review, headless — November 11, 2026 (third)
+
+All six steers are built and recorded above. One mismatch is left in the
+managed rule.
+
+**The repository conversation records no WorkSource.**
+`primary.rs::repository_session` leaves `work_source: None`; Task and Wave
+primaries record `Declared`. So `is_managed` calls it bare (LOO-821: no
+hooks, no steers), while `transport::managed` holds it from a Desktop pane
+through `LF_SERVER` and not from `lf session resume` in a terminal. The
+answer to 778081f8 ("there is no such thing other than one you start through a
+shell") reads every Desktop conversation as Task or Wave work; the repository
+primary is the one that isn't. LOO-823 recorded "wave/repo should behave
+exactly like open tasks" for lifetime.
+
+Open: is the repository conversation managed?
+
+- (a) Yes: `repository_session` records `Declared` (on this branch and
+  LOO-821's reader alike), it gets hooks and steers, and `managed()` loses its
+  `LF_SERVER` branch: held = `task_run || is_managed`, one rule wherever it is
+  opened.
+- (b) No: it stays bare. It is held from Desktop because the holder holds
+  unmanaged things too (as shells will in LOO-830), and `LF_SERVER` stays the
+  Desktop rule; from a terminal it keeps its own owner.
+
+Why it matters: (a) changes what LOO-821 delivers to a repository
+conversation; (b) keeps two answers to "is this held" for one conversation,
+depending on where it was opened. Built today: (b).

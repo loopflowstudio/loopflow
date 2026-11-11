@@ -242,7 +242,7 @@ def test_nested_worktree_discovery_uses_owning_checkout(cleaner, monkeypatch, pr
     if protection == "recent":
         _age(output, 0)
     elif protection == "open":
-        _age(output, 0.5)
+        _age(output, 0.125)
         monkeypatch.setattr(
             cleaner, "_activity", lambda: _activity(frozenset({output}), frozenset())
         )
@@ -298,7 +298,7 @@ def test_global_derived_data_reclaims_idle_projects_and_preserves_open_recent_an
     home = tmp_path / "home"
     derived = home / "Library/Developer/Xcode/DerivedData"
     for name in ("idle", "open", "recent"):
-        _write(derived / name / "Build/output", 0.5, 1024 * 1024)
+        _write(derived / name / "Build/output", 0.125, 1024 * 1024)
         _age_tree(derived / name, 3)
     _age(derived / "recent/Build/output", 0)
     external = home / "unpublished/source.swift"
@@ -374,7 +374,7 @@ def test_build_discovery_limit_reports_incomplete_and_retains_uninspected_output
 
 
 @pytest.mark.parametrize(
-    "free_gib,minutes,removed", [(80, 120, False), (50, 120, True), (10, 30, True), (10, 5, False)]
+    "free_gib,minutes,removed", [(80, 90, False), (50, 90, True), (10, 30, True), (10, 5, False)]
 )
 def test_pressure_changes_retention_without_removing_recent_output(
     cleaner, monkeypatch, free_gib: int, minutes: int, removed: bool
@@ -393,8 +393,8 @@ def test_reclaims_large_idle_profile_beside_live_output_and_unpublished_source(
 ) -> None:
     repo = _build_fixture(cleaner, 300, 128 * 1024**2)
     live = repo / "target/release/live"
-    _write(live, 0.5)
-    _age_tree(repo / "target", 0.5)
+    _write(live, 0.125)
+    _age_tree(repo / "target", 0.125)
     source = repo / "unpublished.rs"
     source.write_text("unfinished work")
     monkeypatch.setattr(cleaner, "_activity", lambda: _activity(frozenset({live}), frozenset()))
@@ -409,8 +409,8 @@ def test_pressure_returns_to_normal_after_space_is_recovered(cleaner, monkeypatc
     repo = _build_fixture(cleaner, 120, 8192)
     first = repo / "target/debug"
     second = repo / "target/release"
-    _write(second / "other", 120 / 1440)
-    _age_tree(second, 120 / 1440)
+    _write(second / "other", 90 / 1440)
+    _age_tree(second, 90 / 1440)
     # A recent root selects separate profiles; the largest one restores the target.
     monkeypatch.setattr(
         cleanup.shutil,
@@ -523,6 +523,39 @@ def test_activity_distinguishes_a_builder_from_an_idle_shell(cleaner, monkeypatc
         cleaner._activity().reason(cleanup.Candidate(repo / "target", "build", repo))
         == "builder in checkout"
     )
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        "/Applications/Loopflow.app/Contents/MacOS/lf session serve --terminal -- lf",
+        "/usr/bin/codex",
+        "/usr/bin/claude",
+    ],
+)
+def test_agent_helpers_in_a_checkout_do_not_hold_its_builds(cleaner, monkeypatch, server) -> None:
+    repo = _build_fixture(cleaner, 300)
+    output = repo / "target/debug/output"
+    lsof = f"p30\ncnode\nfcwd\nn{repo}\n"
+    monkeypatch.delattr(cleaner, "_activity")
+    monkeypatch.setattr(
+        cleaner,
+        "_command",
+        lambda args, **kwargs: f"10 {server}\n20 x\n" if args[0] == "ps" else lsof,
+    )
+    monkeypatch.setattr(
+        cleaner,
+        "_processes",
+        lambda: {
+            10: cleanup.Process(10, 1, os.getuid(), "fixture", server.split()[0]),
+            20: cleanup.Process(20, 10, os.getuid(), "fixture", "/usr/bin/zsh"),
+            30: cleanup.Process(30, 20, os.getuid(), "fixture", "/opt/node"),
+        },
+    )
+    candidate = cleanup.Candidate(repo / "target", "build", repo)
+    assert cleaner._activity().reason(candidate) is None
+    lsof += f"ftxt\nn{output}\n"
+    assert cleaner._activity().reason(candidate) == "held open"
 
 
 @pytest.fixture
@@ -837,7 +870,7 @@ def test_released_demo_loses_its_runtime_and_keeps_durable_history(cleaner, monk
     _write(history / "home/loopflow.db", 8)
     _write(history / "repo/AGENTS.md", 8)
     # With LF_HOME in the durable root, the copied executable is the owner's
-    # only link to the runtime root. A demo records no outcome: seven days.
+    # only link to the runtime root. A demo records no outcome: two days.
     binary = runtime / "bin/lf"
     binary.parent.mkdir(parents=True)
     shutil.copyfile("/bin/sleep", binary)
@@ -1187,12 +1220,12 @@ def test_busy_uv_cache_is_retained_without_forcing_its_lock(cleaner) -> None:
 @pytest.mark.parametrize(
     ("outcome", "age", "removed"),
     [
-        ("passed", 0.5, False),
-        ("passed", 2, True),
-        ("failed", 2, False),
-        ("failed", 8, True),
-        ("unknown", 2, False),
-        ("unknown", 8, True),
+        ("passed", 0.125, False),
+        ("passed", 0.5, True),
+        ("failed", 1, False),
+        ("failed", 3, True),
+        ("unknown", 1, False),
+        ("unknown", 3, True),
         ("saved", 40, False),
     ],
 )

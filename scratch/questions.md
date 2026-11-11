@@ -57,3 +57,9 @@ for the parent plan after its obsolete scratch plans were removed.
   and a discarded warm-up before each timed CLI or served checkpoint. Copy
   provider transcript directories and the OpenCode database without credentials;
   ambient OS processes remain live and are a stated limit on attribution.
+
+- Process-inventory measurement, iteration 2: fresh read-only online backup of
+  the Machine store; every measured command uses `/tmp/loo822-process-measure`.
+  Keep iteration 1’s private provider transcript copies and unchanged timing
+  harness; OS/Git facts remain ambient. Test a non-overlapping local planning
+  latency improvement, with full JSON unchanged, without inventing a target.

@@ -1,0 +1,3626 @@
+{
+  "shapes": {
+    "a8a149e57e439b47": {
+      "family": "live-agent",
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at,e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
+      "plan": [
+        "SCAN e USING INDEX sqlite_autoindex_processes_1"
+      ],
+      "plan_error": null
+    },
+    "6e023bc96509e64b": {
+      "family": null,
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at,g.graph,g.compiled FROM graph_processes g JOIN processes e ON e.id=g.lf_process_id\n             WHERE (e.id IN (SELECT graph FROM (WITH RECURSIVE tw AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1),\n            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),\n            up(id, path) AS (SELECT id, cwd FROM f WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)\n                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),\n            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw\n                WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND worktree!=''),\n            links(session_id, graph) AS (\n                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process\n                    WHERE se.lf_process_id IN (SELECT id FROM f)\n                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p\n                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL\n                UNION SELECT p.agent_session_id, p.id FROM processes p\n                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)\n         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path\n         UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id\n                WHERE r.process_id IN (SELECT id FROM f)\n         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON (a.primary_scope IS NULL\n         AND (a.task_id=tw.id OR (tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (a.cwd=rtrim(tw.worktree,'/') OR instr(a.cwd,rtrim(tw.worktree,'/')||'/')=1))))))) ORDER BY e.rowid",
+      "plan": [
+        "SEARCH g USING INDEX sqlite_autoindex_graph_processes_1 (lf_process_id=?)",
+        "LIST SUBQUERY 19",
+        "CO-ROUTINE (subquery-18)",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "MATERIALIZE up",
+        "SETUP",
+        "MATERIALIZE f",
+        "SCAN fp USING COVERING INDEX sqlite_autoindex_graph_processes_1",
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "SCAN f",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "RECURSIVE STEP",
+        "SCAN up",
+        "MATERIALIZE checkouts",
+        "MATERIALIZE tw",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCAN tw",
+        "SCALAR SUBQUERY 6",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "SCAN c",
+        "BLOOM FILTER ON up (path=?)",
+        "SEARCH up USING AUTOMATIC COVERING INDEX (path=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "LIST SUBQUERY 15",
+        "SCAN f",
+        "SEARCH tw USING AUTOMATIC COVERING INDEX (id=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "MATERIALIZE links",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH se USING COVERING INDEX session_events_process (lf_process_id=?)",
+        "LIST SUBQUERY 8",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX agent_process_attachment (attached_lf_process_id=?)",
+        "LIST SUBQUERY 10",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "LIST SUBQUERY 12",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN l",
+        "SEARCH a USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SCAN tw",
+        "SCALAR SUBQUERY 17",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN (subquery-18)",
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "REUSE LIST SUBQUERY 19",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "cf79ec12d973bf59": {
+      "family": null,
+      "sql": "SELECT type, name, tbl_name, COALESCE(sql, '')\n         FROM sqlite_master\n         WHERE type IN ('table', 'view', 'index', 'trigger')\n           AND name NOT LIKE 'sqlite_%'\n           AND name != 'schema_migrations'\n         ORDER BY type, name",
+      "plan": [
+        "SCAN sqlite_master",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "ac7a870408a25e0c": {
+      "family": null,
+      "sql": "SELECT version, checksum FROM schema_migrations\n         WHERE checksum IS NOT NULL ORDER BY applied_at, rowid",
+      "plan": [
+        "SCAN schema_migrations",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "36c916d2a4c452a4": {
+      "family": null,
+      "sql": "SELECT id,shipped_at,ship_approved_lf_process_id,ship_lf_process_id,ship_restarts FROM tasks WHERE shipped_at IS NOT NULL\n             AND checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)",
+      "plan": [
+        "SCAN tasks",
+        "SCALAR SUBQUERY 1",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)"
+      ],
+      "plan_error": null
+    },
+    "300f2c4e2dcf0305": {
+      "family": null,
+      "sql": "SELECT count(*) FROM tasks t LEFT JOIN projects p ON p.id=t.project_id\n                 WHERE p.wave_id=?1 AND (t.abandoned_at IS NULL AND t.planning_completed IS NOT 1) AND t.planning_deleted_at IS NULL\n    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)",
+      "plan": [
+        "SEARCH p USING INDEX idx_projects_wave_updated (wave_id=?)",
+        "SEARCH t USING INDEX idx_tasks_project (project_id=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH d USING COVERING INDEX sqlite_autoindex_task_deletions_1 (wave_id=? AND issue_id=?)"
+      ],
+      "plan_error": null
+    },
+    "a71147d060c56188": {
+      "family": null,
+      "sql": "SELECT repo,id FROM wave_addresses WHERE id=?1",
+      "plan": [
+        "CO-ROUTINE addresses",
+        "SETUP",
+        "SCAN waves",
+        "RECURSIVE STEP",
+        "SCAN w",
+        "SCAN a",
+        "SEARCH w USING INDEX sqlite_autoindex_waves_1 (id=?)",
+        "SCAN a"
+      ],
+      "plan_error": null
+    },
+    "b0077752121a2702": {
+      "family": null,
+      "sql": "SELECT CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned' WHEN t.planning_completed=1 THEN 'done' WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=t.ship_lf_process_id OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id=t.id))) THEN CASE WHEN t.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END WHEN t.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' WHEN t.worktree IS NULL THEN 'unstarted' ELSE 'idle' END FROM tasks t WHERE t.id=?1",
+      "plan": [
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH lp USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)"
+      ],
+      "plan_error": null
+    },
+    "2338e0a6ec91fe44": {
+      "family": "task-process-membership",
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e WHERE e.id IN (WITH members AS MATERIALIZED (SELECT a.id FROM agent_sessions a JOIN (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1) tw ON (a.primary_scope IS NULL\n         AND (a.task_id=tw.id OR (tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (a.cwd=rtrim(tw.worktree,'/') OR instr(a.cwd,rtrim(tw.worktree,'/')||'/')=1)))))\n        SELECT ae.id FROM processes ae JOIN (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1) tw ON (((tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (ae.cwd=rtrim(tw.worktree,'/') OR instr(ae.cwd,rtrim(tw.worktree,'/')||'/')=1)) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id=ae.id))\n        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL\n        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL\n        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)) ORDER BY e.started_at DESC,e.id",
+      "plan": [
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "LIST SUBQUERY 14",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "SCAN ae USING INDEX sqlite_autoindex_processes_1",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCALAR SUBQUERY 5",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "CORRELATED SCALAR SUBQUERY 6",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH r USING COVERING INDEX sqlite_autoindex_relocated_task_processes_1 (task_id=? AND process_id=?)",
+        "RIGHT",
+        "SEARCH se USING COVERING INDEX session_process_membership (session_id=? AND lf_process_id>?)",
+        "LIST SUBQUERY 9",
+        "MATERIALIZE members",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCAN a",
+        "SCALAR SUBQUERY 2",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH p USING INDEX agent_process_session (agent_session_id=?)",
+        "LIST SUBQUERY 11",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX agent_process_session (agent_session_id=?)",
+        "LIST SUBQUERY 13",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "84409eb0ef3830d3": {
+      "family": "session-summary",
+      "sql": "WITH page AS MATERIALIZED (SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,\n    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,\n    (SELECT gs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,(SELECT gs.node FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS node,(SELECT gs.iterations FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS iterations,s.current_capture\n    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1)\n        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,\n        (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),\n        w.slug,\n        ((SELECT CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END FROM session_events INDEXED BY session_input_membership\n         WHERE session_id=s.id AND captured_event=s.current_capture\n         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),\n        (SELECT json_group_array(id) FROM (WITH RECURSIVE up(path) AS (\n            SELECT rtrim(a.cwd,'/') WHERE a.primary_scope IS NULL\n            UNION ALL\n            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')\n         SELECT id FROM tasks WHERE id=a.task_id AND a.primary_scope IS NULL\n         UNION\n         SELECT tw.id FROM up CROSS JOIN tasks tw\n            ON tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)\n            AND rtrim(tw.worktree,'/')=up.path AND tw.worktree!=''\n         WHERE up.path!='' OR substr(a.cwd,1,1)='/' OR a.cwd=''\n         ORDER BY id)),\n        a.primary_scope,\n        EXISTS(SELECT 1 FROM session_activity act\n            JOIN processes p ON p.id=a.agent_process_id\n            WHERE act.session_id=a.id\n            AND a.completed_at IS NULL AND act.agent_process_id IS a.agent_process_id\n            AND p.completed_at IS NULL\n            AND CASE WHEN act.program_status IS NOT NULL THEN\n                EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r\n                    WHERE json_extract(r.value,'$.state')='blocked'\n                    OR (a.interactive=1 AND json_extract(r.value,'$.state')='idle'))\n            ELSE act.attachment_token=p.attachment_token\n                AND (act.pending_input>0 OR (act.open_tools=0 AND ((a.interactive=1 AND act.yielded=1)\n                    OR 1794418996-act.observed_at>=120))) END),\n        COALESCE((CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned' WHEN t.planning_completed=1 THEN 'done' WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=t.ship_lf_process_id OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id=t.id))) THEN CASE WHEN t.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END WHEN t.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' WHEN t.worktree IS NULL THEN 'unstarted' ELSE 'idle' END) IN ('done','abandoned'),0),\n        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),\n        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),\n        (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id\n         AND json_extract(act.preview,'$.provider_thread')=a.provider_thread\n         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),\n        p.started_at,\n        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),\n        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),\n        EXISTS(\n            SELECT 1 FROM session_events history\n            WHERE history.session_id=s.id AND history.captured_event=s.current_capture\n            AND history.kind='observed'\n            AND CASE WHEN json_valid(history.payload) THEN\n                (instr(history.receipt_key,':provider-session:')>0\n                 OR (instr(history.receipt_key,':events.jsonl:')>0\n                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))\n            AND json_extract(history.payload,'$.evidence.schema_version')=1\n            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END)\n        FROM page s JOIN agent_sessions a ON a.id=s.id\n        LEFT JOIN processes p ON p.id=a.agent_process_id\n        LEFT JOIN session_events captured ON captured.seq=s.current_capture\n        LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id\n        LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id\n        LEFT JOIN processes step ON step.id=gs.lf_process_id\n        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id\n        LEFT JOIN wave_addresses w ON w.id=s.wave_id\n        LEFT JOIN tasks t ON t.id=s.task_id\n        ORDER BY s.title,s.id",
+      "plan": [
+        "MATERIALIZE page",
+        "SEARCH s USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SEARCH c USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH feedback USING INDEX session_observation_receipt (session_id=? AND receipt_key=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "MATERIALIZE wave_addresses",
+        "CO-ROUTINE addresses",
+        "SETUP",
+        "SCAN waves",
+        "RECURSIVE STEP",
+        "SCAN w",
+        "SCAN a",
+        "SCAN w",
+        "SEARCH a USING AUTOMATIC COVERING INDEX (id=?)",
+        "SCAN s",
+        "SEARCH a USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH graph USING INDEX sqlite_autoindex_graph_processes_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH step USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH graph_process USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SCAN w LEFT-JOIN",
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 6",
+        "SEARCH later USING COVERING INDEX graph_process_steps_graph (graph_lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH session_events USING INDEX session_input_membership (session_id=? AND captured_event=?)",
+        "CORRELATED SCALAR SUBQUERY 13",
+        "CO-ROUTINE (subquery-12)",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH tasks USING COVERING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "RIGHT",
+        "CO-ROUTINE up",
+        "SETUP",
+        "SCAN CONSTANT ROW",
+        "RECURSIVE STEP",
+        "SCAN up",
+        "SCAN up",
+        "SEARCH tw USING INDEX tasks_checkout_root (checkout_machine_id=? AND <expr>=?)",
+        "SCALAR SUBQUERY 11",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN (subquery-12)",
+        "CORRELATED SCALAR SUBQUERY 15",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 14",
+        "SCAN r VIRTUAL TABLE INDEX 3:",
+        "CORRELATED SCALAR SUBQUERY 17",
+        "SEARCH lp USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 16",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 18",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 19",
+        "SEARCH p USING COVERING INDEX tasks_primary_session (primary_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 20",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 21",
+        "SEARCH processes USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 22",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 23",
+        "SEARCH o USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 24",
+        "SEARCH pin USING INDEX sqlite_autoindex_provider_session_accounts_1 (provider=? AND provider_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 25",
+        "SEARCH history USING INDEX session_events_captured_event (captured_event=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "34c37746556dfbc1": {
+      "family": null,
+      "sql": "SELECT task_id, graph FROM (WITH RECURSIVE tw AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks\n             WHERE id IN (SELECT value FROM json_each(?1))),\n            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),\n            up(id, path) AS (SELECT id, cwd FROM f WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)\n                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),\n            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw\n                WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND worktree!=''),\n            links(session_id, graph) AS (\n                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process\n                    WHERE se.lf_process_id IN (SELECT id FROM f)\n                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p\n                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL\n                UNION SELECT p.agent_session_id, p.id FROM processes p\n                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)\n         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path\n         UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id\n                WHERE r.process_id IN (SELECT id FROM f)\n         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON (a.primary_scope IS NULL\n         AND (a.task_id=tw.id OR (tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (a.cwd=rtrim(tw.worktree,'/') OR instr(a.cwd,rtrim(tw.worktree,'/')||'/')=1))))) pairs\n         ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
+      "plan": [
+        "CO-ROUTINE pairs",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "CO-ROUTINE up",
+        "SETUP",
+        "MATERIALIZE f",
+        "SCAN fp USING COVERING INDEX sqlite_autoindex_graph_processes_1",
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "SCAN f",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "RECURSIVE STEP",
+        "SCAN up",
+        "MATERIALIZE checkouts",
+        "MATERIALIZE tw",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "LIST SUBQUERY 1",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "SCAN tw",
+        "SCALAR SUBQUERY 7",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "SCAN c",
+        "BLOOM FILTER ON up (path=?)",
+        "SEARCH up USING AUTOMATIC COVERING INDEX (path=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "LIST SUBQUERY 16",
+        "SCAN f",
+        "SEARCH tw USING AUTOMATIC COVERING INDEX (id=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "CO-ROUTINE links",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH se USING COVERING INDEX session_events_process (lf_process_id=?)",
+        "LIST SUBQUERY 9",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX agent_process_attachment (attached_lf_process_id=?)",
+        "LIST SUBQUERY 11",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "LIST SUBQUERY 13",
+        "SCAN f",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN l",
+        "SEARCH a USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SCAN tw",
+        "SCALAR SUBQUERY 18",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN pairs",
+        "CORRELATED SCALAR SUBQUERY 20",
+        "SEARCH e USING COVERING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "4717c294114a8cf6": {
+      "family": null,
+      "sql": "WITH RECURSIVE delegated(root,id,serves) AS (\n                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END\n                 FROM processes WHERE id IN (SELECT value FROM json_each(?1))\n                 UNION\n                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END\n                 FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id\n                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))\n             SELECT d.root,c.session_id,c.receipt_key,MAX(c.seq) FROM delegated d\n             JOIN session_events c ON c.lf_process_id=d.id\n             WHERE c.kind='captured' GROUP BY d.root",
+      "plan": [
+        "CO-ROUTINE delegated",
+        "SETUP",
+        "SEARCH processes USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "LIST SUBQUERY 1",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "RECURSIVE STEP",
+        "SCAN d",
+        "SEARCH p USING INDEX processes_parent (parent_lf_process_id=?)",
+        "SCAN c USING INDEX session_capture_key",
+        "SEARCH d USING AUTOMATIC COVERING INDEX (id=?)",
+        "USE TEMP B-TREE FOR GROUP BY"
+      ],
+      "plan_error": null
+    },
+    "bfbbf348d33072bd": {
+      "family": null,
+      "sql": "SELECT DISTINCT source.id, json_extract(e.kind_json, '$.intent.relation_id'),\n                source.external_issue_id, target.external_issue_id\n             FROM task_events e JOIN tasks source ON source.id=e.task_id\n             JOIN repository_plans w ON w.id=source.repository_id\n             JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')\n                OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')\n                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))\n             WHERE w.repo=?1 AND json_extract(e.kind_json, '$.kind')='follow_through_intent'\n                AND source.external_issue_id IS NOT NULL AND target.external_issue_id IS NOT NULL\n                AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL\n                AND NOT EXISTS(SELECT 1 FROM task_events confirmed WHERE confirmed.task_id=source.id\n                    AND json_extract(confirmed.kind_json, '$.kind')='follow_through_relation_confirmed'\n                    AND json_extract(confirmed.kind_json, '$.relation_id')=json_extract(e.kind_json, '$.intent.relation_id')\n                    AND json_extract(confirmed.kind_json, '$.source_issue_id')=source.external_issue_id\n                    AND json_extract(confirmed.kind_json, '$.target_issue_id')=target.external_issue_id)",
+      "plan": [
+        "SCAN e",
+        "SEARCH source USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "SEARCH w USING INDEX sqlite_autoindex_repository_plans_1 (id=?)",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH target USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH target USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "INDEX 3",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SCAN task_creation_intents",
+        "SEARCH target USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH confirmed USING INDEX idx_task_events_task (task_id=?)",
+        "USE TEMP B-TREE FOR DISTINCT"
+      ],
+      "plan_error": null
+    },
+    "863cfce36f39d97d": {
+      "family": "session-summary",
+      "sql": "WITH page AS MATERIALIZED (SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,\n    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,\n    (SELECT gs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,(SELECT gs.node FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS node,(SELECT gs.iterations FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS iterations,s.current_capture\n    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture WHERE 1 AND s.interactive=?1 AND s.completed_at IS NULL AND COALESCE(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id))=?2 ORDER BY s.title, s.id LIMIT ?3 OFFSET ?4)\n        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,\n        (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),\n        w.slug,\n        ((SELECT CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END FROM session_events INDEXED BY session_input_membership\n         WHERE session_id=s.id AND captured_event=s.current_capture\n         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),\n        (SELECT json_group_array(id) FROM (WITH RECURSIVE up(path) AS (\n            SELECT rtrim(a.cwd,'/') WHERE a.primary_scope IS NULL\n            UNION ALL\n            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')\n         SELECT id FROM tasks WHERE id=a.task_id AND a.primary_scope IS NULL\n         UNION\n         SELECT tw.id FROM up CROSS JOIN tasks tw\n            ON tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)\n            AND rtrim(tw.worktree,'/')=up.path AND tw.worktree!=''\n         WHERE up.path!='' OR substr(a.cwd,1,1)='/' OR a.cwd=''\n         ORDER BY id)),\n        a.primary_scope,\n        EXISTS(SELECT 1 FROM session_activity act\n            JOIN processes p ON p.id=a.agent_process_id\n            WHERE act.session_id=a.id\n            AND a.completed_at IS NULL AND act.agent_process_id IS a.agent_process_id\n            AND p.completed_at IS NULL\n            AND CASE WHEN act.program_status IS NOT NULL THEN\n                EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r\n                    WHERE json_extract(r.value,'$.state')='blocked'\n                    OR (a.interactive=1 AND json_extract(r.value,'$.state')='idle'))\n            ELSE act.attachment_token=p.attachment_token\n                AND (act.pending_input>0 OR (act.open_tools=0 AND ((a.interactive=1 AND act.yielded=1)\n                    OR 1794418996-act.observed_at>=120))) END),\n        COALESCE((CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned' WHEN t.planning_completed=1 THEN 'done' WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=t.ship_lf_process_id OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id=t.id))) THEN CASE WHEN t.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END WHEN t.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' WHEN t.worktree IS NULL THEN 'unstarted' ELSE 'idle' END) IN ('done','abandoned'),0),\n        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),\n        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),\n        (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id\n         AND json_extract(act.preview,'$.provider_thread')=a.provider_thread\n         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),\n        p.started_at,\n        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),\n        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),\n        EXISTS(\n            SELECT 1 FROM session_events history\n            WHERE history.session_id=s.id AND history.captured_event=s.current_capture\n            AND history.kind='observed'\n            AND CASE WHEN json_valid(history.payload) THEN\n                (instr(history.receipt_key,':provider-session:')>0\n                 OR (instr(history.receipt_key,':events.jsonl:')>0\n                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))\n            AND json_extract(history.payload,'$.evidence.schema_version')=1\n            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END)\n        FROM page s JOIN agent_sessions a ON a.id=s.id\n        LEFT JOIN processes p ON p.id=a.agent_process_id\n        LEFT JOIN session_events captured ON captured.seq=s.current_capture\n        LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id\n        LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id\n        LEFT JOIN processes step ON step.id=gs.lf_process_id\n        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id\n        LEFT JOIN wave_addresses w ON w.id=s.wave_id\n        LEFT JOIN tasks t ON t.id=s.task_id\n        ORDER BY s.title,s.id",
+      "plan": [
+        "MATERIALIZE page",
+        "SEARCH s USING INDEX session_inventory (interactive=? AND completed_at=?)",
+        "CORRELATED SCALAR SUBQUERY 5",
+        "SEARCH waves USING INDEX sqlite_autoindex_waves_1 (id=?)",
+        "SEARCH c USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH feedback USING INDEX session_observation_receipt (session_id=? AND receipt_key=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "MATERIALIZE wave_addresses",
+        "CO-ROUTINE addresses",
+        "SETUP",
+        "SCAN waves",
+        "RECURSIVE STEP",
+        "SCAN w",
+        "SCAN a",
+        "SCAN w",
+        "SEARCH a USING AUTOMATIC COVERING INDEX (id=?)",
+        "SCAN s",
+        "SEARCH a USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH graph USING INDEX sqlite_autoindex_graph_processes_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH step USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH graph_process USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH w USING AUTOMATIC COVERING INDEX (id=?) LEFT-JOIN",
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH later USING COVERING INDEX graph_process_steps_graph (graph_lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 8",
+        "SEARCH session_events USING INDEX session_input_membership (session_id=? AND captured_event=?)",
+        "CORRELATED SCALAR SUBQUERY 14",
+        "CO-ROUTINE (subquery-13)",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH tasks USING COVERING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "RIGHT",
+        "CO-ROUTINE up",
+        "SETUP",
+        "SCAN CONSTANT ROW",
+        "RECURSIVE STEP",
+        "SCAN up",
+        "SCAN up",
+        "SEARCH tw USING INDEX tasks_checkout_root (checkout_machine_id=? AND <expr>=?)",
+        "SCALAR SUBQUERY 12",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN (subquery-13)",
+        "CORRELATED SCALAR SUBQUERY 16",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 15",
+        "SCAN r VIRTUAL TABLE INDEX 3:",
+        "CORRELATED SCALAR SUBQUERY 18",
+        "SEARCH lp USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 17",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 19",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 20",
+        "SEARCH p USING COVERING INDEX tasks_primary_session (primary_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 21",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 22",
+        "SEARCH processes USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 23",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 24",
+        "SEARCH o USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 25",
+        "SEARCH pin USING INDEX sqlite_autoindex_provider_session_accounts_1 (provider=? AND provider_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 26",
+        "SEARCH history USING INDEX session_events_captured_event (captured_event=?)"
+      ],
+      "plan_error": null
+    },
+    "a6bd88e267df458c": {
+      "family": null,
+      "sql": "SELECT id FROM agent_sessions WHERE provider_thread=?1\n             ORDER BY created_at DESC LIMIT 1",
+      "plan": [
+        "SCAN agent_sessions",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "64eb2298f41a8f46": {
+      "family": null,
+      "sql": "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND (CASE WHEN json_valid(payload) THEN json_extract(payload,'$.type') END) IN ('provider_transition','agent_session_selected') ORDER BY seq DESC LIMIT 1",
+      "plan": [
+        "SEARCH session_events USING INDEX session_events_history (session_id=?)"
+      ],
+      "plan_error": null
+    },
+    "3b2e3448e24b1a4b": {
+      "family": null,
+      "sql": "SELECT id, worktree, checkout_machine_id\n    FROM tasks WHERE worktree IS NOT NULL",
+      "plan": [
+        "SCAN tasks"
+      ],
+      "plan_error": null
+    },
+    "14fed424d4452a2f": {
+      "family": null,
+      "sql": "SELECT lower(substr(id,6)),issue_identifier FROM tasks",
+      "plan": [
+        "SCAN tasks"
+      ],
+      "plan_error": null
+    },
+    "0b3cf430490c167f": {
+      "family": null,
+      "sql": "SELECT MIN(observed_at + ?1) FROM session_activity WHERE observed_at + ?1 > ?2",
+      "plan": [
+        "SEARCH session_activity"
+      ],
+      "plan_error": null
+    },
+    "8bafc2b6f6975a3a": {
+      "family": null,
+      "sql": "SELECT i.id,i.identifier,i.project_id,i.team_id\n                     FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id\n                     JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider\n                     WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0\n                     AND p.archived=0 AND p.membership_unresolved=0\n                     AND EXISTS(SELECT 1 FROM json_each(p.initiative_ids) WHERE value=?4)\n                     AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id\n                                    WHERE w.repo=i.repo AND d.issue_id=i.id)\n                     ORDER BY m.position,i.id",
+      "plan": [
+        "SEARCH i USING INDEX pm_items_project (repo=? AND provider=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SCAN d USING COVERING INDEX sqlite_autoindex_task_deletions_1",
+        "SEARCH w USING INDEX sqlite_autoindex_waves_1 (id=?)",
+        "SEARCH p USING INDEX sqlite_autoindex_pm_projects_1 (repo=? AND provider=? AND id=?)",
+        "SEARCH m USING INDEX sqlite_autoindex_pm_wave_projects_1 (wave_id=? AND project_id=?)",
+        "SCAN json_each EXISTS VIRTUAL TABLE INDEX 1:",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "61de67def2cad854": {
+      "family": null,
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at,gs.graph_lf_process_id,gs.node,gs.iterations FROM graph_process_steps gs\n             JOIN processes e ON e.id=gs.lf_process_id\n             WHERE gs.graph_lf_process_id IN (SELECT value FROM json_each(?1)) ORDER BY gs.seq",
+      "plan": [
+        "SEARCH gs USING INDEX graph_process_steps_graph (graph_lf_process_id=?)",
+        "LIST SUBQUERY 1",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "b924322370e8bc6f": {
+      "family": null,
+      "sql": "SELECT t.id,t.external_issue_id,\n    t.issue_title, t.issue_description,\n    p.wave_id, t.worktree, t.workspace_slug,\n    t.created_at, t.updated_at, t.pm_snapshot_synced_at,\n    COALESCE((SELECT json_object('state','pending','operation',\n        CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,\n        'error',COALESCE(d.error,'Saved locally; pending planning synchronization'))\n        FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0\n            AND t.external_issue_id IS NOT NULL\n            AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),\n        json_object('state','current')),\n    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,\n    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id\n    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE ((t.abandoned_at IS NULL AND t.planning_completed IS NOT 1)) AND t.planning_deleted_at IS NULL\n    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id) ORDER BY t.updated_at DESC",
+      "plan": [
+        "SCAN t USING INDEX idx_tasks_updated",
+        "SEARCH p USING INDEX sqlite_autoindex_projects_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH d USING COVERING INDEX sqlite_autoindex_task_deletions_1 (wave_id=? AND issue_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH task_state_deliveries USING COVERING INDEX task_state_deliveries_task (task_id=?)"
+      ],
+      "plan_error": null
+    },
+    "04a76272e4ecd33a": {
+      "family": "session-summary",
+      "sql": "WITH page AS MATERIALIZED (SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,\n    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,\n    (SELECT gs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,(SELECT gs.node FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS node,(SELECT gs.iterations FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture) AS iterations,s.current_capture\n    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture WHERE 1 AND s.interactive=?1 AND s.completed_at IS NULL AND COALESCE(s.repo,(SELECT repo FROM waves WHERE id=s.wave_id))=?2 AND s.id>?4 ORDER BY s.id LIMIT ?3)\n        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,\n        (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),\n        w.slug,\n        ((SELECT CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END FROM session_events INDEXED BY session_input_membership\n         WHERE session_id=s.id AND captured_event=s.current_capture\n         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),\n        (SELECT json_group_array(id) FROM (WITH RECURSIVE up(path) AS (\n            SELECT rtrim(a.cwd,'/') WHERE a.primary_scope IS NULL\n            UNION ALL\n            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')\n         SELECT id FROM tasks WHERE id=a.task_id AND a.primary_scope IS NULL\n         UNION\n         SELECT tw.id FROM up CROSS JOIN tasks tw\n            ON tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)\n            AND rtrim(tw.worktree,'/')=up.path AND tw.worktree!=''\n         WHERE up.path!='' OR substr(a.cwd,1,1)='/' OR a.cwd=''\n         ORDER BY id)),\n        a.primary_scope,\n        EXISTS(SELECT 1 FROM session_activity act\n            JOIN processes p ON p.id=a.agent_process_id\n            WHERE act.session_id=a.id\n            AND a.completed_at IS NULL AND act.agent_process_id IS a.agent_process_id\n            AND p.completed_at IS NULL\n            AND CASE WHEN act.program_status IS NOT NULL THEN\n                EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r\n                    WHERE json_extract(r.value,'$.state')='blocked'\n                    OR (a.interactive=1 AND json_extract(r.value,'$.state')='idle'))\n            ELSE act.attachment_token=p.attachment_token\n                AND (act.pending_input>0 OR (act.open_tools=0 AND ((a.interactive=1 AND act.yielded=1)\n                    OR 1794418996-act.observed_at>=120))) END),\n        COALESCE((CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned' WHEN t.planning_completed=1 THEN 'done' WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=t.ship_lf_process_id OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id=t.id))) THEN CASE WHEN t.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END WHEN t.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' WHEN t.worktree IS NULL THEN 'unstarted' ELSE 'idle' END) IN ('done','abandoned'),0),\n        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),\n        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),\n        (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id\n         AND json_extract(act.preview,'$.provider_thread')=a.provider_thread\n         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),\n        p.started_at,\n        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),\n        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),\n        EXISTS(\n            SELECT 1 FROM session_events history\n            WHERE history.session_id=s.id AND history.captured_event=s.current_capture\n            AND history.kind='observed'\n            AND CASE WHEN json_valid(history.payload) THEN\n                (instr(history.receipt_key,':provider-session:')>0\n                 OR (instr(history.receipt_key,':events.jsonl:')>0\n                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))\n            AND json_extract(history.payload,'$.evidence.schema_version')=1\n            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END)\n        FROM page s JOIN agent_sessions a ON a.id=s.id\n        LEFT JOIN processes p ON p.id=a.agent_process_id\n        LEFT JOIN session_events captured ON captured.seq=s.current_capture\n        LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id\n        LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id\n        LEFT JOIN processes step ON step.id=gs.lf_process_id\n        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id\n        LEFT JOIN wave_addresses w ON w.id=s.wave_id\n        LEFT JOIN tasks t ON t.id=s.task_id\n        ORDER BY s.id",
+      "plan": [
+        "MATERIALIZE page",
+        "SEARCH s USING INDEX session_inventory (interactive=? AND completed_at=?)",
+        "CORRELATED SCALAR SUBQUERY 5",
+        "SEARCH waves USING INDEX sqlite_autoindex_waves_1 (id=?)",
+        "SEARCH c USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH feedback USING INDEX session_observation_receipt (session_id=? AND receipt_key=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "MATERIALIZE wave_addresses",
+        "CO-ROUTINE addresses",
+        "SETUP",
+        "SCAN waves",
+        "RECURSIVE STEP",
+        "SCAN w",
+        "SCAN a",
+        "SCAN w",
+        "SEARCH a USING AUTOMATIC COVERING INDEX (id=?)",
+        "SCAN s",
+        "SEARCH a USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH graph USING INDEX sqlite_autoindex_graph_processes_1 (lf_process_id=?) LEFT-JOIN",
+        "SEARCH step USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH graph_process USING INDEX sqlite_autoindex_processes_1 (id=?) LEFT-JOIN",
+        "SEARCH w USING AUTOMATIC COVERING INDEX (id=?) LEFT-JOIN",
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH later USING COVERING INDEX graph_process_steps_graph (graph_lf_process_id=?)",
+        "CORRELATED SCALAR SUBQUERY 8",
+        "SEARCH session_events USING INDEX session_input_membership (session_id=? AND captured_event=?)",
+        "CORRELATED SCALAR SUBQUERY 14",
+        "CO-ROUTINE (subquery-13)",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH tasks USING COVERING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "RIGHT",
+        "CO-ROUTINE up",
+        "SETUP",
+        "SCAN CONSTANT ROW",
+        "RECURSIVE STEP",
+        "SCAN up",
+        "SCAN up",
+        "SEARCH tw USING INDEX tasks_checkout_root (checkout_machine_id=? AND <expr>=?)",
+        "SCALAR SUBQUERY 12",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "SCAN (subquery-13)",
+        "CORRELATED SCALAR SUBQUERY 16",
+        "SEARCH p USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 15",
+        "SCAN r VIRTUAL TABLE INDEX 3:",
+        "CORRELATED SCALAR SUBQUERY 18",
+        "SEARCH lp USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 17",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 19",
+        "SEARCH tg USING INDEX sqlite_autoindex_task_graphs_1 (task_id=?)",
+        "CORRELATED SCALAR SUBQUERY 20",
+        "SEARCH p USING COVERING INDEX tasks_primary_session (primary_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 21",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 22",
+        "SEARCH processes USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 23",
+        "SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 24",
+        "SEARCH o USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "CORRELATED SCALAR SUBQUERY 25",
+        "SEARCH pin USING INDEX sqlite_autoindex_provider_session_accounts_1 (provider=? AND provider_session_id=?)",
+        "CORRELATED SCALAR SUBQUERY 26",
+        "SEARCH history USING INDEX session_events_captured_event (captured_event=?)"
+      ],
+      "plan_error": null
+    },
+    "17a4a7bb0650a76c": {
+      "family": null,
+      "sql": "SELECT id,kind,person,person_key,machine_id,machine_label,at,written_here,task_id\n         FROM task_ownership WHERE task_id IN (SELECT value FROM json_each(?1))\n         ORDER BY ordered_at IS NULL,ordered_at,at,rowid",
+      "plan": [
+        "SEARCH task_ownership USING INDEX idx_task_ownership_task (task_id=?)",
+        "LIST SUBQUERY 1",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "9dbcc50e1f707a32": {
+      "family": null,
+      "sql": "SELECT t.id,t.external_issue_id,\n    t.issue_title, t.issue_description,\n    p.wave_id, t.worktree, t.workspace_slug,\n    t.created_at, t.updated_at, t.pm_snapshot_synced_at,\n    COALESCE((SELECT json_object('state','pending','operation',\n        CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,\n        'error',COALESCE(d.error,'Saved locally; pending planning synchronization'))\n        FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0\n            AND t.external_issue_id IS NOT NULL\n            AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),\n        json_object('state','current')),\n    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,\n    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id\n    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE (1) AND t.planning_deleted_at IS NULL\n    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id) ORDER BY t.updated_at DESC",
+      "plan": [
+        "SCAN t USING INDEX idx_tasks_updated",
+        "SEARCH p USING INDEX sqlite_autoindex_projects_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH d USING COVERING INDEX sqlite_autoindex_task_deletions_1 (wave_id=? AND issue_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH task_state_deliveries USING COVERING INDEX task_state_deliveries_task (task_id=?)"
+      ],
+      "plan_error": null
+    },
+    "f0758c98b34f7b84": {
+      "family": null,
+      "sql": "SELECT is_local,created_at,observed_at FROM machines WHERE id=?1",
+      "plan": [
+        "SEARCH machines USING INDEX sqlite_autoindex_machines_1 (id=?)"
+      ],
+      "plan_error": null
+    },
+    "f70d33ebd33951a3": {
+      "family": null,
+      "sql": "SELECT id FROM machines WHERE is_local=1",
+      "plan": [
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)"
+      ],
+      "plan_error": null
+    },
+    "ed994cd930c02252": {
+      "family": "live-agent",
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at,e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
+      "plan": [
+        "SCAN e USING INDEX agent_process_unfinished"
+      ],
+      "plan_error": null
+    },
+    "0130b2051688ae06": {
+      "family": null,
+      "sql": "SELECT version FROM schema_migrations ORDER BY applied_at, rowid",
+      "plan": [
+        "SCAN schema_migrations",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "4fde9dac80428b0d": {
+      "family": "task-process-membership",
+      "sql": "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,\n    e.caller_agent_process_id,e.command,e.repo,e.cwd,\n    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e WHERE e.id IN (WITH members AS MATERIALIZED (SELECT a.id FROM agent_sessions a JOIN (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1) tw ON (a.primary_scope IS NULL\n         AND (a.task_id=tw.id OR (tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (a.cwd=rtrim(tw.worktree,'/') OR instr(a.cwd,rtrim(tw.worktree,'/')||'/')=1))))), tw AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1)\n        SELECT ae.id FROM tw CROSS JOIN processes ae\n        WHERE tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!=''\n            AND (ae.cwd=rtrim(tw.worktree,'/') OR\n                (ae.cwd>=rtrim(tw.worktree,'/')||'/' AND ae.cwd<rtrim(tw.worktree,'/')||'0'))\n            AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)\n        UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id\n        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL\n        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL\n        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)) ORDER BY e.started_at DESC,e.id",
+      "plan": [
+        "SEARCH e USING INDEX sqlite_autoindex_processes_1 (id=?)",
+        "LIST SUBQUERY 14",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "MATERIALIZE tw",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCAN tw",
+        "SCALAR SUBQUERY 5",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH ae USING INDEX processes_cwd (cwd=?)",
+        "INDEX 2",
+        "SEARCH ae USING INDEX processes_cwd (cwd>? AND cwd<?)",
+        "CORRELATED SCALAR SUBQUERY 6",
+        "SEARCH r USING COVERING INDEX relocated_process_tasks (process_id=?)",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SCAN r USING COVERING INDEX relocated_process_tasks",
+        "SEARCH tw USING AUTOMATIC COVERING INDEX (id=?)",
+        "RIGHT",
+        "MERGE (UNION)",
+        "LEFT",
+        "MERGE (UNION)",
+        "LEFT",
+        "SEARCH se USING COVERING INDEX session_process_membership (session_id=? AND lf_process_id>?)",
+        "LIST SUBQUERY 9",
+        "MATERIALIZE members",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCAN a",
+        "SCALAR SUBQUERY 2",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX agent_process_session (agent_session_id=?)",
+        "LIST SUBQUERY 11",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "RIGHT",
+        "SEARCH p USING INDEX agent_process_session (agent_session_id=?)",
+        "LIST SUBQUERY 13",
+        "SCAN members",
+        "USE TEMP B-TREE FOR ORDER BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "af6315c3fefedf56": {
+      "family": null,
+      "sql": "SELECT e.id,e.task_id,e.kind_json,e.created_at FROM task_events e\n                 JOIN tasks t ON t.id=e.task_id JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?1 AND t.planning_deleted_at IS NULL\n                 AND json_extract(e.kind_json,'$.kind') IN\n                    ('follow_through_intent','follow_through_linked','follow_up','follow_through_conversion')\n                 ORDER BY e.id",
+      "plan": [
+        "SCAN e",
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "SEARCH w USING INDEX sqlite_autoindex_repository_plans_1 (id=?)"
+      ],
+      "plan_error": null
+    },
+    "815b00f3371067f8": {
+      "family": null,
+      "sql": "SELECT s.id,s.title,s.interactive,(SELECT gs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture),s.completed_at\n            FROM agent_sessions s WHERE s.id IN (SELECT a.id FROM agent_sessions a JOIN (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1 OR issue_identifier=?1 OR external_issue_id=?1) tw ON (a.primary_scope IS NULL\n         AND (a.task_id=tw.id OR (tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND (a.cwd=rtrim(tw.worktree,'/') OR instr(a.cwd,rtrim(tw.worktree,'/')||'/')=1))))) ORDER BY s.created_at,s.id",
+      "plan": [
+        "SEARCH s USING INDEX sqlite_autoindex_agent_sessions_1 (id=?)",
+        "LIST SUBQUERY 4",
+        "MULTI-INDEX OR",
+        "INDEX 1",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "INDEX 2",
+        "SEARCH tasks USING INDEX idx_tasks_issue_identifier (issue_identifier=?)",
+        "INDEX 3",
+        "SEARCH tasks USING INDEX sqlite_autoindex_tasks_2 (external_issue_id=?)",
+        "SCAN a",
+        "SCALAR SUBQUERY 3",
+        "SEARCH machines USING INDEX idx_machines_local (is_local=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH captured USING INTEGER PRIMARY KEY (rowid=?)",
+        "SEARCH gs USING INDEX sqlite_autoindex_graph_process_steps_1 (lf_process_id=?)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "plan_error": null
+    },
+    "c1242eb17c2aa61d": {
+      "family": null,
+      "sql": "SELECT t.id,t.external_issue_id,\n    t.issue_title, t.issue_description,\n    p.wave_id, t.worktree, t.workspace_slug,\n    t.created_at, t.updated_at, t.pm_snapshot_synced_at,\n    COALESCE((SELECT json_object('state','pending','operation',\n        CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,\n        'error',COALESCE(d.error,'Saved locally; pending planning synchronization'))\n        FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0\n            AND t.external_issue_id IS NOT NULL\n            AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),\n        json_object('state','current')),\n    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,\n    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id\n    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+      "plan": [
+        "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+        "SEARCH p USING INDEX sqlite_autoindex_projects_1 (id=?) LEFT-JOIN",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH task_state_deliveries USING COVERING INDEX task_state_deliveries_task (task_id=?)"
+      ],
+      "plan_error": null
+    }
+  },
+  "reads": [
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "profile-before-waves",
+      "errors": 0,
+      "ms": 461.53062488883734,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "warmup": {
+        "ms": 3541.1004999186844,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "statements": 641,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "a8a149e57e439b47",
+          "executions": 1,
+          "scan": 160313,
+          "vm": 674239,
+          "sort": 0,
+          "ms": 187.558875,
+          "per_execution": [
+            {
+              "ms": 187.558875,
+              "scan": 160313,
+              "vm": 674239,
+              "sort": 0
+            }
+          ]
+        },
+        {
+          "shape": "6e023bc96509e64b",
+          "executions": 2,
+          "scan": 24744,
+          "vm": 784551,
+          "sort": 14,
+          "ms": 47.814,
+          "profile_ms_range": [
+            23.679,
+            24.135
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 2,
+          "scan": 1030,
+          "vm": 25134,
+          "sort": 2,
+          "ms": 5.094584,
+          "profile_ms_range": [
+            2.531209,
+            2.563375
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 7,
+          "scan": 735,
+          "vm": 10451,
+          "sort": 7,
+          "ms": 3.776707,
+          "profile_ms_range": [
+            0.509375,
+            0.598042
+          ]
+        },
+        {
+          "shape": "36c916d2a4c452a4",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 9720,
+          "sort": 0,
+          "ms": 1.389208,
+          "profile_ms_range": [
+            0.660208,
+            0.729
+          ]
+        },
+        {
+          "shape": "300f2c4e2dcf0305",
+          "executions": 7,
+          "scan": 0,
+          "vm": 6608,
+          "sort": 0,
+          "ms": 0.691708,
+          "profile_ms_range": [
+            0.005583,
+            0.361791
+          ]
+        },
+        {
+          "shape": "a71147d060c56188",
+          "executions": 14,
+          "scan": 19220,
+          "vm": 86832,
+          "sort": 0,
+          "ms": 0.6369980000000001,
+          "profile_ms_range": [
+            0.006625,
+            0.10575
+          ]
+        },
+        {
+          "shape": "b0077752121a2702",
+          "executions": 128,
+          "scan": 0,
+          "vm": 2762,
+          "sort": 0,
+          "ms": 0.40762899999999974,
+          "profile_ms_range": [
+            0.001833,
+            0.022917
+          ]
+        }
+      ],
+      "top_sql": [
+        "a8a149e57e439b47",
+        "6e023bc96509e64b",
+        "cf79ec12d973bf59",
+        "ac7a870408a25e0c",
+        "36c916d2a4c452a4",
+        "300f2c4e2dcf0305",
+        "a71147d060c56188",
+        "b0077752121a2702"
+      ]
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "profile-before-task",
+      "errors": 0,
+      "ms": 7960.265833884478,
+      "rows": 1,
+      "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39",
+      "warmup": {
+        "ms": 11001.572499983013,
+        "rows": 1,
+        "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+      },
+      "statements": 3984,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "a8a149e57e439b47",
+          "executions": 1,
+          "scan": 160313,
+          "vm": 674239,
+          "sort": 0,
+          "ms": 251.112041,
+          "per_execution": [
+            {
+              "ms": 251.112041,
+              "scan": 160313,
+              "vm": 674239,
+              "sort": 0
+            }
+          ]
+        },
+        {
+          "shape": "2338e0a6ec91fe44",
+          "executions": 1,
+          "scan": 175320,
+          "vm": 7641629,
+          "sort": 4,
+          "ms": 316.520042,
+          "per_execution": [
+            {
+              "ms": 316.520042,
+              "scan": 175320,
+              "vm": 7641629,
+              "sort": 4
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 84,
+          "scan": 343728,
+          "vm": 1698470,
+          "sort": 168,
+          "ms": 37.26862800000001,
+          "per_execution": [
+            {
+              "ms": 0.539167,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.863959,
+              "scan": 4092,
+              "vm": 20179,
+              "sort": 2
+            },
+            {
+              "ms": 0.449583,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.476042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.470875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.376458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.404375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.395209,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.347125,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.425709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.451583,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.507916,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.566791,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.422166,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.613709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.411375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.580041,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.392375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.387,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.44975,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.382792,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.373875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.374709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.390833,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.395666,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.543458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.47525,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.483708,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.483792,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.459958,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.781625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.450042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.515458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.3995,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.393917,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.491458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.438667,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.373084,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 1.01875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.378958,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.367042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.399375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.466209,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.385917,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.371041,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.458167,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.456958,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.452875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.379042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.366583,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.408959,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.373417,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.375,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.452375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.461,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.461458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.548708,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.420333,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.45375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.41175,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.364291,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.452292,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.38175,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.47425,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.370417,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.374166,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.36925,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.43,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.373709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.469375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.406,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.390625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.365875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.377,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.380667,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.381459,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.338125,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.334375,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.348792,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.378542,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.441084,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.372459,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.532958,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.5545,
+              "scan": 4092,
+              "vm": 20265,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "6e023bc96509e64b",
+          "executions": 5,
+          "scan": 61860,
+          "vm": 1961823,
+          "sort": 35,
+          "ms": 125.662249,
+          "profile_ms_range": [
+            24.745,
+            25.597833
+          ]
+        },
+        {
+          "shape": "34c37746556dfbc1",
+          "executions": 2,
+          "scan": 24744,
+          "vm": 763918,
+          "sort": 14,
+          "ms": 46.290625,
+          "profile_ms_range": [
+            22.598667,
+            23.691958
+          ]
+        },
+        {
+          "shape": "4717c294114a8cf6",
+          "executions": 2,
+          "scan": 29840,
+          "vm": 187712,
+          "sort": 2,
+          "ms": 40.617166999999995,
+          "profile_ms_range": [
+            19.061625,
+            21.555542
+          ]
+        },
+        {
+          "shape": "bfbbf348d33072bd",
+          "executions": 1,
+          "scan": 77153,
+          "vm": 319169,
+          "sort": 0,
+          "ms": 25.366625,
+          "profile_ms_range": [
+            25.366625,
+            25.366625
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 41,
+          "scan": 4305,
+          "vm": 61213,
+          "sort": 41,
+          "ms": 22.377707,
+          "profile_ms_range": [
+            0.508583,
+            0.705333
+          ]
+        }
+      ],
+      "top_sql": [
+        "2338e0a6ec91fe44",
+        "a8a149e57e439b47",
+        "6e023bc96509e64b",
+        "34c37746556dfbc1",
+        "4717c294114a8cf6",
+        "84409eb0ef3830d3",
+        "bfbbf348d33072bd",
+        "ac7a870408a25e0c"
+      ]
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "profile-before-cli",
+      "errors": 0,
+      "ms": 449.4462921284139,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "6ed57f563a9f51398a3a8b7df7694e06e24368048da41bab938f6033c60cb7fd",
+      "warmup": {
+        "ms": 2688.944875029847,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "6ed57f563a9f51398a3a8b7df7694e06e24368048da41bab938f6033c60cb7fd"
+      },
+      "statements": 329,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "863cfce36f39d97d",
+          "executions": 1,
+          "scan": 4129,
+          "vm": 85802,
+          "sort": 100,
+          "ms": 15.209958,
+          "per_execution": [
+            {
+              "ms": 15.209958,
+              "scan": 4129,
+              "vm": 85802,
+              "sort": 100
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 5,
+          "scan": 20460,
+          "vm": 100404,
+          "sort": 10,
+          "ms": 1.662707,
+          "per_execution": [
+            {
+              "ms": 0.46775,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.328292,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.261291,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            },
+            {
+              "ms": 0.332708,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            },
+            {
+              "ms": 0.272666,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "a6bd88e267df458c",
+          "executions": 5,
+          "scan": 73790,
+          "vm": 221470,
+          "sort": 5,
+          "ms": 8.614376,
+          "profile_ms_range": [
+            1.424292,
+            2.143792
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 105,
+          "scan": 0,
+          "vm": 32884,
+          "sort": 0,
+          "ms": 3.353253,
+          "profile_ms_range": [
+            0.005167,
+            0.3365
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 515,
+          "vm": 12567,
+          "sort": 1,
+          "ms": 2.779417,
+          "profile_ms_range": [
+            2.779417,
+            2.779417
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6431,
+          "sort": 0,
+          "ms": 1.141125,
+          "profile_ms_range": [
+            1.141125,
+            1.141125
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 2,
+          "scan": 210,
+          "vm": 2986,
+          "sort": 2,
+          "ms": 1.133749,
+          "profile_ms_range": [
+            0.542166,
+            0.591583
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6601,
+          "sort": 0,
+          "ms": 0.79875,
+          "profile_ms_range": [
+            0.79875,
+            0.79875
+          ]
+        }
+      ],
+      "top_sql": [
+        "863cfce36f39d97d",
+        "a6bd88e267df458c",
+        "64eb2298f41a8f46",
+        "cf79ec12d973bf59",
+        "84409eb0ef3830d3",
+        "3b2e3448e24b1a4b",
+        "ac7a870408a25e0c",
+        "14fed424d4452a2f"
+      ]
+    },
+    {
+      "side": "before",
+      "workload": "served",
+      "label": "profile-before-served",
+      "errors": 0,
+      "ms": 225.92229209840298,
+      "rows": 372,
+      "raw": 0,
+      "turns": 37,
+      "digest": "38c9411f802c9d3ce68b1c1d95f546ae25250069ff8edab6a2fea921b924088d",
+      "full_digest": "fe88b5dbb2270317b3af8ca3e76a3a2c9abf6e58c71a23f023e9ccb95da694f1",
+      "warmup": {
+        "ms": 1961.157999932766,
+        "rows": 372,
+        "raw": 0,
+        "turns": 37,
+        "digest": "38c9411f802c9d3ce68b1c1d95f546ae25250069ff8edab6a2fea921b924088d",
+        "full_digest": "fe88b5dbb2270317b3af8ca3e76a3a2c9abf6e58c71a23f023e9ccb95da694f1"
+      },
+      "statements": 1515,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "863cfce36f39d97d",
+          "executions": 2,
+          "scan": 8802,
+          "vm": 534158,
+          "sort": 744,
+          "ms": 1048.774625,
+          "per_execution": [
+            {
+              "ms": 962.489458,
+              "scan": 4401,
+              "vm": 267079,
+              "sort": 372
+            },
+            {
+              "ms": 86.285167,
+              "scan": 4401,
+              "vm": 267079,
+              "sort": 372
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 10,
+          "scan": 40920,
+          "vm": 200808,
+          "sort": 20,
+          "ms": 10.252375,
+          "per_execution": [
+            {
+              "ms": 1.304667,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            },
+            {
+              "ms": 1.271875,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 1.513792,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 1.877125,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            },
+            {
+              "ms": 2.710792,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.326916,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.310791,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            },
+            {
+              "ms": 0.278084,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.379333,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            },
+            {
+              "ms": 0.279,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 754,
+          "scan": 0,
+          "vm": 356566,
+          "sort": 0,
+          "ms": 601.3840430000014,
+          "profile_ms_range": [
+            0.002333,
+            110.813792
+          ]
+        },
+        {
+          "shape": "0b3cf430490c167f",
+          "executions": 12,
+          "scan": 155784,
+          "vm": 623604,
+          "sort": 0,
+          "ms": 135.820667,
+          "profile_ms_range": [
+            0.892084,
+            122.218417
+          ]
+        },
+        {
+          "shape": "a6bd88e267df458c",
+          "executions": 10,
+          "scan": 147580,
+          "vm": 442940,
+          "sort": 10,
+          "ms": 80.41679400000001,
+          "profile_ms_range": [
+            1.241334,
+            65.197208
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 13202,
+          "sort": 0,
+          "ms": 25.411834000000002,
+          "profile_ms_range": [
+            0.813459,
+            24.598375
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 12862,
+          "sort": 0,
+          "ms": 11.119166,
+          "profile_ms_range": [
+            1.04975,
+            10.069416
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 515,
+          "vm": 12567,
+          "sort": 1,
+          "ms": 2.235917,
+          "profile_ms_range": [
+            2.235917,
+            2.235917
+          ]
+        }
+      ],
+      "top_sql": [
+        "863cfce36f39d97d",
+        "64eb2298f41a8f46",
+        "0b3cf430490c167f",
+        "a6bd88e267df458c",
+        "14fed424d4452a2f",
+        "3b2e3448e24b1a4b",
+        "84409eb0ef3830d3",
+        "cf79ec12d973bf59"
+      ]
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "profile-before-board",
+      "errors": 0,
+      "ms": 883.456917013973,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "warmup": {
+        "ms": 2904.1761248372495,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "statements": 516,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "34c37746556dfbc1",
+          "executions": 1,
+          "scan": 12580,
+          "vm": 395409,
+          "sort": 7,
+          "ms": 23.816834,
+          "profile_ms_range": [
+            23.816834,
+            23.816834
+          ]
+        },
+        {
+          "shape": "4717c294114a8cf6",
+          "executions": 1,
+          "scan": 14920,
+          "vm": 110270,
+          "sort": 1,
+          "ms": 19.475208,
+          "profile_ms_range": [
+            19.475208,
+            19.475208
+          ]
+        },
+        {
+          "shape": "8bafc2b6f6975a3a",
+          "executions": 6,
+          "scan": 4368,
+          "vm": 198214,
+          "sort": 6,
+          "ms": 4.643251,
+          "profile_ms_range": [
+            0.655459,
+            0.879084
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 515,
+          "vm": 12567,
+          "sort": 1,
+          "ms": 2.534916,
+          "profile_ms_range": [
+            2.534916,
+            2.534916
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 13202,
+          "sort": 0,
+          "ms": 1.39825,
+          "profile_ms_range": [
+            0.635292,
+            0.762958
+          ]
+        },
+        {
+          "shape": "61de67def2cad854",
+          "executions": 1,
+          "scan": 0,
+          "vm": 15830,
+          "sort": 1,
+          "ms": 1.305792,
+          "profile_ms_range": [
+            1.305792,
+            1.305792
+          ]
+        },
+        {
+          "shape": "b924322370e8bc6f",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 24425,
+          "sort": 0,
+          "ms": 1.137041,
+          "profile_ms_range": [
+            1.137041,
+            1.137041
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6431,
+          "sort": 0,
+          "ms": 0.943625,
+          "profile_ms_range": [
+            0.943625,
+            0.943625
+          ]
+        }
+      ],
+      "top_sql": [
+        "34c37746556dfbc1",
+        "4717c294114a8cf6",
+        "8bafc2b6f6975a3a",
+        "cf79ec12d973bf59",
+        "14fed424d4452a2f",
+        "61de67def2cad854",
+        "b924322370e8bc6f",
+        "3b2e3448e24b1a4b"
+      ]
+    },
+    {
+      "side": "before",
+      "workload": "selection",
+      "label": "profile-before-selection",
+      "errors": 0,
+      "ms": 708.784457994625,
+      "rows": 25,
+      "full_digest": "51d9410ead1c2e954b886f8505e5e3fdc75dd33fe2d901d4701358f10303e173",
+      "warmup": {
+        "ms": 1808.3119159564376,
+        "rows": 25,
+        "full_digest": "51d9410ead1c2e954b886f8505e5e3fdc75dd33fe2d901d4701358f10303e173"
+      },
+      "statements": 5983,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "04a76272e4ecd33a",
+          "executions": 1,
+          "scan": 4401,
+          "vm": 270064,
+          "sort": 373,
+          "ms": 97.53625,
+          "per_execution": [
+            {
+              "ms": 97.53625,
+              "scan": 4401,
+              "vm": 270064,
+              "sort": 373
+            }
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 372,
+          "scan": 0,
+          "vm": 177217,
+          "sort": 0,
+          "ms": 49.30755499999997,
+          "profile_ms_range": [
+            0.001292,
+            20.357792
+          ]
+        },
+        {
+          "shape": "17a4a7bb0650a76c",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 74182,
+          "sort": 1454,
+          "ms": 7.51238299999999,
+          "profile_ms_range": [
+            0.002083,
+            0.029083
+          ]
+        },
+        {
+          "shape": "b0077752121a2702",
+          "executions": 727,
+          "scan": 0,
+          "vm": 22214,
+          "sort": 0,
+          "ms": 4.894933999999998,
+          "profile_ms_range": [
+            0.001208,
+            0.144209
+          ]
+        },
+        {
+          "shape": "9dbcc50e1f707a32",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 79542,
+          "sort": 0,
+          "ms": 4.75675,
+          "profile_ms_range": [
+            4.75675,
+            4.75675
+          ]
+        },
+        {
+          "shape": "f0758c98b34f7b84",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 20356,
+          "sort": 0,
+          "ms": 0.9930299999999934,
+          "profile_ms_range": [
+            0.000416,
+            0.006292
+          ]
+        },
+        {
+          "shape": "f70d33ebd33951a3",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 14540,
+          "sort": 0,
+          "ms": 0.9811949999999925,
+          "profile_ms_range": [
+            0.000416,
+            0.00475
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6601,
+          "sort": 0,
+          "ms": 0.88075,
+          "profile_ms_range": [
+            0.88075,
+            0.88075
+          ]
+        }
+      ],
+      "top_sql": [
+        "04a76272e4ecd33a",
+        "64eb2298f41a8f46",
+        "17a4a7bb0650a76c",
+        "b0077752121a2702",
+        "9dbcc50e1f707a32",
+        "f0758c98b34f7b84",
+        "f70d33ebd33951a3",
+        "14fed424d4452a2f"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "waves",
+      "label": "profile-after-waves",
+      "errors": 0,
+      "ms": 303.73004195280373,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "warmup": {
+        "ms": 2000.7212089840323,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "statements": 641,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "ed994cd930c02252",
+          "executions": 1,
+          "scan": 58,
+          "vm": 2133,
+          "sort": 0,
+          "ms": 0.331292,
+          "per_execution": [
+            {
+              "ms": 0.331292,
+              "scan": 58,
+              "vm": 2133,
+              "sort": 0
+            }
+          ]
+        },
+        {
+          "shape": "6e023bc96509e64b",
+          "executions": 2,
+          "scan": 24744,
+          "vm": 784551,
+          "sort": 14,
+          "ms": 50.171208,
+          "profile_ms_range": [
+            24.502291,
+            25.668917
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 2,
+          "scan": 1034,
+          "vm": 25242,
+          "sort": 2,
+          "ms": 5.7897490000000005,
+          "profile_ms_range": [
+            2.555666,
+            3.234083
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 7,
+          "scan": 735,
+          "vm": 10451,
+          "sort": 7,
+          "ms": 4.0257499999999995,
+          "profile_ms_range": [
+            0.523375,
+            0.70125
+          ]
+        },
+        {
+          "shape": "36c916d2a4c452a4",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 9720,
+          "sort": 0,
+          "ms": 1.7327919999999999,
+          "profile_ms_range": [
+            0.857375,
+            0.875417
+          ]
+        },
+        {
+          "shape": "300f2c4e2dcf0305",
+          "executions": 7,
+          "scan": 0,
+          "vm": 6608,
+          "sort": 0,
+          "ms": 0.924042,
+          "profile_ms_range": [
+            0.002917,
+            0.582417
+          ]
+        },
+        {
+          "shape": "a71147d060c56188",
+          "executions": 14,
+          "scan": 19220,
+          "vm": 86832,
+          "sort": 0,
+          "ms": 0.6552070000000001,
+          "profile_ms_range": [
+            0.009041,
+            0.10225
+          ]
+        },
+        {
+          "shape": "b0077752121a2702",
+          "executions": 128,
+          "scan": 0,
+          "vm": 2762,
+          "sort": 0,
+          "ms": 0.6067959999999997,
+          "profile_ms_range": [
+            0.002084,
+            0.047166
+          ]
+        },
+        {
+          "shape": "0130b2051688ae06",
+          "executions": 15,
+          "scan": 1575,
+          "vm": 16035,
+          "sort": 15,
+          "ms": 0.41337599999999997,
+          "profile_ms_range": [
+            0.015708,
+            0.043334
+          ]
+        }
+      ],
+      "top_sql": [
+        "6e023bc96509e64b",
+        "cf79ec12d973bf59",
+        "ac7a870408a25e0c",
+        "36c916d2a4c452a4",
+        "300f2c4e2dcf0305",
+        "a71147d060c56188",
+        "b0077752121a2702",
+        "0130b2051688ae06"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "task",
+      "label": "profile-after-task",
+      "errors": 0,
+      "ms": 7829.510000068694,
+      "rows": 1,
+      "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39",
+      "warmup": {
+        "ms": 10121.06145801954,
+        "rows": 1,
+        "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+      },
+      "statements": 3984,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "ed994cd930c02252",
+          "executions": 1,
+          "scan": 58,
+          "vm": 2133,
+          "sort": 0,
+          "ms": 0.326375,
+          "per_execution": [
+            {
+              "ms": 0.326375,
+              "scan": 58,
+              "vm": 2133,
+              "sort": 0
+            }
+          ]
+        },
+        {
+          "shape": "4fde9dac80428b0d",
+          "executions": 1,
+          "scan": 15007,
+          "vm": 274770,
+          "sort": 5,
+          "ms": 5.969167,
+          "per_execution": [
+            {
+              "ms": 5.969167,
+              "scan": 15007,
+              "vm": 274770,
+              "sort": 5
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 84,
+          "scan": 343728,
+          "vm": 1698470,
+          "sort": 168,
+          "ms": 38.14675000000001,
+          "per_execution": [
+            {
+              "ms": 0.605167,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.968,
+              "scan": 4092,
+              "vm": 20179,
+              "sort": 2
+            },
+            {
+              "ms": 0.417333,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.378625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.382833,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.487333,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.516125,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.421,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.354916,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.411916,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.388375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.378208,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.426625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.422125,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.448875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.41175,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.44575,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.472291,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.391458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.384,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.51725,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.394875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.379625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.451459,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.387333,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.512209,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.497125,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.442375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.401542,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.401709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.74425,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.425,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.435375,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.587625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.408708,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.466667,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.407583,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.502041,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.409541,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.441708,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.404709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.502458,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.495292,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.378542,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.45525,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.510292,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.424334,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.455417,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.451334,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.369917,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.412334,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.471416,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.373,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.419042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.452542,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.505709,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.393292,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.470208,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.492791,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.582459,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.392167,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.404042,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.443,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.411875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.448167,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.377417,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.47775,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.404083,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.397792,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.555708,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.372,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.435083,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.575625,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.409875,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.545083,
+              "scan": 4092,
+              "vm": 20224,
+              "sort": 2
+            },
+            {
+              "ms": 0.365625,
+              "scan": 4092,
+              "vm": 20223,
+              "sort": 2
+            },
+            {
+              "ms": 0.39875,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.391958,
+              "scan": 4092,
+              "vm": 20174,
+              "sort": 2
+            },
+            {
+              "ms": 0.477666,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.498916,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.3785,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.4145,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.48725,
+              "scan": 4092,
+              "vm": 20197,
+              "sort": 2
+            },
+            {
+              "ms": 0.736875,
+              "scan": 4092,
+              "vm": 20265,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "6e023bc96509e64b",
+          "executions": 5,
+          "scan": 61860,
+          "vm": 1961823,
+          "sort": 35,
+          "ms": 129.47400100000002,
+          "profile_ms_range": [
+            25.042167,
+            26.666042
+          ]
+        },
+        {
+          "shape": "34c37746556dfbc1",
+          "executions": 2,
+          "scan": 24744,
+          "vm": 763918,
+          "sort": 14,
+          "ms": 49.262999,
+          "profile_ms_range": [
+            23.883083,
+            25.379916
+          ]
+        },
+        {
+          "shape": "4717c294114a8cf6",
+          "executions": 2,
+          "scan": 29840,
+          "vm": 187712,
+          "sort": 2,
+          "ms": 41.288459,
+          "profile_ms_range": [
+            19.819292,
+            21.469167
+          ]
+        },
+        {
+          "shape": "bfbbf348d33072bd",
+          "executions": 1,
+          "scan": 77153,
+          "vm": 319169,
+          "sort": 0,
+          "ms": 28.324167,
+          "profile_ms_range": [
+            28.324167,
+            28.324167
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 41,
+          "scan": 4305,
+          "vm": 61213,
+          "sort": 41,
+          "ms": 23.037288999999998,
+          "profile_ms_range": [
+            0.507,
+            0.697208
+          ]
+        },
+        {
+          "shape": "af6315c3fefedf56",
+          "executions": 1,
+          "scan": 72649,
+          "vm": 727422,
+          "sort": 0,
+          "ms": 12.475584,
+          "profile_ms_range": [
+            12.475584,
+            12.475584
+          ]
+        },
+        {
+          "shape": "815b00f3371067f8",
+          "executions": 2,
+          "scan": 29516,
+          "vm": 476712,
+          "sort": 2,
+          "ms": 11.463917,
+          "profile_ms_range": [
+            5.354833,
+            6.109084
+          ]
+        }
+      ],
+      "top_sql": [
+        "6e023bc96509e64b",
+        "34c37746556dfbc1",
+        "4717c294114a8cf6",
+        "84409eb0ef3830d3",
+        "bfbbf348d33072bd",
+        "ac7a870408a25e0c",
+        "af6315c3fefedf56",
+        "815b00f3371067f8"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "cli",
+      "label": "profile-after-cli",
+      "errors": 0,
+      "ms": 467.3458749894053,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "6ed57f563a9f51398a3a8b7df7694e06e24368048da41bab938f6033c60cb7fd",
+      "warmup": {
+        "ms": 1260.7888749334961,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "6ed57f563a9f51398a3a8b7df7694e06e24368048da41bab938f6033c60cb7fd"
+      },
+      "statements": 329,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "863cfce36f39d97d",
+          "executions": 1,
+          "scan": 4129,
+          "vm": 85802,
+          "sort": 100,
+          "ms": 17.155834,
+          "per_execution": [
+            {
+              "ms": 17.155834,
+              "scan": 4129,
+              "vm": 85802,
+              "sort": 100
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 5,
+          "scan": 20460,
+          "vm": 100404,
+          "sort": 10,
+          "ms": 1.726708,
+          "per_execution": [
+            {
+              "ms": 0.413375,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.306083,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.2735,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            },
+            {
+              "ms": 0.309,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.42475,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "a6bd88e267df458c",
+          "executions": 5,
+          "scan": 73790,
+          "vm": 221470,
+          "sort": 5,
+          "ms": 8.011916999999999,
+          "profile_ms_range": [
+            1.505125,
+            1.762584
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 105,
+          "scan": 0,
+          "vm": 32884,
+          "sort": 0,
+          "ms": 3.824125,
+          "profile_ms_range": [
+            0.005417,
+            0.396375
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 517,
+          "vm": 12621,
+          "sort": 1,
+          "ms": 2.371292,
+          "profile_ms_range": [
+            2.371292,
+            2.371292
+          ]
+        },
+        {
+          "shape": "ac7a870408a25e0c",
+          "executions": 2,
+          "scan": 210,
+          "vm": 2986,
+          "sort": 2,
+          "ms": 1.285208,
+          "profile_ms_range": [
+            0.5975,
+            0.687708
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6431,
+          "sort": 0,
+          "ms": 0.9585,
+          "profile_ms_range": [
+            0.9585,
+            0.9585
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6601,
+          "sort": 0,
+          "ms": 0.811125,
+          "profile_ms_range": [
+            0.811125,
+            0.811125
+          ]
+        }
+      ],
+      "top_sql": [
+        "863cfce36f39d97d",
+        "a6bd88e267df458c",
+        "64eb2298f41a8f46",
+        "cf79ec12d973bf59",
+        "84409eb0ef3830d3",
+        "ac7a870408a25e0c",
+        "3b2e3448e24b1a4b",
+        "14fed424d4452a2f"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "served",
+      "label": "profile-after-served",
+      "errors": 0,
+      "ms": 245.65608287230134,
+      "rows": 372,
+      "raw": 0,
+      "turns": 37,
+      "digest": "38c9411f802c9d3ce68b1c1d95f546ae25250069ff8edab6a2fea921b924088d",
+      "full_digest": "fe88b5dbb2270317b3af8ca3e76a3a2c9abf6e58c71a23f023e9ccb95da694f1",
+      "warmup": {
+        "ms": 1828.8948340341449,
+        "rows": 372,
+        "raw": 0,
+        "turns": 37,
+        "digest": "38c9411f802c9d3ce68b1c1d95f546ae25250069ff8edab6a2fea921b924088d",
+        "full_digest": "fe88b5dbb2270317b3af8ca3e76a3a2c9abf6e58c71a23f023e9ccb95da694f1"
+      },
+      "statements": 1514,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "863cfce36f39d97d",
+          "executions": 2,
+          "scan": 8802,
+          "vm": 534158,
+          "sort": 744,
+          "ms": 1064.981292,
+          "per_execution": [
+            {
+              "ms": 975.437542,
+              "scan": 4401,
+              "vm": 267079,
+              "sort": 372
+            },
+            {
+              "ms": 89.54375,
+              "scan": 4401,
+              "vm": 267079,
+              "sort": 372
+            }
+          ]
+        },
+        {
+          "shape": "84409eb0ef3830d3",
+          "executions": 10,
+          "scan": 40920,
+          "vm": 200808,
+          "sort": 20,
+          "ms": 8.686249,
+          "per_execution": [
+            {
+              "ms": 1.278542,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            },
+            {
+              "ms": 1.182541,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 1.103,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 1.286167,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 1.598125,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            },
+            {
+              "ms": 0.40325,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.364208,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.327292,
+              "scan": 4092,
+              "vm": 20016,
+              "sort": 2
+            },
+            {
+              "ms": 0.734416,
+              "scan": 4092,
+              "vm": 20098,
+              "sort": 2
+            },
+            {
+              "ms": 0.408708,
+              "scan": 4092,
+              "vm": 20094,
+              "sort": 2
+            }
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 754,
+          "scan": 0,
+          "vm": 356566,
+          "sort": 0,
+          "ms": 605.9916040000002,
+          "profile_ms_range": [
+            0.00275,
+            109.474167
+          ]
+        },
+        {
+          "shape": "0b3cf430490c167f",
+          "executions": 12,
+          "scan": 155784,
+          "vm": 623604,
+          "sort": 0,
+          "ms": 140.773665,
+          "profile_ms_range": [
+            1.159125,
+            127.039875
+          ]
+        },
+        {
+          "shape": "a6bd88e267df458c",
+          "executions": 10,
+          "scan": 147580,
+          "vm": 442940,
+          "sort": 10,
+          "ms": 78.360872,
+          "profile_ms_range": [
+            1.451667,
+            63.348875
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 13202,
+          "sort": 0,
+          "ms": 19.536041,
+          "profile_ms_range": [
+            0.827416,
+            18.708625
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 12862,
+          "sort": 0,
+          "ms": 11.781166,
+          "profile_ms_range": [
+            1.026125,
+            10.755041
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 517,
+          "vm": 12621,
+          "sort": 1,
+          "ms": 4.890041,
+          "profile_ms_range": [
+            4.890041,
+            4.890041
+          ]
+        }
+      ],
+      "top_sql": [
+        "863cfce36f39d97d",
+        "64eb2298f41a8f46",
+        "0b3cf430490c167f",
+        "a6bd88e267df458c",
+        "14fed424d4452a2f",
+        "3b2e3448e24b1a4b",
+        "84409eb0ef3830d3",
+        "cf79ec12d973bf59"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "board",
+      "label": "profile-after-board",
+      "errors": 0,
+      "ms": 821.8031669966877,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "warmup": {
+        "ms": 2886.1726250033826,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "statements": 516,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "34c37746556dfbc1",
+          "executions": 1,
+          "scan": 12580,
+          "vm": 395409,
+          "sort": 7,
+          "ms": 25.0155,
+          "profile_ms_range": [
+            25.0155,
+            25.0155
+          ]
+        },
+        {
+          "shape": "4717c294114a8cf6",
+          "executions": 1,
+          "scan": 14920,
+          "vm": 110270,
+          "sort": 1,
+          "ms": 19.326834,
+          "profile_ms_range": [
+            19.326834,
+            19.326834
+          ]
+        },
+        {
+          "shape": "8bafc2b6f6975a3a",
+          "executions": 6,
+          "scan": 4368,
+          "vm": 198214,
+          "sort": 6,
+          "ms": 4.2154169999999995,
+          "profile_ms_range": [
+            0.55725,
+            0.908542
+          ]
+        },
+        {
+          "shape": "b924322370e8bc6f",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 24425,
+          "sort": 0,
+          "ms": 3.207792,
+          "profile_ms_range": [
+            3.207792,
+            3.207792
+          ]
+        },
+        {
+          "shape": "cf79ec12d973bf59",
+          "executions": 1,
+          "scan": 517,
+          "vm": 12621,
+          "sort": 1,
+          "ms": 2.643875,
+          "profile_ms_range": [
+            2.643875,
+            2.643875
+          ]
+        },
+        {
+          "shape": "14fed424d4452a2f",
+          "executions": 2,
+          "scan": 2196,
+          "vm": 13202,
+          "sort": 0,
+          "ms": 1.519458,
+          "profile_ms_range": [
+            0.730625,
+            0.788833
+          ]
+        },
+        {
+          "shape": "61de67def2cad854",
+          "executions": 1,
+          "scan": 0,
+          "vm": 15830,
+          "sort": 1,
+          "ms": 1.201708,
+          "profile_ms_range": [
+            1.201708,
+            1.201708
+          ]
+        },
+        {
+          "shape": "3b2e3448e24b1a4b",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 6431,
+          "sort": 0,
+          "ms": 0.9955,
+          "profile_ms_range": [
+            0.9955,
+            0.9955
+          ]
+        }
+      ],
+      "top_sql": [
+        "34c37746556dfbc1",
+        "4717c294114a8cf6",
+        "8bafc2b6f6975a3a",
+        "b924322370e8bc6f",
+        "cf79ec12d973bf59",
+        "14fed424d4452a2f",
+        "61de67def2cad854",
+        "3b2e3448e24b1a4b"
+      ]
+    },
+    {
+      "side": "after",
+      "workload": "selection",
+      "label": "profile-after-selection",
+      "errors": 0,
+      "ms": 704.8249999061227,
+      "rows": 25,
+      "full_digest": "51d9410ead1c2e954b886f8505e5e3fdc75dd33fe2d901d4701358f10303e173",
+      "warmup": {
+        "ms": 1786.3384161610156,
+        "rows": 25,
+        "full_digest": "51d9410ead1c2e954b886f8505e5e3fdc75dd33fe2d901d4701358f10303e173"
+      },
+      "statements": 5983,
+      "sqlite_version": "3.53.2",
+      "queries": [
+        {
+          "shape": "04a76272e4ecd33a",
+          "executions": 1,
+          "scan": 4401,
+          "vm": 270064,
+          "sort": 373,
+          "ms": 101.596625,
+          "per_execution": [
+            {
+              "ms": 101.596625,
+              "scan": 4401,
+              "vm": 270064,
+              "sort": 373
+            }
+          ]
+        },
+        {
+          "shape": "64eb2298f41a8f46",
+          "executions": 372,
+          "scan": 0,
+          "vm": 177217,
+          "sort": 0,
+          "ms": 51.419454999999985,
+          "profile_ms_range": [
+            0.001459,
+            22.154709
+          ]
+        },
+        {
+          "shape": "17a4a7bb0650a76c",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 74182,
+          "sort": 1454,
+          "ms": 6.7246409999999965,
+          "profile_ms_range": [
+            0.002042,
+            0.10925
+          ]
+        },
+        {
+          "shape": "b0077752121a2702",
+          "executions": 727,
+          "scan": 0,
+          "vm": 22214,
+          "sort": 0,
+          "ms": 3.899792999999996,
+          "profile_ms_range": [
+            0.001125,
+            0.036917
+          ]
+        },
+        {
+          "shape": "9dbcc50e1f707a32",
+          "executions": 1,
+          "scan": 1098,
+          "vm": 79542,
+          "sort": 0,
+          "ms": 3.717958,
+          "profile_ms_range": [
+            3.717958,
+            3.717958
+          ]
+        },
+        {
+          "shape": "c1242eb17c2aa61d",
+          "executions": 18,
+          "scan": 0,
+          "vm": 1550,
+          "sort": 0,
+          "ms": 1.010791,
+          "profile_ms_range": [
+            0.033333,
+            0.133541
+          ]
+        },
+        {
+          "shape": "f0758c98b34f7b84",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 20356,
+          "sort": 0,
+          "ms": 0.9581599999999869,
+          "profile_ms_range": [
+            0.000416,
+            0.008917
+          ]
+        },
+        {
+          "shape": "f70d33ebd33951a3",
+          "executions": 1454,
+          "scan": 0,
+          "vm": 14540,
+          "sort": 0,
+          "ms": 0.9242229999999869,
+          "profile_ms_range": [
+            0.000375,
+            0.008542
+          ]
+        }
+      ],
+      "top_sql": [
+        "04a76272e4ecd33a",
+        "64eb2298f41a8f46",
+        "17a4a7bb0650a76c",
+        "b0077752121a2702",
+        "9dbcc50e1f707a32",
+        "c1242eb17c2aa61d",
+        "f0758c98b34f7b84",
+        "f70d33ebd33951a3"
+      ]
+    }
+  ]
+}

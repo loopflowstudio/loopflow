@@ -1,0 +1,110 @@
+{
+  "verdict": "Better: keep 761c28056.",
+  "summary": "Wave list: 441.4 \u2192 246.5 ms median (44.2% lower). Task status, network denied: 7373.0 \u2192 6864.7 ms (6.9% lower). Five alternating pairs per workload, non-overlapping ranges, matching full JSON, zero command/validation errors. Session lists and Work selection show no measurable difference. Board is inconclusive.",
+  "limiter": "Task status still spends most sampled main-thread time checking Claude logins through security (59\u201362%); planning configuration loading accounts for 16\u201317%. Private provider homes, ambient OS/Git state and shared-Machine load limit generalization.",
+  "stacks": {
+    "before": {
+      "main_thread_samples": 1267,
+      "functions": {
+        "read_claude_keychain_blob_with_security": {
+          "samples": 752,
+          "percent": 59.35280189423836
+        },
+        "load_planning_transport": {
+          "samples": 213,
+          "percent": 16.811365430149962
+        },
+        "resolve_layers": {
+          "samples": 197,
+          "percent": 15.548539857932123
+        },
+        "check_scope": {
+          "samples": 275,
+          "percent": 21.70481452249408
+        }
+      },
+      "receipt": {
+        "side": "before",
+        "ms": 8601.237750146538,
+        "errors": 0,
+        "warmup": {
+          "ms": 12011.236625025049,
+          "rows": 1,
+          "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+        },
+        "rows": 1,
+        "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+      }
+    },
+    "after": {
+      "main_thread_samples": 1105,
+      "functions": {
+        "read_claude_keychain_blob_with_security": {
+          "samples": 686,
+          "percent": 62.081447963800905
+        },
+        "load_planning_transport": {
+          "samples": 182,
+          "percent": 16.470588235294116
+        },
+        "resolve_layers": {
+          "samples": 175,
+          "percent": 15.83710407239819
+        },
+        "check_scope": {
+          "samples": 250,
+          "percent": 22.624434389140273
+        }
+      },
+      "receipt": {
+        "side": "after",
+        "ms": 7156.414957949892,
+        "errors": 0,
+        "warmup": {
+          "ms": 10238.423167029396,
+          "rows": 1,
+          "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+        },
+        "rows": 1,
+        "full_digest": "c55a1feb5fdab036996824e3dd6264d4d90645845c88b519c4c8e59decef9c39"
+      }
+    }
+  },
+  "full_json_matches_profiles_and_samples": true,
+  "timing_harness_unchanged": true,
+  "retained_timed_calls": 60,
+  "retained_warmups": 60,
+  "command_or_validation_errors": 0,
+  "preparation_failures": 1,
+  "excluded_timed_calls": 60,
+  "board_attribution": "Neither new index is used. Substantive bound plans and work counters match; the small timing separation is unexplained.",
+  "private_directory": "/tmp/loo822-process-measure",
+  "loo_822_untouched": true,
+  "sealed_database_indexes": {
+    "before": [
+      "tasks_checkout_root",
+      "tasks_primary_session"
+    ],
+    "after": [
+      "agent_process_unfinished",
+      "processes_cwd",
+      "tasks_checkout_root",
+      "tasks_primary_session"
+    ]
+  },
+  "store_verification": {
+    "application_tables": 78,
+    "differing_tables": [
+      "schema_migrations"
+    ],
+    "digest_file_sha256": "950e0fab0cc0b684f1c2b9400cf41e495749cb0abe5ce5313d2f0d97bb58ba58"
+  },
+  "final_checks": {
+    "cargo_fmt_check": "passed",
+    "git_diff_check": "passed",
+    "production_files_equal_candidate": true,
+    "binary_and_snapshot_hashes_match": true,
+    "uninstrumented_candidate_restored": true,
+    "owned_processes_remaining": 0
+  }
+}

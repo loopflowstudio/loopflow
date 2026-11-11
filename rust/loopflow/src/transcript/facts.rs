@@ -3,6 +3,10 @@
 //! with no live stream still counts toward its Task. A turn Loopflow already
 //! recorded while it ran is left alone.
 //!
+//! This runs once the provider has exited, so a last run the transcript
+//! leaves open (still going, or stopped on a question) was cut off: it is
+//! written as `interrupted`, ended at the transcript's last row.
+//!
 //! A transcript gives no cost: Claude's `cost-state` row is a total, not a
 //! turn's. Rows from here carry `"source":"transcript"` and no `cost_usd`.
 
@@ -21,8 +25,8 @@ use crate::store::StoreResult;
 /// been recorded.
 const LAG: i64 = 2;
 
-/// Record every finished turn of `thread`'s transcript that `session` holds
-/// no completion for; returns how many were written.
+/// Record every turn of `thread`'s transcript that `session` holds no
+/// completion for; returns how many were written. The provider must be gone.
 pub(crate) fn record(
     store: &SqliteStore,
     session: &str,
@@ -31,10 +35,15 @@ pub(crate) fn record(
     transcript: &Path,
 ) -> StoreResult<usize> {
     let runs = super::runs(harness, transcript);
+    let last_row = || {
+        super::json_lines(transcript)
+            .filter_map(|row| unix_seconds(&row["timestamp"]))
+            .last()
+    };
     let recorded = store.session_completions(session, thread)?;
     let mut written = 0;
     for run in &runs {
-        let (Some(id), Some(ended)) = (&run.id, seconds(&run.ended_at)) else {
+        let (Some(id), Some(ended)) = (&run.id, seconds(&run.ended_at).or_else(last_row)) else {
             continue;
         };
         let started = seconds(&run.started_at);
@@ -76,8 +85,8 @@ fn covers(runs: &[Run], turn: &str, at: i64, started: Option<i64>, ended: i64) -
 
 fn completion(harness: HarnessKind, run: &Run, started: Option<i64>, ended: i64) -> Value {
     let status = match run.state {
-        TurnState::Interrupted => "interrupted",
-        _ => "completed",
+        TurnState::Ended => "completed",
+        TurnState::Interrupted | TurnState::Running | TurnState::Asking => "interrupted",
     };
     let mut detail = json!({
         "status": status,
@@ -216,6 +225,78 @@ mod tests {
         .unwrap();
         assert_eq!(written, 1);
         assert_eq!(rows(&store, SessionEventKind::Usage)[0].0, "turn-2");
+    }
+
+    #[test]
+    fn a_run_the_provider_left_open_is_written_interrupted_once() {
+        let (home, store) = store();
+        let thread = AgentSessionId::from("5d1a7f0e-2c41-4f43-9a51-0d3b8f6c9e10");
+        let path = home.path().join("transcript.jsonl");
+        let row = |kind: &str, at: &str, rest: Value| {
+            let mut row = json!({"type":kind,"userType":"external",
+                "timestamp":format!("2026-11-10T16:{at}Z")});
+            row.as_object_mut()
+                .unwrap()
+                .extend(rest.as_object().unwrap().clone());
+            row.to_string()
+        };
+        let reply = |stop: &str, content: Value| {
+            json!({"message":{"id":stop,"model":"claude-opus-5-5","stop_reason":stop,
+                "content":[content],"usage":{"input_tokens":3,"output_tokens":40}}})
+        };
+        // Killed with a tool still running.
+        let mut lines = vec![
+            row(
+                "user",
+                "00:00",
+                json!({"uuid":"u1","message":{"content":"Build it"}}),
+            ),
+            row(
+                "assistant",
+                "00:05",
+                reply(
+                    "tool_use",
+                    json!({"type":"tool_use","id":"t1","name":"Bash","input":{}}),
+                ),
+            ),
+            row("attachment", "00:30", json!({})),
+        ];
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let record = || record(&store, "conversation", HarnessKind::Claude, &thread, &path);
+        assert_eq!(record().unwrap(), 1);
+        assert_eq!(record().unwrap(), 0);
+
+        let usage = rows(&store, SessionEventKind::Usage);
+        assert_eq!(usage.len(), 1);
+        assert_eq!((usage[0].0.as_str(), usage[0].1), ("u1", 1_794_326_430));
+        assert_eq!(usage[0].2["usage"]["output_tokens"], 40);
+        let completed = rows(&store, SessionEventKind::Completed);
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].2["status"], "interrupted");
+        assert_eq!(completed[0].2["completed_at"], 1_794_326_430);
+
+        // Resumed: the next request ends the same run, under the same id.
+        lines.push(row(
+            "user",
+            "12:00",
+            json!({"uuid":"u2","message":{"content":"ok"}}),
+        ));
+        lines.push(row(
+            "assistant",
+            "12:09",
+            reply("end_turn", json!({"type":"text","text":"Built."})),
+        ));
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(record().unwrap(), 1);
+        let completed = rows(&store, SessionEventKind::Completed);
+        assert_eq!(
+            completed
+                .iter()
+                .map(|(turn, _, detail)| (turn.as_str(), detail["status"].as_str().unwrap()))
+                .collect::<Vec<_>>(),
+            [("u1", "interrupted"), ("u2", "completed")]
+        );
+        assert_eq!(rows(&store, SessionEventKind::Usage).len(), 2);
     }
 
     #[test]

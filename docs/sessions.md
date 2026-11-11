@@ -169,7 +169,7 @@ it. A turn stopped on a permission prompt still reads as `turn running`; lf
 doesn't guess otherwise. Sessions lf manages also get that state from the
 agent's own status reports.
 
-A raw conversation open in a Task's checkout counts toward that Task:
+A raw conversation open in a Task's checkout lists under that Task:
 `lf session list --task <task>` includes it.
 A transcript caught halfway through writing a line is read up to its last
 complete line.

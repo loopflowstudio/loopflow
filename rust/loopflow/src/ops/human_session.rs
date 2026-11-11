@@ -602,7 +602,7 @@ pub(crate) async fn list(
 
 /// Raw conversations list unless `--no-raw` asks otherwise. They have no
 /// account, history or page position, so a selection by any of those leaves
-/// them out. One open in a Task's checkout counts toward that Task.
+/// them out. One open in a Task's checkout lists under that Task.
 fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
     filter.raw
         && !filter.orphan

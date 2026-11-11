@@ -1782,10 +1782,11 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
     }
 }
 
-/// The Task a conversation run in `cwd` counts toward: the one whose checkout
-/// on this Machine holds it. Launches and conversations lf never launched
-/// both ask here, so whether a calling Session's Task should outrank its
-/// checkout's is decided by changing this function alone.
+/// The Task a conversation run in `cwd` belongs to: the one whose checkout
+/// on this Machine holds it. A launch counts toward it, with usage rows; a
+/// raw conversation only lists under it. Both ask here, so whether a calling
+/// Session's Task should outrank its checkout's is decided by changing this
+/// function alone.
 pub(crate) fn counted_task(
     store: &SqliteStore,
     cwd: &Path,

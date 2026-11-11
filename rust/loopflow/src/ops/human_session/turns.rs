@@ -73,7 +73,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
             }
         }
         let turn = crate::observe::transcript_turn(conversation.harness, &conversation.transcript);
-        // A checkout two Tasks claim counts toward neither.
+        // A checkout two Tasks claim lists under neither.
         let task = crate::ops::task::counted_task(store, &conversation.cwd).unwrap_or(None);
         records.push(record(
             conversation.harness,

@@ -149,16 +149,18 @@ executable path (`…/claude/versions/<version>`) identifies it. User docs:
 
 A bare run in a Task's checkout counts toward that Task, and the cost-per-PR
 work (LOO-732) reads per-turn `usage` and `completed` rows from the store, so
-a transcript read also writes them (`transcript/facts.rs`): when a provider lf launched exits, each finished
+a transcript read also writes them (`transcript/facts.rs`): when a provider lf launched exits, each
 run the store holds no completion for gets both rows, dated when the run
-ended, in the live stream's payload shape plus `"source":"transcript"`. A run
+ended, in the live stream's payload shape plus `"source":"transcript"`. A
+last run the transcript leaves open was cut off, since its provider is gone:
+it is written `interrupted`, ended at the transcript's last row, and a later
+resume ends the same run under the same id, so it is not written again. A run
 is already recorded when a completion carries its id (Claude's request row,
 Codex's turn, the same ids the live stream uses) or was observed while it
 ran, since the live recording folds queued input into one turn. These rows
 carry no `cost_usd`: tokens come first, input, cache read, cache write and
-output kept apart, and dollar accounting is later work. Not written: a run cut
-off with no end in the transcript, and anything for a raw conversation, which
-is listed but not tracked. What
+output kept apart, and dollar accounting is later work. Not written:
+anything for a raw conversation, which is listed but not tracked. What
 each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
 0.167.0):
 

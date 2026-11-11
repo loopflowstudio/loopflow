@@ -11,6 +11,45 @@ table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px soli
 
 <h1>LOO-821 QA: bare launches, managed launches, OpenCode and Pi</h1>
 
+<h2>Fifth pass: boundary query plans (lf 0.15.3+72d82a734)</h2>
+
+<p>The scan pass's ship condition: a fresh plan of the traced boundary statements on a store copy shows no scan of a
+growing table. Plan script kept this time: <code>scratch/qa/plan.py</code>.</p>
+
+<table>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>H1. Plan on a copy of the Machine's store<br><code>sqlite3 -readonly ~/.lf/loopflow.db ".backup …"</code></td>
+<td>Copy at 08:42: 3,030 steers, 10,445 batches, 41,000 deliveries, 41,659 <code>session_steers</code>, 236,147 Session
+events, 1,099 Tasks. Its 105 migrations differ from the branch's 106 only by <code>steer_delivery_lookups</code>, applied
+with <code>sqlite3</code> (the copy was never opened by <code>lf</code>). The 33 statements the fixture test traces through
+SessionStart (resume), prompt, tool and Stop, run for the busiest Session <code>881aafe7…</code>:
+<pre>branch indexes  unanalyzed: 0 scans of growing tables, 2.59 ms total, slowest 0.60 ms (applicable/member_tasks)
+                analyzed:   0 scans,                   3.22 ms total, slowest 1.37 ms (same statement)
+main's indexes  unanalyzed: 16 scans (steer_batches, steer_deliveries, steers p), 15.98 ms, slowest 2.77 ms
+                analyzed:   16 scans,                                              16.59 ms</pre>
+The analyzed 1.37 ms was the first <code>member_tasks</code> statement right after a whole-store <code>ANALYZE</code>;
+its two siblings took 0.26–0.34 ms. Output: <code>/tmp/lfqa5/plan-branch.txt</code>, <code>plan-main.txt</code>.</td>
+<td class="ok">works</td></tr>
+<tr><td>H2. Returning private home</td><td>The fourth pass's <code>/tmp/lf-qa-821/lf</code> had applied the earlier draft
+of <code>steer_delivery_lookups.sql</code> (full <code>steers_task</code>/<code>steers_wave</code>). The branch refuses:
+<code>database migration steer_delivery_lookups checksum does not match this lf build; it is unmerged schema work, so start
+a fresh LF_HOME</code>. Moved aside to <code>lf.pass4</code>.</td><td class="ok">as designed</td></tr>
+<tr><td>H3. Managed turn, fresh home<br><code>lf -i --task 38c2fa… -a claude : 'QA round five'</code></td>
+<td>Server down at launch; it registered and was ready at 16:43:52. Start hook (0.32 s) delivered
+<code>QA_STEER_R5_PRE</code>; <code>QA_STEER_R5_MID</code>, posted after turn 1, arrived in turn 2's prompt hook. After
+<code>launchctl bootout</code>, turn 3's hooks exited 0 in 0.33–0.34 s with one gap line. Every hook 0.32–0.35 s; the only
+store holder sampled during a hook was the Session owner. Both steers <code>emitted</code>.</td><td class="ok">works</td></tr>
+</table>
+
+<h3>Fixed</h3>
+<p>Nothing this pass. The qa skill now says how to plan boundary statements on a store copy without opening it with
+<code>lf</code>, and that a home from an earlier migration draft must be replaced.</p>
+
+<h3>Not reached</h3>
+<p>Plans used the fixture test's statements with the busiest Session's id substituted, not statements traced from a live
+server on the real store (that would mean running a server against a copy whose records point at real worktrees and PIDs).
+Same limits as before: no real provider login, no Desktop window, no remote <code>lf --machine</code>.</p>
+
 <h2>Fourth pass: managed resume and Desktop's prepared argv (lf 0.15.3+0d9e955ff)</h2>
 
 <p>Same private Machine (<code>/tmp/lf-qa-821</code>), same stand-in Claude running the installed hook commands and sampling

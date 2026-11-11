@@ -325,6 +325,17 @@ server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+A private home that applied an earlier draft of the branch's migration refuses
+to open (checksum mismatch); move it aside and start a fresh one.
+
+Boundary query plans: copy the Machine's store with
+`sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare
+`schema_migrations` with `store/migrations/`, and apply only the branch's
+missing migration SQL to the copy with `sqlite3`. Never open the copy with
+`lf`: recovery acts on the real PIDs and worktrees it records. Dump `TRACED`
+from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
+temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
+on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
 ## Native conversation opening
 

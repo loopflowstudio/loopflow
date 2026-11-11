@@ -592,7 +592,7 @@ Local and remote tickets are not interchangeable.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
-with a Session ID from `session.list`. Owner resolution and errors follow
+with a Session ID from `session.list`. Owner resolution, bridge protocol and errors follow
 [terminal attachment](#terminal-attachment). A null `owner_lf_process_id`
 selects the current terminal owner:
 
@@ -609,7 +609,6 @@ the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
-After `bridged`, use the [binary owner protocol](../transport/README.md).
 Keep `/v1/machine` for requests and live Work updates.
 For reconnection and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
@@ -617,8 +616,7 @@ For reconnection and exact-owner attachment, follow
 Each ticket opens one bridge and expires 60 seconds after issue, including host
 sleep; expiry does not close an open bridge. Every admitted terminal redemption
 attempt consumes the ticket, including identity and local/remote mismatches.
-Unknown, spent, expired or mismatched tickets return `not_found` with a null
-`id` and close the bridge connection. Retry with a fresh ticket and bridge.
+After a ticket failure, retry with a fresh ticket and bridge.
 
 ## Subscription cost experiment
 

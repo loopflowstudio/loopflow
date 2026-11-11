@@ -116,7 +116,7 @@ execution destination do not grant phone access.
 
 The planned [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
 lets a phone view a Session's running terminal without starting or resuming a
-provider. It describes the authentication requirements and connection steps.
+provider.
 
 Local use needs no network listener. Keep the local socket private; remote
 clients require their own authenticated endpoint.

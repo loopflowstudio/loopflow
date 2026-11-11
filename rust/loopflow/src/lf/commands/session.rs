@@ -707,6 +707,26 @@ fn resumes_work(target: &crate::ops::human_session::SessionTarget<'_>) -> bool {
     ) || crate::journal::task_run_step()
 }
 
+/// A prepared Task or Wave resume opens through that target, so the terminal
+/// that runs `open_argv` resumes managed, as the prepare command would have.
+fn open_through(record: &mut SessionRecord, target: crate::ops::human_session::SessionTarget<'_>) {
+    use crate::ops::human_session::SessionTarget;
+    let selector = match target {
+        SessionTarget::Task(task) => ["--task", task],
+        SessionTarget::Wave(wave) => ["--wave", wave],
+        _ => return,
+    };
+    if let Some(at) = record
+        .open_argv
+        .iter()
+        .position(|word| *word == record.id.as_str())
+    {
+        record
+            .open_argv
+            .splice(at..=at, selector.map(str::to_string));
+    }
+}
+
 /// The conversation `lf resume` run from `directory` selects.
 async fn select(
     store: &Arc<Store>,
@@ -784,7 +804,10 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
                 let managed = resumes_work(&target);
-                reopen(&store, directory, target, connection, *fork, false, managed).await
+                let mut record =
+                    reopen(&store, directory, target, connection, *fork, false, managed).await?;
+                open_through(&mut record, target);
+                Ok(record)
             }
             SessionCommand::New {
                 id,

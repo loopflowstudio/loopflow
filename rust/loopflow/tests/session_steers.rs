@@ -331,7 +331,15 @@ exit 0\n",
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
-        Command::new(env!("CARGO_BIN_EXE_lf"))
+        self.run_program(env!("CARGO_BIN_EXE_lf"), args)
+    }
+
+    fn run_program(
+        &self,
+        program: impl AsRef<std::ffi::OsStr>,
+        args: &[impl AsRef<std::ffi::OsStr>],
+    ) -> std::process::Output {
+        Command::new(program)
             .env_clear()
             .env("HOME", self.home.path())
             .env("LF_HOME", self.home.path())
@@ -390,6 +398,43 @@ fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
     );
     drop(server);
     assert_names_missing_server(&task.run(&["-i", "--task", "INF-123", "resume"]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop opens a Task's conversation by preparing it, then running the
+/// returned `open_argv` in a terminal. That command resumes through the Task,
+/// so with the server stopped it fails naming it, as `lf resume --task` does.
+#[test]
+fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
+    let task = InteractiveTask::new();
+    let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
+    let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    drop(server);
+    let prepared = task.run(&[
+        "session",
+        "resume",
+        "--task",
+        "INF-123",
+        "--prepare",
+        "--json",
+    ]);
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let argv: Vec<String> = serde_json::from_value(record["open_argv"].clone()).unwrap();
+    assert!(
+        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
     assert!(!task.marked("provider-resumed"));
 }
 

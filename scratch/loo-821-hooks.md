@@ -160,16 +160,6 @@ Remaining:
   direct" (above).
 - Gate: the suites under Checks marked gate.
 - `limit` / `record-limit` still open the store, on a usage limit only.
-- Desktop opening a Task: in scope (steer 33c309b1 lists "Desktop opening a
-  Task" among the managed entry points), not built. Desktop prepares with
-  `session resume --prepare --task X`, then runs the record's `open_argv`,
-  which `human_session_argv` builds per Session as `lf session resume <id>`:
-  a Session target, so bare, with no launch check. The record already appends
-  the prepare intent's flag to `open_argv` (`human_session.rs`,
-  `intent.flag()`), so the prepare command can add to it. How is open in
-  `scratch/questions.md`; the test is the Desktop-path twin of
-  `an_interactive_task_resume_with_no_machine_server_fails_naming_it`.
-  Interactive resumes keep every hook either way.
 
 Choices taken (reversible):
 
@@ -303,6 +293,12 @@ now takes `managed` from the resume command (`session.rs::resumes_work`: a Task
 or Wave target, or a Task-run step) through `human_session::open`,
 `open_without_replacing` and `resume_native_session`, as `run::resume` already
 did for `-b`. Bare `lf resume <session>` stays bare.
+
+Checks (November 11, Desktop opening a Task):
+
+- `--test integration session_steers::a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server` — passes; fails without `open_through` (the reopened argv resumes bare)
+- `--lib ops::human_session::` — 42 pass; `session_steers:: session_cli_tests::session_cli_uses_one_truthful_resolution_contract` — 9 pass; `documented_commands::` — 4 pass; clippy clean
+- Gate: the same filter as below, clippy
 
 Checks (November 11, managed resume):
 

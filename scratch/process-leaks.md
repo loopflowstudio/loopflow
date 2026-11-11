@@ -22,6 +22,10 @@ Fixed in the diff: owner close-on-exec, `Pipe.uninherited()` at every Desktop
 child pipe, the shared test reaper. Since `ab682d71f`, `observe-status` is one
 write per reading; a resident one is from an older Desktop.
 
+Docs: `docs/troubleshooting.md` (Many `lf` processes running),
+`rust/loopflow/tests/README.md` (Leaving nothing running),
+`rust/loopflow/src/transport/README.md` (owner descriptors).
+
 Remaining, at demo/gate: `transport_tests` with a ps diff, a fresh report,
 its totals against a fresh `ps`.
 

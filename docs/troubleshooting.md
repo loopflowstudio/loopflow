@@ -309,23 +309,25 @@ and `lf process rollover --dry-run` name a `session serve` owner by its PID.
 |---|---|---|
 | `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
-| `lf session observe-status <ID>` | Records one "working" or "waiting on you" reading; it exits once written | Nothing; one that keeps running is from an older Desktop, whose observers stay until their client is gone |
+| `lf session observe-status <ID>` | Records one "working" or "waiting on you" reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
 | `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
 | `lf server run` | The Machine server | Desktop's connection until the server is started again |
 
 An owner whose conversation is settled and unviewed ends on its own after
 `session.end_detached_after`; one that is days old and still running is held
-by something: `native input` is typing the agent never received as a prompt (a
-draft, an edit, an arrow key), which stopping it loses. Open it with
-`lf resume <ID>` and send or clear what is there.
+by something `lf process rollover --dry-run` names. `native input` means keys
+reached the agent that lf couldn't read as a sent prompt: a typed draft, an
+edit, or only an arrow key or Esc. Stopping the owner loses a draft. Open it
+with `lf resume <ID>`, then send or clear what is there; the owner ends on
+schedule once its input is empty.
 
 A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from
 development. Tests end every process they start before they exit; one that
-remains is a bug worth filing with its command line. A demo keeps its
-processes while input there is unsettled; its note under `scratch/` says how
-to end them.
+remains is a bug worth filing with its command line. A demo or Dev app keeps
+its processes until you quit it; quit the app, or `lf resume` the demo's
+conversations and close them, before stopping anything by PID.
 
 Stop processes one at a time by PID, after reading what each serves. Never stop
 them by name or pattern (`pkill lf`, `killall lf`): that ends live

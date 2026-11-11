@@ -93,7 +93,7 @@ struct WorkSelectionTests {
 func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
                      slots: DashboardSlotLayout = DashboardSlotLayout(root: .slot(0))) -> WorkViewPlan {
     let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
-    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository,
+    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository, repositoryPath: "/src/fixture",
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),

@@ -132,7 +132,7 @@ struct DesktopPaneControlTests {
         let b = WorkWorkspaceKey(repository: repository, kind: .task, id: "b")
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
         func plan(dashboard: String?, expression: WorkSelection.Expression, also: [WorkWorkspaceKey] = []) -> WorkViewPlan {
-            WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository,
+            WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository, repositoryPath: "/src/fixture",
                 selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
@@ -206,7 +206,7 @@ struct DesktopPaneControlTests {
     private func actionFixture() -> (WorkModel, SessionsWorkspaceRegistry, WorkLinkRouter, UUID) {
         let keys = ["a", "b"].map { WorkWorkspaceKey(repository: repository, kind: .task, id: $0) }
         let members = keys.map { WorkMemberRef(source: ["root"], work: $0) }
-        let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository,
+        let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository, repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .repository), savedRevision: nil,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),

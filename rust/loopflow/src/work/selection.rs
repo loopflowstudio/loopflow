@@ -227,6 +227,21 @@ impl Selection {
         }
     }
 
+    /// Every Wave the expression scopes to, however deeply nested: an ID, or
+    /// the ID or name a `wave:` filter matches.
+    pub fn waves(&self) -> Vec<&str> {
+        match &self.expression {
+            SelectionExpression::Wave { wave } => vec![wave.as_str()],
+            SelectionExpression::Filter {
+                filter: SelectionFilter::Wave(wave),
+            } => vec![wave.as_str()],
+            SelectionExpression::Compose { items } | SelectionExpression::Intersect { items } => {
+                items.iter().flat_map(Selection::waves).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), SelectionError> {
         fn visit(node: &Selection, ids: &mut BTreeSet<SelectionId>) -> Result<(), SelectionError> {
             if node.id.0.is_empty() || !ids.insert(node.id.clone()) {
@@ -722,6 +737,9 @@ pub struct ViewPlan {
     pub dashboard_id: Option<DashboardId>,
     #[serde(rename = "repo")]
     pub repository: String,
+    /// The repository's canonical path on this Machine; its last component is
+    /// the name people see.
+    pub repo_path: String,
     pub selection: Selection,
     pub saved_revision: Option<i64>,
     pub resolution: SelectionResolution,

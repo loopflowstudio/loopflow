@@ -184,6 +184,8 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     }
     public let dashboardID: String?
     public let repository: String
+    /// The repository's canonical path on the Machine.
+    public let repositoryPath: String
     public let selection: WorkSelection
     public let savedRevision: Int64?
     public var resolution: WorkSelectionResolution
@@ -194,8 +196,11 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
         case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
-        case dashboardID = "dashboard_id", savedRevision = "saved_revision"
+        case dashboardID = "dashboard_id", savedRevision = "saved_revision", repositoryPath = "repo_path"
     }
+
+    /// The name people see for the repository: its directory's.
+    public var repositoryName: String { URL(fileURLWithPath: repositoryPath).lastPathComponent }
 }
 
 /// Portable intent only. The native host creates fresh incarnations when restoring it.

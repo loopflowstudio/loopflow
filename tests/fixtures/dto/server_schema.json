@@ -15014,6 +15014,10 @@
         "repo": {
           "type": "string"
         },
+        "repo_path": {
+          "description": "The repository's canonical path on this Machine; its last component is\nthe name people see.",
+          "type": "string"
+        },
         "resolution": {
           "$ref": "#/$defs/SelectionResolution"
         },
@@ -15037,6 +15041,7 @@
         "pinned",
         "dashboard_id",
         "repo",
+        "repo_path",
         "selection",
         "saved_revision",
         "resolution",

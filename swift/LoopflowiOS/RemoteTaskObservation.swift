@@ -5,7 +5,11 @@ import Loopflow
 struct RepositoryTasks: Codable, Equatable {
     /// The repository's durable ID, as `WorkWorkspaceKey.repository` carries it.
     let repository: String
+    /// Its path on the Machine, which is how Waves name their repository.
+    let path: String
     let tasks: [WorkViewPlan.Content]
+
+    var name: String { URL(fileURLWithPath: path).lastPathComponent }
 }
 
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
@@ -109,13 +113,13 @@ final class RemoteTaskObservation {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }
         guard let plans = reading.body else { throw RegistryQueryError("Task reading is missing its contents") }
-        // A Wave belongs to one repository, so the others answer "unavailable"; the
-        // reading fails only when no repository could answer.
+        // One repository that cannot answer leaves the others listed; the reading
+        // fails only when none could.
         var failure: RegistryQueryError?
         let repositories = plans.map { plan in
-            do { return RepositoryTasks(repository: plan.repository, tasks: try mobileTasks(plan)) } catch {
+            do { return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: try mobileTasks(plan)) } catch {
                 failure = failure ?? (error as? RegistryQueryError) ?? RegistryQueryError(error.localizedDescription)
-                return RepositoryTasks(repository: plan.repository, tasks: [])
+                return RepositoryTasks(repository: plan.repository, path: plan.repositoryPath, tasks: [])
             }
         }
         if let failure, repositories.allSatisfy(\.tasks.isEmpty), plans.allSatisfy({ !$0.resolution.unavailable.isEmpty }) {

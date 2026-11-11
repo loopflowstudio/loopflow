@@ -1132,7 +1132,7 @@ struct WorkNavigationTests {
                       content(.task, "issue-review")]
         let members = review.map { WorkMemberRef(source: ["root"], work: $0.work) }
         let hidden = WorkMemberRef(source: ["root"], work: .init(repository: "repo", kind: .task, id: "issue-available"))
-        let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo",
+        let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),

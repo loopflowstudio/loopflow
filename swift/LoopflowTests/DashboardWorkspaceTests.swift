@@ -252,7 +252,7 @@ struct DashboardWorkspaceTests {
         let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
-        let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo",
+        let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo", repositoryPath: "/src/fixture",
             selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),

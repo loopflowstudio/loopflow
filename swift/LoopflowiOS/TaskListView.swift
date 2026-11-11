@@ -43,19 +43,10 @@ final class TaskFeed {
     private(set) var repositories: [RepositoryTasks] = []
     private(set) var loaded = false
     private(set) var error: String?
-    /// Repository names by durable ID, filled in as readings name them.
-    private(set) var names: [String: String] = [:]
-    /// Repository paths on the Machine by durable ID, which is how Waves name their repository.
-    private(set) var paths: [String: String] = [:]
     private(set) var waves: [MobileWave] = []
     var filter = TaskFilter.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
-    /// The last reading under each filter, shown at once while the Machine answers.
-    private struct Saved: Codable {
-        let repositories: [RepositoryTasks]
-        let paths: [String: String]
-    }
     @ObservationIgnored private var waiting: Perf.Wait?
     @ObservationIgnored private let client: RemoteMobileClient
     @ObservationIgnored private var observation: RemoteTaskObservation?
@@ -68,12 +59,9 @@ final class TaskFeed {
         stop()
         let current = generation
         waiting = Perf.begin("tasks_current")
-        if let saved = try? JSONDecoder().decode(Saved.self, from: Data(contentsOf: savedURL)) {
-            repositories = saved.repositories
-            for (id, path) in saved.paths where paths[id] == nil {
-                paths[id] = path
-                names[id] = URL(fileURLWithPath: path).lastPathComponent
-            }
+        // The last reading under each filter, shown at once while the Machine answers.
+        if let saved = try? JSONDecoder().decode([RepositoryTasks].self, from: Data(contentsOf: savedURL)) {
+            repositories = saved
             loaded = true
             Perf.launch("tasks_saved")
         } else {
@@ -95,9 +83,8 @@ final class TaskFeed {
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                         self.waiting = nil
-                        let known = self.paths.count
-                        await self.name(repositories.map(\.repository))
-                        if changed || self.paths.count != known { self.save() }
+                        if changed { self.save() }
+                        if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                     case .failure(let error): self.error = error.message
                     }
                 }
@@ -140,21 +127,13 @@ final class TaskFeed {
     }
 
     private func save() {
-        let (saved, url) = (Saved(repositories: repositories, paths: paths), savedURL)
+        let (saved, url) = (repositories, savedURL)
         Task.detached(priority: .utility) {
             try? JSONEncoder().encode(saved)
                 .write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
     }
 
-    private func name(_ ids: [String]) async {
-        for id in ids where names[id] == nil {
-            guard let path = try? await client.repositoryPath(id: id) else { continue }
-            paths[id] = path
-            names[id] = URL(fileURLWithPath: path).lastPathComponent
-        }
-        if waves.isEmpty, let found = try? await client.waves() { waves = found }
-    }
 }
 
 extension WorkViewPlan.Content {
@@ -220,7 +199,7 @@ struct TaskListView: View {
 
     /// The shown repository's Waves; a Wave is chosen within a repository, as on Desktop.
     private var waves: [MobileWave] {
-        guard let path = feed.paths[shown] else { return [] }
+        guard let path = feed.repositories.first(where: { $0.repository == shown })?.path else { return [] }
         return feed.waves.filter { $0.repo == path }.sorted { $0.name < $1.name }
     }
 
@@ -250,7 +229,7 @@ struct TaskListView: View {
                         }
                     } header: {
                         if shown.isEmpty {
-                            Text(feed.names[section.repository] ?? "Repository")
+                            Text(name(section.repository))
                                 .font(Typography.strong(14))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
@@ -343,7 +322,9 @@ struct TaskListView: View {
 
     /// A repository's folder name; one the Machine cannot place keeps its short ID,
     /// so two of them stay told apart.
-    private func name(_ repository: String) -> String { feed.names[repository] ?? String(repository.prefix(11)) }
+    private func name(_ repository: String) -> String {
+        feed.repositories.first { $0.repository == repository }?.name ?? "Repository"
+    }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
         NavigationLink { workspace(task) } label: { row(task) }

@@ -33,10 +33,6 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
     }
 
-    func repositoryPath(id: String) async throws -> String {
-        try await decode(String.self, read(.repoPath(id: id)))
-    }
-
 
     /// The Machine's Waves that are still in use.
     func waves() async throws -> [MobileWave] {

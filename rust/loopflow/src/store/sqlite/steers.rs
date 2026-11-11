@@ -298,6 +298,11 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         (p.session_id=?1 OR p.task_id IN member_tasks OR p.wave_id IN member_waves
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steers newer WHERE newer.source=p.source AND newer.seq>p.seq)
+        -- A shared steer saved before this Session started and already emitted
+        -- to another Session was read there; a later Session starts past it.
+        AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
+         OR NOT EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
+            WHERE d.steer_id=p.id AND d.session_id!=?1 AND b.evidence='emitted'))
         )", super::task_work::session_tasks("s"));
     conn.execute(
         &format!(

@@ -7805,6 +7805,55 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
     fixture.held_ends(&held);
 }
 
+/// A managed launch refused for a stopped server started no provider, so the
+/// next launch starts that conversation fresh instead of resuming one that
+/// never ran (real Claude answers `--resume` with "No conversation found").
+/// The refused launch is piped, so it runs unheld and its owner checks the server.
+#[test]
+fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    // The selected installation's `lf install server` reaches no supervisor.
+    let refusing = fixture.home.path().join("lf-refusing-install");
+    std::fs::write(
+        &refusing,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then exit 1; fi\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&refusing, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let refused = fixture
+        .command(&["-a", "claude", "resume"])
+        .env("PATH", &path)
+        .env("LF_BIN", &refusing)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("Loopflow server is not running"),
+        "{stderr}"
+    );
+
+    let _service = ServerProof::start(&fixture, false);
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
+    let view = Terminal::spawn(launch);
+    let launched = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    assert!(
+        launched.contains("--session-id ") && !launched.contains("--resume "),
+        "{launched}"
+    );
+    let held = fixture.terminal_of(&session_of(&fixture.sql(), &launched));
+    view.stop();
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
 /// The server reads every held terminal's Program Status, viewed or not:
 /// an agent asking a question with no view open is waiting on its person.
 #[test]

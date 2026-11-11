@@ -152,6 +152,21 @@ pub(crate) fn require_server() -> Result<()> {
     )
 }
 
+/// `require_server` for a managed Session; anything else starts without it.
+pub(crate) fn require_server_for(owner: &AttachmentOwner) -> Result<()> {
+    let (store, session, _) = owner;
+    if store.session(session)?.as_ref().is_some_and(is_managed) {
+        require_server()?;
+    }
+    Ok(())
+}
+
+fn is_managed(record: &crate::session::LfSession) -> bool {
+    record
+        .work_source
+        .is_some_and(crate::session::WorkSource::is_managed)
+}
+
 /// A managed Session's agent (`WorkSource::is_managed`) starts beside the
 /// Machine server and carries a steer capability, which its hooks present to
 /// that server. So does a conversation an owner holds, without the server
@@ -160,11 +175,7 @@ pub(crate) fn require_server() -> Result<()> {
 fn steer_environment(command: &mut std::process::Command, owner: &AttachmentOwner) -> Result<()> {
     let (store, session, attachment) = owner;
     let record = store.session(session)?;
-    if record
-        .as_ref()
-        .and_then(|record| record.work_source)
-        .is_some_and(crate::session::WorkSource::is_managed)
-    {
+    if record.as_ref().is_some_and(is_managed) {
         require_server()?;
     } else if record.is_some_and(|record| !record.interactive) {
         return Ok(());

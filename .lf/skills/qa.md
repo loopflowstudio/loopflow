@@ -365,6 +365,12 @@ few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
 (its own holder). A managed launch with the server stopped readies
 `com.loopflow.server.<hash>` under launchd for the private home; `launchctl
 kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
-that label out afterwards. Kill stand-in agents by their holder parent PID;
+that label out afterwards. A managed launch is held only when a terminal
+views it: `lf resume --task … | tail` or `< /dev/null > file` runs unheld
+under its own owner. To make server readiness fail without touching launchd,
+point `LF_BIN` at a wrapper that exits 1 for `install server` and execs the
+branch `lf` otherwise. Find the private server by its store,
+`lsof -t $LF_HOME/loopflow.db`; `pgrep -f 'lf server run'` also matches the
+Machine's real servers. Kill stand-in agents by their holder parent PID;
 holders exit about a minute after their last child. Read the private store
 through a copy once the server stops: a read-only open finds no `-shm`.

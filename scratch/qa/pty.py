@@ -12,7 +12,8 @@ while True:
     r, _, _ = select.select([fd], [], [], 0.1)
     if r:
         try: data = os.read(fd, 65536)
-        except OSError: break
+        except OSError:
+            _, st = os.waitpid(pid, 0); open(log + ".exit", "w").write(str(os.waitstatus_to_exitcode(st))); break
         if not data: break
         out.write(data)
         if b"\x1b[6n" in data: os.write(fd, b"\x1b[1;1R")

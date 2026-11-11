@@ -580,11 +580,16 @@ fn run_native_session(
             crate::agent::configure_native_input(&mut process, input)?;
         }
     }
+    // Only an explicit remote connection is a client of a surviving AgentProcess.
+    let owned = command.remote.is_none().then_some(&attachment);
+    // Refused before the provider conversation is recorded, so the next launch
+    // starts it fresh instead of resuming one that never ran.
+    if let Some(owner) = owned {
+        crate::harness::agent_process::require_server_for(owner)?;
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
     }
-    // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"

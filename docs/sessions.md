@@ -3,8 +3,8 @@
 You've run `lf resume --task LOO-12` and landed back in a Task's conversation.
 Every conversation lf starts, interactive or headless, is a Session: it keeps
 its name, its Task and its provider's native history, whichever terminal or
-agent it ran in. This page covers finding them, steering them, and what
-comes back after a crash.
+agent it ran in. This page covers finding them, steering them, what keeps
+running through an update, and what comes back after a crash.
 
 ## Come back to a conversation
 
@@ -54,6 +54,66 @@ starts from that log and current instructions, and the old thread stays in
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
 
+## Keep working through an update
+
+```bash
+lf resume --task LOO-12            # terminal one: a turn is streaming
+lf install                         # terminal two, mid-turn
+```
+
+The turn keeps streaming. The terminal showing it, and any Desktop pane on the
+same conversation, says **Reconnecting…** and pauses typing while the server
+is replaced, then carries on from the byte where it stopped. Nothing redraws
+and nothing is resent.
+
+A Task or Wave conversation's agent runs in a holder: one `lf holder run`
+process beside the server that keeps the terminals and agents of every such
+conversation. The server restarts on every install; a holder is never
+restarted for one. With ten Task conversations open, `ps` shows one
+`lf server run`, one `lf holder run` and ten agents, and `lf process list`
+shows the holder once.
+
+| Opened with | Runs in |
+|---|---|
+| `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
+| a Desktop pane | the holder |
+| `lf resume <session>` of a Task's or Wave's conversation | the holder |
+| `lf <skill>`, `lf graph …`, `lf -i`, anything with `-b` or a pipe | its own process, as before |
+| a Desktop Task shell | its own process, as before |
+
+A holder keeps the build it started with. After an install, conversations
+already open stay where they are and new ones start in a holder on the new
+build, so two or more holders can be alive at once. Each exits a minute after
+its last conversation ends.
+
+| When | Agents | Open views | A view opened afterward |
+|---|---|---|---|
+| `lf install` | keep running | pause, then continue without redrawing | the saved screen and history |
+| the server crashes or is killed | keep running | pause until the OS restarts the server, then continue | the current screen; older scrollback may be missing |
+| a holder is killed | end, with the conversations it held | say the process is gone and offer resume | `lf resume` continues from provider history |
+| logout or reboot | end | close | [resume from saved history](#after-a-crash-or-reboot) |
+
+While the server is away a holder keeps the newest 2 MiB of each
+conversation's output, and the agent never waits on it. A view that returns
+within that range continues exactly; one that fell further behind gets a
+fresh screen. After a crash the server has no saved screen, so it asks the
+agent to redraw by changing the terminal's width by one column and back:
+the visible screen is exact and scrollback reaches as far back as the kept
+output. An update that changes the terminal emulator's revision recovers the
+same way.
+
+A conversation that ends while the server is away is recorded with its real
+exit when the server returns; until then `lf session list` shows what it last
+knew.
+
+These conversations need the server. Opening one while it is stopped prints
+`Loopflow server is not running; run lf server status` and starts nothing;
+no private process is started in its place. A Graph already running keeps
+going without it.
+
+A conversation opened before this arrived keeps the `lf session serve`
+process it started with until it ends.
+
 ## When Desktop loses its connection
 
 Desktop reconnects to the same live owner automatically and shows connection
@@ -62,9 +122,11 @@ A newer viewer keeps control until an explicit **Move here** request. **Retry**
 repairs connectivity; it does not resume a new provider or replay input.
 [Connect clients](server.md) covers server updates and connection diagnosis.
 
-Byte-stream viewers catch up from retained output when available; terminal
-viewers refresh the screen from the same owner. Expired output retention also
-falls back to a fresh screen. Another viewer's
+A view of a Task or Wave conversation continues from its place in the kept
+output, without redrawing; one that fell behind it gets a fresh screen. For
+conversations in their own process, byte-stream viewers catch up from retained
+output when available and terminal viewers refresh the screen from the same
+owner. Another viewer's
 input and terminal size stay in effect. If the old owner has ended, recovery
 stops at that owner; opening the Session again can reach its current owner.
 Reconnecting a display never starts a provider.
@@ -101,6 +163,7 @@ Other conversations stay stopped until opened.
 | After a crash… | |
 |---|---|
 | interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
+| only the server crashed | nothing to do: agents kept running and views reconnect |
 | Task worktrees, branches, PRs | untouched |
 | steers and reports | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |

@@ -308,6 +308,156 @@ across the owner’s private PTY before native admission. Stale inherited placem
 is discarded. The first Session reading can publish reports already restored on
 its surface; replacement providers begin with an empty observation.
 
+## Held terminals
+
+```sh
+lf resume --task LOO-12     # a view of a terminal the holder keeps
+ps -axo command | grep '^lf '
+# lf server run
+# lf holder run
+```
+
+A managed launch has no owner process. The Machine server asks a holder to
+start the agent on a PTY and keeps everything else: the terminal registry,
+one libghostty-vt terminal per held terminal, viewers, lifetime policy, input
+retention, the child's control requests and exit settlement. Everything above
+about viewers, control, ownership, lifetime and repainting holds for a held
+terminal with "the server" in place of "the owner", except where this section
+says otherwise. Owners remain for bare launches, piped and `-b` executions
+and Desktop Task shells.
+
+`transport::managed(&Launch)` is the one place that decides:
+
+| Launch | Managed |
+|---|---|
+| `lf task run`, an interactive `lf ship` step, `lf resume --task`, a Task's primary conversation, Wave session commands | yes |
+| A Desktop pane (`LF_SERVER=1` on the prepared command) | yes |
+| `lf resume SESSION` of a Session bound to a Task or Wave | yes |
+| `lf <skill>`, `lf graph …`, `lf -i`, any `-b` or piped execution | no |
+| Desktop Task shells | no: they run without a server on headless Linux |
+
+A managed launch calls `session.start` and becomes a view of the returned
+terminal. With the server unreachable it fails with `Loopflow server is not
+running; run lf server status`. It never falls back to a local owner.
+
+### Identity
+
+A held terminal is a `TerminalId`, not an LfProcess: Session → TerminalId →
+holder (build, pid) + PTY + child AgentProcess. A holder is one LfProcess
+however many terminals it holds, and `lf process list` shows it once. Launcher
+LfProcess rows and capture attachment keep describing the processes that
+really ran. The registry is live state the server rebuilds from holder
+inventory, the per-terminal files below and the store; it is not a second
+record of Work.
+
+### Holder
+
+`lf holder run` is hidden and started only by the server. It opens no store,
+runs no async runtime and knows nothing about Sessions.
+
+- **One per build.** Keyed by the executable's SHA-256: socket
+  `<private dir>/holder-<sha12>.sock`, a lock file beside it, state under
+  `<Machine home>/holders/<sha12>/<terminal>/`. The server sends starts only
+  to the holder of its own build and speaks to every older one it finds.
+- **Claim.** The holder takes an exclusive lock for life and only then
+  unlinks and binds its socket. A second `lf holder run` of the same build
+  fails the lock and exits 0. A holder that is slow to answer still holds the
+  lock, so the server waits for it and never starts another in its place.
+- **Start.** The server spawns it with `setsid` and reads one ready line.
+  launchd (`AbandonProcessGroup`) and systemd (`KillMode=process`) leave it
+  running when the server's service stops or is replaced.
+- **Lifetime.** It exits 60 seconds after its last child, if no start
+  arrives. Logout and reboot end it. Nothing restarts a holder, and a holder
+  that dies takes its agents with it.
+- **Ring.** The newest 2 MiB of raw output per PTY, addressed by absolute
+  byte count since the child started. The holder drains every PTY whether or
+  not a server is connected, so a stopped server never blocks an agent.
+- **Exit.** When a child exits the holder writes `<terminal>/exit.json` (code
+  or signal, final byte count) before reporting it.
+
+The protocol is newline-delimited JSON requests on a Unix socket, with raw
+frames once a connection becomes a stream. It is small so that a newer server
+can speak to any older holder:
+
+| Request | Answer |
+|---|---|
+| `hello {revision}` | `welcome {revision, build, pid}` or `incompatible` |
+| `list` | `[{terminal, pid, rows, cols, written, ring_start, exit}]` |
+| `start {terminal, request, argv, cwd, env, rows, cols}` | `{pid}`. `env` is complete; nothing is inherited from the holder. Repeating a `terminal` with the same `request` answers the existing child; with different content it is an error |
+| `read {terminal, from}` | The connection becomes that terminal's output: `gap {ring_start}` when `from` is older than the ring, then `out` frames, then `exit {…}` |
+| `write {terminal}` | The connection becomes that terminal's input |
+| `resize {terminal, rows, cols}` | — |
+
+There is no signal request. The server signals a child's process group itself
+(same user, pid from `list`).
+
+A dropped holder connection says nothing about its agents. The server reads
+again from its last position with backoff; a terminal ends only on an `exit`
+frame or an `exit.json`. A `start` whose answer was lost is reconciled with
+`list` before anything is retried, so one request starts one child. A
+terminal missing from `list` with no `exit.json` has an unknown outcome and is
+reported as such, never given an invented exit code.
+
+### Positions and resume
+
+A held terminal's viewer stream is counted in PTY bytes, the holder's
+`written`, not in bytes sent to that viewer. The `snapshot` frame names the
+position it covers; `out` frames continue from it. Events (`resize`, `theme`,
+`owner`, `control`, `child_exited`, `hint`, `return`, `directory`) travel in
+their own frame tag for held terminals, so they never shift a position.
+
+`{"kind":"resume","terminal":…,"from":N}` continues at byte `N` from the
+ring with no snapshot. When `N` is older than `ring_start` the answer is a
+fresh snapshot at a position inside the ring. There is no per-viewer spool
+for a held terminal, and a server restart does not invalidate a viewer's
+position. Input control and geometry claims are asked for again on resume, as
+for owners.
+
+Views of a held terminal always take the server route (a `session.attach`
+ticket), including `lf resume --task` in a terminal. The direct socket route
+is for owners.
+
+### Server restart
+
+Before `start` the server writes `<terminal>/meta.json`: the Session, the
+control key the child's requests are checked against, the last size. That is
+what lets another server instance answer the same child.
+
+On a graceful stop (the SIGTERM an install sends) the server writes
+`<terminal>/screen.ghostsnp` for each held terminal: the snapshot format
+above, with the PTY position it covers in the header.
+
+On startup the server greets every `holder-*.sock`, lists it, and registers
+each live terminal under its existing `TerminalId`:
+
+| Found | Emulator rebuilt from |
+|---|---|
+| A snapshot of this Ghostty revision whose position is still inside the ring | The snapshot, then the ring from that position: screen, scrollback and modes are exact |
+| No snapshot, another revision, or a position the ring has passed | The ring, then one size nudge (one column narrower for 0.4 s, and back) so the agent repaints the visible screen |
+
+After a nudge the visible screen and cursor are exact (Claude Code 2.1.322 and
+codex-cli 0.167.0, November 10, 2026). Scrollback reaches only as far back as
+the ring, and a terminal mode set before the ring's start is known only if
+the agent sets it again when resized.
+
+Open views do not wait for any of this to matter: they resume by position
+from the ring and are not repainted.
+
+### Exit and settlement
+
+An accepted `ExitRecord` from a launcher is written to
+`<terminal>/exit-record.json` before the launcher is told it was accepted.
+With the server down the hand-over fails, and the launcher stays beside the
+provider and settles its own exit, as it does under a busy owner.
+
+When a terminal's `exit` arrives the server settles it (`native_exit::settle`
+with the stored record, else a plain Process end). The terminal's directory is
+the receipt: it is deleted only after the store and capture writes are
+confirmed, so a store outage at exit leaves the receipt and settlement is
+tried again. A server that was down when the child exited finds `exit.json`
+at startup and settles the same way. Settling twice changes nothing, starts
+nothing and closes no newer attachment.
+
 ## Task shells and completed workspaces
 
 Desktop creates a shell once, on the Task's recorded Machine. Its private

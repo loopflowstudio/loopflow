@@ -77,7 +77,8 @@ lf doctor          # selected installation and store health
 input readiness. Its last available screen stays readable; without a saved
 screen the same pane stays empty until output arrives.
 **Reconnecting…** means a connection was lost and Desktop is trying the same
-Session owner. Neither status changes the terminal's dimensions. Keep the pane
+running conversation. Its agent is still working: agents run in a holder
+process that a server restart leaves alone. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
@@ -90,6 +91,29 @@ System Settings, or enable its user service on Linux. Retry and status do not
 change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
+
+## `Loopflow server is not running`
+
+```bash
+lf server status   # why it is not answering
+lf install         # repair a build mismatch or missing registration
+```
+
+`lf task run`, `lf resume --task` and Wave session commands start their agent
+through the server, so they stop with this message when it is not answering.
+Nothing was started and nothing needs cleaning up; run the command again once
+`lf server status` reads ready. Conversations that were already open are
+still running in their holder and their views return on their own.
+`lf <skill>` and `-b` runs do not need the server.
+
+## Several `lf holder run` processes
+
+One per installed build that still has an open Task or Wave conversation.
+Each exits a minute after its last conversation ends; ending those
+conversations, not killing the holder, is how to retire one. Killing a holder
+ends every agent it holds. `lf session serve` processes belong to
+conversations opened before holders, or to runs outside a Task or Wave, and
+end with their conversation.
 
 ## A creation has no confirmed answer
 

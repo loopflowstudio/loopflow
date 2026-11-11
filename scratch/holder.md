@@ -551,3 +551,29 @@ Jack Heart, on question 2 after asking what "ended" means: "i think i want 2a"
 
 Plain `lf resume SESSION` of an ended Session bound to a Task or Wave starts
 its new process managed, as the managed-rule table above already has it.
+
+## Docs written ahead of the code — November 10, 2026
+
+Implement reads these as the intended behavior and corrects them where the
+build differs:
+
+- `docs/sessions.md` "Keep working through an update" (what runs in the
+  holder, the interruption table, the server-required failure)
+- `docs/server.md` (reconnect paragraphs, Updates)
+- `docs/troubleshooting.md` (`Loopflow server is not running`, several
+  `lf holder run` processes)
+- `docs/glossary.md` (Holder)
+- `rust/loopflow/src/transport/README.md` "Held terminals" (managed rule,
+  identity, holder protocol, positions, restart, settlement)
+- `rust/loopflow/src/server/README.md` (`session.start`, `session.attach` by
+  `terminal_id`, recovery)
+- `docs/dev/server-first.md` (Staying open, managed rule, piece row)
+
+Left for implement: the "Local protocol, revision 4" heading and handshake
+examples in `server/README.md` move to 5 with the shared bump;
+`documented_commands` needs `lf holder run` in Clap (hidden) before these
+docs pass it; the owner-only paragraphs of `transport/README.md` were not
+rewritten, the new section says where held terminals differ. The holder
+protocol in the docs names its key `terminal` (the `TerminalId`) where the
+kickoff table said `pty`, and `start` carries a `request` identity per the
+explore finding on ambiguous starts.

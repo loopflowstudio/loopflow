@@ -19,8 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Session owners retain their existing lifetime policy; this
-service creates no PTYs, retention records or Graphs. Logout/reboot do not
+stop the service. Managed Sessions run in a holder the service starts with
+`setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
+stopping or replacing the service leaves holders and their agents running.
+Session owners retain their existing lifetime policy. This service holds no
+PTY itself and starts no Graphs. Logout/reboot do not
 preserve live processes. Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
@@ -214,7 +217,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
+| `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
+| `session.attach` | `lf session attach` (every view of a held terminal, and Desktop panes' relay; ordinary CLI attachment to an owner reaches its socket directly) | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
@@ -356,6 +360,21 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. Transport IDs
   correlate diagnostics and are **not** durable deduplication receipts. Only
   `task.create` and `session.new` have the creation retry contract below.
+- `session.start {session, request, argv, cwd, env, rows, cols}` starts the
+  Session's agent in this build's holder and answers `{terminal_id}`. `env` is
+  the caller's complete environment; the server's own is not used. `request`
+  identifies the start: repeating it answers the same terminal and starts
+  nothing, and a start whose holder reply was lost is reconciled against the
+  holder's inventory first. It creates a process and is the only operation
+  here that does; attaching never does.
+- `session.attach {session, terminal_id}` for a held terminal answers a ticket
+  `{ticket, terminal_id, expires_in_ms}`, and its bridge answers
+  `bridged {terminal_id}`. The bridged connection speaks the viewer protocol
+  to the server's terminal registry, with positions in PTY bytes; no private
+  socket stands behind it. A Session whose terminal has ended answers
+  `not_found` with `terminal_id` and, when one exists, `current_terminal_id`.
+  The owner form below is unchanged and serves owners only; an owner ID is
+  never a terminal ID.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
   `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first
@@ -763,8 +782,11 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 
 ### Terminal and provider recovery
 
-Terminal continuation addresses the exact owner, separately from Work reads.
-Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+Terminal continuation addresses the exact owner or held terminal, separately
+from Work reads. A view of a held terminal resumes from its PTY byte position,
+served from the holder's 2 MiB ring; a server restart does not invalidate the
+position, and one older than the ring falls back to a fresh screen. For
+owners, byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
 reconnect grace; expired continuation falls back to a fresh screen from that
 owner. Terminal-mode viewers request a fresh screen. Uncertain input is
 never replayed. Recovery takes only free claims or those held by the viewer's

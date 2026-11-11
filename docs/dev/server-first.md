@@ -75,8 +75,12 @@ Rex shows `lf` there, not the agent.
   token or Move here.
 - **Joining late.** The server keeps the terminal emulator and paints a
   joining view from it. The holder keeps only recent raw bytes. After a server
-  restart the emulator is rebuilt from those bytes, or the agent is asked to
-  repaint by a size nudge; scrollback from before the restart may be absent.
+  restart the emulator is rebuilt from a snapshot saved at a graceful stop plus
+  those bytes, or from the bytes and a size nudge asking the agent to repaint;
+  scrollback from before the kept bytes may then be absent.
+- **Staying open.** A view's place in the stream is a PTY byte position the
+  holder can serve, so a view that is open across a server restart continues
+  without a repaint.
 - **Attach never creates.** A view of a Session whose process is gone says so
   and offers resume.
 
@@ -124,7 +128,7 @@ Each is one Task and one PR. The first five do not depend on each other.
 | Desktop sends pane status on its server connection | One `session observe-status` per pane | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
-| Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |
+| Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
 | Every view types; size follows the newest view | Takeover tokens, Move here | Holder |
 | Observers become server registrations | `__codex-observe`, Task-update watchers | Hooks call the server |
 | Bare launches drop their hooks | Hook installs for bare runs | Transcript telemetry |
@@ -137,7 +141,8 @@ one each.
 ## The managed rule
 
 A launch is managed when it comes through a Task or Wave command or from
-Desktop. A bare `lf` typed inside a Task's checkout stays bare and records the
+Desktop. `lf resume SESSION` of a Session bound to a Task or Wave is managed
+too. A bare `lf` typed inside a Task's checkout stays bare and records the
 Task as its ancestry. One function answers this for every launch path.
 
 ## Open

@@ -33,3 +33,22 @@ Reversible choices made in kickoff; the plan is `holder.md`.
   ring + nudge also applies to incompatible upgrades. Terminal-mode recovery
   after a gap has not been verified.
 - Ring 2 MiB per PTY; holder exits 60 s after its last child.
+
+## Raised while writing the docs
+
+Written into the docs as assumptions; none was said by anyone.
+
+- `lf task run` with the server stopped: does the whole command fail with
+  `Loopflow server is not running; run lf server status`, or does the Graph
+  start and only the Task's background conversation go unstarted (as it
+  already does past sixteen conversations)? `docs/troubleshooting.md` says the
+  command stops and nothing starts; `docs/sessions.md` says a Graph already
+  running keeps going.
+- A CLI managed launch never starts the server itself (Desktop's first
+  connection does ask the installation for readiness). On headless Linux with
+  the user service disabled, `lf resume --task` therefore cannot open a
+  conversation until the service is enabled. Should a managed launch ask for
+  readiness the way Desktop does before failing?
+- A killed holder ends every agent it holds, and the docs say so. Nothing
+  restarts one. Is "views say the process is gone and offer resume" the whole
+  experience, or should the server say which conversations were lost?

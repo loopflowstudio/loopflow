@@ -36,6 +36,12 @@ Changes to server protocol types or their doc comments also run
 the generated schema; regenerate its checked-in fixture using the command in
 [the server README](../rust/loopflow/src/server/README.md) when it changes.
 
+Changes to compile-time embedded files also run
+`cargo package --locked --allow-dirty -p loopflow`. The extracted source archive
+must compile without access to files outside the crate. Server examples shared
+with Swift live under `rust/loopflow/tests/fixtures/dto/server/` so the archive
+contains them.
+
 Creation receipt changes also run `test(local_planning::)`,
 `test(context_launch_tests::)`, `test(settings_launch_tests::)` and
 `binary(session_lifecycle_tests)`. Served-write changes run
@@ -53,6 +59,11 @@ Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
 lookup completes in a deterministic output test; a live attachment can miss that
 startup race locally.
+
+Viewer readiness changes also run `test(transport::viewer_tests::)` and
+`test(session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts)`.
+A provider may exit before its viewer sends readiness; final output and exit
+status must survive that acknowledgement failing.
 
 Changes to `scripts/resource_envelope.py` or its imports also include
 `test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python

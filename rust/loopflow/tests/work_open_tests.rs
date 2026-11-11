@@ -628,30 +628,23 @@ fn automatic_route_opens_where_the_caller_is() {
         ));
         links[0]["route"].clone()
     };
-    let order = |first: &[&str]| {
-        serde_json::json!(if first.is_empty() {
-            vec!["terminal"]
-        } else {
-            first.to_vec()
-        })
-    };
     let herdr = [
         ("HERDR_ENV", "1"),
         ("HERDR_SOCKET_PATH", "/tmp/herdr.sock"),
         ("HERDR_PANE_ID", "w1:p1"),
     ];
-    assert_eq!(route(&herdr)["hosts"], order(&["herdr"]));
+    assert_eq!(route(&herdr)["host"], "herdr");
     let tmux = [("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%0")];
-    assert_eq!(route(&tmux)["hosts"], order(&["tmux"]));
-    assert_eq!(route(&[])["hosts"], order(&[]));
+    assert_eq!(route(&tmux)["host"], "tmux");
+    assert_eq!(route(&[])["host"], "terminal");
     if cfg!(target_os = "macos") {
         let cmux = [
             ("CMUX_WORKSPACE_ID", "w"),
             ("CMUX_SOCKET_PATH", "/tmp/cmux.sock"),
         ];
-        assert_eq!(route(&cmux)["hosts"], order(&["cmux"]));
+        assert_eq!(route(&cmux)["host"], "cmux");
         let inside = route(&[("LF_DESKTOP", "com.loopflow.mac")]);
-        assert_eq!(inside["hosts"], order(&[]));
+        assert_eq!(inside["host"], "terminal");
         assert!(
             inside["reason"]
                 .as_str()
@@ -674,7 +667,7 @@ fn linux_automatic_route_never_selects_desktop() {
         None,
         &["open", &url, "--link", "--json"],
     ));
-    assert_eq!(links[0]["route"]["hosts"], serde_json::json!(["terminal"]));
+    assert_eq!(links[0]["route"]["host"], "terminal");
     let output = lf(
         home.path(),
         repo.path(),
@@ -933,7 +926,7 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
         Some(bin.path()),
         &["open", &url, "--focus", "--json"],
     ));
-    assert_eq!(report["receipts"][0]["status"], "usable");
+    assert_eq!(report["receipts"][0]["status"], "focused");
     assert!(report["receipts"][0]["destination"]
         .as_str()
         .unwrap()
@@ -1056,7 +1049,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         let links = json(&lf_with(home.path(), repo.path(), None,
             &[("LF_AGENT_CALLER", &own), ("REX_SESSION", "session:stale"), ("REX_BLOCK", "block:stale")],
             &["open", &url, "--link", "--json"]));
-        assert_eq!(links[0]["route"]["hosts"][0], expected);
+        assert_eq!(links[0]["route"]["host"], expected);
     }
 }
 
@@ -2338,7 +2331,7 @@ fn own_session_and_same_rex_open_report_identity_without_creating_or_focusing() 
         Some(bin.path()),
         &["open", "--session", &session, "--focus", "--json"],
     ));
-    assert_eq!(focused["receipts"][0]["status"], "usable");
+    assert_eq!(focused["receipts"][0]["status"], "focused");
     let selected =
         std::fs::read_to_string(bin.path().join("session.focus_window.requests")).unwrap();
     assert!(selected.contains("moved-window"), "{selected}");
@@ -2485,4 +2478,189 @@ fn workspace_attachment_failure_keeps_the_created_tools_and_destination() {
         created.contains("Task & workflow") && created.contains("shell"),
         "{created}"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn desktop_conversation_attachment_retry_and_focus_keep_the_retained_view() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixListener;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    struct Peer {
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for Peer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let provider = Provider::start();
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Retry",
+        0,
+        1,
+    );
+    drop(provider);
+    let log = host(bin.path(), "open", "", 0);
+    let reading_path = home.path().join("desktop.json");
+    let corrected = home.path().join("corrected");
+    let mut reading: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/desktop_inspection.json"
+    ))
+    .unwrap();
+    reading["openings"] = serde_json::json!([]);
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["subject"] =
+        session.clone().into();
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] = "failed".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    let socket_dir = home.path().join("run/desktop");
+    std::fs::create_dir_all(&socket_dir).unwrap();
+    let listener = UnixListener::bind(socket_dir.join("com.loopflow.mac.test.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let peer_stop = stop.clone();
+    let peer_reading = reading_path.clone();
+    let peer_log = log.clone();
+    let peer_corrected = corrected.clone();
+    let thread = std::thread::spawn(move || {
+        let mut launches = 0;
+        while !peer_stop.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            let mut reading: Value =
+                serde_json::from_str(&std::fs::read_to_string(&peer_reading).unwrap()).unwrap();
+            let sent = std::fs::read_to_string(&peer_log).unwrap_or_default();
+            if sent.lines().count() != launches {
+                launches = sent.lines().count();
+                let status = if peer_corrected.exists() {
+                    "usable"
+                } else {
+                    "failed"
+                };
+                reading["windows"][0]["opening"] = serde_json::json!({
+                    "revision": format!("attempt-{launches}"),
+                    "url": sent.split_whitespace().last().unwrap(), "status": status,
+                    "reason": if status == "failed" { Some("Attachment failed") } else { None }
+                });
+                reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] =
+                    status.into();
+                std::fs::write(&peer_reading, reading.to_string()).unwrap();
+            }
+            let result = if request["method"] == "inspect" {
+                reading
+            } else {
+                assert_eq!(request["params"]["action"], "focus");
+                let action: Value = serde_json::from_str(include_str!(
+                    "../../../tests/fixtures/dto/desktop_action.json"
+                ))
+                .unwrap();
+                action["receipt"].clone()
+            };
+            writeln!(
+                stream,
+                "{}",
+                serde_json::json!({"id":request["id"],"result":result})
+            )
+            .unwrap();
+        }
+    });
+    let _peer = Peer {
+        stop,
+        thread: Some(thread),
+    };
+    let env = [("LF_DESKTOP", "com.loopflow.mac.test")];
+    let open = || {
+        lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &env,
+            &["open", "--session", &session, "--host", "desktop", "--json"],
+        )
+    };
+    let focus = || {
+        lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &env,
+            &["open", "--session", &session, "--focus", "--json"],
+        )
+    };
+    let focused = focus();
+    assert!(focused.status.success(), "focus retained view: {focused:?}");
+    assert_eq!(json(&focused)["receipts"][0]["status"], "focused");
+    assert!(!log.exists());
+    let failed = open();
+    assert!(!failed.status.success(), "{failed:?}");
+    assert!(String::from_utf8_lossy(&failed.stdout).contains("Attachment failed"));
+    std::fs::write(&corrected, "").unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "usable");
+    let focused = focus();
+    assert!(focused.status.success(), "focus retained view: {focused:?}");
+    assert_eq!(json(&focused)["receipts"][0]["status"], "focused");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
+    let companion = lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &env,
+        &[
+            "open",
+            "--session",
+            &session,
+            "--host",
+            "desktop",
+            "--diff",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&companion)["receipts"][0]["status"], "usable");
+    let mut reading: Value =
+        serde_json::from_str(&std::fs::read_to_string(&reading_path).unwrap()).unwrap();
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] =
+        "opening".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "opening");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    reading["windows"][0]["workspaces"] = serde_json::json!([]);
+    reading["windows"][0]["opening"]["status"] = "opening".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "opening");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    let pending_focus = focus();
+    assert!(!pending_focus.status.success());
+    assert!(String::from_utf8_lossy(&pending_focus.stdout).contains("Not open"));
+    reading["windows"] = serde_json::json!([]);
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    let absent = focus();
+    assert!(!absent.status.success());
+    assert!(String::from_utf8_lossy(&absent.stdout).contains("Not open"));
+    assert_eq!(sessions(home.path()), 1);
 }

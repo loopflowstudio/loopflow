@@ -12,3 +12,7 @@ These are autonomous design choices, not a recorded human review.
 
 Attachment waits up to 30 seconds. A timeout reports failure without cancelling
 the destination; a retry checks its live Session before creating another view.
+
+Desktop receipt revisions identify published results, not stored attempts. A
+pending opening without a pane still suppresses another launch; focus reports
+Not open until its view exists.

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-825 · Opening concepts</title>
+<style>
+  :root { color-scheme: light dark; --ink: #222a2d; --paper: #faf9f5; --muted: #586267; --line: #c8ceca; --accent: #006a62; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e5e9e5; --paper: #192021; --muted: #adb9b7; --line: #455251; --accent: #81d3c3; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.45 system-ui, sans-serif; }
+  main { max-width: 850px; margin: auto; padding: 30px 24px 42px; }
+  header, small { font-size: 12px; color: var(--muted); }
+  h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.12; margin: 18px 0 12px; }
+  h2 { font-size: 19px; margin: 24px 0 8px; }
+  p { margin: 10px 0; }
+  code { font: .87em ui-monospace, monospace; overflow-wrap: anywhere; }
+  strong { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { padding: 9px 10px 9px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  ol { padding-left: 22px; }
+  li { margin: 7px 0; }
+  @media (max-width: 520px) { main { padding: 20px 16px; } table { font-size: 12px; } }
+</style>
+<main>
+  <header>LOO-825 · concept-review · 2026-11-10<br>
+    Sources: scratch/design.md; docs/workspaces.md; open/conversation.rs;
+    open.rs; desktop.rs; transport.rs; WorkModel.swift;
+    GhosttyTerminalView.swift; capture-tasks.md
+  </header>
+  <h1>A retained view does not establish attachment.</h1>
+  <p><strong>Direction: return to implement.</strong> Keep the commands and scope model.
+    Separate view location from attachment state so retry can recover a failed
+    conversation. No open product choice; no code changed in this review.</p>
+
+  <table aria-label="Actions, concepts and APIs">
+    <thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
+    <tbody>
+      <tr><td><code>lf open --task ENG-123</code></td><td>One scope → one primary Session</td><td><code>select_connection</code> → non-replacing attachment; Graph unchanged</td></tr>
+      <tr><td><code>--here</code> / <code>--tab</code></td><td>Where to attach</td><td>Current terminal / host adapter → input-ready Return</td></tr>
+      <tr><td><code>--focus</code></td><td>Reveal a view</td><td><code>focus_destination</code>; no launch or input transfer</td></tr>
+      <tr><td><code>lf workspace</code></td><td>Arrange tools</td><td>Native layout or Desktop board; Conversation uses shared opening rules</td></tr>
+    </tbody>
+  </table>
+
+  <h2>The mismatch, before → proposed</h2>
+  <p><b>Existing implementation:</b> Desktop surface exists → “Already open,”
+    or focus → <code>usable</code>. A failed attachment can retain that surface.
+    Desktop opening also maps <code>elsewhere</code> to <code>usable</code>.</p>
+  <p><b>Proposed:</b> view identity answers <em>where</em>; its existing owner answers
+    <em>ready, pending or failed</em>. A focus result confirms focus. Only attachment
+    confirms readiness. Derive these facts; add no persistent registry.</p>
+
+  <h2>One command through recovery</h2>
+  <p><code>lf open --task ENG-123 --host desktop</code></p>
+  <table aria-label="Opening and recovery">
+    <tbody>
+      <tr><th>Normal</th><td>Resolve Session → attach → confirm readiness. Later terminal opening reports the existing location.</td></tr>
+      <tr><th>Failure</th><td>Attachment fails; keep the pane and error. A surface alone cannot confirm success.</td></tr>
+      <tr><th>Retry · proposed</th><td>Correct the cause; repeat the command. Reuse Desktop's pane and retry through the Session owner without replaying consumed input.</td></tr>
+      <tr><th>Counterexample</th><td>A timeout may leave attachment running. Report pending instead of launching a competitor. If it completed, report its ready view.</td></tr>
+    </tbody>
+  </table>
+  <p><small>Source-level review, not native-host reproduction. Prior host-request timeouts
+    and isolated acceptance remain with gate. Session history, diagnostic panes and
+    successful workspace tools survive. Missing provider history retains the existing
+    deliberate-resume requirement.</small></p>
+
+  <h2>Questions for the next implementation check</h2>
+  <ol>
+    <li>After failure, does the same command reconnect the same Session without replaying a prompt?</li>
+    <li>After a timeout, does retry distinguish a pending attachment from a ready view without creating competing input?</li>
+    <li>Can focus reveal ready or failed views without claiming attachment, while absence still creates nothing?</li>
+  </ol>
+</main>
+</html>

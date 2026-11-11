@@ -114,8 +114,7 @@ impl Rex {
         let mut command = Command::new("rex");
         command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
         command.args(["api", "call", method, &serde_json::to_string(&args)?]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("Rex {method}: {}", error.reason()))?;
+        let output = super::run_host(command, "Rex").with_context(|| format!("Rex {method}"))?;
         serde_json::from_str(&output).context("Rex reply is unreadable; outcome is unknown")
     }
 
@@ -167,8 +166,7 @@ impl Rex {
             command.args(["-S", server]);
         }
         command.args(["--autostart=false", "--timeout", "2s", "whoami", "--json"]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("{}", error.reason()))?;
+        let output = super::run_host(command, "Rex")?;
         let who: Value = serde_json::from_str(&output)?;
         let server = who["endpoint"]
             .as_str()

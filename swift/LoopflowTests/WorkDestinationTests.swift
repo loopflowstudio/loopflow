@@ -46,7 +46,7 @@ struct WorkDestinationTests {
                                               wave: waveScoped ? wave.wave.id : nil, session: record.id, diff: false,
                                               executionMachine: nil),
                                 conversation: .otherConversation, conversationReason: nil,
-                                route: .init(hosts: [.desktop], reason: "Selected Desktop"))
+                                route: .init(host: .desktop, reason: "Selected Desktop"))
         await model.receiveWorkLink(try #require(LinkedWork(resolved)))
         #expect(installedSession(model, registry)?.id == record.id)
         #expect(model.selection == (waveScoped ? .wave(id: wave.wave.id) : nil))
@@ -1164,6 +1164,52 @@ struct WorkDestinationTests {
         #expect(files.selection == "retained-draft.rs")
     }
 
+    @Test("Repeating a failed opening retries the same Session in its retained pane")
+    func conversationAttachmentRecovery() async throws {
+        let (model, registry, record, url, query) = try openingFixture(outcome: "usable")
+        await model.openTaskLink(url)
+        let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
+        let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
+        let pane = try #require(workspace.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
+        store.recordPaneFailure(record.id, reason: "Temporary attachment failure")
+        try await waitForOpening(model)
+        #expect(model.taskOpening?.status == .failed)
+        func attachment(in layout: DesktopLayoutInspection) -> DesktopOpening.Status? {
+            if layout.subject == record.id { return layout.attachment }
+            return layout.children.compactMap { attachment(in: $0) }.first
+        }
+        let inspected = try #require(registry.inspect().first { $0.work == workspace.key })
+        #expect(attachment(in: inspected.layout) == .failed)
+        store.reconcile([record])
+        #expect(store.attachment(record.id) == .failed)
+        await model.openTaskLink(url)
+        #expect(store.attachment(record.id) == .opening)
+        #expect(workspace.multiplexer.layout.pane(for: pane.id) == pane)
+        #expect(store.sessions.count == 1)
+        #expect(store.sessions.first?.id == record.id)
+        // Repeating while pending does not recreate the viewer or declare it ready.
+        let launch = store.sessions.first?.launchId
+        await model.openTaskLink(url)
+        #expect(store.sessions.first?.launchId == launch)
+        #expect(model.taskOpening?.status == .opening)
+        store.recordPaneLive(record.id)
+        try await waitForOpening(model)
+        #expect(model.taskOpening?.status == .usable)
+        let ready = try #require(registry.inspect().first { $0.work == workspace.key })
+        #expect(attachment(in: ready.layout) == .usable)
+    }
+
+    @Test("A conversation held elsewhere never confirms local attachment")
+    func conversationAttachmentElsewhere() async throws {
+        let (model, registry, record, url, query) = try openingFixture(outcome: "elsewhere")
+        await model.openTaskLink(url)
+        try await waitForOpening(model)
+        let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
+        #expect(store.attachment(record.id) == .elsewhere)
+        #expect(model.taskOpening?.status == .elsewhere)
+        #expect(model.taskOpening?.reason?.contains("another client") == true)
+    }
+
     @Test func unavailableWorkspaceMachineDoesNotConnect() async throws {
         let (model, _, _, url, query) = try openingFixture(outcome: "usable")
         let registry = SessionsWorkspaceRegistry()
@@ -1229,8 +1275,8 @@ struct WorkDestinationTests {
             "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
         ]))
         var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        sessionJSON["state"] = "detached"
-        sessionJSON["actions"] = sessionActionFixture(state: "detached")
+        sessionJSON["state"] = outcome == "elsewhere" ? "active" : "detached"
+        sessionJSON["actions"] = sessionActionFixture(state: outcome == "elsewhere" ? "active" : "detached")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let sessionID = record.id

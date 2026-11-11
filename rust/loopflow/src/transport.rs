@@ -528,6 +528,7 @@ struct Viewer {
     /// The input claim, while this connection may type.
     token: Option<String>,
     attached: bool,
+    ready: bool,
     heartbeat_at: Instant,
     seq: u64,
     /// Events awaiting a sequence boundary in the stream.
@@ -556,6 +557,7 @@ impl Viewer {
             nonce: token()[..16].to_owned(),
             token: None,
             attached: false,
+            ready: false,
             heartbeat_at: Instant::now(),
             seq: 0,
             events: Vec::new(),
@@ -1023,6 +1025,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         {
             control = None;
         }
+        let controller_ready = client.is_some()
+            && viewers
+                .iter()
+                .any(|viewer| viewer.token.is_some() && viewer.token == control && viewer.ready);
         viewers.retain_mut(|viewer| {
             let result = (|| -> Result<()> {
                 while let Some((tag, payload)) = viewer.decoder.next()? {
@@ -1074,7 +1080,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             viewer.input_hint = Some(hint);
                             hint_due = true;
                         }
-                        Request::Controlled => {
+                        Request::Controlled { ready } => {
+                            if let Some(ready) = ready {
+                                viewer.ready = viewer.attached
+                                    && client.as_ref().is_some_and(|client| client.detach == ready);
+                            }
                             if viewer.attached {
                                 viewer.heartbeat_at = Instant::now();
                             }
@@ -1082,6 +1092,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 answers,
                                 Reply::Controlled {
                                     held: control.is_some(),
+                                    ready: Some(controller_ready),
                                 },
                             );
                         }
@@ -1335,6 +1346,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         if let Some(event) = returning.take() {
             for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                viewer.ready = false;
                 viewer.event(event.clone());
             }
         }
@@ -2395,7 +2407,7 @@ fn view(
         }
         if Instant::now() >= heartbeat {
             heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
-            if let Err(error) = send(&mut socket, Request::Controlled) {
+            if let Err(error) = send(&mut socket, Request::Controlled { ready: None }) {
                 if !can_reconnect {
                     return Err(error);
                 }
@@ -2625,6 +2637,12 @@ fn view(
                             return Ok(());
                         }
                         Event::Return { detach } => {
+                            send(
+                                &mut socket,
+                                Request::Controlled {
+                                    ready: Some(detach.clone()),
+                                },
+                            )?;
                             returning = Some(detach);
                             if controlled {
                                 acknowledge_open();
@@ -2915,12 +2933,17 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 /// Whether a viewer of this execution holds input control. A closed terminal
 /// leaves its execution running with none, ready for the next viewer.
 pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
+    attachment(id).map(|(held, _)| held)
+}
+
+/// Input ownership and the controlling viewer's native readiness are separate.
+pub(crate) fn attachment(id: &LfProcessId) -> Result<(bool, bool)> {
     let mut socket = UnixStream::connect(endpoint(id)?)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    send(&mut socket, Request::Controlled)?;
+    send(&mut socket, Request::Controlled { ready: None })?;
     match receive_reply(&mut socket)? {
-        Reply::Controlled { held } => Ok(held),
+        Reply::Controlled { held, ready } => Ok((held, ready == Some(true))),
         other => bail!("unexpected transport reply {other:?}"),
     }
 }

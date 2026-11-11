@@ -1,13 +1,14 @@
 # LOO-825: conversation opening
 
-Status: implemented and focused checks pass. Gate owns the affected suites and
-isolated native-host acceptance.
+Status: attachment-aware recovery is implemented. Gate still owns affected-suite
+checks, the earlier parallel host-request timeouts and isolated native-host
+acceptance.
 
 The Task brief delegates the remaining product decisions:
 
 > Finish the remaining product details autonomously in the written design: the scope of already-open detection (same terminal versus other local hosts/Machines), repository/Wave opening and workspace command placement, and the result for a plain terminal without sibling-tab support. Do not silently change the requested mode.
 
-## Direction for implementation
+## Opening contract
 
 - `lf open` resolves one scope's primary Session, or an exact `--session`.
   Task, Wave and repository selection all open that scope's conversation.
@@ -35,66 +36,129 @@ The Task brief delegates the remaining product decisions:
   after rechecking live attachment. Keep successful workspace tools on partial
   failure. Use existing Session/view records, not another workspace registry.
 
-## Docs to read in the implementation step
+## Current approach
 
-- `docs/workspaces.md` — opening contract, modes, workspace entry point, recovery.
-- `docs/surfaces.md` — host and Desktop entry points.
-- `docs/sessions.md` — opening versus deliberate input takeover with resume.
-- `docs/config.md` — layout scope.
-- `README.md` — command table.
-- `rust/loopflow/src/builtins/task/skill/capture-tasks.md` — agent opening guidance.
-- `rust/loopflow/src/builtins/ops/skill/init.md` — explicit Desktop entry point.
+`select_connection` and `--start-if-free` own primary selection, closed-history
+continuation and atomic non-takeover. A transient launch acknowledgement records
+the transport's input-ready Return; accepting a tab or layout cannot satisfy it.
+Desktop confirms its own conversation opening. Arrangements use one URL, and a
+Task layout has one optional conversation acknowledgement. No workspace registry
+is added. The public contract is documented in `docs/workspaces.md`.
 
-Keep CLI help and command examples in agreement with these docs when implementing.
-The command reference's generated sections remain generated from Clap.
-Attachment/host tests must use isolated fixtures, including same-Rex identity,
-agent own-Session opening, focus present/absent, closed Sessions and failed attach.
-The Task brief's PR #1876 reconnect work remains separate.
+The removed layout routing, cached starting receipts and conversation-suppression
+policies need no further implementation work. Their earlier inventory is in
+`b8510757c9:scratch/design.md`.
+
+On 2026-11-10, fetching `origin/main` found no commits absent from this branch.
+The base already includes #1876's Task subscription and sleep/wake reconnect
+changes, and #1875's Desktop Session status changes. No separate reconnect
+implementation remains in this Task.
+
+## Recovery contract
+
+Separate **where a view exists** from **whether its conversation attached**.
+The existing contract already requires both honest attachment results and a
+meaningful retry; no additional product choice is needed.
+
+Counterexample: `lf open --task ENG-123 --host desktop` leaves a terminal surface
+after attachment fails. Correcting the cause and repeating that command must
+retry the conversation in that destination. A retained error surface must not
+short-circuit recovery as “Already open” or “Focused existing conversation.”
+At `ee5392a9a5cd66ceefe6e4f5ff361a5f53b08fe4`, `conversation_view` checked
+surface existence while Desktop's opening owner separately knew failure;
+`OpenStatus::Usable` combined attachment and focus. These are distinct facts, not two ways to establish
+readiness. This is a source-level finding, not a reproduced native-host run.
+
+Recovery behavior:
+
+- Ready view: ordinary terminal opening reports its location; `--focus`
+  reveals it. Neither duplicates it nor moves input.
+- Pending attachment: report that it is still opening and its location. A
+  timeout does not authorize another launch while that attachment remains live.
+- Failed or ended attachment: ordinary opening retries through the existing
+  non-replacing Session path. Desktop reuses its retained pane; native terminal
+  error tabs keep their diagnostics. Saved history remains; consumed prompts
+  are never replayed. Failure without provider history still explains the
+  deliberate `resume` action already required by the Session owner.
+- Focus only reveals an existing view, including its diagnostics; its result
+  must not claim that a failed or pending conversation became usable. With no
+  view it still reports `Not open` and creates nothing.
+
+Derive view identity and attachment state from the existing Session/transport
+and Desktop owners, and let the shared opening decision consume both. Replace
+the presence-only `Live` decision; do not add a persisted opening lifecycle.
+Keep focus results distinct from attachment results in the receipt API and its
+wire fixtures. Each transient Desktop receipt has an identity: the previous
+failure cannot settle a retry before LaunchServices delivers its new request.
+Repository-window readiness cannot confirm Session attachment. Desktop's `.elsewhere` result must retain that meaning rather
+than confirm local attachment. Workspace Conversation panes use the same facts;
+successful tools and diagnostic panes survive failures. Transport input control
+alone, before input-ready Return, must not stand in for readiness on retry.
+
+The matching rule in `docs/workspaces.md`: “A view may still be opening or show
+an attachment error. `--focus` only reveals it. After correcting an attachment
+failure, repeat the opening command to reconnect; an attachment still in
+progress is reported without launching another.” Existing agent guidance stays:
+retry in the requested mode, never use `--here` inside a tool call.
+
+Focused checks cover failure → corrected cause → same-command retry, delayed
+readiness, acknowledgement timeout, and focus on ready/failed/absent views. Check
+Session identity, no prompt replay, no competing input owner, retained
+diagnostics and truthful receipts. Existing native-host acceptance remains.
+Desktop resolution before pane creation also remains pending through its existing
+opening receipt. A receipt revision distinguishes the last attempt from its retry.
+No open product questions. Review page: `scratch/concept-review.html`.
+
+## Delete — do not maintain
+
+No deletion targets remain. Removed paths stay removed:
+
+- Presence-only `open::Live`/`elsewhere` and surface-exists-as-live shortcuts.
+  View identity and attachment now come from their existing owners.
+- Focus-as-`Usable` and elsewhere-as-usable receipts. Focus confirms only focus;
+  failed viewers retry in retained panes; pending attachments keep their attempt.
+- Ordered host fallbacks and `RouteError::{Definite, Unknown}`. One optional
+  route host replaces the list; host failures carry their diagnostic chain.
+  The Swift DTO, fixtures and schema use the same shape, including null for focus.
+
+The conversation presenter handles existing views before launch. Desktop's
+receipt wait is separate from terminal presentation; both still require attachment.
 
 ## Remaining verification
 
 Gate: affected Rust suites (`open`, `desktop`, CLI discovery, Wave resolution,
 Work opening, transport and the CLI binary), documented commands, architecture,
-clippy and the broader Swift suite. Run isolated Rex/Herdr acceptance there;
-never use a live host for those fixtures.
+clippy, the broader Swift suite and the Xcode terminal-fallback build. Isolated Rex/Herdr acceptance remains,
+including direct opening, agent sibling and own-Session opening, same-Rex
+identity, focus present/absent, closed history, plain terminals, repository/Wave
+selection and failed attachment. The native arrangement fixtures alone do not
+establish all of those conversation behaviors.
 
-- `cargo test -p loopflow --test integration work_open_tests::` — compression run: 28 passed, four 2s host-request timeouts, one invalid new regression fixture (replaced), two native-host checks deferred to gate.
-- Eight serial rechecks passed: caller identity, available conversations, links, focus, Rex display/fresh tabs/following and tmux.
-- `target/debug/deps/integration-e6cabc0454f7ba0f work_open_tests::workspace_attachment work_open_tests::cmux_launches work_open_tests::configured_task_layout --test-threads=1` — three passed on the final code; the parallel run hit Rex/cmux 2s timeouts. Gate should recheck host timing.
-- `cargo test -p loopflow --lib -- lf::commands::open:: server::schema::tests::the_checked_in_schema_is_what_describe_prints` — 21 passed after compression; linker warned that `__eh_frame` exceeds 16MB. Earlier parser (40), Wave registry and conversation receipt checks passed.
-- `cargo test -p loopflow --test transport_tests conversation_open_continues_closed_history_without_replaying_the_request` — passed; the direct opening/non-takeover check also passed.
-- `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter tasklessSessionLink` — app built; repository and Wave cases passed without WindowServer access.
+The earlier parallel Work-opening run had four 2s host-request timeouts; eight
+serial rechecks and three workspace checks passed without explaining them.
+The compression run passed the Work-opening suite in parallel without those timeouts;
+isolated native-host acceptance still belongs to gate. The full earlier results are at
+`ee5392a9a5cd66ceefe6e4f5ff361a5f53b08fe4:scratch/design.md`.
 
-Earlier file presentation of the seven docs returned "No Desktop Files view
-attached; nothing opened." No fallback launched.
+Focused recovery checks (inherited `LF_*` cleared, stdin closed):
 
-## Delete — do not maintain
+- `cargo test -p loopflow --test integration work_open_tests::desktop_conversation_attachment_retry_and_focus_keep_the_retained_view` — passed: failed/ready/absent focus, same-command retry, Changes companion, pending with/without a pane, no extra launch. Socket fixture uses a short `/tmp` path after macOS canonicalization made the longer path unreachable.
+- `cargo test -p loopflow --test integration -- dto_fixtures::opening_receipts_distinguish_focus_from_attachment dto_fixtures::desktop_state_retains_outer_and_inner_layouts dto_fixtures::desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed work_open_tests::ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it` — four passed.
+- `cargo test -p loopflow --test transport_tests conversation_open -- --test-threads=1` — three passed: withheld readiness, non-takeover and closed history without prompt replay.
+- `cargo test -p loopflow --lib lf::commands::desktop::tests::conversation_attachment` — two passed; linker repeated its earlier `__eh_frame` size warning.
+- `cargo test -p loopflow --lib -- lf::commands::open::conversation::tests:: transport::viewer_tests::snapshot_preview_hands_off_to_a_fresh_primary_screen` — passed; acknowledgement timeout/exit and native viewer handoff covered.
+- `scripts/test_desktop.sh --skip-build --filter 'conversationAttachment|composedOpeningWaitsForNativeSessionAndComparison|ServerConnectionTests/openingWaitsForNativeReadinessAndRecoversInPlace|DTOFixtureTests/desktop'` — app/tests built; eight tests passed, including eight composed-opening cases, with WindowServer denied.
 
-These paths are removed; no deletion targets remain.
+Compression checks (inherited `LF_*` cleared, stdin closed):
 
-- Normal `open` dispatch into `workspace::run`; layouts, arrivals and batch
-  selection move exclusively to `workspace`; default `desktop view` uses that
-  same arrangement entry point.
-- `Opening::starting`/`record` and `STARTING`: a remembered destination is not
-  attachment. Keep only the concurrent opening lock.
-- `open_terminal` graphical launch/fallback and implicit Desktop routing.
-- `primary::TaskResume`/`task_resume`, `current_conversation` suppression and
-  `Resume::Detached`/caller suppression:
-  use the shared non-replacing Session connection for every Conversation pane.
-- `DesktopBatch`, `Opened`, the remaining `Resume` policy enum and attachment
-  collections: one opening has one destination; a Task layout has one Session pane.
-- Tests asserting fresh layouts for normal opening, implicit focus, cached
-  starting success or workflow substitution. Keep layout tests on `workspace`;
-  replace conversation coverage with the new modes and attachment receipts.
+- `cargo test -p loopflow --test integration -- work_open_tests:: dto_fixtures::work_links_carry_readable_labels_routes_and_conversation_relation dto_fixtures::opening_receipts_distinguish_focus_from_attachment` — 36 passed, two native-host tests ignored; no host-request timeouts.
+- `swift build --build-tests --package-path swift` — passed; existing Swift and Ghostty linker warnings remain.
+- `scripts/test_desktop.sh --skip-build --filter 'conversationAttachment|composedOpeningWaitsForNativeSessionAndComparison|ServerConnectionTests/openingWaitsForNativeReadinessAndRecoversInPlace|DTOFixtureTests/workLinksCarryReadableLabelsRoutesAndConversationRelation'` — five tests passed, including eight composed-opening cases, with WindowServer denied.
+- `cargo test -p loopflow --lib -- lf::commands::open:: server::schema::tests::` — 27 passed; existing `__eh_frame` linker warning remains.
+- `cargo test -p loopflow --test integration -- documented_commands:: dto_fixtures::work_links_carry_readable_labels_routes_and_conversation_relation` — five passed.
+- `cargo fmt --check` and `git diff --check` — passed.
 
-Implementation uses `select_connection` and `--start-if-free`, which already
-own primary selection, closed-history continuation and atomic non-takeover.
-A transient launch acknowledgement records the transport's input-ready Return;
-workspace/tab creation alone cannot satisfy it. No workspace registry is added.
-
-The compression pass removes the leftover Desktop batch receipt registry: each
-conversation confirms its own attachment and an arrangement is one URL. Normal
-selection returns one target. Task layouts permit exactly one
-Session pane, so layout rendering owns one optional attachment, without a vector,
-`RefCell`, or parsing synthetic argv. The failure regression checks that the
-created workspace destination and tools remain available.
+These socket/transport and headless model checks do not replace isolated
+Rex/Herdr acceptance. The autonomous choices in `questions.md` need no further
+product decision. Earlier file presentation returned “No Desktop Files view
+attached; nothing opened.” No fallback launched.

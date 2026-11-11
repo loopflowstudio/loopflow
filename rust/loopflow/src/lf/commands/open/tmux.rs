@@ -2,7 +2,9 @@
 //! Task split layouts are handled only by Rex, Herdr and cmux.
 use std::process::Command;
 
-use super::{run_host, viewed_placement, OpenHost, Resolved, RouteError};
+use anyhow::{Context, Result};
+
+use super::{run_host, viewed_placement, OpenHost, Resolved};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(super) struct TmuxLocation {
@@ -28,14 +30,12 @@ impl TmuxLocation {
 
 /// A new window right after the caller's, named for the Work. Its pane is the
 /// destination: pane IDs are unique for the server's life, unlike indexes.
-pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<String, RouteError> {
-    let shell = shlex::try_join(argv.iter().map(String::as_str))
-        .map_err(|error| RouteError::Definite(error.to_string()))?;
+pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<String> {
+    let shell = shlex::try_join(argv.iter().map(String::as_str))?;
     let caller = match viewed_placement() {
         Some((OpenHost::Tmux, value)) => Some(
-            serde_json::from_str::<TmuxLocation>(&value).map_err(|error| {
-                RouteError::Definite(format!("Recorded tmux view is unreadable: {error}"))
-            })?,
+            serde_json::from_str::<TmuxLocation>(&value)
+                .context("Recorded tmux view is unreadable")?,
         ),
         _ => TmuxLocation::current(),
     };
@@ -66,16 +66,13 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
     };
     let output = window(caller.as_ref().map(|location| location.pane.as_str()))?;
     let pane = output.trim();
-    if pane.is_empty() {
-        return Err(RouteError::Unknown("tmux reply named no pane".into()));
-    }
+    anyhow::ensure!(!pane.is_empty(), "tmux reply named no pane");
     Ok(pane.to_owned())
 }
 
-pub(super) fn focus(destination: &str) -> Result<(), RouteError> {
-    let location: TmuxLocation = serde_json::from_str(destination).map_err(|error| {
-        RouteError::Definite(format!("Recorded tmux view is unreadable: {error}"))
-    })?;
+pub(super) fn focus(destination: &str) -> Result<()> {
+    let location: TmuxLocation =
+        serde_json::from_str(destination).context("Recorded tmux view is unreadable")?;
     let mut command = location.command();
     command.args([
         "select-window",

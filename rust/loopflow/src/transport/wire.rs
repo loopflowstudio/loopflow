@@ -187,7 +187,12 @@ pub(super) enum Request {
     },
     /// Whether some viewer holds input control, asked before opening another.
     /// On an attached connection this also refreshes the viewer's liveness.
-    Controlled,
+    Controlled {
+        /// A viewer acknowledges Return on its existing heartbeat protocol.
+        /// Retained owners from before this field ignore it across helper upgrades.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ready: Option<String>,
+    },
     /// Transfer the direct child's exit recording to its owner before exec.
     ExitRecord {
         key: String,
@@ -239,6 +244,8 @@ pub(super) enum Reply {
     ReconnectRequired,
     Controlled {
         held: bool,
+        /// None means the retained owner cannot report native readiness.
+        ready: Option<bool>,
     },
     NativeEnded,
     Accepted,

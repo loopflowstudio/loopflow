@@ -6,9 +6,10 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 
 use super::{
-    elsewhere, fallback_text, focus_destination, open_desktop, route, workspace, OpenArgs,
+    conversation_view, fallback_text, focus_destination, open_desktop, route, workspace, OpenArgs,
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
+use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
 use crate::lf::commands::write::SessionOpenIntent;
 use crate::ops::human_session::{select_connection, SessionTarget};
 
@@ -44,7 +45,7 @@ fn mode(args: &OpenArgs, agent: bool) -> Result<Mode> {
 
 pub(super) fn here_route() -> OpenRoute {
     OpenRoute {
-        hosts: vec![OpenHost::Terminal],
+        host: Some(OpenHost::Terminal),
         reason: "attach in the calling terminal".into(),
     }
 }
@@ -54,7 +55,7 @@ pub(super) fn presentation(args: &OpenArgs) -> Result<OpenRoute> {
         match mode(args, crate::journal::agent_caller().is_some())? {
             Mode::Here => here_route(),
             Mode::Focus => OpenRoute {
-                hosts: Vec::new(),
+                host: None,
                 reason: "focus the recorded live view without opening another".into(),
             },
             _ => route(args.selection.host),
@@ -82,7 +83,9 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     let host = if mode == Mode::Here {
         OpenHost::Terminal
     } else {
-        route(args.selection.host).hosts[0]
+        route(args.selection.host)
+            .host
+            .expect("host selection always names a host")
     };
     anyhow::ensure!(
         args.selection.server.is_none() || host == OpenHost::Rex,
@@ -97,7 +100,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         && args.selection.host != OpenHost::Terminal
     {
         anyhow::ensure!(
-            route(OpenHost::Auto).hosts[0] == args.selection.host,
+            route(OpenHost::Auto).host == Some(args.selection.host),
             "--here uses the current terminal; use --tab for another host"
         );
     }
@@ -108,41 +111,37 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     resolve(target, false)?;
     let opening = Opening::lock(target)?;
     resolve(target, false)?;
-    if let Some(live) = elsewhere(target)? {
-        if mode == Mode::Focus
+    if let Some(view) = conversation_view(target)? {
+        let destination = view.placement.as_deref().and_then(super::placement_host);
+        // Changes needs its own opening even when the conversation is ready.
+        let companion = mode == Mode::Desktop
+            && target.url.diff
+            && view.attachment == DesktopOpeningStatus::Usable;
+        let focus_existing = mode == Mode::Focus
             || (mode == Mode::Desktop
+                && !companion
                 && focus_new
-                && live
-                    .placement
-                    .as_deref()
-                    .and_then(super::placement_host)
-                    .is_some_and(|(host, _)| host == OpenHost::Desktop))
-        {
-            let (host, destination) = live
-                .placement
-                .as_deref()
-                .and_then(super::placement_host)
-                .with_context(|| format!("{}; this view cannot be focused", live.reason))?;
-            focus_destination(host, destination)
-                .map_err(|e| anyhow::anyhow!("{}; {}", live.reason, e.reason()))?;
+                && view.attachment == DesktopOpeningStatus::Usable
+                && destination.is_some_and(|(host, _)| host == OpenHost::Desktop));
+        if focus_existing {
+            let (host, destination) = destination
+                .with_context(|| format!("Not open in a focusable view; {}", view.reason))?;
+            focus_destination(host, destination).with_context(|| view.reason.clone())?;
             return Ok(target.receipt(
                 Some(host),
                 Some(destination.into()),
-                OpenStatus::Usable,
-                Some("Focused existing conversation".into()),
+                OpenStatus::Focused,
+                Some(view.reason),
             ));
         }
-        let viewed_host = live
-            .placement
-            .as_deref()
-            .and_then(super::placement_host)
-            .map(|(host, _)| host);
-        return Ok(target.receipt(
-            viewed_host,
-            live.placement,
-            OpenStatus::Elsewhere,
-            Some(live.reason),
-        ));
+        if view.retains_attachment() && !companion {
+            return Ok(target.receipt(
+                destination.map(|(host, _)| host),
+                view.placement.clone(),
+                view.status(),
+                Some(view.reason),
+            ));
+        }
     }
     anyhow::ensure!(mode != Mode::Focus, "Not open");
     if mode == Mode::Tab && matches!(host, OpenHost::Terminal | OpenHost::Desktop) {
@@ -154,35 +153,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     }
     resolve(target, true)?;
     if mode == Mode::Desktop {
-        target.url.session = target.session.clone();
-        open_desktop(&target.url.to_string(), focus_new)
-            .map_err(|e| anyhow::anyhow!("{}", e.reason()))?;
-        let deadline = SystemTime::now() + Duration::from_secs(30);
-        loop {
-            if let Some(opening) =
-                super::super::desktop::conversation_opening(&target.url.to_string())?
-            {
-                use super::super::desktop::DesktopOpeningStatus;
-                match opening.status {
-                    DesktopOpeningStatus::Usable => {
-                        return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None))
-                    }
-                    DesktopOpeningStatus::Failed => anyhow::bail!(
-                        "{}",
-                        opening
-                            .reason
-                            .as_deref()
-                            .unwrap_or("Desktop could not attach the conversation")
-                    ),
-                    DesktopOpeningStatus::Opening => {}
-                }
-            }
-            anyhow::ensure!(
-                SystemTime::now() < deadline,
-                "Desktop attachment was not confirmed; see the destination and retry"
-            );
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        return desktop_open(target, focus_new);
     }
 
     let lf = crate::os_process::resolve_lf_binary()?
@@ -205,8 +176,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     let attachment = Attachment::new()?;
     let argv = attachment.argv(target.resume_argv(&lf));
     let mut receipt = if host == OpenHost::Tmux {
-        let pane = super::tmux::open(target, focus_new, &argv)
-            .map_err(|e| anyhow::anyhow!("{}", e.reason()))?;
+        let pane = super::tmux::open(target, focus_new, &argv)?;
         target.receipt(Some(host), Some(pane), OpenStatus::Opening, None)
     } else {
         workspace::conversation_tab(
@@ -219,6 +189,53 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     };
     attachment.settle(&mut receipt);
     Ok(receipt)
+}
+
+fn desktop_open(target: &mut Resolved, focus: bool) -> Result<OpenReceipt> {
+    target.url.session = target.session.clone();
+    let url = target.url.to_string();
+    let previous = desktop::conversation_opening(&url)?;
+    open_desktop(&url, focus)?;
+    let deadline = SystemTime::now() + Duration::from_secs(30);
+    loop {
+        if let Some(opening) = desktop::conversation_opening(&url)?.filter(|opening| {
+            previous
+                .as_ref()
+                .is_none_or(|old| old.revision != opening.revision)
+        }) {
+            match opening.status {
+                DesktopOpeningStatus::Usable => {
+                    return Ok(target.receipt(
+                        Some(OpenHost::Desktop),
+                        None,
+                        OpenStatus::Usable,
+                        None,
+                    ))
+                }
+                DesktopOpeningStatus::Elsewhere => {
+                    return Ok(target.receipt(
+                        Some(OpenHost::Desktop),
+                        None,
+                        OpenStatus::Elsewhere,
+                        opening.reason,
+                    ))
+                }
+                DesktopOpeningStatus::Failed => anyhow::bail!(
+                    "{}",
+                    opening
+                        .reason
+                        .as_deref()
+                        .unwrap_or("Desktop could not attach the conversation")
+                ),
+                DesktopOpeningStatus::Opening => {}
+            }
+        }
+        anyhow::ensure!(
+            SystemTime::now() < deadline,
+            "Desktop attachment was not confirmed; see the destination and retry"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// Use the connection owner's resolver for every scope. Resolution never launches

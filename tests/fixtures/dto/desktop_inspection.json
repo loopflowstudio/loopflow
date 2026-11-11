@@ -4,7 +4,8 @@
     {
       "url": "loopflow://missing",
       "status": "failed",
-      "reason": "Repository path is unavailable"
+      "reason": "Repository path is unavailable",
+      "revision": "receipt-failed"
     }
   ],
   "windows": [
@@ -57,7 +58,8 @@
                   "worktree": "/repo.task"
                 },
                 "tabs": [],
-                "selected_tab": null
+                "selected_tab": null,
+                "attachment": "usable"
               },
               {
                 "pane": "files-pane",
@@ -73,14 +75,16 @@
                   "worktree": "/repo.task"
                 },
                 "tabs": [],
-                "selected_tab": null
+                "selected_tab": null,
+                "attachment": null
               }
             ],
             "incarnation": null,
             "surface": null,
             "location": null,
             "tabs": [],
-            "selected_tab": null
+            "selected_tab": null,
+            "attachment": null
           },
           "work": {
             "repository": "repo_22222222222222222222222222222222",

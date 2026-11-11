@@ -106,7 +106,8 @@ pub struct WorkLinkTarget {
 /// The selected host, or no host when focusing a recorded view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OpenRoute {
-    pub hosts: Vec<OpenHost>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub host: Option<OpenHost>,
     pub reason: String,
 }
 
@@ -115,8 +116,10 @@ pub struct OpenRoute {
 pub enum OpenStatus {
     /// The destination accepted the request; input readiness is not observed.
     Opening,
-    /// The conversation attached, or its existing view was focused.
+    /// The conversation attached.
     Usable,
+    /// An existing view was revealed; this does not establish attachment.
+    Focused,
     /// Another client holds the conversation; nothing new was opened.
     Elsewhere,
     Failed,
@@ -773,12 +776,12 @@ fn available_target(
 // Routing
 // ---------------------------------------------------------------------------
 
-/// Destinations in order. Only explicit choice or the direct caller's own
+/// Only explicit choice or the direct caller's own
 /// terminal context selects a host; nothing scans running applications.
 fn route(requested: OpenHost) -> OpenRoute {
     if requested != OpenHost::Auto {
         return OpenRoute {
-            hosts: vec![requested],
+            host: Some(requested),
             reason: format!("{} was requested", requested.label()),
         };
     }
@@ -801,12 +804,12 @@ fn route(requested: OpenHost) -> OpenRoute {
     };
     if let Some((host, reason)) = current {
         return OpenRoute {
-            hosts: vec![host],
+            host: Some(host),
             reason: format!("{reason}; failure there never falls through to another host"),
         };
     }
     OpenRoute {
-        hosts: vec![OpenHost::Terminal],
+        host: Some(OpenHost::Terminal),
         reason: "the current terminal".into(),
     }
 }
@@ -966,20 +969,6 @@ fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
     Some((host, id))
 }
 
-/// Why one destination did not open. A definite failure created nothing, so
-/// the next destination may proceed; an unknown effect must not be repeated.
-enum RouteError {
-    Definite(String),
-    Unknown(String),
-}
-
-impl RouteError {
-    fn reason(&self) -> &str {
-        let (Self::Definite(reason) | Self::Unknown(reason)) = self;
-        reason
-    }
-}
-
 /// Serialize selection and presentation until attachment settles.
 struct Opening {
     _lock: std::fs::File,
@@ -1019,65 +1008,116 @@ impl Opening {
     }
 }
 
-struct Live {
+struct ConversationView {
     reason: String,
-    /// The attached client's recorded host workspace, when it has one.
     placement: Option<String>,
+    attachment: super::desktop::DesktopOpeningStatus,
 }
 
-/// Read known live views by Session identity, without changing their input.
-fn elsewhere(target: &Resolved) -> Result<Option<Live>> {
+impl ConversationView {
+    fn retains_attachment(&self) -> bool {
+        self.attachment != super::desktop::DesktopOpeningStatus::Failed
+    }
+
+    fn status(&self) -> OpenStatus {
+        if self.attachment == super::desktop::DesktopOpeningStatus::Opening {
+            OpenStatus::Opening
+        } else {
+            OpenStatus::Elsewhere
+        }
+    }
+}
+
+/// Location and attachment come from the existing view and transport owners.
+fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
+    use super::desktop::DesktopOpeningStatus;
     let Some(id) = target.conversation() else {
         return Ok(None);
     };
-    if let Some(view) = super::desktop::conversation_view(id)? {
-        let location = format!("desktop:{}", serde_json::to_string(&view)?);
-        return Ok(Some(Live {
-            reason: format!("Already open in Desktop (window {}, pane {}); reveal it with `lf open --session {id} --focus`", view.window, view.pane),
-            placement: Some(location),
-        }));
+    let desktop = super::desktop::conversation_view(id)?
+        .map(|(view, attachment)| -> Result<_> {
+            let Some(view) = view else {
+                return Ok(ConversationView {
+                    reason: "Still opening in Desktop; no conversation pane exists yet".into(),
+                    placement: None,
+                    attachment,
+                });
+            };
+            let description = match attachment {
+                DesktopOpeningStatus::Opening => "Still opening",
+                DesktopOpeningStatus::Usable => "Already open",
+                DesktopOpeningStatus::Elsewhere => "Conversation held elsewhere; view retained",
+                DesktopOpeningStatus::Failed => "Attachment failed or ended; view retained",
+            };
+            Ok(ConversationView {
+                reason: format!("{description} in Desktop (window {}, pane {}); reveal it with `lf open --session {id} --focus`", view.window, view.pane),
+                placement: Some(format!("desktop:{}", serde_json::to_string(&view)?)),
+                attachment,
+            })
+        }).transpose()?;
+    if desktop
+        .as_ref()
+        .is_some_and(ConversationView::retains_attachment)
+    {
+        return Ok(desktop);
     }
     let Some(store) = crate::store::read_existing_registry()? else {
-        return Ok(None);
+        return Ok(desktop);
     };
     let Some(summary) = crate::ops::human_session::viewed_summary(&store.sqlite, id)? else {
-        return Ok(None);
+        return Ok(desktop);
     };
-    let viewed = if let Some(owner) = store.sqlite.session_transport(id)? {
-        crate::transport::controlled(&owner).unwrap_or(false)
+    if summary.unviewed {
+        return Ok(desktop);
+    }
+    let (viewed, ready) = if let Some(owner) = store.sqlite.session_transport(id)? {
+        crate::transport::attachment(&owner)?
     } else {
-        summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
-            && !summary.unviewed
+        (
+            summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live,
+            true,
+        )
     };
-    Ok(viewed.then(|| Live {
+    if !viewed {
+        return Ok(desktop);
+    }
+    let description = if ready {
+        "Already open"
+    } else {
+        "Still opening"
+    };
+    Ok(Some(ConversationView {
         reason: format!(
-            "Already open at {}; reveal it with `lf open --session {id} --focus`",
+            "{description} at {}; reveal it with `lf open --session {id} --focus`",
             summary.terminal_id.as_deref().unwrap_or("another client")
         ),
         placement: summary.terminal_id,
+        attachment: if ready {
+            DesktopOpeningStatus::Usable
+        } else {
+            DesktopOpeningStatus::Opening
+        },
     }))
 }
 
-fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
-    let result = match host {
-        OpenHost::Tmux => return tmux::focus(destination),
+fn focus_destination(host: OpenHost, destination: &str) -> Result<()> {
+    match host {
+        OpenHost::Tmux => tmux::focus(destination),
         OpenHost::Desktop => super::desktop::focus_conversation(destination),
         OpenHost::Rex => rex::focus_view(destination),
         OpenHost::Herdr => herdr::Herdr::focus_view(destination),
         OpenHost::Cmux => cmux::Cmux::focus_view(destination),
-        _ => return Err(RouteError::Definite("This view cannot be focused".into())),
-    };
-    result.map_err(|error| RouteError::Definite(format!("{error:#}")))
+        _ => bail!("This view cannot be focused"),
+    }
 }
 
 /// Send one conversation or arrangement address without changing hosts.
-fn open_desktop(url: &str, focus: bool) -> Result<(), RouteError> {
-    if !cfg!(target_os = "macos") {
-        return Err(RouteError::Definite(
-            "Loopflow Desktop requires macOS; use --host terminal".into(),
-        ));
-    }
-    let app = DesktopApp::current().ok_or_else(|| RouteError::Definite(NO_DESKTOP.into()))?;
+fn open_desktop(url: &str, focus: bool) -> Result<()> {
+    anyhow::ensure!(
+        cfg!(target_os = "macos"),
+        "Loopflow Desktop requires macOS; use --host terminal"
+    );
+    let app = DesktopApp::current().context(NO_DESKTOP)?;
     let mut command = Command::new("open");
     command.args(app.open_args());
     if !focus {
@@ -1088,55 +1128,35 @@ fn open_desktop(url: &str, focus: bool) -> Result<(), RouteError> {
 }
 
 /// Run one host request with a finite timeout and return its stdout.
-fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
+fn run_host(mut command: Command, host: &str) -> Result<String> {
     // Native inventories can exceed a pipe buffer. Spool while the child runs
     // so waiting for exit cannot deadlock behind an unread stdout/stderr pipe.
-    let capture = || tempfile::tempfile().map_err(|error| RouteError::Definite(error.to_string()));
-    let mut stdout = capture()?;
-    let mut stderr = capture()?;
-    let output = stdout
-        .try_clone()
-        .map_err(|error| RouteError::Definite(error.to_string()))?;
-    let errors = stderr
-        .try_clone()
-        .map_err(|error| RouteError::Definite(error.to_string()))?;
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(output)
-        .stderr(errors)
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
         .spawn()
-        .map_err(|error| RouteError::Definite(format!("cannot run {host}: {error}")))?;
+        .with_context(|| format!("cannot run {host}"))?;
     let (status, timed_out) =
-        crate::os_process::wait_for_exit(&mut child, Some(HOST_TIMEOUT), || {})
-            .map_err(|error| RouteError::Unknown(error.to_string()))?;
+        crate::os_process::wait_for_exit(&mut child, Some(HOST_TIMEOUT), || {})?;
     if timed_out {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(RouteError::Unknown(format!(
-            "{host} did not answer within {}s",
-            HOST_TIMEOUT.as_secs()
-        )));
+        bail!("{host} did not answer within {}s", HOST_TIMEOUT.as_secs());
     }
     use std::io::Seek;
-    stdout
-        .rewind()
-        .map_err(|error| RouteError::Unknown(error.to_string()))?;
-    stderr
-        .rewind()
-        .map_err(|error| RouteError::Unknown(error.to_string()))?;
-    let stdout =
-        std::io::read_to_string(stdout).map_err(|error| RouteError::Unknown(error.to_string()))?;
-    let stderr =
-        std::io::read_to_string(stderr).map_err(|error| RouteError::Unknown(error.to_string()))?;
+    stdout.rewind()?;
+    stderr.rewind()?;
+    let stdout = std::io::read_to_string(stdout)?;
+    let stderr = std::io::read_to_string(stderr)?;
     if status.success() {
         Ok(stdout)
     } else {
         let detail = stderr.trim();
-        Err(RouteError::Definite(if detail.is_empty() {
-            format!("{host} exited with {status}")
-        } else {
-            format!("{host} refused: {detail}")
-        }))
+        anyhow::ensure!(!detail.is_empty(), "{host} exited with {status}");
+        bail!("{host} refused: {detail}")
     }
 }
 
@@ -1328,7 +1348,9 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
             route(args.selection.host),
         );
     }
-    let host = route(args.selection.host).hosts[0];
+    let host = route(args.selection.host)
+        .host
+        .expect("host selection always names a host");
     if host == OpenHost::Desktop {
         let (targets, unknown) = workspace_targets(cli, args)?;
         let receipts = targets
@@ -1364,7 +1386,7 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
                         Some(host),
                         None,
                         OpenStatus::Failed,
-                        Some(error.reason().into()),
+                        Some(format!("{error:#}")),
                     ),
                 }
             })
@@ -1445,7 +1467,8 @@ fn print_report(report: OpenReport, json: bool) -> Result<()> {
                 "{}: {}",
                 receipt.label,
                 receipt.reason.as_deref().unwrap_or(match receipt.status {
-                    OpenStatus::Opening => "Opened workspace",
+                    OpenStatus::Opening => "Opening",
+                    OpenStatus::Focused => "Focused",
                     OpenStatus::Usable => "Attached",
                     OpenStatus::Elsewhere => "Already open",
                     OpenStatus::Failed => "Opening failed",
@@ -1491,12 +1514,7 @@ mod tests {
             "-c",
             "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2",
         ]);
-        assert_eq!(
-            super::run_host(command, "fixture")
-                .unwrap_or_else(|error| panic!("{}", error.reason()))
-                .len(),
-            131072
-        );
+        assert_eq!(super::run_host(command, "fixture").unwrap().len(), 131072);
     }
 
     #[test]

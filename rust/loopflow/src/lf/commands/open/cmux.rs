@@ -53,7 +53,7 @@ impl Cmux {
         if let Some(location) = &self.location {
             command.env("CMUX_SOCKET_PATH", &location.socket);
         }
-        super::run_host(command, "cmux").map_err(|error| anyhow::anyhow!("{}", error.reason()))
+        super::run_host(command, "cmux")
     }
 
     /// The group holding the caller's workspace now; `None` when it is ungrouped

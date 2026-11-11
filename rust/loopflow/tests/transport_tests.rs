@@ -815,6 +815,59 @@ printf '%s' "$answer" > "$HOME/answer"
 }
 
 #[test]
+fn conversation_open_pending_retry_waits_for_the_controlling_viewers_readiness() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
+    let _stop = StopOwner(&fixture, owner.clone());
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let mut viewer = fixture.viewer(&owner, true);
+    let returned = viewer.until_event("return");
+    let ready = events(&returned, "return")[0]["detach"].clone();
+    // The opening caller can time out while its viewer has yet to accept Return.
+    // Repeating open must neither claim readiness nor create another attachment.
+    for _ in 0..2 {
+        let report = fixture
+            .command(&["open", "--session", &session, "--json"])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(report.status.success(), "{report:?}");
+        let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+        assert_eq!(report["receipts"][0]["status"], "opening");
+        assert!(report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Still opening"));
+    }
+    viewer.request(json!({"kind":"controlled", "ready":ready}));
+    viewer.until_reply();
+    // Wait for the owner to observe the acknowledgement, independently of caller timing.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        viewer.request(json!({"kind":"controlled"}));
+        if viewer.until_reply()["ready"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+    }
+    let report = fixture
+        .command(&["open", "--session", &session, "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(report.status.success(), "{report:?}");
+    let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "elsewhere");
+    assert_eq!(fixture.session_of_owner(&owner), session);
+    assert_eq!(fixture.launches(1).len(), 1);
+    viewer.input("done\n");
+    viewer.finish();
+}
+
+#[test]
 fn conversation_open_continues_closed_history_without_replaying_the_request() {
     let fixture = Fixture::new();
     let path = fixture.provider(
@@ -1731,7 +1784,7 @@ fn accept_attachment(listener: &UnixListener) -> UnixStream {
                     "controlled" => socket
                         .write_all(&frame(
                             REPLY,
-                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false})
+                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false,"ready":false})
                                 .to_string()
                                 .as_bytes(),
                         ))

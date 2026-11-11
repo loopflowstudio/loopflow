@@ -134,7 +134,9 @@ impl Tools<'_> {
             None,
         )?;
         super::super::conversation::resolve(&mut target, true)?;
-        let argv = if let Some(live) = super::super::elsewhere(&target)? {
+        let argv = if let Some(live) =
+            super::super::conversation_view(&target)?.filter(|view| view.retains_attachment())
+        {
             eprintln!("{}: {}", target.label, live.reason);
             vec![
                 "/bin/sh".into(),

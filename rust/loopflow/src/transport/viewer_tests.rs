@@ -121,7 +121,7 @@ fn snapshot_preview_fixture() {
             let request: Incoming = serde_json::from_slice(&payload).unwrap();
             assert!(matches!(
                 request.request,
-                Request::Leave | Request::Controlled
+                Request::Leave | Request::Controlled { .. }
             ));
         }
     });

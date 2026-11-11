@@ -329,7 +329,7 @@ final class WorkModel {
         guard !Task.isCancelled else { return }
         dismissTaskLink()
         let generation = destinationGeneration
-        taskOpening = DesktopOpening(url: link.address, status: .opening, reason: nil)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
         defer {
             if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
         }
@@ -363,7 +363,7 @@ final class WorkModel {
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation, intent: intent)
             } else {
-                taskOpening = DesktopOpening(url: link.address, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
+                taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
                 showsTaskLink = true
             }
         } catch {
@@ -374,7 +374,7 @@ final class WorkModel {
 
     func dismissTaskLink() {
         if let opening = taskOpening, opening.status == .opening {
-            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening canceled by navigation or a newer request.")
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed, reason: "Opening canceled by navigation or a newer request.")
         }
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
@@ -385,7 +385,7 @@ final class WorkModel {
         guard let taskLink else { return }
         dismissTaskLink()
         let generation = destinationGeneration
-        taskOpening = DesktopOpening(url: taskLink.address, status: .opening, reason: nil)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: taskLink.address, status: .opening, reason: nil)
         defer {
             if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
         }
@@ -398,7 +398,7 @@ final class WorkModel {
 
     private func failTaskLink(_ error: Error, link: TaskLink, generation: Int) {
         guard !Task.isCancelled, destinationGeneration == generation else { return }
-        taskOpening = DesktopOpening(url: link.address, status: .failed, reason: error.localizedDescription)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .failed, reason: error.localizedDescription)
         taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
         // A sidebar opening already has its retained Task error and retry.
         // Only unresolved external links need the lookup sheet.
@@ -560,7 +560,7 @@ final class WorkModel {
         guard !Task.isCancelled, destinationGeneration == generation else { return }
         if let workspace {
             guard workspace.conversationRequest == request, !workspace.conversationClosed else {
-                taskOpening = DesktopOpening(url: link.address, status: .failed, reason: "Opening was closed or released.")
+                taskOpening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .failed, reason: "Opening was closed or released.")
                 return
             }
         }
@@ -667,7 +667,7 @@ final class WorkModel {
         guard !Task.isCancelled, linkedTaskPage == request, request.generation == destinationGeneration,
               repoPath?.normalizedFilePath == request.repo,
               let opening = taskOpening, opening.status == .opening else { return }
-        taskOpening = DesktopOpening(url: opening.url, status: error == nil ? .usable : .failed, reason: error)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: error == nil ? .usable : .failed, reason: error)
         linkedTaskPage = nil
     }
 
@@ -685,7 +685,7 @@ final class WorkModel {
         if destination.showsChanges, let pane = layout.pane(of: .browser),
            pane.content.selectedBrowserTab == .files { panes.append(pane) }
         guard panes.count == (destination.showsChanges ? 2 : 1) else {
-            taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
+            taskOpening = taskOpening.map { DesktopOpening(revision: UUID().uuidString, url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
         if let intent = destination.preparedIntent { store.adoptPreparation(destination.record, intent: intent) }
@@ -715,7 +715,7 @@ final class WorkModel {
         // cannot hide a definitive close, replacement or visibility change.
         guard (workspaceRegistry == nil || workspaceRegistry?.selectedWork == workspace.key),
               panes.allSatisfy(workspace.multiplexer.isVisible) else {
-            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening panes were hidden, closed or replaced.")
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed, reason: "Opening panes were hidden, closed or replaced.")
             return
         }
         guard let item = store.sessions.first(where: { $0.id == record.id }) else { return }
@@ -733,10 +733,18 @@ final class WorkModel {
             }
         }
         if let reason {
-            taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
-        } else if item.state == .live || item.state == .elsewhere,
-                  !showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false) {
-            taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed, reason: reason)
+            return
+        }
+        switch store.attachment(record.id) {
+        case .failed:
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .failed,
+                reason: store.connectionReading(record.id)?.message ?? "Conversation attachment failed or ended.")
+        case .elsewhere:
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .elsewhere, reason: "Conversation input is held by another client.")
+        case .usable where !showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false):
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: opening.url, status: .usable, reason: nil)
+        default: break
         }
     }
 
@@ -849,7 +857,7 @@ final class WorkModel {
         guard !Task.isCancelled else { return }
         dismissTaskLink()
         var generation = destinationGeneration
-        taskOpening = DesktopOpening(url: address, status: .opening, reason: nil)
+        taskOpening = DesktopOpening(revision: UUID().uuidString, url: address, status: .opening, reason: nil)
         defer {
             if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
         }
@@ -875,13 +883,13 @@ final class WorkModel {
             else { pane = workspace.multiplexer.pane(forSessionId: id) }
             guard let pane else { throw RegistryQueryError("The Session pane is unavailable; retry opening it.") }
             generation = destinationGeneration
-            taskOpening = DesktopOpening(url: address, status: .opening, reason: nil)
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: address, status: .opening, reason: nil)
             await store.select(id, intent: .start)
             observeOpeningOwners(generation: generation, record: record, showsChanges: false,
                                  store: store, workspace: workspace, panes: [pane], files: nil)
         } catch {
             guard !Task.isCancelled, destinationGeneration == generation else { return }
-            taskOpening = DesktopOpening(url: address, status: .failed, reason: error.localizedDescription)
+            taskOpening = DesktopOpening(revision: UUID().uuidString, url: address, status: .failed, reason: error.localizedDescription)
         }
     }
 
@@ -3209,18 +3217,18 @@ extension WorkModel {
         let request = UUID()
         viewOpening = request
         let link = url?.absoluteString ?? "loopflow://open"
-        selectionOpening = DesktopOpening(url: link, status: .opening, reason: nil)
+        selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .opening, reason: nil)
         do {
             let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
             guard viewOpening == request, self.repoPath == repoPath else { return }
             if plan.dashboardID != nil { replacePlan(plan) }
             selectDestination(plan.dashboardID.map { .dashboard($0) } ?? .view(plan), recordingHistory: true)
-            selectionOpening = DesktopOpening(url: link, status: .usable, reason: nil)
+            selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .usable, reason: nil)
         } catch {
             guard viewOpening == request else { return }
             viewOpening = nil
             dashboardError = error.localizedDescription
-            selectionOpening = DesktopOpening(url: link, status: .failed, reason: error.localizedDescription)
+            selectionOpening = DesktopOpening(revision: UUID().uuidString, url: link, status: .failed, reason: error.localizedDescription)
         }
     }
 }

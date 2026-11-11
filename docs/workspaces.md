@@ -34,7 +34,12 @@ It does not search other Machines. A known remote viewer is reported with its
 location; opening does not take it over. To deliberately move input, use
 `lf resume <session>`.
 
-`--focus` reports **Not open** when no live view is found. A view the host cannot
+A view may still be opening or show an attachment error. `--focus` only reveals
+it. After correcting an attachment failure, repeat the opening command to
+reconnect; an attachment still in progress is reported without launching another.
+
+`--focus` reports **Not open** when no view exists, including while Desktop is
+still resolving an opening before creating its pane. A view the host cannot
 focus is reported with its location and the failure. Neither case launches a
 replacement. To start a closed conversation, run the command again without
 `--focus`.

@@ -49,9 +49,6 @@ targets:
       - path: ../rust/loopflow/tests/fixtures/dto/server
         type: folder
         buildPhase: resources
-      - path: ../tests/fixtures/dto/owner
-        type: folder
-        buildPhase: resources
     dependencies:
       - target: LoopflowiOS
       - package: ViewInspector

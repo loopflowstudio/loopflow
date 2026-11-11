@@ -2,26 +2,9 @@ import Foundation
 import Loopflow
 import Observation
 
-/// Renderer-facing events, after the transport has checked identity and order.
-enum MobileTerminalEvent: Sendable {
-    case geometry(columns: Int, rows: Int)
-    case snapshot(Data)
-    case output(Data)
-    case control(input: Bool, geometry: Bool)
-    case programStatus(ProgramStatusRecords)
-    case ended
-    case disconnected(String)
-}
-
 struct TerminalGeometry: Equatable {
     let columns: Int
     let rows: Int
-}
-
-struct SessionUnavailable: LocalizedError {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var errorDescription: String? { message }
 }
 
 struct SessionNotRunning: LocalizedError {
@@ -175,7 +158,7 @@ final class SessionLink {
         echo = nil
     }
 
-    private func receive(_ event: MobileTerminalEvent) {
+    private func receive(_ event: TerminalEvent) {
         switch event {
         case .snapshot(let data):
             render?(data, true)

@@ -155,14 +155,14 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 @MainActor
 final class RemoteAttachment {
     let sessionID: String
-    lazy var events = AsyncStream<MobileTerminalEvent>(unfolding: { [weak self] in
+    lazy var events = AsyncStream<TerminalEvent>(unfolding: { [weak self] in
         await self?.nextEvent()
     }, onCancel: { [weak self] in
         Task { @MainActor in self?.close() }
     })
     private let connection: MachineSocket
     private var decoder = OwnerStream()
-    private var pendingEvents: ArraySlice<MobileTerminalEvent> = []
+    private var pendingEvents: ArraySlice<TerminalEvent> = []
     private var failure: String?
     private var writer: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
@@ -206,14 +206,13 @@ final class RemoteAttachment {
 
     func send(_ bytes: Data) throws {
         guard !closed, decoder.ready, decoder.inputControl else { throw RegistryQueryError("Keyboard control was released") }
-        try enqueue(OwnerStream.frame(tag: 0x12, body: bytes))
+        try enqueue(OwnerStream.input(bytes))
     }
 
     func resize(columns: Int, rows: Int) throws {
         guard !closed, decoder.geometryControl else { return }
         nextRequest += 1
-        try enqueue(OwnerStream.frame(tag: 0x11, body: JSONEncoder().encode(
-            ResizeRequest(id: nextRequest, kind: "resize", rows: rows, cols: columns))))
+        try enqueue(OwnerStream.resizeRequest(id: nextRequest, columns: columns, rows: rows))
     }
 
     func close() {
@@ -229,7 +228,7 @@ final class RemoteAttachment {
 
     /// The renderer pulls the next event. Keep only one decoded network batch;
     /// do not turn packet coalescing into an artificial slow-consumer failure.
-    private func nextEvent() async -> MobileTerminalEvent? {
+    private func nextEvent() async -> TerminalEvent? {
         while !closed && !Task.isCancelled {
             if let event = pendingEvents.popFirst() {
                 if pendingEvents.isEmpty { pendingEvents = [] }
@@ -247,7 +246,7 @@ final class RemoteAttachment {
         }
         guard !Task.isCancelled else { close(); return nil }
         defer { failure = nil }
-        return failure.map(MobileTerminalEvent.disconnected)
+        return failure.map(TerminalEvent.disconnected)
     }
 
     private func startWriter() {
@@ -297,27 +296,6 @@ final class RemoteAttachment {
     }
 
     private func attachRequest(id: UInt64, size: TerminalGeometry) throws -> Data {
-        try OwnerStream.frame(tag: 0x11, body: JSONEncoder().encode(AttachRequest(
-            id: id, kind: "attach", control: true, replace: true, own: "take",
-            rows: size.rows, cols: size.columns, name: "Loopflow iPhone", moved: nil)))
+        try OwnerStream.attachRequest(id: id, columns: size.columns, rows: size.rows, name: "Loopflow iPhone")
     }
-}
-
-private struct AttachRequest: Encodable {
-    let id: UInt64
-    let kind: String
-    let control: Bool
-    let replace: Bool
-    let own: String
-    let rows: Int
-    let cols: Int
-    let name: String?
-    let moved: String?
-}
-
-private struct ResizeRequest: Encodable {
-    let id: UInt64
-    let kind: String
-    let rows: Int
-    let cols: Int
 }

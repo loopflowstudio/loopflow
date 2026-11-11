@@ -1,53 +1,79 @@
 import Foundation
-import Loopflow
+
+/// A frame's first byte on an owner connection, as `rust/loopflow/src/transport/wire.rs` names it.
+public enum OwnerTag: UInt8, Sendable {
+    case reply = 0x01, snapshot = 0x02, out = 0x03, err = 0x04
+    case request = 0x11, input = 0x12
+}
+
+/// What a terminal renderer receives, after the stream has checked identity and order.
+public enum TerminalEvent: Sendable {
+    case geometry(columns: Int, rows: Int)
+    case snapshot(Data)
+    case output(Data)
+    case control(input: Bool, geometry: Bool)
+    case programStatus(ProgramStatusRecords)
+    case ended
+    case disconnected(String)
+}
+
+/// The Session has no interactive terminal to attach to.
+public struct SessionUnavailable: LocalizedError {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
+}
 
 /// Consumer of transport/wire.rs. A new attachment always asks for a fresh
 /// snapshot; byte replay and input replay are deliberately separate concerns.
-struct OwnerStream {
-    static let maxPayload = 4 * 1024 * 1024
+public struct OwnerStream: Sendable {
+    public static let maxPayload = 4 * 1024 * 1024
     private var frames = Data()
     private var scanner: OwnerEventScanner?
     private var pendingScreen: Data?
     private var baseline: UInt64 = 0
     private var sequence: UInt64 = 0
     private var viewer: String?
-    private(set) var ready = false
-    private(set) var inputControl = false
-    private(set) var geometryControl = false
-    private(set) var ended = false
+    public private(set) var ready = false
+    public private(set) var inputControl = false
+    public private(set) var geometryControl = false
+    public private(set) var ended = false
     private var awaiting: UInt64?
     private var awaitingHeartbeat: UInt64?
-    var awaitingAttachment: Bool { awaiting != nil }
+    public var awaitingAttachment: Bool { awaiting != nil }
 
-    mutating func expectAttachment(_ request: UInt64) {
+    public init() {}
+
+    public mutating func expectAttachment(_ request: UInt64) {
         awaiting = request
     }
 
-    mutating func heartbeatRequest(id: UInt64) throws -> Data {
+    public mutating func heartbeatRequest(id: UInt64) throws -> Data {
         guard awaitingHeartbeat == nil else {
             throw RegistryQueryError("The Session did not answer; reconnect for a fresh screen")
         }
         awaitingHeartbeat = id
-        return try Self.frame(tag: 0x11, body: JSONEncoder().encode(HeartbeatRequest(id: id, kind: "controlled")))
+        return try Self.frame(.request, body: JSONEncoder().encode(HeartbeatRequest(id: id, kind: "controlled")))
     }
 
-    mutating func receive(_ bytes: Data) throws -> [MobileTerminalEvent] {
+    public mutating func receive(_ bytes: Data) throws -> [TerminalEvent] {
         guard !ended else { return [] }
         frames.append(bytes)
         var consumed = 0
-        var events: [MobileTerminalEvent] = []
+        var events: [TerminalEvent] = []
         while frames.count - consumed >= 5 {
             let start = frames.startIndex + consumed
-            let tag = frames[start]
-            guard (1...4).contains(tag) else { throw RegistryQueryError("Unsupported Session frame") }
+            guard let tag = OwnerTag(rawValue: frames[start]), tag.rawValue <= OwnerTag.err.rawValue else {
+                throw RegistryQueryError("Unsupported Session frame")
+            }
             let length = frames[(start + 1)..<(start + 5)].reduce(0) { ($0 << 8) | Int($1) }
             guard length <= Self.maxPayload else { throw RegistryQueryError("Session frame exceeds its limit") }
             guard frames.count - consumed >= length + 5 else { break }
             let body = Data(frames[(start + 5)..<(start + 5 + length)])
             consumed += 5 + length
             switch tag {
-            case 1: try reply(body, events: &events)
-            case 2:
+            case .reply: try reply(body, events: &events)
+            case .snapshot:
                 guard viewer != nil, pendingScreen != nil else {
                     throw RegistryQueryError("Unexpected Session snapshot")
                 }
@@ -76,7 +102,7 @@ struct OwnerStream {
         pendingScreen?.append(bytes)
     }
 
-    private mutating func reply(_ bytes: Data, events: inout [MobileTerminalEvent]) throws {
+    private mutating func reply(_ bytes: Data, events: inout [TerminalEvent]) throws {
         let reply = try JSONDecoder().decode(OwnerReply.self, from: bytes)
         if reply.answers == awaitingHeartbeat {
             guard case .controlled = reply.value else {
@@ -107,7 +133,7 @@ struct OwnerStream {
         }
     }
 
-    private mutating func apply(_ event: OwnerEvent, events: inout [MobileTerminalEvent]) throws {
+    private mutating func apply(_ event: OwnerEvent, events: inout [TerminalEvent]) throws {
         // Replies can precede already-queued events. A fresh attachment's
         // snapshot supersedes those events; later gaps are never ignored.
         if event.sequence <= baseline { return }
@@ -150,14 +176,46 @@ struct OwnerStream {
         }
     }
 
-    static func frame(tag: UInt8, body: Data) throws -> Data {
+    public static func frame(_ tag: OwnerTag, body: Data) throws -> Data {
         guard body.count <= maxPayload else { throw RegistryQueryError("Session input exceeds its limit") }
         var length = UInt32(body.count).bigEndian
-        var result = Data([tag])
+        var result = Data([tag.rawValue])
         withUnsafeBytes(of: &length) { result.append(contentsOf: $0) }
         result.append(body)
         return result
     }
+
+    /// Take input and geometry at `rows` × `columns`, replacing an earlier attachment.
+    public static func attachRequest(id: UInt64, columns: Int, rows: Int, name: String) throws -> Data {
+        try frame(.request, body: JSONEncoder().encode(AttachRequest(
+            id: id, kind: "attach", control: true, replace: true, own: "take",
+            rows: rows, cols: columns, name: name, moved: nil)))
+    }
+
+    public static func resizeRequest(id: UInt64, columns: Int, rows: Int) throws -> Data {
+        try frame(.request, body: JSONEncoder().encode(ResizeRequest(id: id, kind: "resize", rows: rows, cols: columns)))
+    }
+
+    public static func input(_ bytes: Data) throws -> Data { try frame(.input, body: bytes) }
+}
+
+private struct AttachRequest: Encodable {
+    let id: UInt64
+    let kind: String
+    let control: Bool
+    let replace: Bool
+    let own: String
+    let rows: Int
+    let cols: Int
+    let name: String?
+    let moved: String?
+}
+
+private struct ResizeRequest: Encodable {
+    let id: UInt64
+    let kind: String
+    let rows: Int
+    let cols: Int
 }
 
 private struct HeartbeatRequest: Encodable {

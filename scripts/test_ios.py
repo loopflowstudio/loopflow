@@ -1,6 +1,6 @@
 """Run the native iOS tests on a fresh, disposable Simulator.
 
-    uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/OwnerStreamTests
+    uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/SessionTerminalTests
 
 Additional arguments pass straight to xcodebuild. No personal Simulator is used.
 """

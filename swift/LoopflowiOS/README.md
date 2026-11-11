@@ -71,7 +71,6 @@ Simulator slice is arm64.
 |---|---|
 | `MachineConnection.swift`, `SavedMachine.swift` | The WebSocket that carries `Loopflow`'s shared `ServerLink`; saved address |
 | `RemoteMobileClient.swift`, `RemoteTaskObservation.swift` | Requests, the live Task reading (resumed after a lost connection), a Session attachment |
-| `OwnerStream.swift` | Decoder for the owner protocol in `rust/loopflow/src/transport/wire.rs` |
 | `SessionLink.swift` | The phone's hold on one Session |
 | `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the Session's bytes |
 | `SessionTerminal.swift`, `SessionView.swift` | Terminal scrolling, reply field and keys |

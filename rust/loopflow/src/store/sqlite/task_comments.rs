@@ -147,7 +147,6 @@ pub(super) fn insert_authored_comment(
 }
 
 impl SqliteStore {
-    /// Saved conversation content, independent of planning configuration and delivery badges.
     /// The Task's comments that are not also steers. A direction comment
     /// reaches Sessions once, as the steer saved with source `comment:<id>`.
     pub(crate) fn task_undirected_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {

@@ -245,15 +245,8 @@ fn claim_steers(
             "{event}:{}:{invocation}",
             callback["turn_id"].as_str().unwrap_or("")
         );
-        let steers =
-            store.emit_session_steers(adapter, thread, &boundary, |id, steers, remaining| {
-                let (text, excerpts) =
-                    render_steers(delivery, &adapter.session, id, steers, remaining)
-                        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-                Ok(SteerContext { text, excerpts })
-            })?;
         Ok((
-            steers.map(|(batch, text)| SteerBatch { batch, text }),
+            emit_steers(store, delivery, adapter, thread, &boundary)?,
             waiting,
         ))
     })
@@ -270,14 +263,27 @@ pub(super) fn wake_steers(
     let delivery = ContextDelivery::load(delivery)?;
     store.recover_prepared_steers(&adapter.session)?;
     let boundary = format!("wake:{}", uuid::Uuid::new_v4());
-    let steers = store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-        store.emit_session_steers(adapter, thread, &boundary, |id, steers, remaining| {
-            let (text, excerpts) =
-                render_steers(&delivery, &adapter.session, id, steers, remaining)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    Ok(
+        store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+            emit_steers(store, &delivery, adapter, thread, &boundary)
+        })?,
+    )
+}
+
+/// Render and record the Session's next batch of pending steers at `boundary`.
+fn emit_steers(
+    store: &SqliteStore,
+    delivery: &ContextDelivery,
+    adapter: &SteerAdapter,
+    thread: &str,
+    boundary: &str,
+) -> StoreResult<Option<SteerBatch>> {
+    let steers =
+        store.emit_session_steers(adapter, thread, boundary, |id, steers, remaining| {
+            let (text, excerpts) = render_steers(delivery, &adapter.session, id, steers, remaining)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             Ok(SteerContext { text, excerpts })
-        })
-    })?;
+        })?;
     Ok(steers.map(|(batch, text)| SteerBatch { batch, text }))
 }
 

@@ -129,7 +129,7 @@ fn watch() {
         {
             Ok(revision) => revision,
             Err(error) => {
-                tracing::warn!(%error, "Task update revision unread");
+                tracing::warn!(%error, "steer and Task update revisions unread");
                 store = None;
                 continue;
             }

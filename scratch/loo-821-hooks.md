@@ -177,6 +177,9 @@ Remaining:
 - Bare interactive launches drop their turn hooks with "Bare launches go
   direct" (above).
 - Gate: the suites under Checks marked gate.
+- Ship: Jack Heart, "ok, otherwise l2gm, ship it ocne the queries are fast"
+  (`questions.md`). The scan pass is built; demo plans the traced statements
+  on a fresh store copy again.
 - `limit` / `record-limit` still open the store, on a usage limit only.
 
 Choices taken (reversible):
@@ -244,16 +247,16 @@ Tasks). Scans fixed:
 - `steer_batches` by Session (recover, confirm, waiting, reconcile's prepared
   cancel): `steer_batches_session(session_id,evidence,created_at)`.
 - `steer_deliveries` by batch (cancel, excerpt): `steer_deliveries_batch`.
-- reconcile's applicable steers read every steer:
-  `steers_session`, `steers_repo` (Task and Wave already indexed).
+- reconcile's applicable steers read every steer: partial owner indexes
+  (`steers_session`, `steers_repo`, `steers_task`, `steers_wave`; see
+  Boundary query plans below).
 - reconcile's cancelled-delivery delete read every cancelled batch: scoped to
   the Session.
 - reconcile's checkout membership read every Task, twice: `session_tasks`
   now finds candidates by the cwd's ancestors through `idx_tasks_worktree`,
   and `member_tasks` is materialized. Reconcile 1.7 → 0.23 ms.
-- Left: the history read at a conversation switch (`resume_reference`) plans
-  wave/task scans in branches its NULL filters never take; 8 ms on the
-  Session with the most events.
+- the history read at a conversation switch (`resume_reference`): keyed
+  read, below.
 
 No write lock when there is nothing to write: `recover_prepared_steers` with
 no prepared batch, `confirm_session_steers` with nothing printed and nothing

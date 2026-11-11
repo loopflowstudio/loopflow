@@ -101,7 +101,7 @@ Work on every prepare; `openSessionLink` and the repository store stay bare.
 The id is not checked against the Task: naming another Task only makes the
 resume managed.
 
-Jack Heart, November 11, after the PR review page and the scan steer: "ok, otherwise l2gm, ship it ocne the queries are fast". The operator ships (`lf ship`) after the scan pass reaches demo and a fresh `plan_steers.py` run shows no scan of a growing table.
+Jack Heart, November 11, after the PR review page and the scan steer: "ok, otherwise l2gm, ship it ocne the queries are fast". The operator ships (`lf ship`) after the scan pass reaches demo and a fresh plan of the traced boundary statements on a store copy shows no scan of a growing table (the November 11 script was not kept; `boundary_statements_never_scan_tables_that_grow_with_use` plans the same statements on fixtures).
 
 The scan steer asked for `applicable` as a UNION of indexed lookups. Measured
 on the Machine's store, the UNION alone still scanned (the cause was `ANALYZE`

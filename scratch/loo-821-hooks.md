@@ -20,11 +20,17 @@ Looked at and left alone:
 - The server rewrites the delivery file after a checkout move and the hook
   rereads it; changing that is another Task.
 
-Open, with why it matters:
+Settled by the design (concept review, November 10):
 
-- A custom `LF_HOME` (a World, a source experiment) with no server gets a
-  launchd or systemd job for that home the first time it launches Task work;
-  that is what `lf install server` does there.
+- A custom `LF_HOME` (a World, a source experiment) that launches Task work
+  gets a launchd or systemd job for that home. Task work requires its
+  Machine's server, so this is the decision's consequence, not a leak.
+- A skill run in a Task's checkout carries the Task (`work_source`
+  checkout) and so needs the server. It touches the work model; "anything that
+  doesnt touch the work model" is the Task-less run, which stays server-free.
+- Pi's `--moment pi-event` (`harness/pi.rs::native_event`) is a receipt
+  observer like `__codex-observe`, not a turn-boundary hook: it moves with
+  "Observers become server registrations" (`server-first.md`), not here.
 
 Remaining:
 
@@ -34,12 +40,7 @@ Remaining:
   sequence headless with a provider stand-in.
 - Gate: the suites under Checks marked gate, plus `harness::` (named in the
   Task's check, not yet run on this tree).
-- Pi's `--moment pi-event` (`harness/pi.rs::native_event`: turn, usage and
-  completion receipts) still opens the store at each Pi turn, the last
-  `open_for_hook` caller. The Task names Claude and Codex boundaries; whether
-  Pi's receipts move to the server here or with the observer Task is open
-  (`questions.md`). `limit` / `record-limit` also open the store, on a usage
-  limit only, and are untouched.
+- `limit` / `record-limit` still open the store, on a usage limit only.
 
 Choices taken (reversible):
 

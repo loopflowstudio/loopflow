@@ -63,6 +63,6 @@ showed it). A Session launched in a Task's
 checkout carries that Task (`work_source` checkout), so a skill run there is
 checked too.
 
-- Pi's `pi-event` callback still opens the store each turn. Move it behind a
-  server operation in this Task, or leave it for the Task that turns observers
-  into server registrations? Left as is here.
+- Pi's `pi-event` callback still opens the store each turn. Settled by the
+  design: it is an observer and moves with the observer Task
+  (`scratch/loo-821-hooks.md`).

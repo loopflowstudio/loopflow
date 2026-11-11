@@ -418,7 +418,8 @@ report "open in Rex". A stand-in `claude` on the private `PATH` (answering
 `--version`) drives held Task Sessions with `lf resume --task <id>` on a PTY.
 Its stdin is lf's first-turn prompt file: drain it with `cat > /dev/null` and
 read answers from `/dev/tty`, or the agent answers its own question with the
-prompt. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
+prompt. A resume of an ended Session pipes no prompt, so that `cat` waits on
+the terminal: send Ctrl-D through the view. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
 `lf session list --json --all` reads (`availability`) with no view open.
 
 To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
@@ -459,7 +460,9 @@ exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
 After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
 passed without a viewer and live work has settled. That pass signals the verified
 conversation owner directly, even without a checkout; a held Task
-conversation ends on the server's notice instead.
+conversation ends on the server's notice instead. `lf task abandon` ends only
+unviewed conversations; one still viewed then ends at the next
+`lf task retire <task>` after its view leaves.
 
 A new conversation's stand-in reads its opening turn from stdin, then the
 terminal, as Claude does, but writes no transcript: before resuming one after

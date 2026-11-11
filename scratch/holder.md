@@ -337,6 +337,8 @@ then main `1570bef61`, already here). `git merge-tree` conflicts in
 `bin/lf.rs`, `transport.rs`, `transport/README.md` and three scratch files;
 the next sync takes it, then `merge-base --stat` for reverted main changes.
 
+QA, fifth pass (Nov 11, [qa.html](qa.html)): reopen by id holds the same terminal; abandon ends unviewed held terminals at once, viewed ones at the next `lf task retire`; a done Task's ends after the 15-minute grace. No product change.
+
 Compress (Nov 11): `cargo test -p loopflow --lib holder::` 10 passed; `cargo clippy --all-targets -D warnings` clean.
 
 ## Concept review, headless — November 11, 2026 (fourth)

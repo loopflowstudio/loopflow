@@ -1,102 +1,89 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>LOO-824 QA — held terminals (fourth pass)</title>
+<title>LOO-824 QA — held terminals (fifth pass)</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
 td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
 table{border-collapse:collapse} .bad{color:#a12} .ok{color:#185}
 </style>
-<h1>LOO-824 QA: held terminals, November 11 2026 (fourth pass)</h1>
+<h1>LOO-824 QA: held terminals, November 11 2026 (fifth pass)</h1>
 
-<p>Branch lf <code>0.15.3+1660be243</code> copied to <code>/tmp/lfq4/lf-a</code>, later the
-fixed tree as <code>lf-b</code>, with <code>LF_BIN</code> a symlink between them. Private Machine
-under <code>/tmp/lfq4</code> (HOME, LF_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR; inherited
-<code>LF_*</code>/<code>REX_*</code> cleared), Git repo with a local bare origin,
-<code>default_agent: claude</code>, Git planning. The agent was the stand-in claude script from
-earlier passes, now also emitting OSC 7 for its cwd. Views were real <code>lf resume</code>
-processes on PTYs (<code>scratch/qa/pty.py</code>). The server ran in the foreground.</p>
+<p>Branch lf <code>0.15.3+1905bb692</code> (after the LOO-821 landing and the LOO-823 merge),
+copied to <code>/tmp/lfq5/lf-a</code>. Private Machine under <code>/tmp/lfq5</code> (HOME,
+LF_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR; inherited <code>LF_*</code>/<code>REX_*</code> cleared),
+Git repo with a local bare origin, <code>default_agent: claude</code>, Git planning. Agent: the
+stand-in <code>claude</code> from earlier passes (ticks, OSC 7, OSC 7501, asks on a flag file,
+exits 3 on another). Views: real <code>lf resume</code> processes on PTYs
+(<code>scratch/qa/pty.py</code>). Server in the foreground. The fourth pass's report is at
+<code>1905bb692:scratch/qa.html</code>.</p>
 
-<p>This pass checks by hand the fixes made after the third pass: the list action, the one exit
-line, the OSC 7 repaint and rollover's binary inventory.</p>
+<p>This pass covers what changed since: LOO-823's lifetime rule applied to held terminals
+(Task cleanup ends them), and reopening a held conversation by Session id alone.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th></tr>
 <tr><td>Three Task Sessions via <code>lf resume --task</code></td><td class="ok">One
-<code>lf holder run</code> (child of the server) is the parent of all three agents; each view is
-an <code>lf session attach --terminal</code>; no <code>session serve</code>.</td></tr>
-<tr><td>Ctrl+] on view 1, then <code>lf session list</code></td><td class="ok">
-<pre>Detached from “ed4e51 QA held 1”; it keeps running. Return with: lf resume 96d4060c…
-
-6e810441…  active  b82426  b82426 QA held 3
-  Open here — View the running conversation here: lf resume 6e810441…
-20c7d0f1…  active  d02a06  d02a06 QA held 2
-  Open here — View the running conversation here: lf resume 20c7d0f1…
-96d4060c…  detached ed4e51  ed4e51 QA held 1
-  Reconnect — View the running conversation here: lf resume 96d4060c…</pre>
-No "Take back"; Tasks with no Wave are labelled by their Task.</td></tr>
-<tr><td>Agent 2 asks, view answers <code>yes</code>; server SIGKILLed; agent exits 3</td><td class="ok">
-The holder wrote <code>exit.json {"code":3,"signal":null,…}</code>; the other agents kept ticking.
-After <code>lf server run</code> again, view 2 ended with <code>claude exited with 3.</code>
-— the line a connected view prints.</td></tr>
-<tr><td>View 3 across the same restart</td><td class="ok">It continued from its PTY position:
-ticks 82–103 written during the outage arrived from the ring, then
-<code>ESC]7;file://…/repo.b82426-qa-held-3/ ESC\</code>, the title, the 7501 status and the
-<code>ESC[5n</code> catch-up fence. No NUL anywhere in the view's 1.8 KB transcript.</td></tr>
-<tr><td><code>lf ps</code></td><td>Activity lists the holder, each launcher folded under its
-<code>claude</code> row, and one surviving view. BINARIES counted 2 on <code>lf-a</code> (holder +
-view): launcher rows exec'd into the provider are skipped.
-<span class="bad">Version read <code>unknown</code></span> — fixed below.</td></tr>
-<tr><td><code>lf session attach --terminal not-a-uuid</code></td><td>
-<code>Error: lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got ["--terminal", "not-a-uuid"]</code>, exit 1.
-It names the form; it doesn't say the id is malformed.</td></tr>
-<tr><td><code>lf session attach --terminal &lt;unknown uuid&gt;</code></td><td class="ok">
-<code>Error: terminal 00000000-… is not running; nothing was started and no input replayed</code>,
-exit 1. Attach never creates and never answers from byte 0.</td></tr>
-<tr><td>Build swap: symlink to <code>lf-b</code>, server restarted, a fourth Task launched, view 1
-reattached with <code>lf resume</code></td><td class="ok">Two holders: the old one (reparented to
-launchd after the server's exit) keeps agents 1 and 3; the new Task's agent is under a new holder
-on <code>lf-b</code>. View 1 came back with ticks continuing (595). BINARIES:
-<pre>     2  lf-a                 0.15.3+1660be243       superseded
-     3  lf-b                 0.15.3+1660be243.dirty selected</pre>
-<code>lf monitor rollover --dry-run</code>: "pid 83987 lf holder on lf-a: keeps its lf until it
-exits" and the same for the old view. Nothing to move.</td></tr>
-<tr><td>Agents killed (<code>pkill -P &lt;holder&gt;</code>, SIGTERM)</td><td>Each view restored the
-terminal and closed with no exit line. A signal ending reads as interrupted, not failed, so
-<code>exit_line</code> is not reached; noted, not changed.</td></tr>
-<tr><td>Cleanup</td><td class="ok">Both holders exited about a minute after their last child;
-the server was stopped. Nothing from <code>/tmp/lfq4</code> is running; no launchd label was
-registered this pass.</td></tr>
+<code>lf holder run</code> (child of the server) parents all three agents; each view is an
+<code>lf session attach --terminal &lt;id&gt; --session &lt;id&gt;</code>; no <code>session serve</code>.</td></tr>
+<tr><td>Detach view 1 (Ctrl+]), then <code>lf resume 8e8d805c…</code> from
+<code>/tmp/lfq5</code>, outside the checkout, no <code>--task</code></td><td class="ok">The same
+terminal <code>a750243b…</code> came back: saved screen (ticks 1–15), then live ticks from 16. No
+new agent, no owner. The row read holds a reopen by id.</td></tr>
+<tr><td>Detach view 2; <code>lf task abandon</code> Task 2</td><td class="ok">Its agent ended
+within seconds (the server's notice); Session reads <code>closed</code>; the holder's
+<code>&lt;terminal&gt;/</code> directory is gone.</td></tr>
+<tr><td><code>lf task abandon</code> Task 3 with view 3 attached</td><td class="ok">Agent kept
+running; abandon said <code>retained checkout/PR: Process … has live or unresolved
+execution</code>. After detaching view 3, the agent kept running until
+<code>lf task retire</code>, which ended it.</td></tr>
+<tr><td><code>lf task complete</code> Task 1 with its reopened view attached, then detached</td>
+<td class="ok"><code>lf task retire &lt;task&gt;</code> 2 minutes after detaching: exit 0, agent
+kept. Again at 15 min 35 s: agent ended, Session <code>closed</code>, terminal directory gone.</td></tr>
+<tr><td>Task 4: agent asks, view answers <code>yes</code>; server SIGKILLed; agent exits 3</td>
+<td class="ok">Holder wrote <code>{"code":3,"signal":null,…,"written":444}</code>. On
+<code>lf server run</code> the view printed <code>claude exited with 3.</code> and exited 3;
+Session <code>closed</code>. While asking, the title read <code>83417f QA held 4 · Available</code>.</td></tr>
+<tr><td><code>lf resume d9f9c334…</code> (Task 4's ended Session) by id, outside the checkout</td>
+<td class="ok">A new agent on the same holder under a new terminal <code>b23c461d…</code>.
+<code>lf session attach --terminal 0020be15…</code> (the old one):
+<code>Error: the agent in terminal 0020be15… exited with 3</code>, exit 1. Never an answer from
+byte 0.</td></tr>
+<tr><td>SIGTERM the server with view 4b open, restart</td><td class="ok">View stayed open;
+ticks 1–148 contiguous, no NUL in the transcript.</td></tr>
+<tr><td><code>lf ps</code></td><td class="ok">The holder, each launcher folded over its
+<code>claude</code> row, the open view; BINARIES <code>2 lf-a 0.15.3+1905bb692 selected</code>.</td></tr>
+<tr><td>Cleanup</td><td class="ok">Agents ended by holder parent PID, server stopped; the
+holder exited on its own. Nothing from <code>/tmp/lfq5</code> runs; no private launchd label.</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p><b><code>lf ps</code> BINARIES showed every build's version as <code>unknown</code>.</b>
-<code>rollover::parse_version</code> refused a banner containing whitespace, and
-<code>lf --version</code> now prints <code>lf 0.15.3+1660be243 (schema work … on v0.15.3)</code> —
-the installed app's build too. It now takes the first word. On main as well; this branch's
-demo reads that column. Test: <code>versions_come_from_the_binary_banner</code> gains the
-current banner (fails on the old code). After the fix the live Machine showed the versions above.</p>
-<p><code>scratch/qa/pty.py</code> writes its <code>.exit</code> file when the PTY read returns
-empty too (view 1's driver left none). The qa skill's held-terminal section gained the
-<code>ESC[5n</code> fence and the rollover dry-run check.</p>
+<p>Nothing in the product. The qa skill gained two notes: a resumed ended Session pipes the
+stand-in no prompt (send Ctrl-D through the view), and an abandoned Task's viewed conversation
+ends at the next <code>lf task retire</code> after its view leaves.</p>
 
 <h2>Checks run</h2>
-<p><code>cargo test -p loopflow --lib rollover::</code> 5 passed ·
-<code>cargo clippy -p loopflow --all-targets -- -D warnings</code> clean. Gate runs the rest.</p>
+<p><code>cargo build -p loopflow --bin lf</code> only; this pass changed no code. Gate runs the
+suites.</p>
 
 <h2>Not reached</h2>
 <ul>
 <li>Desktop windows and its <code>session.attach</code> bridge: headless; Swift suites stay with gate.</li>
-<li>Real Claude or Codex turns and their repaint on a size nudge: none signed in here.</li>
-<li>A real <code>lf install</code> (launchd service swap) and Linux/systemd; the second pass
-covered launchd restarts.</li>
+<li>Real Claude or Codex turns: none signed in here.</li>
+<li>A real <code>lf install</code> and Linux/systemd; the second and fourth passes covered launchd
+restarts and a build swap.</li>
+<li>The installed <code>com.loopflow.cleanup</code> job: the private Machine schedules no cleanup,
+so every pass was run by hand.</li>
 </ul>
 
 <h2>Still rough, worst first</h2>
 <ol>
-<li>An agent killed by a signal closes its view silently: no "claude was stopped" line, so a view
-that vanishes doesn't say why.</li>
-<li>The malformed <code>--terminal</code> error names the expected form but not that the given
-id isn't a terminal id.</li>
+<li>An agent ended by a signal closes its view with no line (view 4b exited 143, silent). The
+same <code>interrupted</code> path ends owner-hosted views; not new here.</li>
+<li><code>lf task abandon</code> prints <code>canceled; PRs and branches removed</code> for a Task
+with no PR, where nothing was removed: Task 2's branch and checkout stay. That is main's
+<code>prepare_abandon</code>, not this branch.</li>
+<li>A malformed <code>lf session attach --terminal not-a-uuid</code> names the expected form, not
+that the id is wrong. Only reachable by copying from <code>ps</code>.</li>
 </ol>

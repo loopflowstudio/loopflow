@@ -15,7 +15,14 @@ pub(crate) fn claude_args(context: &ContextDelivery, managed: bool) -> Result<Ve
     if managed {
         hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     }
-    let settings = json!({"hooks": hooks});
+    let mut settings = json!({"hooks": hooks});
+    if managed {
+        // The Machine server wakes an idle conversation with a Task update
+        // through Claude's cross-session inbox. lf runs in no permission mode
+        // it could attest, and a session that bypasses prompts holds such a
+        // message for review unless it accepts peers.
+        settings["crossSessionInbound"] = json!("accept");
+    }
     let bytes = serde_json::to_vec(&settings)?;
     let path = save_hook(&context.home, "claude", "json", &bytes)?;
     Ok(vec!["--settings".into(), path.display().to_string()])
@@ -263,23 +270,10 @@ mod tests {
                 "/<session-flags>/config.toml:post_tool_use:0:0",
                 "/<session-flags>/config.toml:session_start:0:0",
                 "/<session-flags>/config.toml:session_start:1:0",
-                "/<session-flags>/config.toml:session_start:1:1",
                 "/<session-flags>/config.toml:session_start:2:0",
                 "/<session-flags>/config.toml:stop:0:0",
-                "/<session-flags>/config.toml:stop:0:1",
                 "/<session-flags>/config.toml:user_prompt_submit:0:0",
             ]
-        );
-        // Codex hashes a handler with its defaults filled in (codex-cli 0.166.0
-        // `hooks/list`), so an async handler without a timeout is trusted too.
-        let handler = &hooks["Stop"][0]["hooks"][1];
-        let mut identity = serde_json::json!({"event_name":"stop", "hooks":[{
-            "type":"command", "command":handler["command"], "async":true, "timeout":600}]});
-        identity.sort_all_objects();
-        let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity).unwrap()));
-        assert_eq!(
-            state["/<session-flags>/config.toml:stop:0:1"]["trusted_hash"],
-            format!("sha256:{hash}")
         );
         // Each Loopflow entry trusts the exact declaration at its own index.
         assert_ne!(

@@ -1,18 +1,14 @@
 //! lf's side connections to a Codex app-server. The native client talks to the
-//! app-server directly: lf opens the conversation, then watches it as one more
-//! subscriber. Nothing here carries the person's bytes, so a store failure is a
-//! recording gap and never reaches the conversation.
+//! app-server directly: lf opens the conversation, and the Machine server reads
+//! its turns when a turn-end hook says one finished. Nothing here carries the
+//! person's bytes, so a store failure is a recording gap and never reaches the
+//! conversation.
 
-use std::io::{Read, Write};
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::path::Path;
+use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
-use futures_util::stream::SplitSink;
+use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{
@@ -23,29 +19,14 @@ use tokio_tungstenite::{
 
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
-use super::task_updates::{TaskUpdate, TaskUpdates};
 use crate::id::AgentSessionId;
-use crate::journal::{process_identity_evidence, ProcessIdentityEvidence};
-use crate::process::SessionAttachment;
-use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
-use crate::store::{ProviderAccountId, RecordingGap, StoreError};
 
 type Upstream = WebSocketStream<UnixStream>;
-
-#[cfg(test)]
-#[path = "observer_measurement.rs"]
-mod observer_measurement;
 
 const REPLY_LIMIT: Duration = Duration::from_secs(15);
 /// Starting a thread loads MCP servers and plugins.
 const STARTUP_LIMIT: Duration = Duration::from_secs(60);
-/// How often a broken store is tried again.
-const STORE_RETRY: Duration = Duration::from_secs(5);
-/// How often Task updates and the attachment are read.
-const WATCH_INTERVAL: Duration = Duration::from_secs(1);
-const CLIENT_STOP_GRACE: Duration = Duration::from_secs(2);
-const REJOIN_INTERVAL: Duration = Duration::from_millis(250);
 
 // Codex sends single frames larger than tungstenite's defaults: plugin/list
 // carries the whole curated marketplace (7,000+ plugins, over 16 MiB).
@@ -232,6 +213,60 @@ pub(crate) async fn recover_history(
     Ok(count)
 }
 
+/// Send the launch's first turn, recorded as lf's input, before the native
+/// client joins. Codex creates the turn's rollout before answering.
+pub(crate) async fn start_turn(
+    store: &SqliteStore,
+    session: &str,
+    attachment: &crate::process::SessionAttachment,
+    endpoint: &Path,
+    thread: &AgentSessionId,
+    text: &str,
+) -> Result<()> {
+    let mut upstream = initialized(endpoint, "loopflow_start").await?;
+    let mut history = CodexStream::new(FactWriter::new(
+        store.clone(),
+        session.to_owned(),
+        Some(attachment.clone()),
+        None,
+        Default::default(),
+    ));
+    let id = format!("lf-initial-{}", uuid::Uuid::new_v4());
+    let request = json!({"id":id,"method":"turn/start",
+        "params":{"threadId":thread,"input":[{"type":"text","text":text}]}});
+    if let Err(error) = history.outbound(&request).await {
+        tracing::warn!(error = %format!("{error:#}"), session, "Codex first turn unrecorded");
+    }
+    upstream
+        .send(Message::Text(request.to_string().into()))
+        .await?;
+    let reply = reply_within(&mut upstream, &id, "turn/start", REPLY_LIMIT).await?;
+    if let Err(error) = history
+        .inbound(&json!({"id":id,"result":reply}), Some(thread))
+        .await
+        .1
+    {
+        tracing::warn!(error = %format!("{error:#}"), session, "Codex first turn unrecorded");
+    }
+    upstream.close(None).await?;
+    Ok(())
+}
+
+/// Wake an idle conversation with a Task update, as a tool result Codex
+/// keeps in its history and answers in a turn of its own.
+pub(crate) async fn deliver_update(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
+    let mut upstream = initialized(endpoint, "loopflow_update").await?;
+    rpc_request(
+        &mut upstream,
+        "turn/start",
+        json!({"threadId":thread,"input":[],
+            "toolOutput":{"name":"loopflow_task_update","output":text,"retain":true}}),
+    )
+    .await?;
+    upstream.close(None).await?;
+    Ok(())
+}
+
 /// Start or resume the conversation with lf's prepared configuration, so the
 /// native client only has to join it. Codex cannot resume a thread with no
 /// rollout, and creates one on the first turn or a name (verified on 0.166.0);
@@ -273,572 +308,6 @@ pub(crate) async fn open_thread(
     Ok(thread)
 }
 
-/// The conversation an observer watches and the native client it answers for.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodexObserver {
-    pub(crate) database: PathBuf,
-    pub(crate) session: String,
-    pub(crate) attachment: SessionAttachment,
-    pub(crate) endpoint: PathBuf,
-    pub(crate) thread: AgentSessionId,
-    pub(crate) account: Option<ProviderAccountId>,
-    /// Where the native client runs, which names its repository's route.
-    pub(crate) cwd: PathBuf,
-    /// PID and birth of the native client this attachment opened.
-    pub(crate) client: (u32, i64),
-    /// The first turn, submitted once this observer can record it.
-    pub(crate) input: Option<String>,
-}
-
-/// Start the observer beside the native client, subscribed before the first
-/// turn. It outlives this process and never holds the provider's lifeline.
-pub(crate) fn spawn_observer(observer: &CodexObserver) -> Result<()> {
-    let mut command = Command::new(crate::os_process::resolve_lf_binary()?);
-    command
-        .arg("__codex-observe")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    // SAFETY: setsid is async-signal-safe and touches only the new child. Its
-    // own session keeps the terminal's hangup and job control away.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn()?;
-    let mut stdin = child.stdin.take().context("observer has no stdin")?;
-    stdin.write_all(&serde_json::to_vec(observer)?)?;
-    drop(stdin);
-    // One byte means subscribed; EOF means it gave up. Both let the client open.
-    let mut stdout = child.stdout.take().context("observer has no stdout")?;
-    let mut ready = [0];
-    stdout
-        .read_exact(&mut ready)
-        .context("observer stopped before subscribing")
-}
-
-/// `lf __codex-observe`: read the launch from stdin and watch until the
-/// app-server goes away or the conversation moves.
-pub fn run_observer() -> Result<()> {
-    let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
-    let observer: CodexObserver = serde_json::from_str(&input)?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()?;
-    let result = runtime.block_on(observe(observer, || {
-        let mut stdout = std::io::stdout();
-        let _ = stdout.write_all(b".").and_then(|()| stdout.flush());
-    }));
-    if let Err(error) = &result {
-        tracing::warn!(error = %format!("{error:#}"), "Codex observer stopped");
-    }
-    result
-}
-
-/// Runs as long as its client does. A server can go before the store records why,
-/// so losing it says nothing about the client: a mover may still end it.
-async fn observe(observer: CodexObserver, ready: impl FnOnce()) -> Result<()> {
-    let mut recorder = Recorder::new(observer).await;
-    let mut ready = Some(ready);
-    loop {
-        // A hung app-server accepts the socket and never shakes hands.
-        let subscribed = tokio::time::timeout(REPLY_LIMIT, recorder.subscribe())
-            .await
-            .unwrap_or_else(|_| Err(anyhow!("Codex app-server did not answer the observer")));
-        match subscribed {
-            Ok(mut upstream) => {
-                if let Err(error) = recorder.submit_input(&mut upstream).await {
-                    tracing::warn!(error = %format!("{error:#}"), "Codex first turn was not sent");
-                }
-                if let Some(ready) = ready.take() {
-                    ready();
-                }
-                recorder.watch(upstream).await;
-            }
-            Err(error) if ready.is_some() => return Err(error),
-            Err(error) => tracing::debug!(error = %format!("{error:#}"), "Codex app-server closed"),
-        }
-        if !recorder.client_alive() {
-            return Ok(());
-        }
-        if recorder.attachment_moved() {
-            recorder.stop_client().await;
-            return Ok(());
-        }
-        tokio::time::sleep(REJOIN_INTERVAL).await;
-    }
-}
-
-struct Recorder {
-    observer: CodexObserver,
-    route: Option<crate::provider_account::ProviderAccountRoute>,
-    store: Option<(SqliteStore, CodexStream)>,
-    retry_at: Option<Instant>,
-    failure: RecordingGap,
-    updates: TaskUpdates,
-    /// A turn is running, or may be; updates wait for it.
-    busy: bool,
-    update_request: Option<(Value, TaskUpdate)>,
-    /// The person moved to this thread and the store has not recorded it yet.
-    selection: Option<&'static str>,
-    /// Not yet subscribed to the selected thread on this connection, and the
-    /// request that is trying.
-    following: bool,
-    resume_request: Option<Value>,
-}
-
-impl Recorder {
-    async fn new(observer: CodexObserver) -> Self {
-        let route = match &observer.account {
-            Some(account) => crate::provider_account::resolve_provider_account_exact(
-                Provider::Codex,
-                Some(&observer.thread),
-                Some(account),
-                None,
-                None,
-                Some(&observer.cwd),
-            )
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "Codex observer has no account route");
-                None
-            }),
-            None => None,
-        };
-        Self {
-            observer,
-            route,
-            store: None,
-            retry_at: None,
-            failure: RecordingGap::default(),
-            updates: TaskUpdates::default(),
-            busy: true,
-            update_request: None,
-            selection: None,
-            following: false,
-            resume_request: None,
-        }
-    }
-
-    /// The store, reopened at most every `STORE_RETRY` while it stays broken.
-    fn stream(&mut self) -> Option<&mut (SqliteStore, CodexStream)> {
-        if self.store.is_none() && self.retry_at.is_none_or(|at| at <= Instant::now()) {
-            match SqliteStore::new(&self.observer.database) {
-                Ok(store) => {
-                    let writer = FactWriter::new(
-                        store.clone(),
-                        self.observer.session.clone(),
-                        Some(self.observer.attachment.clone()),
-                        self.route.clone(),
-                        Default::default(),
-                    );
-                    self.store = Some((store, CodexStream::new(writer)));
-                    self.retry_at = None;
-                }
-                Err(error) => self.gap(&error),
-            }
-        }
-        self.store.as_mut()
-    }
-
-    /// A recording gap, logged once per changed failure. History fills it on the
-    /// next launch.
-    fn gap(&mut self, error: &dyn std::fmt::Display) {
-        self.failure
-            .note(&format!("Codex Session {}", self.observer.session), error);
-        self.store = None;
-        self.retry_at = Some(Instant::now() + STORE_RETRY);
-    }
-
-    async fn subscribe(&mut self) -> Result<Upstream> {
-        let mut upstream = initialized(&self.observer.endpoint, "loopflow_observer").await?;
-        let thread = self.observer.thread.clone();
-        let result =
-            rpc_request(&mut upstream, "thread/resume", json!({"threadId":thread})).await?;
-        self.busy = turn_running(&result);
-        (self.following, self.resume_request) = (false, None);
-        self.record(&json!({"result":result})).await;
-        if let Some((store, _)) = self.stream() {
-            let store = store.clone();
-            // The first read is a baseline: updates report what changes from here.
-            if let Err(error) = self.pending_update(&store) {
-                self.gap(&error);
-            }
-        }
-        Ok(upstream)
-    }
-
-    /// Provider history decides on the next launch whether this was received,
-    /// so nothing here needs a receipt, and a broken store cannot stop the turn.
-    async fn submit_input(&mut self, upstream: &mut Upstream) -> Result<()> {
-        let Some(text) = self.observer.input.take() else {
-            return Ok(());
-        };
-        let request = json!({
-            "id":format!("lf-initial-{}", uuid::Uuid::new_v4()),"method":"turn/start",
-            "params":{"threadId":self.observer.thread,"input":[{"type":"text","text":text}]}
-        });
-        if let Some((_, history)) = self.stream() {
-            if let Err(error) = history.outbound(&request).await {
-                self.gap(&format!("{error:#}"));
-            }
-        }
-        self.busy = true;
-        upstream
-            .send(Message::Text(request.to_string().into()))
-            .await?;
-        Ok(())
-    }
-
-    async fn record(&mut self, rpc: &Value) {
-        // Selection first: the decoder would otherwise set the thread with no
-        // history and leave the resume reference behind.
-        self.select();
-        let thread = self.observer.thread.clone();
-        let Some((_, history)) = self.stream() else {
-            return;
-        };
-        if let Err(error) = history.inbound(rpc, Some(&thread)).await.1 {
-            self.gap(&format!("{error:#}"));
-        }
-    }
-
-    fn pending_update(&mut self, store: &SqliteStore) -> Result<Option<TaskUpdate>, StoreError> {
-        let (session, attachment) = (&self.observer.session, &self.observer.attachment);
-        let updates = &mut self.updates;
-        match store.with_session_attachment(session, attachment, || updates.pending(store, session))
-        {
-            Err(StoreError::InvalidAuthority(_)) => Ok(None),
-            result => result,
-        }
-    }
-
-    /// Until the connection closes or the attachment moves. Reading runs apart
-    /// from recording, so a slow store never backs up app-server's queue for
-    /// this connection.
-    async fn watch(&mut self, upstream: Upstream) {
-        let (mut writer, mut reader) = upstream.split();
-        let (messages, mut incoming) = tokio::sync::mpsc::unbounded_channel();
-        let reading = tokio::spawn(async move {
-            while let Some(Ok(message)) = reader.next().await {
-                if let Message::Text(text) = message {
-                    if messages.send(text).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        let mut clock = tokio::time::interval(WATCH_INTERVAL);
-        loop {
-            tokio::select! {
-                message = incoming.recv() => {
-                    let Some(text) = message else { break };
-                    match serde_json::from_str::<Value>(&text) {
-                        Ok(rpc) => self.observe_message(&rpc, &mut writer).await,
-                        Err(error) => tracing::warn!(%error, "undecodable Codex message"),
-                    }
-                }
-                _ = clock.tick() => {
-                    if self.attachment_moved() {
-                        break;
-                    }
-                    self.select();
-                    if self.following && self.resume_request.is_none() {
-                        self.resume(&mut writer).await;
-                    }
-                    if !self.busy && self.update_request.is_none() {
-                        self.deliver_update(&mut writer).await;
-                    }
-                }
-            }
-        }
-        reading.abort();
-    }
-
-    async fn observe_message(&mut self, rpc: &Value, writer: &mut SplitSink<Upstream, Message>) {
-        if rpc["method"] == "thread/started" {
-            if let Some((thread, source)) =
-                person_started(rpc).filter(|(thread, _)| *thread != self.observer.thread)
-            {
-                self.follow(thread, source, writer).await;
-            }
-            return;
-        }
-        if self.resume_request.is_some() && rpc.get("id") == self.resume_request.as_ref() {
-            self.resume_request = None;
-            match rpc.get("result") {
-                Some(result) => {
-                    self.following = false;
-                    self.busy = turn_running(result);
-                }
-                // A thread has no rollout to resume until its first turn; the
-                // next tick asks again, and history fills what came before.
-                None => tracing::debug!(error = %rpc["error"], "Codex thread not yet resumable"),
-            }
-        }
-        let params = &rpc["params"];
-        let ours = params["threadId"].as_str() == Some(self.observer.thread.as_str());
-        match rpc["method"].as_str() {
-            Some("turn/started") if ours => {
-                self.busy = true;
-                // Only our update has a request to answer for it; every other
-                // turn came from the person's client.
-                if self.update_request.is_none() {
-                    if let (Some(turn), Some((_, history))) = (
-                        params.pointer("/turn/id").and_then(Value::as_str),
-                        self.stream(),
-                    ) {
-                        history.decoder.client_turn(turn);
-                    }
-                }
-            }
-            Some("turn/completed") if ours => self.busy = false,
-            _ => {}
-        }
-        self.record(rpc).await;
-        let answered = self
-            .update_request
-            .as_ref()
-            .is_some_and(|(id, _)| rpc.get("id") == Some(id));
-        if answered {
-            let (_, update) = self.update_request.take().expect("matched update request");
-            let state = if rpc.get("error").is_some() {
-                self.busy = false;
-                "rejected"
-            } else {
-                "accepted"
-            };
-            let session = self.observer.session.clone();
-            if let Some((store, _)) = self.stream() {
-                if let Err(error) =
-                    store.record_task_update(&session, &update.key, state, &update.observation)
-                {
-                    self.gap(&error);
-                }
-            }
-        }
-    }
-
-    /// The person started or forked a conversation in their client. The Session
-    /// follows it, as Claude's `/clear` does, and the earlier one stays in its
-    /// selection history.
-    async fn follow(
-        &mut self,
-        thread: AgentSessionId,
-        source: &'static str,
-        writer: &mut SplitSink<Upstream, Message>,
-    ) {
-        tracing::info!(
-            session = self.observer.session,
-            from = %self.observer.thread,
-            to = %thread,
-            source,
-            "Codex conversation changed; following it"
-        );
-        // Bound before the person's first turn there can reach a hook.
-        if let Err(error) = crate::context_block::follow_codex_session(
-            &crate::store::lf_home_dir(),
-            self.observer.thread.as_str(),
-            thread.as_str(),
-        ) {
-            tracing::warn!(%error, "Codex conversation's hooks have no lf context");
-        }
-        self.observer.thread = thread;
-        self.selection = Some(source);
-        self.select();
-        (self.busy, self.following) = (true, true);
-        self.resume(writer).await;
-    }
-
-    async fn resume(&mut self, writer: &mut SplitSink<Upstream, Message>) {
-        let id = json!(format!("lf-follow-{}", uuid::Uuid::new_v4()));
-        let request =
-            json!({"id":id,"method":"thread/resume","params":{"threadId":self.observer.thread}});
-        match writer.send(Message::Text(request.to_string().into())).await {
-            Ok(()) => self.resume_request = Some(id),
-            // The connection is gone; the rejoin subscribes to this thread.
-            Err(error) => tracing::debug!(%error, "Codex observer could not resume"),
-        }
-    }
-
-    /// Record the followed thread as the Session's AgentSession. A lost
-    /// attachment has nothing to select; a broken store tries again later.
-    fn select(&mut self) {
-        let Some(source) = self.selection else {
-            return;
-        };
-        let (session, attachment) = (
-            self.observer.session.clone(),
-            self.observer.attachment.clone(),
-        );
-        let thread = self.observer.thread.clone();
-        let Some((store, _)) = self.stream() else {
-            return;
-        };
-        let store = store.clone();
-        let selected = store
-            .reserve_steer_adapter(&session, &attachment)
-            .and_then(|adapter| {
-                store.with_provider_context(
-                    &adapter,
-                    thread.as_str(),
-                    crate::steer::NativeBoundary::Select { source },
-                    || Ok(()),
-                )
-            });
-        match selected {
-            Ok(()) => self.selection = None,
-            Err(StoreError::InvalidAuthority(error)) => {
-                tracing::debug!(%error, "Codex conversation change has no attachment to select");
-                self.selection = None;
-            }
-            Err(error) => self.gap(&error),
-        }
-    }
-
-    /// A store that cannot say keeps the client: only a recorded move ends it.
-    fn attachment_moved(&mut self) -> bool {
-        let session = self.observer.session.clone();
-        let Some((store, _)) = self.stream() else {
-            return false;
-        };
-        match store.session_attachment(&session) {
-            Ok(current) => current.as_ref() != Some(&self.observer.attachment),
-            Err(error) => {
-                self.gap(&error);
-                false
-            }
-        }
-    }
-
-    fn client_alive(&self) -> bool {
-        let (pid, born) = self.observer.client;
-        process_identity_evidence(pid, born) == ProcessIdentityEvidence::Live
-    }
-
-    /// End the exact client this attachment opened. It would otherwise keep
-    /// writing to a conversation that lives elsewhere now.
-    async fn stop_client(&self) {
-        tracing::info!(
-            session = self.observer.session,
-            "attachment ended elsewhere; closing its client"
-        );
-        let signal = |signal| {
-            if self.client_alive() {
-                let pid = self.observer.client.0;
-                // SAFETY: kill reads no memory; identity was just checked by PID
-                // and birth, and a single PID is signalled, never a group.
-                if unsafe { libc::kill(pid as libc::pid_t, signal) } != 0 {
-                    tracing::warn!(error = %std::io::Error::last_os_error(), "cannot signal the client");
-                }
-            }
-        };
-        signal(libc::SIGTERM);
-        tokio::time::sleep(CLIENT_STOP_GRACE).await;
-        signal(libc::SIGKILL);
-    }
-
-    /// An idle tick is also when a reading the store refused catches up and
-    /// when a closed gap enters the Session's history.
-    async fn deliver_update(&mut self, writer: &mut SplitSink<Upstream, Message>) {
-        let Some((store, history)) = self.stream() else {
-            return;
-        };
-        let caught_up = matches!(
-            history.writer.catch_up(),
-            Ok(()) | Err(StoreError::InvalidAuthority(_))
-        );
-        let store = store.clone();
-        let pending = self.pending_update(&store);
-        if pending.is_ok() && caught_up {
-            if let Err(error) = store.close_recording_gap(&self.observer.session, &mut self.failure)
-            {
-                self.failure.note("recording gap", &error);
-            }
-        }
-        let update = match pending {
-            Ok(Some(update)) => update,
-            Ok(None) => return,
-            Err(error) => {
-                self.gap(&error);
-                return;
-            }
-        };
-        let id = json!(format!("lf-task-update-{}", uuid::Uuid::new_v4()));
-        let request = json!({"id":id,"method":"turn/start","params":{
-            "threadId":self.observer.thread,"input":[],
-            "toolOutput":{"name":"loopflow_task_update","output":&update.text,"retain":true}
-        }});
-        if let Some((_, history)) = self.stream() {
-            if let Err(error) = history.outbound(&request).await {
-                if !matches!(
-                    error.downcast_ref::<StoreError>(),
-                    Some(StoreError::InvalidAuthority(_))
-                ) {
-                    self.gap(&format!("{error:#}"));
-                }
-                return;
-            }
-        }
-        let (session, attachment) = (&self.observer.session, &self.observer.attachment);
-        let message = Message::Text(request.to_string().into());
-        let dispatched = super::dispatch::off_reactor(|| {
-            store.with_session_dispatch(session, attachment, || {
-                if !store.record_task_update(
-                    session,
-                    &update.key,
-                    "dispatched",
-                    &update.observation,
-                )? {
-                    return Ok(false);
-                }
-                super::dispatch::send_fenced(writer, message)?;
-                Ok(true)
-            })
-        });
-        match dispatched {
-            Ok(true) => {
-                self.busy = true;
-                self.update_request = Some((id, update));
-            }
-            Ok(false) | Err(StoreError::InvalidAuthority(_)) => {}
-            Err(error) => self.gap(&error),
-        }
-    }
-}
-
-/// A conversation the person's client started (`/new`) or forked (`/fork`). On
-/// a Session's private app-server lf opens its own thread before the observer
-/// subscribes, so every later lasting top-level start is the person's. Codex
-/// subagents name their parent and stay part of the selected conversation; its
-/// own helpers, such as the title writer, are ephemeral and never resumable.
-fn person_started(rpc: &Value) -> Option<(AgentSessionId, &'static str)> {
-    let thread = &rpc["params"]["thread"];
-    if !thread["parentThreadId"].is_null() || thread["ephemeral"] == true {
-        return None;
-    }
-    let source = if thread["forkedFromId"].is_null() {
-        "new"
-    } else {
-        "fork"
-    };
-    Some((thread["id"].as_str()?.into(), source))
-}
-
-/// A resumed thread with a turn in progress, or one whose turns are unknown.
-fn turn_running(result: &Value) -> bool {
-    result
-        .pointer("/thread/turns")
-        .and_then(Value::as_array)
-        .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"))
-}
-
 async fn rpc_request(upstream: &mut Upstream, method: &str, params: Value) -> Result<Value> {
     rpc_within(upstream, method, params, REPLY_LIMIT).await
 }
@@ -857,13 +326,23 @@ async fn rpc_within(
                 .into(),
         ))
         .await?;
+    reply_within(upstream, &id, method, limit).await
+}
+
+/// The result of request `id`, skipping notifications and other replies.
+async fn reply_within(
+    upstream: &mut Upstream,
+    id: &str,
+    method: &str,
+    limit: Duration,
+) -> Result<Value> {
     tokio::time::timeout(limit, async {
         while let Some(message) = upstream.next().await {
             let Message::Text(text) = message? else {
                 continue;
             };
             let rpc: Value = serde_json::from_str(&text)?;
-            if rpc["id"].as_str() != Some(&id) {
+            if rpc["id"].as_str() != Some(id) {
                 continue;
             }
             if let Some(error) = rpc.get("error") {
@@ -882,72 +361,13 @@ async fn rpc_within(
 
 #[cfg(test)]
 mod tests {
-    use super::{observe, CodexObserver};
-    use crate::id::LfProcessId;
-    use crate::process::SessionAttachment;
-    use crate::store::sqlite::SqliteStore;
     use futures_util::{SinkExt, StreamExt};
     use serde_json::{json, Value};
-    use std::path::{Path, PathBuf};
-    use std::process::{Command, Stdio};
     use std::time::Duration;
     use tokio::net::{UnixListener, UnixStream};
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
     type Provider = WebSocketStream<UnixStream>;
-
-    fn fixture(home: &Path) -> (SqliteStore, SessionAttachment, PathBuf) {
-        let database = home.join("store.db");
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let process = LfProcessId::new();
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [process.as_str()],
-            )
-            .unwrap();
-        let attachment = store
-            .claim_session_attachment("conversation", None, &process, true)
-            .unwrap();
-        (store, attachment, database)
-    }
-
-    fn observer(
-        home: &Path,
-        database: PathBuf,
-        attachment: SessionAttachment,
-        client: u32,
-    ) -> CodexObserver {
-        CodexObserver {
-            database,
-            session: "conversation".into(),
-            attachment,
-            endpoint: home.join("provider.sock"),
-            thread: "native-thread".into(),
-            account: None,
-            cwd: home.to_path_buf(),
-            client: (
-                client,
-                crate::journal::process_started_at(client).unwrap().unwrap(),
-            ),
-            input: None,
-        }
-    }
-
-    fn client() -> std::process::Child {
-        Command::new("/bin/sleep")
-            .arg("30")
-            .stdin(Stdio::null())
-            .spawn()
-            .unwrap()
-    }
-
-    fn end(mut client: std::process::Child) {
-        client.kill().unwrap();
-        client.wait().unwrap();
-    }
 
     async fn receive(socket: &mut Provider) -> Value {
         loop {
@@ -967,309 +387,6 @@ mod tests {
             .send(Message::Text(value.to_string().into()))
             .await
             .unwrap();
-    }
-
-    /// Accept the observer through its subscription, which must add nothing:
-    /// a passive `thread/resume` leaves the client's configuration alone.
-    async fn subscribed(listener: &UnixListener) -> Provider {
-        let (stream, _) = listener.accept().await.unwrap();
-        let mut socket = accept_async(stream).await.unwrap();
-        let initialize = receive(&mut socket).await;
-        send(&mut socket, json!({"id":initialize["id"],"result":{}})).await;
-        assert_eq!(receive(&mut socket).await["method"], "initialized");
-        let resume = receive(&mut socket).await;
-        assert_eq!(resume["method"], "thread/resume");
-        assert_eq!(resume["params"], json!({"threadId":"native-thread"}));
-        send(
-            &mut socket,
-            json!({"id":resume["id"],"result":{"thread":{"id":"native-thread","turns":[]}}}),
-        )
-        .await;
-        socket
-    }
-
-    fn turn(method: &str, id: &str, status: &str) -> Value {
-        json!({"method":method,"params":{"threadId":"native-thread",
-            "turn":{"id":id,"status":status,"items":[]}}})
-    }
-
-    async fn eventually(mut done: impl FnMut() -> bool) {
-        for _ in 0..200 {
-            if done() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        panic!("condition never held");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn turns_a_client_started_are_recorded_with_their_origin() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let (store, attachment, database) = fixture(home.path());
-        let client = client();
-        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
-        let watching = tokio::spawn(observe(
-            observer(home.path(), database, attachment, client.id()),
-            || {},
-        ));
-        let mut provider = subscribed(&listener).await;
-        send(&mut provider, turn("turn/started", "typed", "inProgress")).await;
-        send(&mut provider, turn("turn/completed", "typed", "completed")).await;
-        eventually(|| {
-            store
-                .session_history("conversation", 0, 0)
-                .unwrap()
-                .iter()
-                .any(|event| event.provider_turn.as_deref() == Some("typed"))
-        })
-        .await;
-        drop(listener);
-        drop(provider);
-        end(client);
-        watching.await.unwrap().unwrap();
-        assert!(store
-            .session_turn_completed("conversation", &"native-thread".into(), "typed")
-            .unwrap());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_session_follows_a_conversation_the_person_starts() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let (store, attachment, database) = fixture(home.path());
-        store
-            .record_agent_process_identity(
-                "conversation",
-                &attachment,
-                std::process::id(),
-                crate::journal::process_started_at(std::process::id())
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-        store
-            .record_session_agent_session("conversation", &attachment, &"native-thread".into())
-            .unwrap();
-        let selected = || -> String {
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .query_row(
-                    "SELECT provider_thread FROM agent_sessions WHERE id='conversation'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        };
-        let client = client();
-        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
-        let watching = tokio::spawn(observe(
-            observer(home.path(), database, attachment, client.id()),
-            || {},
-        ));
-        let mut provider = subscribed(&listener).await;
-        // Subagents name their parent, and Codex's title writer is ephemeral:
-        // neither moves the Session.
-        send(
-            &mut provider,
-            json!({"method":"thread/started","params":{"thread":
-            {"id":"subagent","parentThreadId":"native-thread","forkedFromId":null}}}),
-        )
-        .await;
-        send(
-            &mut provider,
-            json!({"method":"thread/started","params":{"thread":
-            {"id":"title","parentThreadId":null,"ephemeral":true,"threadSource":"thread_title"}}}),
-        )
-        .await;
-        send(
-            &mut provider,
-            json!({"method":"thread/started","params":{"thread":
-            {"id":"fresh","parentThreadId":null,"forkedFromId":null}}}),
-        )
-        .await;
-        let resume = receive(&mut provider).await;
-        assert_eq!(resume["method"], "thread/resume");
-        assert_eq!(resume["params"], json!({"threadId":"fresh"}));
-        assert_eq!(selected(), "fresh");
-        // A thread with no rollout yet is asked again.
-        send(
-            &mut provider,
-            json!({"id":resume["id"],"error":{"message":"no rollout found"}}),
-        )
-        .await;
-        let resume = receive(&mut provider).await;
-        assert_eq!(resume["params"], json!({"threadId":"fresh"}));
-        send(
-            &mut provider,
-            json!({"id":resume["id"],"result":{"thread":{"id":"fresh","turns":[]}}}),
-        )
-        .await;
-        let fresh = |method: &str, status: &str| {
-            json!({"method":method,"params":{"threadId":"fresh",
-                "turn":{"id":"after-new","status":status,"items":[]}}})
-        };
-        send(&mut provider, fresh("turn/started", "inProgress")).await;
-        send(&mut provider, fresh("turn/completed", "completed")).await;
-        eventually(|| {
-            store
-                .session_turn_completed("conversation", &"fresh".into(), "after-new")
-                .unwrap()
-        })
-        .await;
-        let history = store.session_history("conversation", 0, 0).unwrap();
-        let selection = history
-            .iter()
-            .find(|event| {
-                event.payload["type"] == "provider_transition"
-                    && event.payload["transition"]["to_provider_session"] == "fresh"
-            })
-            .expect("the change is in selection history");
-        assert_eq!(
-            selection.payload["transition"]["from_provider_session"],
-            "native-thread"
-        );
-        assert_eq!(
-            selection.payload["transition"]["to_provider_session"],
-            "fresh"
-        );
-        assert_eq!(selection.payload["source"], "new");
-        assert_eq!(selected(), "fresh");
-        drop(listener);
-        drop(provider);
-        end(client);
-        watching.await.unwrap().unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn task_update_wakes_an_idle_conversation_from_the_side() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let (store, attachment, database) = fixture(home.path());
-        let task = crate::durable::TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/task-updates").unwrap(),
-                id: task.clone(),
-                project_id: None,
-                title: "Updates".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        store.conn.lock().unwrap().execute("UPDATE tasks SET worktree='/task-updates',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET interactive=1 WHERE id='conversation'",
-                [],
-            )
-            .unwrap();
-        let captured = store.session("conversation").unwrap().unwrap().captured;
-        store.bind_session("conversation", captured, &task).unwrap();
-        let client = client();
-        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
-        let (ready, subscribed_signal) = tokio::sync::oneshot::channel();
-        let watching = tokio::spawn(observe(
-            observer(home.path(), database, attachment, client.id()),
-            move || ready.send(()).unwrap(),
-        ));
-        let mut provider = subscribed(&listener).await;
-        subscribed_signal.await.unwrap();
-        store.test_graph(
-            "feature",
-            "/task-updates",
-            &[("gate", Some("failed"))],
-            Some("failed"),
-        );
-        let request = receive(&mut provider).await;
-        assert_eq!(request["method"], "turn/start");
-        assert_eq!(request["params"]["threadId"], "native-thread");
-        assert_eq!(request["params"]["input"], json!([]));
-        assert_eq!(
-            request["params"]["toolOutput"]["name"],
-            "loopflow_task_update"
-        );
-        let progress = request["params"]["toolOutput"]["output"].as_str().unwrap();
-        assert!(progress.contains("gate ("));
-        assert!(progress.contains("): failed"));
-        send(
-            &mut provider,
-            json!({"id":request["id"],"result":{"turn":{"id":"report"}}}),
-        )
-        .await;
-        eventually(|| {
-            store
-                .session_history("conversation", 0, 0)
-                .unwrap()
-                .iter()
-                .any(|event| {
-                    event.payload["source"] == "task_update" && event.payload["state"] == "accepted"
-                })
-        })
-        .await;
-        drop(listener);
-        drop(provider);
-        end(client);
-        watching.await.unwrap().unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn an_unopenable_store_leaves_the_observer_watching() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let (_store, attachment, _) = fixture(home.path());
-        let client = client();
-        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
-        // A directory is never a database, as a store mid-replacement is not.
-        let database = home.path().join("not-a-database");
-        std::fs::create_dir(&database).unwrap();
-        let watching = tokio::spawn(observe(
-            observer(home.path(), database, attachment, client.id()),
-            || {},
-        ));
-        let mut provider = subscribed(&listener).await;
-        send(&mut provider, turn("turn/started", "gap", "inProgress")).await;
-        send(&mut provider, turn("turn/completed", "gap", "completed")).await;
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-        assert!(!watching.is_finished());
-        drop(listener);
-        drop(provider);
-        end(client);
-        watching.await.unwrap().unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_moved_attachment_ends_only_its_own_client() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let (store, attachment, database) = fixture(home.path());
-        let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
-        let mut client = client();
-        let watching = tokio::spawn(observe(
-            observer(
-                home.path(),
-                database.clone(),
-                attachment.clone(),
-                client.id(),
-            ),
-            || {},
-        ));
-        let _provider = subscribed(&listener).await;
-        assert_eq!(client.try_wait().unwrap(), None);
-        let replacement = LfProcessId::new();
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [replacement.as_str()],
-            )
-            .unwrap();
-        store
-            .claim_session_attachment("conversation", Some(&attachment), &replacement, false)
-            .unwrap();
-        eventually(|| client.try_wait().unwrap().is_some()).await;
-        watching.await.unwrap().unwrap();
     }
 
     #[tokio::test]

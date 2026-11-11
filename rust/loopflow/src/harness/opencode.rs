@@ -102,51 +102,6 @@ impl OpenCodeHarness {
             .ok_or_else(|| anyhow!("OpenCode server not started"))
     }
 
-    pub(crate) async fn report_task_update(
-        &mut self,
-        updates: &mut super::task_updates::TaskUpdates,
-    ) -> Result<()> {
-        let (store, session, attachment) = self.owner()?;
-        let pending = store
-            .with_session_attachment(&session, &attachment, || updates.pending(&store, &session))?;
-        let Some(update) = pending else {
-            return Ok(());
-        };
-        // The owned stream supplies the turn boundary. The display projection can
-        // remain unavailable after native attachment even when the server is idle.
-        if self
-            .turn_in_progress
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return Ok(());
-        }
-        let mut turn_guard = TurnInProgressGuard::new(self.turn_in_progress.clone());
-        let base = self
-            .server_base_url
-            .as_ref()
-            .ok_or_else(|| anyhow!("OpenCode server not started"))?;
-        let thread = self
-            .agent_session
-            .as_ref()
-            .ok_or_else(|| anyhow!("OpenCode conversation not selected"))?;
-        let request = self.stream()?.lock().await.request(false)?;
-        let payload = json!({"id":request,"text":update.text,
-            "description":"Loopflow worker progress","metadata":{"source":"loopflow"}});
-        let sent = post(
-            (store, session, attachment),
-            self.authorization.clone(),
-            format!("{base}/api/session/{thread}/synthetic"),
-            payload,
-            Some(update),
-        )
-        .await?;
-        if sent {
-            turn_guard.disarm();
-        }
-        Ok(())
-    }
-
     pub(crate) fn prepare_terminal(&mut self) {
         self.interactive = true;
     }
@@ -392,7 +347,7 @@ impl OpenCodeHarness {
                                 .ok_or_else(|| anyhow!("OpenCode permission has no originating assistant"))?;
                             anyhow::ensure!(current_messages.iter().any(|(_, m)| m["id"] == assistant), "OpenCode permission belongs to an unselected request");
                             let id = data["id"].as_str().ok_or_else(|| anyhow!("OpenCode permission has no ID"))?;
-                            post(reader_owner.clone(), authorization.clone(), format!("{reader_base_url}/api/session/{reader_session_id}/permission/{id}/reply"), json!({"reply":"once"}), None).await?;
+                            post(reader_owner.clone(), authorization.clone(), format!("{reader_base_url}/api/session/{reader_session_id}/permission/{id}/reply"), json!({"reply":"once"})).await?;
                         }
                         Ok::<_, anyhow::Error>(())
                     }.await;
@@ -507,14 +462,7 @@ impl Harness for OpenCodeHarness {
         let payload = json!({"id":request,"text":turn_content});
 
         let message_url = format!("{base_url}/api/session/{agent_session}/prompt");
-        post(
-            owner,
-            self.authorization.clone(),
-            message_url,
-            payload,
-            None,
-        )
-        .await?;
+        post(owner, self.authorization.clone(), message_url, payload).await?;
 
         self.should_seed_prompt = false;
         turn_guard.disarm();
@@ -558,7 +506,7 @@ impl Harness for OpenCodeHarness {
         };
         let payload = json!({"id":provider_turn_id,"text":text,"delivery":"steer"});
         let steer_url = format!("{base_url}/api/session/{agent_session}/prompt");
-        match post(owner, self.authorization.clone(), steer_url, payload, None).await {
+        match post(owner, self.authorization.clone(), steer_url, payload).await {
             Ok(_) => SendCurrentOutcome::Sent { provider_turn_id },
             Err(error) => SendCurrentOutcome::Failed {
                 error: format!("failed to send opencode steer: {error}"),
@@ -586,7 +534,6 @@ impl Harness for OpenCodeHarness {
             self.authorization.clone(),
             abort_url,
             json!({}),
-            None,
         )
         .await?;
         Ok(())
@@ -809,21 +756,10 @@ async fn post(
     authorization: reqwest::header::HeaderValue,
     url: String,
     payload: Value,
-    update: Option<super::task_updates::TaskUpdate>,
 ) -> Result<bool> {
     tokio::task::spawn_blocking(move || {
         let (store, session, attachment) = owner;
         store.with_session_dispatch(&session, &attachment, || {
-            if let Some(update) = &update {
-                if !store.record_task_update(
-                    &session,
-                    &update.key,
-                    "dispatched",
-                    &update.observation,
-                )? {
-                    return Ok(false);
-                }
-            }
             reqwest::blocking::Client::new()
                 .post(url)
                 .header(reqwest::header::AUTHORIZATION, authorization)
@@ -837,9 +773,6 @@ async fn post(
                         "OpenCode native request: {error}"
                     ))
                 })?;
-            if let Some(update) = &update {
-                store.record_task_update(&session, &update.key, "accepted", &update.observation)?;
-            }
             Ok(true)
         })
     })
@@ -975,92 +908,6 @@ mod tests {
         assert_eq!(
             super::opencode_model(&launch("opencode:anthropic/claude-sonnet")),
             Some(("anthropic".into(), "claude-sonnet".into()))
-        );
-    }
-
-    #[tokio::test]
-    async fn task_update_receipt_survives_reconnect() {
-        use std::io::{Read, Write};
-        let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
-        store.test_session("reader", &crate::session_record::new_artifact_key());
-        let process = crate::id::LfProcessId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [process.as_str()],
-            )
-            .unwrap();
-        let attachment = store
-            .claim_session_attachment("reader", None, &process, true)
-            .unwrap();
-        let owner = (store.clone(), "reader".to_owned(), attachment);
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!(
-            "http://{}/api/session/native-thread/synthetic",
-            listener.local_addr().unwrap()
-        );
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0; 1024];
-            loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert!(size > 0);
-                request.extend_from_slice(&buffer[..size]);
-                let complete = std::str::from_utf8(&request)
-                    .ok()
-                    .and_then(|request| request.split_once("\r\n\r\n"))
-                    .is_some_and(|(_, body)| {
-                        serde_json::from_str::<serde_json::Value>(body).is_ok()
-                    });
-                if complete {
-                    break;
-                }
-            }
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
-                .unwrap();
-            String::from_utf8(request).unwrap()
-        });
-        let update = crate::harness::task_updates::TaskUpdate {
-            key: "transition".into(),
-            observation: serde_json::json!({}),
-            text: "gate: failed".into(),
-        };
-        let authorization = reqwest::header::HeaderValue::from_static("fixture");
-        let payload = serde_json::json!({"text":update.text});
-        super::post(
-            owner.clone(),
-            authorization.clone(),
-            url.clone(),
-            payload.clone(),
-            Some(update.clone()),
-        )
-        .await
-        .unwrap();
-        let request = server.join().unwrap();
-        assert!(request.starts_with("POST /api/session/native-thread/synthetic "));
-        assert!(request.contains("gate: failed"));
-        // The listener is gone: reconnect must use the durable receipt without sending.
-        super::post(owner, authorization, url, payload, Some(update))
-            .await
-            .unwrap();
-        let history = store.session_history("reader", 0, 0).unwrap();
-        assert_eq!(
-            history
-                .iter()
-                .filter(|event| event.payload["key"] == "transition")
-                .map(|event| event.payload["state"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            ["dispatched", "accepted"]
         );
     }
 

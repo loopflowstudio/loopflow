@@ -94,3 +94,7 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   as built; interactive bare hooks go with the owner.
 - Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
   migration rewrites them.
+
+  Direction, November 11: "I prefer idle waking i think?" Steered implement to keep waking,
+  driven by the server (Codex `turn/start` over the recorded app-server connection; Claude
+  mechanism open, no per-Session waiting hook). Then: "none of those sounds like obviosuly the right answer, so exploring is fine" (options: HTTP MCP channels, a minimal socket-waiting Stop hook, typing into the terminal).

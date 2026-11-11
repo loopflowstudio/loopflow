@@ -29,7 +29,8 @@ pub enum ContextMoment {
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
     Stop,
-    /// Observe Task movement from the native provider’s asynchronous hook.
+    /// Retired: Task updates ride the boundary answer. Hooks installed in
+    /// conversations that started before then still name it; it does nothing.
     TaskUpdates,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
@@ -272,7 +273,7 @@ impl ContextDelivery {
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction. A managed launch
     /// (`WorkSource::is_managed`) also reports its turn and tool boundaries
-    /// to the Machine server and watches its Task.
+    /// to the Machine server, whose answers carry its steers and Task updates.
     pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
@@ -297,28 +298,15 @@ impl ContextDelivery {
             latest = quote(&crate::steer::latest_marker(&self.home)),
         );
         Ok(serde_json::json!({
-            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
-                {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
+            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
             "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":10}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":10}]}],
             "SessionStart": [
-            {"matcher": "startup|resume|clear", "hooks": [context("start"), {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
+            {"matcher": "startup|resume|clear", "hooks": [context("start")]},
             {"matcher": "compact", "hooks": [context("compact")]}
         ]}))
     }
-}
-
-/// A conversation the person starts on a Session's app-server is that Session's,
-/// so it takes the binding of the one it replaces. A Session launched without
-/// context has no binding to carry.
-pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow::Result<()> {
-    let bytes = match fs::read(native_delivery_path(home, from)) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
 }
 
 pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {

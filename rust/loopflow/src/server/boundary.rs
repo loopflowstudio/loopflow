@@ -1,7 +1,8 @@
 //! `session.boundary`: the store work a provider hook asks for at a turn or tool
 //! boundary. The hook opens nothing; the server records the boundary and
 //! answers the Session's pending steers, which count as delivered once the
-//! hook's next request says it printed them.
+//! hook's next request says it printed them. Task changes since the Session's
+//! last update ride the same answer, so it hears them at its next turn.
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -20,6 +21,8 @@ pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
 /// How long a pending Session move waits after its Stop is answered: the hook
 /// prints and exits, then the provider ends its turn.
 const MOVE_AFTER_STOP: Duration = Duration::from_secs(2);
+/// The longest a turn end's Codex history read may take.
+const CODEX_HISTORY: Duration = Duration::from_secs(10);
 /// The longest a turn end's planning refresh may take.
 const PLANNING_REFRESH: Duration = Duration::from_secs(8);
 
@@ -29,6 +32,8 @@ const PLANNING_REFRESH: Duration = Duration::from_secs(8);
 pub(super) struct AfterStop {
     repo: PathBuf,
     session: Option<String>,
+    /// A Codex Session's app-server and the conversation whose turn ended.
+    codex: Option<(PathBuf, crate::id::AgentSessionId)>,
 }
 
 /// Record the boundary and claim its steers; blocking.
@@ -43,6 +48,7 @@ pub(super) fn answer(
         callback,
         gap,
         printed,
+        inbox,
     } = boundary;
     let mut delivery = ContextDelivery::load(path)?;
     // A checkout moved since launch: the hook renders from the new place.
@@ -51,6 +57,7 @@ pub(super) fn answer(
     }
     let nothing = SessionBoundaryAnswer {
         steers: None,
+        update: None,
         waiting: false,
     };
     let Some(adapter) = adapter else {
@@ -61,6 +68,7 @@ pub(super) fn answer(
         let after = AfterStop {
             repo: delivery.repo,
             session: None,
+            codex: None,
         };
         return Ok((nothing, Some(after)));
     };
@@ -97,23 +105,52 @@ pub(super) fn answer(
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
+    let connection = store.session_connection(&adapter.session)?;
+    if store
+        .session(&adapter.session)?
+        .and_then(|session| session.work_source)
+        .is_some_and(crate::session::WorkSource::is_managed)
+    {
+        let wake = match (&connection, inbox) {
+            (Some((endpoint, _)), _) => Some(super::wake::Wake::Codex(endpoint.into())),
+            (None, Some(inbox)) => Some(super::wake::Wake::Claude(inbox.clone())),
+            (None, None) => None,
+        };
+        super::wake::register(adapter, thread, wake, *moment == BoundaryMoment::Stop);
+    }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
         // for the next prompt, whose hook always asks.
         store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+        // Codex keeps its turns on its app-server; read them now that one
+        // ended. A Claude Session records none.
+        let codex = connection.map(|(endpoint, _)| (PathBuf::from(endpoint), thread.into()));
         let after = AfterStop {
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
+            codex,
         };
         return Ok((nothing, Some(after)));
     }
     let (steers, waiting) =
         claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
-    Ok((SessionBoundaryAnswer { steers, waiting }, None))
+    let update = claim_task_update(store, adapter, thread).unwrap_or_else(|error| {
+        tracing::warn!(session = adapter.session, %error, "Task update unread at this boundary");
+        None
+    });
+    Ok((
+        SessionBoundaryAnswer {
+            steers,
+            update,
+            waiting,
+        },
+        None,
+    ))
 }
 
-/// After a Stop's answer: refresh the Session's planning, whose changes become
-/// steers for its next boundary, then continue it on a pending move's agent.
+/// After a Stop's answer: record a Codex Session's turns, refresh the Session's
+/// planning, wake it with any Task update its turn missed, then continue it on
+/// a pending move's agent.
 /// Blocking; failures are logged, since no one waits for them.
 pub(super) fn after_stop(after: AfterStop) {
     let ran = (|| -> Result<()> {
@@ -125,6 +162,9 @@ pub(super) fn after_stop(after: AfterStop) {
                 return Ok(());
             };
             let store = std::sync::Arc::new(store);
+            if let (Some(session), Some((endpoint, thread))) = (&after.session, &after.codex) {
+                record_codex_turns(&store.sqlite, session, thread, endpoint).await;
+            }
             let repo = after.repo.to_string_lossy();
             if tokio::time::timeout(
                 PLANNING_REFRESH,
@@ -138,6 +178,9 @@ pub(super) fn after_stop(after: AfterStop) {
             let Some(session) = &after.session else {
                 return Ok(());
             };
+            // The turn ended: an update that arrived during it goes out now.
+            let (sqlite, ended) = (store.sqlite.clone(), session.clone());
+            tokio::task::spawn_blocking(move || super::wake::after_turn(&sqlite, &ended)).await?;
             if store.sqlite.pending_session_move(session)?.is_none() {
                 return Ok(());
             }
@@ -147,6 +190,26 @@ pub(super) fn after_stop(after: AfterStop) {
     })();
     if let Err(error) = ran {
         tracing::warn!(session = ?after.session, error = %format!("{error:#}"), "turn-end work failed");
+    }
+}
+
+/// Read a Codex conversation's turns from its app-server into the Session's
+/// history. A failure is a recording gap the next turn end or launch fills.
+async fn record_codex_turns(
+    store: &SqliteStore,
+    session: &str,
+    thread: &crate::id::AgentSessionId,
+    endpoint: &std::path::Path,
+) {
+    let read = tokio::time::timeout(
+        CODEX_HISTORY,
+        crate::harness::codex_connection::recover_history(store, session, thread, endpoint),
+    )
+    .await
+    .map_err(|_| anyhow!("Codex history read timed out"))
+    .and_then(|read| read);
+    if let Err(error) = read {
+        tracing::warn!(session, error = %format!("{error:#}"), "Codex turns unrecorded at turn end");
     }
 }
 
@@ -193,6 +256,27 @@ fn claim_steers(
             steers.map(|(batch, text)| SteerBatch { batch, text }),
             waiting,
         ))
+    })
+}
+
+/// What changed on the Session's Tasks since its last update, recorded as
+/// dispatched once: a second boundary answering the same reading gets none.
+fn claim_task_update(
+    store: &SqliteStore,
+    adapter: &SteerAdapter,
+    thread: &str,
+) -> StoreResult<Option<String>> {
+    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+        let Some(update) = crate::harness::task_updates::read(store, &adapter.session)? else {
+            return Ok(None);
+        };
+        let claimed = store.record_task_update(
+            &adapter.session,
+            &update.key,
+            "dispatched",
+            &update.observation,
+        )?;
+        Ok(claimed.then_some(update.text))
     })
 }
 
@@ -327,6 +411,7 @@ mod tests {
             callback,
             gap: None,
             printed: Vec::new(),
+            inbox: None,
         }
     }
 
@@ -394,6 +479,62 @@ mod tests {
         let followed = ContextDelivery::load(&delivery).unwrap();
         assert_eq!(followed.repo, moved);
         assert_eq!(followed.skill_file, Some(moved.join("active.md")));
+    }
+
+    /// A comment on the Session's Task reaches its next prompt once, beside
+    /// any steers, with no watcher between the two.
+    #[test]
+    fn a_task_comment_rides_the_next_boundary_answer_once() {
+        let (_home, store, adapter, delivery) = fixture();
+        let task = crate::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/updates").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Updates".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
+                [],
+            )
+            .unwrap();
+        let captured = store.session("session").unwrap().unwrap().captured;
+        store.bind_session("session", captured, &task).unwrap();
+        let prompt = |id: &str| {
+            boundary(
+                BoundaryMoment::Tool,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                    "prompt_id":id,"prompt":"go"}),
+            )
+        };
+        // The first boundary is the baseline: history before it is not news.
+        assert_eq!(answer(&store, &prompt("p-1")).unwrap().0.update, None);
+        store
+            .append_task_comment(
+                &task,
+                &crate::work::task::comment::TaskComment {
+                    id: "c-1".into(),
+                    body: "use the staging bucket".into(),
+                    author: crate::work::task::comment::TaskCommentAuthor::Person {
+                        name: Some("jack".into()),
+                    },
+                    created_at: Some("2026-11-11T09:00:00Z".into()),
+                },
+            )
+            .unwrap();
+        let update = answer(&store, &prompt("p-2")).unwrap().0.update.unwrap();
+        assert!(update.contains("New comment from jack: use the staging bucket"));
+        assert_eq!(answer(&store, &prompt("p-3")).unwrap().0.update, None);
     }
 
     #[test]
@@ -509,6 +650,7 @@ mod tests {
             callback: serde_json::json!({"session_id":"codex-thread","hook_event_name":"Stop"}),
             gap: None,
             printed: Vec::new(),
+            inbox: None,
         };
         let (answered, after) = answer(&store, &stop(BoundaryMoment::Stop)).unwrap();
         assert_eq!(answered.steers, None);

@@ -783,6 +783,13 @@ impl CodexHarness {
             // the Session fence before deciding whether to terminate it.
             .kill_on_drop(false);
         super::configure_agent_env(&mut command, launch);
+        if let (ApprovalPolicy::NativeClient, None, Some(context)) =
+            (self.approval, &connection, &launch.conversation_context)
+        {
+            // Hooks run on the app-server. A conversation the person starts
+            // there with /new or /fork has no binding of its own and reads this.
+            context.configure_hooks(command.as_std_mut())?;
+        }
         if let Some(cwd) = &launch.cwd {
             command.current_dir(cwd);
         }

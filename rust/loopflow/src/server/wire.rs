@@ -136,6 +136,10 @@ pub struct SessionBoundary {
     /// Steer batches from earlier answers that this conversation's hooks
     /// printed and have not yet told the server about.
     pub printed: Vec<crate::id::SteerBatchId>,
+    /// Where an idle Claude conversation takes a Task update; null for other
+    /// providers and a Claude with no inbox.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub inbox: Option<ClaudeInbox>,
 }
 
 /// Where in a native conversation a hook fired.
@@ -156,6 +160,16 @@ pub struct BoundaryGap {
     pub last: i64,
 }
 
+/// A Claude conversation's cross-session inbox: its socket and the key file
+/// Claude publishes beside its session record for peers. Paths only; the
+/// server reads the key when it sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClaudeInbox {
+    pub socket: std::path::PathBuf,
+    pub key: std::path::PathBuf,
+}
+
 /// What `session.boundary` answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -163,6 +177,11 @@ pub struct SessionBoundaryAnswer {
     /// The next pending steers; null when none are ready.
     #[serde(deserialize_with = "Option::deserialize")]
     pub steers: Option<SteerBatch>,
+    /// What changed on the Session's Tasks since its last update, rendered
+    /// for the provider; null when nothing did. Recorded as delivered when
+    /// answered.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub update: Option<String>,
     /// An earlier answer's batch is unconfirmed and its hook may still print
     /// it: the hook asks again at its next tool boundary.
     pub waiting: bool,

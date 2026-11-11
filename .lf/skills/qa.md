@@ -307,3 +307,34 @@ server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+
+## Native conversation opening
+
+Use the private homes above for native servers too. Start Rex with
+`rex server run --listen unix://<root>/rex.sock --state-dir <root>/rex-state
+--config <root>/empty.lua`; create an empty Lua file first. Every Rex client
+command takes `--autostart=false -S unix://<root>/rex.sock`. Never launch a second
+Rex app: its preferences share the installed app's cached route. A headless Rex
+server can attach and capture real terminals; focus correctly fails without a
+capable display client.
+
+Open with `lf open --tab --host rex --server unix://<root>/rex.sock --json`.
+Use `rex api call session.list_blocks '{"session_id":"…"}'`, then
+`rex block capture -s <session> -b <block>` to read the terminal. To check the
+direct default inside Rex, create a `session.new_window` whose terminal command
+is `["<branch-lf>","open","--task","<task>"]`; it must stay in that block.
+
+For Herdr, isolate `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, start
+`herdr --session qa server`, and set `HERDR_SOCKET_PATH` to
+`<config>/herdr/sessions/qa/herdr.sock` in clients. `herdr pane list` and
+`herdr pane read <pane> --source visible --format text` show the real destination.
+Two simultaneous opens of one prepared Session should create one attachment.
+
+To exercise failed-start recovery with real Codex, exit its private sign-in
+screen with Ctrl+C, temporarily put invalid TOML in the private Codex config,
+and reopen that Session. Capture the retained error tab, restore the config,
+then repeat the exact opening command. Check the Session and provider-thread
+identity, and capture again after startup settles. Attachment at the sign-in
+screen does not establish authenticated conversation behavior. Stop native
+servers and their terminal descendants, including detached owners recorded in
+the private store.

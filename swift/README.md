@@ -964,6 +964,10 @@ Top-level `openings` records the latest repository-opening request per local loc
 including lookup/validation failures before any window registers. A plain repository
 becomes usable when its validated workspace receiver registers, even while planning
 loads. Registered Task links report their page/Session outcome on the window instead.
+Each receipt has a revision so a repeated request cannot consume its previous
+result. Session panes report attachment separately from native surface existence;
+`elsewhere` means another client retains input. Failed panes can reconnect in
+place, while a pending attachment stays with its current viewer.
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
 opening its Session and optional Changes pane. A remote link without `--session`

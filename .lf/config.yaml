@@ -11,6 +11,7 @@ release:
       verify:
       - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
       prepare:
+      - uv run python scripts/check_migrations.py --write-package-order
       - uv run python scripts/third_party.py refresh
       completion: github-release
       publisher:

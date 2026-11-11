@@ -144,7 +144,11 @@ appended to a prepare's `open_argv`; `open_through` is gone. Desktop:
 `session_steers::` 9/9 (incl.
 `a_task_pane_reopened_by_session_id_fails_naming_a_missing_server`),
 `lf::tests::` 40/40, `scripts/test_desktop.sh --filter SessionsStoreTests`
-36/36.
+36/36. Fourth pass (headless, after it was built): every Desktop prepare in a
+Task or Wave workspace, reconnect and provider switch names its Work
+(`openingWork`); `openSessionLink` names none and opens in the repository
+store, which the rule calls bare. Code, `server-first.md` and this design
+agree; nothing to change, no open choice.
 
 LOO-824 (its concept review, Jack Heart: "managed should = held") will read
 `AgentConfig::managed` and call `require_server` instead of keeping its own

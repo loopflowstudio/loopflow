@@ -56,31 +56,34 @@
 <main>
 
 <h1>Which conversations depend on the Machine server?</h1>
-<p class="meta">LOO-821 · concept review, third pass (headless) · November 11, 2026 · PR #1879<br>
+<p class="meta">LOO-821 · concept review, fourth pass (headless) · November 11, 2026 · PR #1879<br>
 Built from <code>scratch/loo-821-hooks.md</code>, <code>scratch/questions.md</code>,
-<code>docs/dev/server-first.md</code>, <code>server/README.md</code>,
-<code>lf/mod.rs</code> (<code>Cli::names_work</code>), <code>journal/mod.rs</code>,
-<code>agent/mod.rs</code> (<code>AgentConfig::managed</code>), <code>lf/commands/graph.rs</code>,
-<code>lf/commands/session.rs</code> (<code>open_through</code>), <code>LoopflowMac/Views/SessionsView.swift</code>, <code>Loopflow/Services/RegistryQuery.swift</code></p>
+<code>docs/dev/server-first.md</code> (“The managed rule”), <code>lf/mod.rs</code>
+(<code>Cli::names_work</code>, <code>SessionConnectionArgs::work_flag</code>),
+<code>lf/commands/session.rs</code> (<code>resumes_work</code>),
+<code>LoopflowMac/Views/SessionsView.swift</code>, <code>LoopflowMac/WorkModel.swift</code></p>
 
-<p class="lead">No product decision needed; one gap in the rule goes back to implement.
-Desktop opens a Task's conversation managed only the first time. Reopening a pane
-that already has a Session goes by Session id, and a Session id resumes bare.</p>
+<p class="lead">No decision needed. The third pass's gap is closed: Desktop names the
+Task beside the Session id on every reopen, so a Task pane resumes managed. Rule,
+docs and code agree.</p>
 
 <h2>What people do, as built</h2>
 <div class="scroll"><table>
 <tr><th>You do</th><th>What happens</th><th>What changes state</th></tr>
-<tr><td><code>lf task run LOO-1</code>, its Graph's steps, <code>lf --task LOO-1 implement</code>, <code>lf -b resume --task LOO-1</code>, a Task or Wave conversation</td>
+<tr><td><code>lf task run LOO-1</code>, its Graph's steps, <code>lf --task LOO-1 implement</code>, <code>lf resume --task LOO-1</code>, a Task or Wave conversation</td>
 <td>Managed. Starts only beside the Machine server (runs <code>lf install server</code> if none answers, then fails naming it). Every hook, a steer capability.</td>
 <td><code>hello</code> on <code>machine.sock</code>; <code>session.boundary</code> at start, compact, prompt, tool, turn end</td></tr>
+<tr><td>Desktop: open, reopen, reconnect or switch provider on a pane in a Task or Wave workspace, or a Task-run step's Session</td>
+<td>Managed. <code>lf session resume 3f2a… --task LOO-1 --prepare</code>; the id selects, <code>--task</code> makes it managed; <code>open_argv</code> keeps both.</td>
+<td>as above</td></tr>
+<tr><td>Desktop: open a Session link</td>
+<td>Bare. The link names no Work and opens in the repository workspace.</td>
+<td>hooks as for a terminal launch</td></tr>
 <tr><td><code>lf -b implement</code> in a Task's checkout, or a subagent <code>lf research</code> a Task's agent runs</td>
 <td>Bare. No server check, two hooks (start, compact) that print the context block from the delivery file. Still counts toward the Task.</td>
 <td>none from the hooks</td></tr>
 <tr><td><code>lf -i</code>, <code>lf implement</code> at a terminal, an agent started from a Desktop shell</td>
 <td>Bare, no server check, but keeps every hook while an owner process holds it. They go with the owner in “Bare launches go direct”.</td>
-<td><code>session.boundary</code>, a gap line when unanswered</td></tr>
-<tr class="gap"><td>Desktop: reopen a Task workspace pane that has a Session (restored layout, conversation that exited), or connect to a Task-run step's Session</td>
-<td>Bare today: <code>prepareSession(id:)</code> → <code>lf session resume &lt;id&gt; --prepare</code>. No server check; a steer waits unseen if the server is down.</td>
 <td><code>session.boundary</code>, a gap line when unanswered</td></tr>
 <tr><td><code>lf task steer LOO-1 "…"</code></td>
 <td>Reaches a managed agent at its next prompt or tool; waits while the server is down.</td>
@@ -89,50 +92,27 @@ that already has a Session goes by Session id, and a Session id resumes bare.</p
 
 <h2>One rule, one place</h2>
 <div class="built">
-<p><span class="tag">Built.</span> <code>Cli::names_work</code> is true when the
-command names its Work (<code>--task</code>, <code>--wave</code>) or is a step
-of a Task's run. It sets <code>AgentConfig::managed</code>; headless spawns take it
-as an argument, native launches read <code>SessionCommand::managed</code>. Nothing
-reads <code>agent_sessions.work_source</code> to decide it; the column is still written.</p>
-<pre><code>Cli::names_work ──► AgentConfig::managed ──► require_server + steer capability
-                                         └──► ContextDelivery::hook_settings(managed)
-                                              OpenCode / Pi: spec.managed</code></pre>
-</div>
-
-<h2>The gap, and what closes it</h2>
-<p>The first open from a Task workspace goes through the Task:</p>
-<pre><code>lf session resume --task LOO-1 --prepare
-  open_argv: lf session resume --task LOO-1        <span class="soft"># open_through: id spliced out, reselected from cwd</span></code></pre>
-<p>Every later open of the same pane goes through its Session id:</p>
-<pre><code>lf session resume 3f2a… --prepare
-  open_argv: lf session resume 3f2a…               <span class="soft"># bare</span></code></pre>
-<div class="prop">
-<p><span class="tag">Proposed, next implement.</span> One command names both:</p>
-<pre><code>lf session resume 3f2a… --task LOO-1 --prepare
-  open_argv: lf session resume 3f2a… --task LOO-1  <span class="soft"># the id selects, --task makes it managed</span></code></pre>
-<p><code>SessionTarget::from_selectors</code> accepts an id with <code>--task</code> or
-<code>--wave</code>. Desktop passes the Task from its Task workspace and from
-<code>executionLocations</code>. <code>open_through</code>, its splice and its fork
-exception go, and the terminal stops reselecting the Task from its cwd between
-prepare and open. A Session link names no Task and stays bare.</p>
+<p><span class="tag">Built.</span> The command decides. <code>Cli::names_work</code>
+(launches) and <code>resumes_work</code> (resumes, through <code>work_flag</code>) are true
+when the command names its Work or is a step of a Task's run. That sets
+<code>AgentConfig::managed</code>; nothing reads <code>agent_sessions.work_source</code>
+to decide it, and the column is still written.</p>
+<pre><code>--task / --wave / LF_GRAPH_STEP=task
+   └─► AgentConfig::managed ──► require_server + steer capability
+                            └─► ContextDelivery::hook_settings(managed)
+                                OpenCode / Pi: spec.managed</code></pre>
 </div>
 
 <h2>Looked at and left alone</h2>
-<p>A Task-run step knows it is one from <code>LF_GRAPH_STEP=task</code>, which the
-Graph sets on the child and <code>take_graph_step</code> clears, so the step's own
-subagents are bare. Passing <code>--task</code> instead would make
-<code>names_work</code> read only flags, but <code>--task</code> also drives cwd,
-checkout and Session binding, which steps don't take today. The Graph spawning its
-step is the command; the mark is its argument.</p>
+<p>A Session link stays bare even when its Session belongs to a Task: the link
+names a conversation, not Work, and the rule is the command. Desktop runs beside
+its server, so the missing check costs little there.</p>
 <p>The plugin observations (Pi polling <code>--moment tool</code> each second,
 OpenCode never resetting <code>compacted</code>) stay recorded in the working
 design as seen, not changed here.</p>
 
 <h2>Questions</h2>
-<p>None open. The gap above follows from the rule in <code>server-first.md</code>
-(“Desktop opening a Task's conversation” is managed). The first pass's three were answered November 11 (1b with the start
-and compact hooks kept for bare launches; 2 unchanged; 3a kept). Words in
-<code>scratch/loo-821-hooks.md</code>.</p>
+<p>None open. Earlier answers, word for word, are in <code>scratch/loo-821-hooks.md</code>.</p>
 
 </main>
 </body>

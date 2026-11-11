@@ -148,11 +148,15 @@ pub(super) fn insert_authored_comment(
 
 impl SqliteStore {
     /// Saved conversation content, independent of planning configuration and delivery badges.
-    pub(crate) fn task_comment_content(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
+    /// The Task's comments that are not also steers. A direction comment
+    /// reaches Sessions once, as the steer saved with source `comment:<id>`.
+    pub(crate) fn task_undirected_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id,body,author,created_at FROM task_comments
-             WHERE task_id=?1 ORDER BY created_at,id",
+            "SELECT id,body,author,created_at FROM task_comments c
+             WHERE task_id=?1
+               AND NOT EXISTS(SELECT 1 FROM steers s WHERE s.source='comment:'||c.id)
+             ORDER BY created_at,id",
         )?;
         let comments = query
             .query_map([task.as_str()], read_comment)?

@@ -38,9 +38,8 @@ Choices taken (reversible):
 
 - The hook sends the inbox as paths (`inbox: {socket, key}`); the server reads
   the key when it sends. No token on lf's wire or in its logs.
-- `crossSessionInbound: accept` goes on every Claude launch with turn hooks,
-  which includes bare interactive launches (`claude_args(…, managed)` is "has
-  turn hooks" since LOO-821). Any same-user process can then message those
+- `crossSessionInbound: accept` goes only on managed Claude launches, the
+  Sessions the server registers. Any same-user process can message those
   sessions without review. Attesting a permission mode instead was not done:
   lf has none.
 - The watcher's only clock is `StoreChanges`' 60 s fallback (missed WAL event,
@@ -71,8 +70,10 @@ again.
 
 Open, from the concept review (November 11):
 
-1. Do steers wake an idle managed conversation? Built and documented: "A
-   steer starts no turn"; Task updates do. Today a person's Task comment
+1. Do steers wake an idle managed conversation? Built as (a), reversible
+   (November 11 implement pass): the wake carries the pending steer batch
+   with the Task update; "A steer starts no turn" is gone from the docs.
+   Before that pass: "A steer starts no turn"; Task updates did. Today a person's Task comment
    reaches an idle conversation anyway, as a Task update, so waking already
    happens for most direction, framed as worker progress. Once a comment is
    delivered once (as a steer, `loo-826.md`):

@@ -156,9 +156,11 @@ lf --wave billing session steer "invoices before refunds"    # every Session on 
 lf session steers <session>                                  # was it delivered?
 ```
 
-A steer starts no turn. Each Session receives it at its next supported provider
-boundary; idle ones stay idle until they next run. For a Task, `lf task steer`
-does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
+Each Session receives a steer at its next supported provider boundary. An idle
+managed conversation is woken with it now
+([below](#keep-several-conversations-open)); an idle bare one waits until it
+next runs. For a Task, `lf task steer` does the same for every Session on it
+([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.
 
@@ -172,12 +174,13 @@ lf process list       # one lf server, no process per conversation
 Leave Task conversations open while their Graphs run. Each managed
 conversation, one opened through a Task or Wave command or from Desktop, is
 registered with this Machine's lf server. When a Graph step settles, the Graph
-moves or a tracker comment arrives on its Task, the server wakes the conversation
-if it is waiting for you: Claude takes the update as a message from
-`loopflow`, Codex as a turn of its own. A conversation in the middle of a turn
-hears it when that turn ends. Ten idle conversations cost nothing beyond the
-one server: no watcher per conversation and no clock tick. Steers still wait
-for the conversation's next turn.
+moves, a comment arrives on its Task or a steer is saved for it, the server
+wakes the conversation if it is waiting for you: Claude takes the news as a
+message from `loopflow`, Codex as a turn of its own. A comment with direction
+arrives once, as a steer; other comments arrive as Task updates. A
+conversation in the middle of a turn hears it when that turn ends. Ten idle
+conversations cost nothing beyond the one server: no watcher per conversation
+and no clock tick.
 
 A conversation you start with a bare `lf <skill>` in a terminal is not
 registered and gets no Task progress.

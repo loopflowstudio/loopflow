@@ -116,7 +116,7 @@ pub(super) fn answer(
             (None, Some(inbox)) => Some(super::wake::Wake::Claude(inbox.clone())),
             (None, None) => None,
         };
-        super::wake::register(adapter, thread, wake, *moment == BoundaryMoment::Stop);
+        super::wake::register(adapter, thread, path, wake, *moment == BoundaryMoment::Stop);
     }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
@@ -257,6 +257,28 @@ fn claim_steers(
             waiting,
         ))
     })
+}
+
+/// The batch of pending steers a wake carries to an idle conversation,
+/// rendered as a hook would print it. The waker confirms it once sent.
+pub(super) fn wake_steers(
+    store: &SqliteStore,
+    delivery: &std::path::Path,
+    adapter: &SteerAdapter,
+    thread: &str,
+) -> Result<Option<SteerBatch>> {
+    let delivery = ContextDelivery::load(delivery)?;
+    store.recover_prepared_steers(&adapter.session)?;
+    let boundary = format!("wake:{}", uuid::Uuid::new_v4());
+    let steers = store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+        store.emit_session_steers(adapter, thread, &boundary, |id, steers, remaining| {
+            let (text, excerpts) =
+                render_steers(&delivery, &adapter.session, id, steers, remaining)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            Ok(SteerContext { text, excerpts })
+        })
+    })?;
+    Ok(steers.map(|(batch, text)| SteerBatch { batch, text }))
 }
 
 fn excerpt(text: &str, bytes: usize) -> &str {
@@ -460,8 +482,8 @@ mod tests {
         assert_eq!(followed.skill_file, Some(moved.join("active.md")));
     }
 
-    /// A comment on the Session's Task reaches its next prompt once, beside
-    /// any steers, with no watcher between the two.
+    /// Comments on the Session's Task reach its next prompt once, with no
+    /// watcher between: direction as a steer, anything else as a Task update.
     #[test]
     fn a_task_comment_rides_the_next_boundary_answer_once() {
         let (_home, store, adapter, delivery) = fixture();
@@ -498,21 +520,33 @@ mod tests {
         };
         // The first boundary is the baseline: history before it is not news.
         assert_eq!(answer(&store, &prompt("p-1")).unwrap().0.update, None);
-        store
-            .append_task_comment(
-                &task,
-                &crate::work::task::comment::TaskComment {
-                    id: "c-1".into(),
-                    body: "use the staging bucket".into(),
-                    author: crate::work::task::comment::TaskCommentAuthor::Person {
-                        name: Some("jack".into()),
+        for (id, body) in [
+            ("c-1", "use the staging bucket"),
+            ("c-2", "PR: https://example.test/pr/1"),
+        ] {
+            store
+                .append_task_comment(
+                    &task,
+                    &crate::work::task::comment::TaskComment {
+                        id: id.into(),
+                        body: body.into(),
+                        author: crate::work::task::comment::TaskCommentAuthor::Person {
+                            name: Some("jack".into()),
+                        },
+                        created_at: Some("2026-11-11T09:00:00Z".into()),
                     },
-                    created_at: Some("2026-11-11T09:00:00Z".into()),
-                },
-            )
-            .unwrap();
-        let update = answer(&store, &prompt("p-2")).unwrap().0.update.unwrap();
-        assert!(update.contains("New comment from jack: use the staging bucket"));
+                )
+                .unwrap();
+        }
+        let answered = answer(&store, &prompt("p-2")).unwrap().0;
+        assert!(answered
+            .steers
+            .unwrap()
+            .text
+            .contains("use the staging bucket"));
+        let update = answered.update.unwrap();
+        assert!(update.contains("New comment from jack: PR: https://example.test/pr/1"));
+        assert!(!update.contains("staging bucket"), "direction arrives once");
         assert_eq!(answer(&store, &prompt("p-3")).unwrap().0.update, None);
     }
 

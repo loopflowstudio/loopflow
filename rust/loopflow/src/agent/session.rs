@@ -28,6 +28,8 @@ pub(crate) struct SessionCommand {
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
+    /// A Task or Wave command named the launch's Work (`AgentConfig::managed`).
+    pub(crate) managed: bool,
     pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
@@ -55,6 +57,7 @@ pub(crate) fn native_connection_command(
         args,
         cwd,
         context: None,
+        managed: false,
         remote: Some(remote),
         attachment,
     }
@@ -161,6 +164,7 @@ pub(crate) fn build_session_command(
         args,
         cwd,
         context: config.conversation_context.clone(),
+        managed: config.managed,
         remote: None,
         attachment: config.session_attachment.clone(),
     })

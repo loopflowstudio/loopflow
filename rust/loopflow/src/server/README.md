@@ -465,19 +465,22 @@ Each managed Session's boundaries register it with the server (`wake.rs`):
 its provider context, its conversation, and how to reach it while it waits for
 the person. A turn end marks it idle and any other boundary busy. One server
 thread waits on the store's change signal (`store::changes`) and reads the
-`task_updates` revision; when it moves, every idle registration with news gets
-its update, recorded as delivered first:
+`task_updates` revision and the newest steer; when either moves, every idle
+registration with news gets its pending steer batch and its Task update in one
+message. The update is recorded as delivered first; the steer batch is
+confirmed once the message is sent, so a failed send answers it again at the
+next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
   `crossSessionInbound` to `accept`: lf has no permission mode to attest, and
   a session that bypasses permission prompts otherwise holds the message for
-  review.
+  review. Bare launches keep Claude's default.
 - Codex: a `turn/start` on the Session's private app-server whose tool output
-  is the update.
+  is the message.
 
 Registrations live in the server's memory. A conversation it cannot reach is
-dropped and hears the update at its next boundary, which registers it again;
+dropped and hears its news at its next boundary, which registers it again;
 after a server restart, so does every conversation. Bare Sessions never
 register. No process or clock runs per Session: the watcher's only clock is
 the change signal's 60 s fallback for a missed checkpoint or a Machine's sleep.

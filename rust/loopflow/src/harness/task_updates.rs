@@ -124,7 +124,7 @@ pub(crate) fn read(store: &SqliteStore, session_id: &str) -> StoreResult<Option<
             }
             observation.runs.insert(id, run);
         }
-        let comments = store.task_comment_content(&task)?;
+        let comments = store.task_undirected_comments(&task)?;
         let heard = old.and_then(|observation| observation.comments.as_ref());
         // A comment this conversation posted is not news to it.
         let arrived: Vec<String> = heard
@@ -474,13 +474,31 @@ mod tests {
             read(&store, "reader").unwrap().is_none(),
             "a conversation is not told about its own comment"
         );
-        comment(&store, &task, "use the staging bucket", person());
+        comment(&store, &task, "PR: https://example.test/pr/1", person());
         let update = read(&store, "reader").unwrap().unwrap();
         assert!(update
             .text
-            .contains("New comment from jack: use the staging bucket"));
+            .contains("New comment from jack: PR: https://example.test/pr/1"));
         assert!(!update.text.contains("already in the prompt"));
         assert!(!update.text.contains("own progress"));
+    }
+
+    #[test]
+    fn direction_comments_arrive_as_steers_not_task_updates() {
+        let (_home, store, task) = task_session();
+        assert!(read(&store, "reader").unwrap().is_none(), "baseline");
+        comment(
+            &store,
+            &task,
+            "use the staging bucket",
+            TaskCommentAuthor::Person {
+                name: Some("jack".into()),
+            },
+        );
+        assert!(
+            read(&store, "reader").unwrap().is_none(),
+            "the steer saved for this comment is its only delivery"
+        );
     }
 
     #[test]

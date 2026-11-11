@@ -252,7 +252,7 @@ pub(crate) async fn start_turn(
     Ok(())
 }
 
-/// Wake an idle conversation with a Task update, as a tool result Codex
+/// Wake an idle conversation with steers and a Task update, as a tool result Codex
 /// keeps in its history and answers in a turn of its own.
 pub(crate) async fn deliver_update(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
     let mut upstream = initialized(endpoint, "loopflow_update").await?;
@@ -260,7 +260,7 @@ pub(crate) async fn deliver_update(endpoint: &Path, thread: &str, text: &str) ->
         &mut upstream,
         "turn/start",
         json!({"threadId":thread,"input":[],
-            "toolOutput":{"name":"loopflow_task_update","output":text,"retain":true}}),
+            "toolOutput":{"name":"loopflow_wake","output":text,"retain":true}}),
     )
     .await?;
     upstream.close(None).await?;
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(start["params"]["input"], json!([]));
         assert_eq!(
             start["params"]["toolOutput"],
-            json!({"name":"loopflow_task_update","output":"gate: failed","retain":true})
+            json!({"name":"loopflow_wake","output":"gate: failed","retain":true})
         );
     }
 

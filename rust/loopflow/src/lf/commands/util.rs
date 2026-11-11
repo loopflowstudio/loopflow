@@ -568,6 +568,7 @@ fn run_native_session(
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
+        command.managed,
     )?);
     process.args(&command.args);
     if command.program == "claude" {
@@ -1207,6 +1208,7 @@ mod tests {
             launch: None,
             input: None,
             context: None,
+            managed: false,
             attachment: None,
             remote: None,
             program: provider.display().to_string(),
@@ -1420,6 +1422,7 @@ mod tests {
             launch: None,
             input: None,
             context: None,
+            managed: false,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
             cwd: home.into(),
@@ -1445,6 +1448,7 @@ mod tests {
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
             context: None,
+            managed: false,
             attachment: None,
             remote: None,
         };
@@ -1551,6 +1555,7 @@ mod tests {
                 args: vec![],
                 cwd: home.into(),
                 context: None,
+                managed: false,
                 attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(endpoint.clone()),
             };
@@ -1630,6 +1635,7 @@ mod tests {
                 launch: None,
                 input: None,
                 context: None,
+                managed: false,
                 attachment: capture.session_attachment(),
                 remote: None,
                 program: "/bin/sleep".into(),

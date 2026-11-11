@@ -84,7 +84,9 @@ at the next turn end or launch.
 
 Keep several Task conversations open while a Graph finishes and a teammate adds
 a comment. Each managed conversation hears what changed on its Tasks: a Graph
-run or step that settled, its Graph position, a comment from anyone else.
+run or step that settled, its Graph position, a comment from anyone else. A
+comment with direction is a steer (source `comment:<id>`) and arrives only as
+one.
 History from before its first boundary is a baseline, not a report to repeat.
 
 `task_updates::read` compares the Tasks against the last update the Session

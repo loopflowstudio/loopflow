@@ -67,11 +67,30 @@ Items 2 and 3 are unanswered.
    boundary (QA, beside installed 0.15.2). No server and a stale server leave
    the same conversation; only one refuses. Choices: as built, refuse both, or
    start both with one line at launch naming the fix.
+   Answered, Jack Heart, November 11: "existing servers today shouldnt be
+   designed around. just upgrade servers as necessary, use dev servers to
+   test etc. in the future we should do somethign similar to waht rex server
+   and client do and/or our desktop and server do for protocol negotiation".
+   No change: no warning or refusal for an older server.
+   Then: "avoid adding an additional handshake exchange, reuse desktops
+   basically". The hook and launch check already send Desktop's `hello`
+   (`revision`, `min_revision`); the server at 0.15.2 and this branch both
+   speak revision 4, so the hello agrees and the missing operation shows up
+   only as `invalid {kind}`.
 3. Steer confirmation puts every steer through `uncertain` for a tool
    interval. Choices: keep it and show that state as `sent`, or have the hook
    send its deadline so a late server hands over nothing (no `.printed`, no
    `waiting`; a steer is lost only when a hook dies between read and print).
    "arrive twice" was said when the choice was lost-until-retried or twice.
+   Then, Jack Heart, November 11: "No real opinion, worth following t3 code
+   or rex's appraoches here". Rex has no steer concept: `terminal.write`
+   "returns once the text is queued, without waiting for the program to read
+   it". T3 Code (`pingdotgg/t3code` 25631c3c, `EffectOutbox.ts`,
+   `EffectWorker.ts`): a steer is an outbox row sent through the provider's
+   own channel (Codex `turn/steer`, Claude SDK streaming input, Pi RPC);
+   confirmation is the call returning; failures retry up to 5 times, which
+   can duplicate; a server restart cancels it silently. So T3 accepts
+   duplicates while running. Kept as built (option a); no change.
 
 Answered November 11, Jack Heart: "no. in 824 i explained that there is no
 such thing other than one you start through a shell. shells in desktop should
@@ -87,8 +106,15 @@ What the bare rule costs, found while building it (see `questions.md`):
   (`harness/pi.rs::observe_native`); `lf resume` continues from it. Bare
   interactive launches keep their hooks, so this still works. It is one more
   thing the hooks carry when they go.
+  Outside lf, Pi resumes by session file or ID: `pi --continue` (latest in
+  the directory), `pi --resume` (picker), `pi --session <path|id>`, and
+  `pi --session-id <id>` names a new session up front ("Use exact project
+  session ID, creating it if missing", `pi --help`). Launching interactive
+  Pi with `--session-id`, as Claude gets `--session-id`, would let lf know
+  the session without the report. Not tried.
 - A headless Session started as a `lf task run` step before this change is
   `checkout` in the store; a correction turn resumed on it is bare.
+  Jack Heart, November 11: "Thats fine".
 
 LOO-824 (its concept review, Jack Heart: "managed should = held") will call
 `WorkSource::is_managed` and `require_server` instead of keeping its own

@@ -78,5 +78,8 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   moves ride on them (`loo-821-hooks.md`, "Not built, and why"). Drop them
   here anyway and let those Sessions read stale, or with the owner in "Bare
   launches go direct"?
+  Jack Heart, November 11: "dont really care about intermediate states as
+  long as we remove the owner eventually and end up in cleanest place". Kept
+  as built; interactive bare hooks go with the owner.
 - Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
   migration rewrites them.

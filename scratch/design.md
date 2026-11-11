@@ -1,10 +1,10 @@
 # LOO-825: conversation opening
 
-Status: attachment-aware recovery is implemented. Gate still owns affected-suite
-checks, the earlier parallel host-request timeouts and isolated native-host
-acceptance. Concept review at `1b8c46d8f` found no further design change or open
-product choice; loop-or-next can advance. The earlier recovery counterexample
-below remains the check against treating a retained surface as attachment.
+Status: publication is blocked by three reproduced parallel host-request timeouts
+at `a73c71151`. The affected Rust run passed 447 of 450 tests. Attachment-aware
+recovery is implemented; the remaining verification is recorded below. The earlier
+recovery counterexample remains the check against treating a retained surface as
+attachment.
 
 The Task brief delegates the remaining product decisions:
 

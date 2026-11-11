@@ -530,7 +530,8 @@ struct WorkDestinationTests {
         let store = registry.sessionStore(repository: "repo", repoPath: wave.wave.repo, query: query)
         #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
         #expect(workspace.conversationError == nil)
-        #expect(model.taskOpening?.status == .usable)
+        #expect(model.taskOpening?.status == .elsewhere)
+        #expect(model.taskOpening?.reason?.contains("another client") == true)
         #expect(store.sessions.first?.state == .elsewhere)
         #expect(store.sessions.first?.surface == nil)
         // Inspect the production placeholder directly: ViewInspector cannot resolve
@@ -1435,7 +1436,8 @@ struct WorkDestinationTests {
         #expect(model.showsSavedWork)
         await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: task.task.repo, session: record.id))
         #expect(installedSession(model, registry)?.id == record.id)
-        #expect(model.taskOpening?.reason == nil)
+        #expect(model.taskOpening?.status == .elsewhere)
+        #expect(model.taskOpening?.reason?.contains("another client") == true)
     }
 
     @Test func historicalTaskSurvivesCurrentPlanRefresh() async throws {

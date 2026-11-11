@@ -1259,7 +1259,7 @@ final class SessionsStore {
 
     func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent = .start) {
         guard let index = _index(record.id) else { return }
-        if attachment(record.id) == .failed { release(record.id) }
+        if sessions[index].state != .pending, attachment(record.id) == .failed { release(record.id) }
         guard localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
         case .pending, .failed, .unavailable, .ended, .elsewhere:
@@ -1288,7 +1288,7 @@ final class SessionsStore {
 
     func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
         guard let index = _index(id) else { return }
-        if attachment(id) == .failed { release(id) }
+        if sessions[index].state != .pending, attachment(id) == .failed { release(id) }
         if localTerminal(for: sessions[index].record) != nil {
             switch sessions[index].state {
             case .failed, .unavailable, .ended:

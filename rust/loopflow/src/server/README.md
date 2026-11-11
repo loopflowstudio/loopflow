@@ -220,6 +220,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |

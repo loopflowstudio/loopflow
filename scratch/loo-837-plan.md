@@ -18,4 +18,5 @@ Checks:
 - `cargo test -p loopflow --test global_commands task_checkout_explain_reuses`: pass (stack effects under `unavailable`)
 - clippy `--all-targets`: clean
 - compress pass (2026-11-11): same three test commands and clippy pass after folding `Missing` into an error
+- QA (2026-11-11, `scratch/qa.html`): real CLI against a bare origin; the push was silent, now printed (`e6c5971f1`). Lib stack tests and clippy pass after it.
 - Gate owns the affected-suite run.

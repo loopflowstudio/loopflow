@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-837 QA: stack on any placed Task</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f2;padding:.6rem .8rem;overflow-x:auto;font-size:12.5px;border-radius:4px}
+td,th{padding:.3rem .6rem;border-bottom:1px solid #ddd;vertical-align:top;text-align:left}
+table{border-collapse:collapse;width:100%}
+.ok{color:#176b2c}.fix{color:#8a5a00}.no{color:#a01d1d}
+</style>
+<h1>LOO-837 QA: stack on any placed Task</h1>
+<p>Branch-built <code>target/debug/lf</code> against a disposable repository
+(<code>/tmp/lf-qa-837/repo</code>) with a local bare origin,
+<code>planning: {provider: git, personal: true}</code>, isolated <code>HOME</code>,
+<code>LF_HOME</code>, <code>CODEX_HOME</code>, no inherited <code>LF_*</code>, stdin closed.
+Every step used <code>lf task create</code>, <code>lf checkout</code>, <code>lf sync</code> and
+plain git, the way a person would. Store rows were read with <code>sqlite3 -readonly</code>.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What happened</th><th></th></tr>
+<tr><td>Parent Task exists but was never placed</td><td><code>Error: stack parent 426ffa has no placed branch; run `lf checkout 426ffa` first</code>. Child stayed unplaced.</td><td class=ok>works</td></tr>
+<tr><td>Unknown parent</td><td><code>Error: stack parent "NOPE-1" has no Task; create it with `lf task create`</code></td><td class=ok>works</td></tr>
+<tr><td>Stack on itself</td><td><code>Error: a Task cannot stack on itself</code></td><td class=ok>works</td></tr>
+<tr><td><code>--explain</code> before stacking on an unpushed parent</td><td>Lists "Not run: stacking pushes 426ffa's branch qa/426ffa-parent-work to origin" and "Not run: stacking records an unpublished PR for 426ffa". Origin and <code>task_prs</code> unchanged afterwards (0 refs, 0 rows).</td><td class=ok>works</td></tr>
+<tr><td>New placement on a placed, unpushed parent with no Task PR (the LOO-820/LOO-824 case)</td><td>Parent branch appeared on origin at the parent's local commit; parent got upstream <code>origin/qa/426ffa-parent-work</code>; one <code>task_prs</code> row with no GitHub number; child <code>parent_pr_id</code> = that row, <code>base_commit</code> = parent tip, child checkout contains <code>parent.txt</code>. <b>Stderr said nothing about the push</b> (fixed, below).</td><td class=fix>fixed</td></tr>
+<tr><td><code>lf sync</code> after the parent advances</td><td><code>Merging origin/qa/426ffa-parent-work... Synced onto origin/qa/426ffa-parent-work.</code> Child history merges the parent's second commit over its own.</td><td class=ok>works</td></tr>
+<tr><td>Parent branch diverged from origin (1 origin-only commit, 2 local-only)</td><td>New placement: <code>Task ddbb1b stacks on de2900: origin/qa/de2900-diverged-parent has diverged, so this Task bases on it and leaves out 2 local de2900 commits not on origin.</code> Child based on origin's tip; origin not forced (still <code>5b20e95</code>).</td><td class=ok>works</td></tr>
+<tr><td>Already-placed Task restacked onto the diverged parent</td><td><code>Task 76e4dd stacks on de2900 (qa/de2900-diverged-parent); origin/… has diverged, … leaves out 2 local de2900 commits not on origin. Checkout and GitHub are unchanged; run `lf sync` in … to integrate it.</code> Then <code>lf sync</code> merged origin's parent.</td><td class=ok>works</td></tr>
+<tr><td>Three children on one parent</td><td>All share one parent row (<code>pr_4b1fba…</code>); no duplicate rows.</td><td class=ok>works</td></tr>
+<tr><td>Parent board after stacking</td><td><code>lf task show</code> on the parent: <code>pr.phase: working</code>, <code>publication: null</code>, section <code>working</code>, recommended action <code>run</code>, same as before.</td><td class=ok>works</td></tr>
+<tr><td>Origin rejects the push (pre-receive hook)</td><td>Error carries git's message:
+<pre>Error: failed to push stack parent 9b874d's branch qa/9b874d-rejected-parent to origin: git push --set-upstream origin qa/9b874d-rejected-parent failed: remote: QA hook: pushes are frozen
+ ! [remote rejected] qa/9b874d-rejected-parent -> qa/9b874d-rejected-parent (pre-receive hook declined)</pre>
+No parent row recorded, child not placed. Retrying after removing the hook pushed, recorded and placed.</td><td class=ok>works</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p><code>e6c5971f1</code> Say when stacking pushes the parent branch. <code>record_stack_parent</code>
+returned a note only for a diverged branch, so the push that the brief's first user (LOO-820 on LOO-824)
+depends on happened silently while <code>--explain</code> predicted it. It now returns
+<code>StackParentBranch::note</code> for every state; the run prints:</p>
+<pre>Task 5bcb7e stacks on 0c90e4: stacking pushes 0c90e4's branch qa/0c90e4-fresh-parent to origin.</pre>
+<p>A second child on the now-current parent prints nothing. <code>cargo test -p loopflow --lib stack</code> (5 pass)
+and <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> clean after the change.</p>
+
+<h2>Still rough, worst first</h2>
+<ol>
+<li><code>--explain</code> reads only already-fetched refs, so with a diverged origin it predicted
+"stacking pushes …" and the real run then reported "has diverged … leaves out 2 commits". Documented
+("from refs already fetched"); a person reading explain gets the wrong forecast until they fetch.</li>
+<li>Not this change: <code>lf checkout</code> leaves an untracked <code>.gitignore</code> (<code>.lf/prompts/</code>) in
+every new checkout, and <code>lf sync</code> commits it as "Checkpoint edits before syncing onto …". The merge
+commit message is <code>Merge &lt;sha&gt;</code>.</li>
+<li>Error quoting is uneven: the unknown-parent error quotes the identifier, the unplaced one doesn't.</li>
+</ol>
+
+<h2>Not reached</h2>
+<ul>
+<li>A parent with a real GitHub PR, and the child's PR targeting the parent branch on GitHub: needs a GitHub remote.</li>
+<li><code>lf task run --stack-on</code> through a provider-backed Graph: the same <code>prepare_task</code> path was exercised via <code>lf checkout</code>; no step ran.</li>
+<li>Checkout warmed a Codex primary conversation per Task (unauthenticated); all 44 recorded processes in the private store were stopped afterwards.</li>
+</ul>

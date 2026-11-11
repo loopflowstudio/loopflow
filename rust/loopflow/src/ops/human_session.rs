@@ -58,17 +58,19 @@ pub enum SessionTarget<'a> {
 }
 
 impl<'a> SessionTarget<'a> {
+    /// A Session id selects that conversation even beside `--task` or
+    /// `--wave`; naming the Work there only makes the command managed.
     pub fn from_selectors(
         id: Option<&'a str>,
         task: Option<&'a str>,
         wave: Option<&'a str>,
     ) -> Result<Self> {
         match (id, task, wave) {
-            (None, None, None) => Ok(Self::Context),
-            (Some(id), None, None) => Ok(Self::Session(id)),
+            (_, Some(_), Some(_)) => bail!("select one Task or Wave"),
+            (Some(id), _, _) => Ok(Self::Session(id)),
             (None, Some(task), None) => Ok(Self::Task(task)),
             (None, None, Some(wave)) => Ok(Self::Wave(wave)),
-            _ => bail!("select one Session, Task or Wave target"),
+            (None, None, None) => Ok(Self::Context),
         }
     }
 }
@@ -955,6 +957,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
+    managed: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -1094,7 +1097,7 @@ pub(crate) async fn open(
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, managed).await?;
         }
         return surface(store, session).await;
     }
@@ -1105,7 +1108,7 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, managed).await?;
         }
         return Ok(surface);
     };
@@ -1122,7 +1125,11 @@ pub(crate) async fn open(
                 session.provider.as_deref().unwrap_or("provider")
             ));
         }
-        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
+        crate::lf::commands::util::resume_session(
+            session.input_key()?,
+            &provider_session,
+            managed,
+        )?;
     }
     Ok(result)
 }
@@ -1137,6 +1144,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
+    managed: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1213,7 +1221,7 @@ pub(crate) async fn open_without_replacing(
     }
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock)
+        return open_waiting_locked(store, session, lock, managed)
             .await
             .map(|()| record);
     };
@@ -1238,6 +1246,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
+        managed,
     )?;
     Ok(record)
 }
@@ -1302,9 +1311,10 @@ async fn fork(
 
 /// Preparation has already mutated the Session. Only its resulting identity
 /// crosses to the owner; opening it reacquires the lock and reads current state.
+/// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
     if !crate::transport::delegate_prepared_session(id, json)? {
-        open_waiting(store, id).await?;
+        open_waiting(store, id, false).await?;
     }
     Ok(())
 }
@@ -1350,7 +1360,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1362,13 +1372,14 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock).await
+    open_waiting_locked(store, session, launch_lock, managed).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
+    managed: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1379,7 +1390,13 @@ async fn open_waiting_locked(
         session
     };
     let token = session_token(&session);
-    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
+    if resume_native_session(
+        store,
+        session.input_key()?,
+        &token,
+        &mut launch_lock,
+        managed,
+    )? {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
@@ -1906,6 +1923,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
+    managed: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1941,6 +1959,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
+        managed,
     )?;
     Ok(true)
 }

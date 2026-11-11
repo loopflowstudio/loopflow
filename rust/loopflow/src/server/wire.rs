@@ -105,6 +105,76 @@ pub enum ServerOperation {
         session: crate::id::LfSessionId,
         owner_lf_process_id: Option<LfProcessId>,
     },
+    /// A provider hook at a turn or tool boundary. The server records what the
+    /// boundary says (the native turn, the acknowledged input, `gap`) and
+    /// answers the Session's pending steers. At `stop` it answers first, then
+    /// refreshes planning and applies a pending Session move.
+    #[serde(rename = "session.boundary")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
+    SessionBoundary(SessionBoundary),
+}
+
+/// What a hook says at a turn or tool boundary.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionBoundary {
+    pub moment: BoundaryMoment,
+    /// The Session's context delivery file.
+    pub delivery: std::path::PathBuf,
+    /// The provider context the launch gave the agent; null for a
+    /// conversation lf did not start (a Codex app-server thread), whose
+    /// `stop` only refreshes planning.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub adapter: Option<crate::steer::SteerAdapter>,
+    /// The JSON the provider sent the hook, unchanged.
+    #[schemars(with = "Untyped")]
+    pub callback: serde_json::Value,
+    /// The hook's open recording gap; the server writes it into the
+    /// Session's history as one `store-gap` observation.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub gap: Option<BoundaryGap>,
+    /// Steer batches from earlier answers that this conversation's hooks
+    /// printed and have not yet told the server about.
+    pub printed: Vec<crate::id::SteerBatchId>,
+}
+
+/// Where in a native conversation a hook fired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryMoment {
+    Start,
+    Compact,
+    Tool,
+    Stop,
+}
+
+/// Boundaries the hook could not record, in Unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoundaryGap {
+    pub first: i64,
+    pub last: i64,
+}
+
+/// What `session.boundary` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionBoundaryAnswer {
+    /// The next pending steers; null when none are ready.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub steers: Option<SteerBatch>,
+    /// An earlier answer's batch is unconfirmed and its hook may still print
+    /// it: the hook asks again at its next tool boundary.
+    pub waiting: bool,
+}
+
+/// Steers rendered for the provider. They count as delivered once a later
+/// request lists `batch` in `printed`; unconfirmed, they are answered again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SteerBatch {
+    pub batch: crate::id::SteerBatchId,
+    pub text: String,
 }
 
 /// What `session.attach` answers: a ticket that opens one bridge.
@@ -296,6 +366,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/task_interrupt.json"),
             include_str!("../../tests/fixtures/dto/server/task_wait.json"),
             include_str!("../../tests/fixtures/dto/server/session_steer.json"),
+            include_str!("../../tests/fixtures/dto/server/session_boundary.json"),
             include_str!("../../tests/fixtures/dto/server/session_status.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
@@ -350,6 +421,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../tests/fixtures/dto/server/task_held.json"),
             include_str!("../../tests/fixtures/dto/server/session_steered.json"),
+            include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
             include_str!("../../tests/fixtures/dto/server/repo_ci_report.json"),

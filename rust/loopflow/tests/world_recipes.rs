@@ -25,6 +25,8 @@ fn success(output: Output) -> String {
 
 /// A built World and the commands that read it.
 struct Built {
+    /// The World's Task conversations start only beside its Machine server.
+    _server: loopflow_test_support::MachineServer,
     root: tempfile::TempDir,
     world: PathBuf,
     env: Value,
@@ -39,14 +41,23 @@ impl Built {
         )
         .unwrap();
         let world = root.path().join("world");
-        let env = serde_json::from_str(&success(
+        let env: Value = serde_json::from_str(&success(
             clean(env!("CARGO_BIN_EXE_lf-world"), root.path())
                 .args(["build", recipe, world.to_str().unwrap()])
                 .output()
                 .unwrap(),
         ))
         .unwrap();
-        Self { root, world, env }
+        let server = loopflow_test_support::MachineServer::start(
+            env!("CARGO_BIN_EXE_lf"),
+            env["LF_HOME"].as_str().unwrap().as_ref(),
+        );
+        Self {
+            _server: server,
+            root,
+            world,
+            env,
+        }
     }
 
     fn command(&self, args: &[&str]) -> Command {

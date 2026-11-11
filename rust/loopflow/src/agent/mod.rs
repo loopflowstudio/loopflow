@@ -188,6 +188,10 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
+    /// Whether a Task or Wave command launched this (`Cli::names_work`): it
+    /// needs the Machine server, and a headless run gets every hook. A native
+    /// terminal launch gets every hook either way.
+    pub managed: bool,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -1760,7 +1764,7 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(
-        session_environment(launch, process.context_file.as_deref())
+        session_environment(launch, process.context_file.as_deref(), true)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
     );
     if let Some(context) = launch
@@ -1864,7 +1868,14 @@ fn _run_agent_once(
     let admitted_runtime = runtime.ok_or_else(|| {
         CoreError::ExecutionFailed("AgentProcess launch has no admitted runtime".into())
     })?;
-    let result = run_interactive(cmd, process.timeout, admitted_runtime, activation, title);
+    let result = run_interactive(
+        cmd,
+        process.timeout,
+        admitted_runtime,
+        activation,
+        title,
+        launch.managed,
+    );
     result.map(|result| AgentAttempt::Finished {
         result,
         can_failover: false,
@@ -1877,9 +1888,10 @@ fn spawn_agent_child(
     cmd: Command,
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
+    managed: bool,
 ) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
     let child = runtime
-        .spawn_native_agent(cmd)
+        .spawn_native_agent(cmd, managed)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
@@ -1891,9 +1903,10 @@ fn run_interactive(
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
     mut title: Option<crate::terminal_title::TerminalTitle>,
+    managed: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
-    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, managed)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),

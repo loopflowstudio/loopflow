@@ -130,7 +130,7 @@ Before gate, regenerate the portable architecture page after edits to
 `docs/dev/index.md` or its rendering, following [website/README.md](../website/README.md#testing).
 Include `docs/dev/index.html` in the change; the website suite checks it for drift.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
-(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
+(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
 unless the diff reaches them; together they exceed the 2400 s Rust budget, and
 CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
 the union first: `(test(a::) | test(b::)) - test(slow)`; without the
@@ -144,6 +144,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## macOS traps
 
+- The runner stops at sustained `syspolicyd` pressure, which can last as long
+  as other checkouts keep compiling. Run its printed Rust plan by hand (build,
+  the `nextest` line with the same `-E` filter, clippy), then each suite's
+  command, and record that the runner's pressure stop was bypassed.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.

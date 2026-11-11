@@ -30,7 +30,8 @@ pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
 }
 
 /// Survives attachment-only handoff; replacement creates another capability.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SteerAdapter {
     pub session: String,
     pub agent_process_id: crate::id::AgentProcessId,

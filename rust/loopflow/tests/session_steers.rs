@@ -4,27 +4,28 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 
-#[test]
-fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let _task =
-        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let account_home = home.path().join("accounts/claude/fixture");
+/// `lf skill startup-proof` on a stand-in Claude that runs its SessionStart
+/// hook, then answers. With `task` the command names the Task, so the launch
+/// is managed; without, it is a bare `lf` in the checkout and the stand-in
+/// expects only the two context hooks and no steer capability. The stand-in
+/// expects a steer in the hook's block when `expect-steer` exists under `home`.
+fn launch_startup_proof(
+    repo: &TestRepo,
+    home: &std::path::Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    task: Option<&str>,
+) -> std::process::Output {
+    launch_startup_proof_through(repo, home, store, env!("CARGO_BIN_EXE_lf").as_ref(), task)
+}
+
+/// A connected managed Claude account, which Task work launches as.
+fn connect_fixture_account(home: &std::path::Path, store: &loopflow::store::sqlite::SqliteStore) {
+    let account_home = home.join("accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let steer = store
-        .save_repository_steer(
-            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
-            "Fixture author",
-            &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
-        )
-        .unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
         .upsert_provider_account(&loopflow::store::ProviderAccount {
@@ -53,7 +54,21 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
             updated_at: now,
         })
         .unwrap();
-    let bin = home.path().join("bin");
+}
+
+/// The same launch, with `lf_bin` as the `lf` it runs for its own commands.
+fn launch_startup_proof_through(
+    repo: &TestRepo,
+    home: &std::path::Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    lf_bin: &std::path::Path,
+    task: Option<&str>,
+) -> std::process::Output {
+    if task.is_none() {
+        fs::write(home.join("expect-bare"), "").unwrap();
+    }
+    connect_fixture_account(home, store);
+    let bin = home.join("bin");
     fs::create_dir(&bin).unwrap();
     // Signing the shared Claude home in goes through the Keychain on macOS.
     fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
@@ -66,7 +81,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     )
     .unwrap();
     let clipboard = format!("CLIPBOARD_START{}CLIPBOARD_END", "界".repeat(50_000));
-    fs::write(home.path().join("clipboard"), &clipboard).unwrap();
+    fs::write(home.join("clipboard"), &clipboard).unwrap();
     for name in ["pbpaste", "xclip", "xsel"] {
         let path = bin.join(name);
         fs::write(&path, "#!/bin/sh\ncat \"$LF_HOME/clipboard\"\n").unwrap();
@@ -89,13 +104,21 @@ with open(lock, 'r+') as fence:
     settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
     hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
     arguments = shlex.split(hook)
-    adapter = json.loads(os.environ['LF_PROVIDER_CONTEXT'])
-    assert adapter['agent_process_id'] == caller['agent_process_id']
+    if (home / 'expect-bare').exists():
+        assert 'LF_PROVIDER_CONTEXT' not in os.environ and 'LF_STEER_SEEN' not in os.environ
+        assert list(settings['hooks']) == ['SessionStart'], list(settings['hooks'])
+        commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
+        assert commands == ['start', 'compact'], commands
+    else:
+        adapter = json.loads(os.environ['LF_PROVIDER_CONTEXT'])
+        assert adapter['agent_process_id'] == caller['agent_process_id']
+        assert 'Stop' in settings['hooks'] and 'PostToolUse' in settings['hooks']
     output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
     context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
     assert len(context_text.encode()) <= 10000
-    assert 'STARTUP_DIRECTION' in context_text
-    assert '[excerpt; full source above]' in context_text
+    if (home / 'expect-steer').exists():
+        assert 'STARTUP_DIRECTION' in context_text
+        assert '[excerpt; full source above]' in context_text
     (home / 'startup-complete').touch()
 context = json.loads(sys.stdin.readline())
 query = json.loads(sys.stdin.readline())
@@ -112,17 +135,18 @@ print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-
 sys.stdin.read()
 "#).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
-        .env("HOME", home.path())
-        .env("LF_HOME", home.path())
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("LF_BIN", lf_bin)
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
         // The Keychain item lf signs the shared home in with names its user.
         .env("USER", "fixture")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("GIT_ALLOW_PROTOCOL", "file")
         .current_dir(repo.path())
+        .args(task.into_iter().flat_map(|task| ["--task", task]))
         .args([
             "-b",
             "-a",
@@ -134,15 +158,40 @@ sys.stdin.read()
         ])
         .stdin(Stdio::null())
         .output()
-        .unwrap();
+        .unwrap()
+}
+
+fn assert_launched(output: &std::process::Output, home: &std::path::Path) {
     assert!(
         output.status.success(),
         "{}\n{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
-        fs::read_to_string(home.path().join("provider-errors")).unwrap_or_default()
+        fs::read_to_string(home.join("provider-errors")).unwrap_or_default()
     );
-    assert!(home.path().join("startup-complete").exists());
+    assert!(home.join("startup-complete").exists());
+}
+
+#[test]
+fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let steer = store
+        .save_repository_steer(
+            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            "Fixture author",
+            &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
+        )
+        .unwrap();
+    fs::write(home.path().join("expect-steer"), "").unwrap();
+    // The startup hook asks the Machine server for the steer.
+    let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
+    let output = launch_startup_proof(&repo, home.path(), &store, Some("INF-123"));
+    assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (native, answer, turn): (String, String, String) = db
         .query_row(
@@ -164,7 +213,8 @@ sys.stdin.read()
         .unwrap();
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
-    assert_eq!(receipts.items[0].evidence, "emitted");
+    // No later hook ran to say the startup hook printed it.
+    assert_eq!(receipts.items[0].evidence, "uncertain");
     assert_eq!(receipts.items[0].excerpted, Some(true));
     assert_eq!(
         store
@@ -173,6 +223,235 @@ sys.stdin.read()
             .text,
         steer.text
     );
+}
+
+/// A bare `lf <skill>` in a Task's checkout needs no Machine server: it
+/// counts toward the Task, its two context hooks hand the provider its block
+/// from checkout files, and nothing asks a server, so no gap is logged.
+#[test]
+fn a_bare_skill_in_a_task_checkout_gets_context_hooks_and_asks_no_server() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let output = launch_startup_proof(&repo, home.path(), &store, None);
+    assert_launched(&output, home.path());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (counted, source): (String, String) = db
+        .query_row(
+            "SELECT task_id,work_source FROM agent_sessions WHERE provider_thread='startup-native'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(counted, task.task.id.to_string());
+    assert_eq!(source, "checkout");
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap_or_default();
+    assert!(!log.contains("Loopflow server unavailable"), "{log}");
+}
+
+/// Task work starts only with the Machine server: with none running and an
+/// installation that cannot start one, the launch stops before the agent and
+/// says which command brings the server up.
+#[test]
+fn a_task_launch_with_no_machine_server_fails_naming_it() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    // The selected installation's `lf install server` reaches no supervisor.
+    let lf = home.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then\n  echo 'no supervisor here' >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = launch_startup_proof_through(&repo, home.path(), &store, &lf, Some("INF-123"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Loopflow server is not running")
+            && stderr.contains("no supervisor here")
+            && stderr.contains("lf install server"),
+        "{stderr}"
+    );
+    assert!(!home.path().join("startup-complete").exists());
+}
+/// A Task checkout with a connected account, a Claude stand-in that marks
+/// `provider-started` (and `provider-resumed` for `--resume`), and an `LF_BIN`
+/// whose `lf install server` fails, so no Machine server can start.
+struct InteractiveTask {
+    repo: TestRepo,
+    home: tempfile::TempDir,
+    lf: std::path::PathBuf,
+}
+
+impl InteractiveTask {
+    fn new() -> Self {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let _task =
+            support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        connect_fixture_account(home.path(), &store);
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+        fs::write(
+            bin.join("claude"),
+            "#!/bin/sh
+[ \"$1\" = --version ] && { echo fixture; exit 0; }
+touch \"$LF_HOME/provider-started\"
+for arg in \"$@\"; do [ \"$arg\" = --resume ] && touch \"$LF_HOME/provider-resumed\"; done
+exit 0\n",
+        )
+        .unwrap();
+        let lf = home.path().join("lf");
+        fs::write(
+            &lf,
+            format!(
+                "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then\n  echo 'no supervisor here' >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+                env!("CARGO_BIN_EXE_lf")
+            ),
+        )
+        .unwrap();
+        for path in [bin.join("security"), bin.join("claude"), lf.clone()] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        Self { repo, home, lf }
+    }
+
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        self.run_program(env!("CARGO_BIN_EXE_lf"), args)
+    }
+
+    fn run_program(
+        &self,
+        program: impl AsRef<std::ffi::OsStr>,
+        args: &[impl AsRef<std::ffi::OsStr>],
+    ) -> std::process::Output {
+        Command::new(program)
+            .env_clear()
+            .env("HOME", self.home.path())
+            .env("LF_HOME", self.home.path())
+            .env("LF_BIN", &self.lf)
+            .env("CLAUDE_CONFIG_DIR", self.home.path().join(".claude"))
+            .env("USER", "fixture")
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", self.home.path().join("bin").display()),
+            )
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .current_dir(self.repo.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    /// A Task whose Claude conversation launched beside a Machine server that
+    /// has since stopped.
+    fn launched_then_stopped() -> Self {
+        let task = Self::new();
+        let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
+        let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        drop(server);
+        task
+    }
+
+    /// The Session id and `open_argv` that `args --prepare --json` returns.
+    fn prepared(&self, args: &[&str]) -> (String, Vec<String>) {
+        let output = self.run(&[args, &["--prepare", "--json"]].concat());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (
+            record["id"].as_str().unwrap().to_string(),
+            serde_json::from_value(record["open_argv"].clone()).unwrap(),
+        )
+    }
+
+    fn marked(&self, name: &str) -> bool {
+        self.home.path().join(name).exists()
+    }
+}
+
+fn assert_names_missing_server(output: &std::process::Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Loopflow server is not running") && stderr.contains("lf install server"),
+        "{stderr}"
+    );
+}
+
+/// The same holds for a terminal launch: `lf -i --task` with Claude, whose
+/// native command carries no launch configuration, still checks the server.
+#[test]
+fn an_interactive_task_launch_with_no_machine_server_fails_naming_it() {
+    let task = InteractiveTask::new();
+    assert_names_missing_server(
+        &task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]),
+    );
+    assert!(!task.marked("provider-started"));
+}
+
+/// A Task resume is managed as its launch was: `lf -i --task X resume` of the
+/// Task's recorded Claude conversation, after the server stopped, fails naming
+/// it instead of continuing unrecorded.
+#[test]
+fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
+    let task = InteractiveTask::launched_then_stopped();
+    assert_names_missing_server(&task.run(&["-i", "--task", "INF-123", "resume"]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop opens a Task's conversation by preparing it, then running the
+/// returned `open_argv` in a terminal. A prepare naming the Task returns a
+/// command that resumes managed, so with the server stopped it fails naming it,
+/// as `lf resume --task` does.
+#[test]
+fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
+    let task = InteractiveTask::launched_then_stopped();
+    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    assert!(
+        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop's Task workspace reopens a pane that already has a Session by its
+/// id, naming the Task beside it: the id selects, the Task makes it managed.
+#[test]
+fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
+    let task = InteractiveTask::launched_then_stopped();
+    let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
+    assert!(
+        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
+    assert!(!task.marked("provider-resumed"));
 }
 
 #[test]
@@ -184,7 +463,17 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
 
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    // The command names the Task, so the launch is managed: it carries a steer
+    // capability and starts beside the Machine server its hooks call.
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
+    connect_fixture_account(home.path(), &store);
+    // Signing the shared Claude home in goes through the Keychain on macOS.
+    let security = home.path().join("security");
+    fs::write(&security, support::FAKE_SECURITY).unwrap();
+    fs::set_permissions(security, fs::Permissions::from_mode(0o755)).unwrap();
     let provider = home.path().join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
 import json, os, pathlib, sys, time
@@ -211,9 +500,11 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .env("LF_HOME", home.path())
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("USER", "fixture")
         .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
         .current_dir(repo.path())
-        .args(["-v", "-b", "-a", "claude", ":", "Hold this conversation"])
+        .args(["--task", "INF-123", "-v", "-b", "-a", "claude"])
+        .args([":", "Hold this conversation"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(fs::File::create(&startup_log).unwrap())
@@ -294,6 +585,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
+    // Hooks open no store: the Machine server records and delivers for them.
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -336,9 +628,10 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         String::from_utf8_lossy(&received.stderr)
     );
     assert!(String::from_utf8_lossy(&received.stdout).contains("HANDOFF_DIRECTION"));
+    // Printed; the conversation's next hook tells the server so.
     assert_eq!(
         store.session_steers(session, 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
     let pending = store
         .save_session_steer(session, "Fixture author", "NEXT_DIRECTION")
@@ -364,7 +657,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     let delivery: serde_json::Value =
         serde_json::from_slice(&fs::read(delivery_path).unwrap()).unwrap();
     fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}",
-        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":""}),
+        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true}),
         serde_json::to_string(delivery_path).unwrap(),
         include_str!("../src/harness/context_opencode.js"))).unwrap();
     let probe = home.path().join("transform-proof.mjs");
@@ -421,6 +714,15 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
             .attempt,
         0
     );
+    assert_eq!(
+        page.items
+            .iter()
+            .find(|row| row.steer.id == direction.id)
+            .unwrap()
+            .evidence,
+        "emitted",
+        "a later hook named the batch the first one printed"
+    );
     store
         .save_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")
         .unwrap();
@@ -461,6 +763,47 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
         String::from_utf8_lossy(&after_clear.stderr)
     );
     assert!(String::from_utf8_lossy(&after_clear.stdout).contains("AFTER_CLEAR_DIRECTION"));
+    // With the server stopped the tool completes without its steer, and the
+    // conversation keeps one recording gap until the server answers again.
+    drop(server.take());
+    store
+        .save_session_steer(session, "Fixture author", "WAITED_DIRECTION")
+        .unwrap();
+    let unanswered = serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"PostToolUse","tool_use_id":"unanswered-tool"});
+    for _ in 0..2 {
+        let missed = hook(unanswered.clone());
+        assert!(
+            missed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&missed.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&missed.stdout).contains("WAITED_DIRECTION"));
+    }
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+    let down = "recording gap: session boundary: Loopflow server unavailable";
+    assert_eq!(log.matches(down).count(), 1, "{log}");
+    let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
+    let answered = hook(serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"PostToolUse","tool_use_id":"answered-tool"}));
+    assert!(String::from_utf8_lossy(&answered.stdout).contains("WAITED_DIRECTION"));
+    let gaps: i64 = db
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1
+             AND json_extract(payload,'$.source')='store-gap'",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(gaps, 1);
+    let marker = {
+        use sha2::Digest;
+        home.path().join("context-deliveries").join(format!(
+            "{:x}.store-gap",
+            sha2::Sha256::digest(b"cleared-native")
+        ))
+    };
+    assert!(!marker.exists(), "the answered hook closes its gap");
     let selected: String = db
         .query_row(
             "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events

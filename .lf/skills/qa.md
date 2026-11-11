@@ -310,6 +310,56 @@ establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
 Use different names for a headless Graph and its skill so Graph resolution does
 not treat the step as a recursive Graph call.
 
+## Turn and tool hooks
+
+A Session launched in a Task's checkout is Task work. Headless (`-b`) there
+confines the agent and needs a managed login (`claude=<email>`), which a private
+home cannot get without real OAuth; launch interactively (`-i`) in a PTY
+instead. `lf account connect claude --api-key` with a placeholder
+`ANTHROPIC_API_KEY` satisfies account selection for that launch. A stand-in
+`claude` on `PATH` can read `--settings` and run each hook command exactly as
+installed, with Claude's callback JSON on stdin; release its turns with marker
+files so steers and server changes can happen between them. Run `lf` commands
+from the disposable repository: from inside this checkout they resolve
+loopflow's Linear planning.
+
+Managed is decided by the command: `--task` or `--wave` gets turn hooks and
+the server check, on a launch or a resume (`lf -i --task <id> resume`,
+`lf session resume <session> --task <id>`, and the `open_argv` that
+`lf session resume --prepare --json --task <id>` returns for Desktop). Plain
+`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and
+`lf -i resume <session>` keep turn hooks without the check, so they never
+start a stopped server. Driver scripts that delete their marker directory
+must do it before waiting on it, or a stale `provider.jsonl` releases a turn
+too early. A managed launch
+with the server down registers it before the agent starts: check
+`launchctl list | grep <label>` after launch, not only the hooks' output. Real OpenCode
+answers with no login (its free `opencode/big-pickle` model), so
+`lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
+its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
+The model runs tools in the checkout, so keep it disposable and stop the
+`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model
+key; a private home has none.
+
+A Task launch with no server runs `lf install server`, which registers
+`com.loopflow.server.<hash>` for the private home; boot it out with the label in
+`$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
+server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
+delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
+`store-gap` row in `lf session history <id>`. Read the store with
+`sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+A private home that applied an earlier draft of the branch's migration refuses
+to open (checksum mismatch); move it aside and start a fresh one.
+
+Boundary query plans: copy the Machine's store with
+`sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare
+`schema_migrations` with `store/migrations/`, and apply only the branch's
+missing migration SQL to the copy with `sqlite3`. Never open the copy with
+`lf`: recovery acts on the real PIDs and worktrees it records. Dump `TRACED`
+from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
+temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
+on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with

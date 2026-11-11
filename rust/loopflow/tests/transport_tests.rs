@@ -17,7 +17,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::program_status;
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -188,6 +188,10 @@ impl Fixture {
             unsafe { libc::geteuid() },
             &digest[..16]
         ))
+    }
+    /// The Machine server under this home, stopped when dropped.
+    fn machine_server(&self) -> MachineServer {
+        MachineServer::start(env!("CARGO_BIN_EXE_lf"), self.home.path())
     }
     #[track_caller]
     fn viewer(&self, id: &str, control: bool) -> Viewer {
@@ -3204,6 +3208,8 @@ fn quiet_unviewed_conversations_ignore_the_obsolete_detached_limit() {
 #[test]
 fn retained_hooks_survive_upgrade() {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
@@ -3339,6 +3345,8 @@ fn unanswering_superseded_owner_preserves_pending_turn_and_queued_input() {
 
 fn continue_session_after_upgrade(unanswering: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time, tty
@@ -3566,6 +3574,8 @@ fn native_background_watches_survive_until_settlement() {
 
 fn native_work_survives_until_settlement(background: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time

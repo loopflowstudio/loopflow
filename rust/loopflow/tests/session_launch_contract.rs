@@ -5,19 +5,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
 struct Fixture {
+    /// Task and Wave launches start their agent only once it answers.
+    _server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new(provider: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
         let fixture = Self {
+            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),
-            home: tempfile::tempdir().unwrap(),
+            home,
         };
         fs::create_dir(fixture.home.path().join("bin")).unwrap();
         fixture.repo.create_file(
@@ -1585,17 +1589,13 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
     assert_eq!(prepare(&linked, &["resume", id])["id"], id);
+    // Beside an id, a Task or Wave only makes the resume managed: the id
+    // still selects, whatever Work the flag names.
     for argv in [
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "resume", id],
     ] {
-        assert!(!fixture
-            .command()
-            .args(argv)
-            .output()
-            .unwrap()
-            .status
-            .success());
+        success(&fixture.command().args(argv).output().unwrap());
         assert_eq!(count(), before);
     }
 }

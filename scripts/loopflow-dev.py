@@ -67,7 +67,7 @@ DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8-ios1.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
 GHOSTTY_VT_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos",
@@ -255,6 +255,7 @@ def cmd_ghostty_build() -> int:
             "-Dtest-filter=terminal contrast",
             "-Dtest-filter=terminal feedback",
             "-Dtest-filter=renderer.cell",
+            "-Dtest-filter=external io",
         ],
         cwd=source,
         check=False,

@@ -74,7 +74,7 @@ def build(work: Path) -> None:
     manifest = json.loads((app_source / "third_party/manifest.json").read_text())
     ghostty = work / ("ghostty-" + manifest["ghostty"]["revision"])
     framework = app_source / "swift/GhosttyKit.xcframework"
-    library = next(framework.glob("*/libghostty.a"))
+    library = next(framework.glob("macos*/libghostty.a"))
     slices = []
     for arch in ["arm64", "x86_64"]:
         output = work / arch

@@ -1,6 +1,7 @@
 # Loopflow for iOS
 
 ```sh
+uv run python scripts/loopflow-dev.py ghostty-build   # once: the terminal's framework
 xcodegen generate --spec swift/ios.yml
 open swift/LoopflowMobile.xcodeproj
 ```
@@ -43,12 +44,27 @@ phone stops drawing and offers **Continue here**.
 Type or dictate in **Reply** and send: the text arrives as one paste followed by
 Return. The software keyboard never types into the terminal itself, so touching
 the screen sends nothing. The arrows button shows Escape, Tab, the arrow keys and
-Return for provider menus. A hardware keyboard types directly.
+Return for provider menus. A hardware keyboard types directly once you tap the
+terminal.
 
 Scrolling up holds your place while output arrives; **Latest** returns to the
 end. Leaving the app drops the connection and the Session keeps running;
 returning reconnects. A stopped Session offers **Start it**. Nothing typed is
 ever sent twice: after an uncertain send the app says so and waits.
+
+## Terminal
+
+Ghostty draws the Session, the same renderer as Desktop, in the theme's terminal
+colours and JetBrains Mono 12 scaled by Dynamic Type. No process runs on the
+phone: the bytes the Machine sends are fed to the surface, and what Ghostty
+would write back (keys, and its answers to a program's queries such as
+`OSC 7501;?`) goes to the Machine. Ghostty encodes the key row and hardware keys
+for the modes the program set, so arrows follow application-cursor mode.
+
+The framework is GhosttyKit with the iOS slices from
+[`0006-ios-external-io.patch`](../GhosttyKitPatches/README.md). The project
+links the local build at `swift/.build/local/GhosttyKit.xcframework`; the
+Simulator slice is arm64.
 
 ## Files
 
@@ -58,7 +74,8 @@ ever sent twice: after an uncertain send the app says so and waits.
 | `RemoteMobileClient.swift`, `RemoteTaskObservation.swift` | Requests, the live Task reading, a Session attachment |
 | `OwnerStream.swift` | Decoder for the owner protocol in `rust/loopflow/src/transport/wire.rs` |
 | `SessionLink.swift` | The phone's hold on one Session |
-| `SessionTerminal.swift`, `SessionView.swift` | Terminal, reply field and keys |
+| `GhosttySurface.swift` | Ghostty's app and one terminal surface fed with the Session's bytes |
+| `SessionTerminal.swift`, `SessionView.swift` | Terminal scrolling, reply field and keys |
 | `TaskListView.swift` | Repository, filter, search and the Task list |
 | `TaskWorkspaceView.swift` | A Task's conversation with its Brief and Changes |
 | `MobileTaskCreation.swift`, `MobileNewTaskView.swift` | New Task |

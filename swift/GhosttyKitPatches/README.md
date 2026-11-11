@@ -35,6 +35,36 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## iOS and embedder-supplied bytes
+
+`0006-ios-external-io.patch` lets the phone app draw a Session with Ghostty's
+own renderer. The framework gains `ios-arm64` and `ios-arm64-simulator` slices
+beside the macOS one, and a surface can run with no command behind it.
+
+Set `io_write_cb` in `ghostty_surface_config_s` and the surface starts nothing.
+Feed what the remote terminal printed with `ghostty_surface_process_output`;
+everything the terminal would write to a pty (keys, pastes, replies to queries
+such as `OSC 7501;?`) arrives at the callback on the IO thread with the surface
+userdata. Copy the bytes before returning. A surface without the callback runs
+its command on a pty as before. `ghostty_surface_mode` reads one terminal mode
+by number, which is how the phone knows whether a reply is pasted bracketed.
+
+| Change | Why |
+| --- | --- |
+| `termio/External.zig`, `backend.zig` | A second IO backend beside `exec`; no pty, no read thread |
+| `Config.zig`, `GhosttyXCFramework.zig`, `MetallibStep.zig` | Upstream builds only libghostty-vt for iOS; the runtime and Metal renderer still compile there |
+| `pkg/translate-c/build.zig` | Aro enables Blocks only for macOS; the iOS SDK headers use them |
+| `input/keycodes.zig` | iOS key codes are USB keyboard usages (`0x070000 \| UIKey.keyCode`) |
+| `font/face.zig` | A UIKit point is 72 to the inch, as on macOS, so `font-size` means points |
+
+The Simulator slice is arm64 only. `zig build test -Dtest-filter='external io'`
+covers the backend's writes; `LoopflowiOSTests/SessionTerminalTests` drives a
+real surface on the Simulator: grid size, the status query reply, cursor-key
+modes, held scroll position and reset. The build writes
+`GhosttyKit-a60e9e2-lf8-ios1.xcframework.zip`; until it is published and
+`Package.swift` names it, the iOS project links `swift/.build/local/` and Desktop
+stays on the published lf7 archive, which lacks this patch.
+
 ## Theme readback
 
 `0005-terminal-color-readback.patch` extends `ghostty_config_get` to read RGB

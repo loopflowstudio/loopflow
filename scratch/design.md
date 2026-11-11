@@ -16,11 +16,9 @@ reservations.
 The server tree is unchanged from the previously inspected
 `3f1a7d434736779139695ba4c91ebf8245c4e121`.
 
-At November 11 04:21 UTC, GitHub reported PR #1812 open and unmerged at
-that head, with no auto-merge; main was
-`922830b0be1c8030c18e467269c7468a1a33f8d3`.
-At 04:54 UTC, GitHub still reports that PR open and unmerged at the same head.
-Freshly fetched main is now `b18387f17430676b3435b9e48740be9586ed7625`,
+At November 11 05:30 UTC, GitHub still reports PR #1812 open and unmerged
+at that head. Freshly fetched main is now
+`0766e9cbfd5e01f1c244f0fb3cdecfe8aa6fad9c`,
 still without `server/mobile.rs` or `server/ticket.rs`.
 `lf task status LOO-718 --json` still places it at `feature`'s `demo` step,
 with PR settlement not armed.
@@ -63,7 +61,9 @@ planned/local-only wording and describe local/remote admission binding.
 Keep exact-owner selection and recovery together for both transports; keep
 the running-owner prerequisite and missing-owner error beside the remote example.
 The phone overview keeps connection steps; the server README owns protocol
-details and shared owner recovery, avoiding duplicate contracts. Desktop opening
-results are in `questions.md`.
+details and shared owner recovery, avoiding duplicate contracts. The inspected
+transport speaks revision 5: update the remote example's `hello`/`welcome`
+anchor from revision 4 when integrating it. Desktop opening results are in
+`questions.md`.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

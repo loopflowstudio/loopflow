@@ -7,7 +7,7 @@ and November 11 00:26, 01:02 and 02:12 UTC, the same command failed:
 `Error: Desktop did not answer within 10 seconds. Inspect again before retrying.`
 Visual inspection remains for QA. No product question is open.
 
-At November 11 02:49, 04:16 and 04:53 UTC, the same command returned:
+At November 11 02:49, 04:16, 04:53 and 05:28 UTC, the same command returned:
 `No Desktop Files view attached; nothing opened.` Both docs remain at their
 paths; the existing text needs no further change in this docs step.
 

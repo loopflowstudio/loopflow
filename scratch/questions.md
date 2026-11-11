@@ -60,6 +60,15 @@ Choices taken (reversible):
 - The `task_updates` revision triggers stay (shipped migration); the watcher
   reads them.
 
+Open: bare conversations. The steer says "Deliver at the next boundary only
+for bare or unreachable conversations." Under LOO-821's bare rule, bare hooks
+ask no server, so a bare conversation gets no Task updates at any boundary
+(`docs/sessions.md`: "not registered and gets no Task progress"), matching the
+Task brief's "Bare Sessions get none of this". Built as: unreachable managed
+conversations get the update at their next boundary; bare ones get nothing.
+Giving bare ones next-boundary updates would mean their hooks call the server
+again.
+
 ## Inherited from LOO-821
 
 Decided in the Task conversation, November 10 (Jack Heart's words):

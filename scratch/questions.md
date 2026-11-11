@@ -1,4 +1,26 @@
-# LOO-824 assumptions
+# LOO-824 exploration
+
+The visions in [explore.html](explore.html) and `holder.md` are proposals;
+none is selected. The page is organized by three goals: load, separation from
+Rex, and the Desktop experience.
+
+1. **1a** move existing viewer loops into the server; **1b** give held
+   terminals their own model and server dispatch; **1c** 1b plus a screen
+   journal on disk.
+2. New process for an ended Task/Wave Session via plain `lf resume SESSION`:
+   **2a** managed by Session association; **2b** managed only through a
+   Task/Wave entry point or Desktop. Existing held processes stay held.
+3. Emulator: **3a** in the server, holder keeps raw bytes (as said in
+   LOO-819); **3b** in the holder beside the PTY, as Rex and Paseo do;
+   **3c** run the mode probe through production Ghostty first, then pick.
+4. Open views across a server restart: **4a** resume from a PTY byte
+   position out of the holder's ring, no repaint; **4b** refresh from the
+   rebuilt emulator, as the kickoff plan has it.
+
+Said so far (Jack Heart): "1b seems right"; "ok 3a 4a"; "i think i want 2a".
+The direction built from those is in `holder.md`, "Direction after explore".
+
+## Kickoff assumptions, pending exploration
 
 Reversible choices made in kickoff; the plan is `holder.md`.
 
@@ -6,6 +28,8 @@ Reversible choices made in kickoff; the plan is `holder.md`.
   managed. The brief names Task/Wave commands and Desktop only.
 - Desktop Task shells stay on their own `session serve` owner: they run
   without a server on headless Linux.
-- A graceful server stop writes a Ghostty snapshot per held Session so an
-  install restores exact screen and modes; ring + nudge is the crash path.
+- A graceful server stop writes a Ghostty snapshot per held Session. Exact
+  recovery requires a compatible revision and continuous retained bytes;
+  ring + nudge also applies to incompatible upgrades. Terminal-mode recovery
+  after a gap has not been verified.
 - Ring 2 MiB per PTY; holder exits 60 s after its last child.

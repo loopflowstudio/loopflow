@@ -48,7 +48,14 @@ repainted (both print history inline), and pyte does not model terminal
 modes, so whether either re-sends bracketed paste, focus or Kitty keyboard
 modes on resize is unknown. Script: re-creatable from this description.
 
-## Chosen approach
+## Kickoff candidate A (superseded where it differs)
+
+Build from "Direction after explore" at the end of this file: terminal
+registry and one event loop (1b), emulator in the server (3a), PTY-position
+resume (4a), plain resume of a Task/Wave Session managed (2a). The owner
+loop per Session, `endpoint(owner)` for held terminals, owner Process rows
+with the holder's pid and the Slices below are not built. The holder,
+managed rule, Risks, Forbidden and the explore findings stand.
 
 ### Processes
 
@@ -268,3 +275,279 @@ Linux: same test on the RunPod rental with the user unit's `KillMode=process`.
 no `session serve`; an `lf install` mid-turn and a server kill both leave the
 turn running and every view repainted; a Session whose agent exits while the
 server is down reads ended with its real code once the server is back.
+
+## Explore — November 10, 2026
+
+Jack Heart: "$explore"
+
+Review [explore.html](explore.html). These are proposed implementations of
+the same decided ownership model: one holder per build, emulator in the
+Machine server, a raw ring in the holder, single-controller views for this
+Task. Bare execution and every-view typing remain separate work. The
+kickoff probes above are recorded observations, not tests of these visions.
+
+### Findings that change the kickoff candidate
+
+- `docs/dev/reference-models.md:139` defines an LfProcess as an actual lf
+  process. Ten owner rows with the holder's PID do not describe ten processes.
+  All visions need a held-terminal identity separate from the holder's one
+  LfProcess and from each actual launcher/AgentProcess. Do not assign a
+  fabricated process to a server thread. Existing launcher ancestry and
+  capture attachment remain real process records.
+- `transport/snapshot.rs::stream` rejects a different Ghostty revision. A
+  graceful upgrade can therefore require ring replay and a repaint too.
+  Snapshot position and ring continuity must agree before replay; a stale
+  snapshot cannot bridge overwritten output. Exact modes after a gap remain
+  unproven by the pyte probe.
+- `harness/native_exit.rs::settle` returns a provider-facing outcome even
+  when store/capture writes fail. Calling it is not confirmation of recorded
+  settlement. Keep the exit receipt until all required recording is confirmed;
+  retry recording without replaying a launch or closing a newer attachment.
+- An unanswered `start` may have started a child. Give it a stable terminal
+  id and request identity; reconcile via holder inventory before any retry.
+  Reusing an id with different launch content is an error. Do not infer death
+  from a missed reply. A successful list lacking the PTY but no exit receipt
+  is an unknown outcome, not a fabricated exit code.
+
+These are correctness requirements for every candidate, not optional extras
+to trade against delivery time. Holder restart does not resurrect a process.
+
+### A — Move the loops
+
+One holder replaces per-Session owner processes; the server runs the existing
+viewer loop for each terminal, retaining its socket and controller behavior.
+Introduce a small held-terminal mapping (terminal id, holder process/build,
+child identity, Session, exit receipt); adapt the old endpoint resolver and
+handoff to it without pretending the mapping is an LfProcess.
+
+Appeal: most existing attach, input retry and viewer tests still apply.
+Cost: per-terminal server threads and sockets remain, and process-oriented
+transport signatures need adapters until later cleanup. Restart reconstructs
+every loop. This is the smallest viewer change, not a trivial thread move.
+
+### B — Model the held terminal
+
+The server owns a registry of held terminals keyed by a distinct TerminalId.
+Session -> TerminalId -> holder process + PTY; AgentProcess identifies the
+child, and launcher LfProcess records keep their existing provenance. Viewer
+tickets resolve the terminal in this registry. Preserve the viewer wire and
+single-controller rules, but dispatch its input/output directly to terminal
+state instead of bridging through another private socket per terminal.
+
+One server event loop schedules ready terminal work; bounded per-terminal
+queues prevent a noisy agent or stalled view delaying peers. The holder
+retains the small versioned byte protocol. Restart reconstructs terminal state
+from holder inventory and recording receipts, independently of viewer count.
+The registry is live state reconstructed from the store and receipts, not a
+second authoritative Work database.
+
+Appeal: process inventory describes real processes; one model supplies start,
+attach, recovery and exit. Cost: more transport extraction and DTO/schema
+migration now. Fair output draining, request attribution and cancellation need
+real tests. Current wire fields named owner_lf_process_id cannot secretly
+become TerminalIds: update the typed managed route and its consumers together;
+retain the current route only for Local owners until their separate removal.
+This does not take on every-view typing or size-policy changes.
+
+### C — Recover the working screen
+
+B plus a bounded server-side recovery journal: emulator checkpoints and the
+ordered output/resize events after them, all at known byte positions. The
+holder still keeps only a raw ring. After a server crash, combine the saved
+checkpoint and journal with the holder's ring before falling back to repaint.
+The ambition is returning to the same screen, modes and retained scrollback
+after a crash as well as an ordinary restart.
+
+Appeal: a conversation's working screen becomes recoverable, not just its
+provider process. Cost: continuous disk writes, terminal output retained on
+disk, retention limits, atomic checkpoints and crash/format migration tests.
+Neither a journal nor a snapshot can recover bytes overwritten while the
+server was offline. A new Ghostty revision may reject the checkpoint; a
+bounded suffix alone cannot rebuild arbitrary earlier terminal state. C must
+report that gap and repaint, or establish a portable checkpoint format as
+additional work. It cannot promise exact recovery universally.
+
+This is an expanded scope proposal, not required for LOO-824. Journal limits
+and retention policy would be designed before implementation; no numeric
+budget is selected by this page. The same single-controller behavior remains.
+
+### Recommendation and decisions still open
+
+Recommend **B**. The holder changes what owns a terminal; representing that
+directly avoids moving the old per-process assumptions into server threads.
+A remains reasonable if limiting the viewer refactor is the priority. C adds
+meaningful recovery at a substantial storage and protocol cost; defer it
+unless that experience is wanted now.
+
+1. Which cut should lead: **1a** move the loops; **1b** model held terminals;
+   **1c** expand to a recoverable working screen; or combine/revise them?
+2. When `lf resume SESSION` names an ended Task/Wave Session, should a new
+   process be **2a** managed, as kickoff proposes, or **2b** follow the entry
+   point (plain terminal bare; Task/Wave command or Desktop managed)? Attaching
+   to an already held terminal keeps that terminal in both cases. A bare
+   skill in a Task checkout remains bare in both cases.
+
+Before implementation, replace the candidate's slices with the selected cut.
+Regardless of cut, acceptance must cover ambiguous start replies (one child),
+store outage at child exit (receipt retained), old attachment settlement,
+Ghostty revision mismatch, ring overrun, and one Session exiting while another
+in the same holder remains active. Verify terminal modes with the production
+Ghostty emulator, not only text rows. Linux service replacement and macOS
+SMAppService unregister remain untested by the kickoff probe.
+
+### Competitor comparison — November 10, 2026
+
+Jack Heart: "what would rex do? what do t3code / paradev / paseo do?"
+
+Fresh documentation/source reads, not new runtime probes. Open-source pins
+match `docs/dev/research/server-protocols.md`; these are not claims about HEAD.
+
+- [Rex upgrades](https://www.superlogical.com/rex/docs/linux/upgrading):
+  personal/account terminal servers keep running the old build. The login
+  server can restart independently. Restarting a shared terminal server ends
+  its programs. Its [API](https://www.superlogical.com/rex/docs/reference/api)
+  addresses blocks separately from client views; ownership controls size,
+  not exclusive input. Recorded local API research establishes Ghostty
+  snapshot then bytes. This supports B's model, not reconstructing the
+  emulator on each coordinator restart.
+- [Paseo worker at 71439e5](https://raw.githubusercontent.com/getpaseo/paseo/71439e51a555bfca21dc21e74bcfb39f1eb5e760/docs/terminal-worker.md):
+  the surviving worker holds both PTYs and headless xterm, including 10,000
+  history rows. No lifetime byte log. Its two-version policy can close
+  workers two protocol versions behind; do not copy that into the promise
+  that installs never end conversations.
+- [Paradev daemon at 61645f48](https://raw.githubusercontent.com/ParadevAI/Paradev/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/packages/pty-daemon/README.md):
+  an independent PTY service, in-memory replay, fd handoff on daemon upgrade.
+  [SessionStore](https://raw.githubusercontent.com/ParadevAI/Paradev/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/packages/pty-daemon/src/SessionStore/SessionStore.ts)
+  also tracks terminal modes/colors. Its default ring is 64 KiB, overridden
+  to 512 KiB by DaemonSupervisor at this pin. The earlier 2 MiB reconnect
+  note describes another layer; do not call it this daemon's ring size.
+- [T3 terminal manager at 71c2d3a3](https://raw.githubusercontent.com/pingdotgg/t3code/71c2d3a302092b94511eb7e6ab4e6844a66dbf22/apps/server/src/terminal/Manager.ts):
+  server-owned node-pty with bounded persisted terminal history. Its provider
+  manager releases runtimes on server shutdown and can resume provider
+  conversations. History continuity does not mean same-process continuity.
+
+Inference: B is the nearest model, but a surviving emulator is an additional
+axis the original page did not compare. Rex/Paseo keep screen state with the
+long-lived terminal owner. That avoids rebuilding it when the coordinator
+restarts, at the cost of keeping emulator code on the old build and a richer
+holder protocol. It does not survive holder death or reboot by itself.
+Consider this before C's disk journal if closer Rex behavior becomes the goal.
+It changes the earlier emulator-in-server decision; this question alone does
+not select that change. A/B/C and their scope remain proposals.
+
+### Three goals — November 10, 2026
+
+Jack Heart: "Please rrewrite the explore.html to help me understand what will
+move things most in the direction of: - High performance, low overhead,
+maximum scalabiltiy for a lot of concurrent work - Best isolation of
+responsibiliies, least duplicative with with tools like Rex - Best overall UX
+for a loopflow desktop user"
+
+[explore.html](explore.html) is rewritten around those goals. Nothing is
+selected. Observations it rests on:
+
+- `ps` at 18:29: 126 `session serve`, median 36 MB RSS (max 76), 70% CPU
+  summed, 30 of them at or above 1% and 69 at or above 0.1%. All lf: about
+  19.6 GB, of which `session serve` 4.4, `__context-block` 8.3 (62 processes),
+  `observe-status` 2.4 (113), `__codex-observe` 2.4 (42, 115% CPU). The
+  holder removes the 4.4; the rest belongs to other server-first pieces.
+- A viewer's resume position counts its own stream (snapshot + out frames),
+  kept in a 1 MiB spool per viewer inside the owner (`transport.rs` `Spool`,
+  `wire.rs` header). A restarted server has no spool, so every open view
+  refreshes from the rebuilt emulator. Positions in PTY bytes, answered from
+  the holder's ring, would let an open pane continue across a server restart
+  with no repaint. Proposed on the page as lever 3; not in the slices above.
+- A joining view is painted at most 2,000 rows / 768 KiB of history
+  (`transport/terminal.rs`). A 2 MiB raw ring usually holds more than that,
+  so what a thin holder puts at risk after a restart is terminal state set
+  before the ring's start (modes, alternate screen, Kitty keyboard stack,
+  program colors), more than rows.
+- The owner's emulator answers the agent's cursor, device and mode queries
+  while no view is attached (`transport/README.md`). Some emulator, or a
+  responder, has to exist headless wherever no view is open.
+
+Page's reading: 1b + emulator in the server (3a) + PTY-position resume (4a),
+no journal; before implement, repeat the resize probe through the production
+Ghostty emulator to see whether Claude and Codex re-send modes. If they do
+not, 3b (emulator in the holder) is what fixes cold opens, at the cost of the
+holder covering what Rex already does.
+
+Jack Heart, after the three-goals page: "1b seems right" and "unsure on 3a
+vs 3b. Why did I prefer 3a before? What would you recommended"
+
+The LOO-819 notes keep only the reply to the emulator question ("Yea the
+second"), not a reason; the original exchange was not found under
+`~/.lf/runs`. The reasoning in `docs/dev/server-first.md` is that a holder is
+never restarted for an upgrade, so its protocol stays small.
+
+## Direction after explore — November 10, 2026
+
+Jack Heart: "1b seems right", then "ok 3a 4a". Question 2 (plain
+`lf resume SESSION`) has no answer yet; the disk journal (1c) was not taken up.
+
+This replaces "Kickoff candidate A" where they differ. The holder section,
+the managed rule, Risks, Forbidden and the explore findings (terminal
+identity, start reconciliation, exit receipts) stand.
+
+**What is built**
+
+- **Terminal registry (1b).** The server keeps held terminals keyed by a
+  `TerminalId`: Session → TerminalId → holder (build, pid) + PTY + child
+  AgentProcess. No LfProcess row stands for a server thread; the holder has
+  one LfProcess. One server event loop reads holders and views; per-terminal
+  queues are bounded so a noisy agent or a stalled view delays nobody else.
+  No private socket or thread per terminal. `session.start` returns a
+  `terminal_id`; managed attach resolves it in the registry. The
+  `endpoint(owner)` route stays only for `Local` owners.
+- **Emulator in the server (3a).** One libghostty-vt terminal per held
+  terminal, as the owner has today: paints joining views, answers the
+  agent's queries while no view is attached. The holder never parses output.
+- **PTY positions (4a).** A view's stream position is the holder's absolute
+  PTY byte count. A snapshot frame carries the position it covers; `out`
+  frames follow from there. Resume is `{terminal_id, from}`: the server
+  serves from the ring, or answers with a fresh snapshot when `from` is
+  older than `ring_start`. The per-viewer `Spool` is deleted for held
+  terminals. Events that ride the stream as APC sequences are not PTY bytes;
+  they move to their own frame tag so positions stay exact (implement
+  confirms nothing depends on their in-stream order beyond the title
+  update).
+- After a server restart, open views resume by position with no repaint;
+  the emulator is rebuilt from `screen.ghostsnp` when its revision and
+  position line up with the ring, else ring replay plus one size nudge.
+
+**Slices**
+
+0. Mode probe: the kickoff resize harness with the production Ghostty
+   emulator in place of pyte, Claude and Codex, idle and after an answer;
+   compare bracketed paste, focus, Kitty keyboard and mouse modes between
+   the full-stream emulator and the post-nudge one. Result goes here. It
+   does not gate slices 1–3; it says how cold opens after a restart behave.
+1. Holder: as kickoff slice 1.
+2. Registry and event loop; `session.start`; the managed rule and its
+   callers; emulator per terminal; views attached through the registry with
+   today's single-controller rules.
+3. PTY positions in the viewer stream; resume from the ring; server restart
+   rebuild; offline settlement with retained exit receipts.
+4. Docs, revision bump with the other pieces, `server_schema.json`,
+   `tests/fixtures/dto/` for the changed wire types.
+
+**Acceptance, added to the gate test**
+
+- After the server is SIGTERMed and restarted, the attached viewer receives
+  no snapshot frame: its next frame is `out` at the position it held, and
+  the bytes between are the ones printed while the server was down.
+- A viewer whose position is older than `ring_start` receives one snapshot
+  whose position is inside the ring.
+- With ten held terminals the server has no per-terminal thread or socket
+  (thread count and open sockets do not grow with terminals).
+- `lf ps --json` lists one holder LfProcess per build and no owner row per
+  held terminal.
+
+Demo: ten Task Sessions in Desktop, `lf install` mid-turn: every open pane
+pauses and continues without redrawing; a pane opened afterward shows its
+screen and history; `ps` shows one server, one holder per build, ten agents.
+
+Jack Heart, on question 2 after asking what "ended" means: "i think i want 2a"
+
+Plain `lf resume SESSION` of an ended Session bound to a Task or Wave starts
+its new process managed, as the managed-rule table above already has it.

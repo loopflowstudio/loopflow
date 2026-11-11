@@ -99,6 +99,19 @@ impl SqliteStore {
         )?)
     }
 
+    /// What an ended terminal's child exited with, once recorded with a status.
+    pub(crate) fn terminal_exit_code(&self, terminal: &TerminalId) -> StoreResult<Option<u8>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT exit_code FROM held_terminals WHERE id=?1 AND ended_at IS NOT NULL",
+                [terminal.as_str()],
+                |row| row.get::<_, Option<u8>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     pub(crate) fn end_terminal(&self, terminal: &TerminalId, code: Option<u8>) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
             "UPDATE held_terminals SET ended_at=unixepoch(),exit_code=?2,native_input=NULL

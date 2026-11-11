@@ -227,11 +227,79 @@ fn spawn() -> Result<()> {
     }
     let mut child = command.spawn().context("Start lf holder run")?;
     let output = child.stdout.take().expect("ready pipe configured");
+    let started = crate::journal::process_started_at(child.id())
+        .ok()
+        .flatten();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let status = child.wait();
+        if let (Some(started), Ok(status)) = (started, status) {
+            settle(child.id(), started, status);
+        }
     });
     // A ready line, or end of file from a holder that found the lock taken.
     let mut line = String::new();
     BufReader::new(output).read_line(&mut line)?;
     Ok(())
+}
+
+// ---- The holder's LfProcess ----
+
+/// The LfProcess a holder is recorded as. Its id comes from the holder's pid
+/// and OS start time, so every server that meets the same holder names the
+/// same row, however many terminals it holds.
+fn holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
+    let name = format!("holder:{pid}:{os_started_at}");
+    let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, name.as_bytes());
+    crate::process::LfProcess {
+        id: crate::id::LfProcessId::parse(&id.to_string()).expect("a UUID is an LfProcessId"),
+        pid: Some(pid),
+        os_started_at: Some(os_started_at),
+        trace_id: crate::id::TraceId::new(),
+        parent_lf_process_id: None,
+        via_agent: Some(false),
+        caller_session_id: None,
+        caller_agent_process_id: None,
+        command: Some(r#"["lf","holder","run"]"#.to_owned()),
+        repo: None,
+        cwd: None,
+        started_at: os_started_at,
+        completed_at: None,
+        outcome: None,
+        exit_code: None,
+        signal: None,
+        error: None,
+    }
+}
+
+/// Record the holder `pid` as running. Recording again writes nothing; a
+/// store that cannot be written leaves the holder unlisted, never stopped.
+pub fn record(pid: u32) {
+    let Ok(Some(started)) = crate::journal::process_started_at(pid) else {
+        return;
+    };
+    let recorded = crate::journal::process_ledger()
+        .and_then(|store| store.record_process(&holder_process(pid, started)));
+    if let Err(error) = recorded {
+        tracing::warn!(%error, pid, "holder process not recorded");
+    }
+}
+
+/// Record that the holder this server started has exited.
+fn settle(pid: u32, os_started_at: i64, status: std::process::ExitStatus) {
+    let mut process = holder_process(pid, os_started_at);
+    process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
+    process.outcome = Some(
+        if status.success() {
+            "succeeded"
+        } else {
+            "failed"
+        }
+        .into(),
+    );
+    process.exit_code = status.code();
+    let recorded =
+        crate::journal::process_ledger().and_then(|store| store.record_process(&process));
+    if let Err(error) = recorded {
+        tracing::warn!(%error, pid, "holder exit not recorded");
+    }
 }

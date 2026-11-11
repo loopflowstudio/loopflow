@@ -56,6 +56,34 @@ impl Drop for StopOwner<'_> {
     }
 }
 
+impl Drop for Fixture {
+    /// A holder outlives every server, so a test that fails before its agent
+    /// ends would leave the holder and that agent running. Stop each holder
+    /// this fixture's store recorded; its agents lose their PTY with it.
+    fn drop(&mut self) {
+        let Ok(sql) = rusqlite::Connection::open(self.home.path().join("loopflow.db")) else {
+            return;
+        };
+        let holders: Vec<libc::pid_t> = sql
+            .prepare(
+                r#"SELECT pid FROM processes WHERE command='["lf","holder","run"]'
+                   AND completed_at IS NULL AND pid IS NOT NULL"#,
+            )
+            .and_then(|mut query| {
+                query
+                    .query_map([], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()
+            })
+            .unwrap_or_default();
+        for pid in holders {
+            if command_line(pid).1.contains("holder run") {
+                // SAFETY: a holder this fixture's servers started and recorded.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        }
+    }
+}
+
 impl Drop for PausedOwner {
     fn drop(&mut self) {
         // SAFETY: only the fixture's paused owner is resumed, including on panic.
@@ -7611,7 +7639,6 @@ fn held_session_survives_server_restart() {
     // The agent's parent is the holder, not the server or an owner process.
     let (holder, _) = command_line(agent);
     let (_, holder_command) = command_line(holder);
-    let _holder = KillOnDrop(holder);
     assert!(holder_command.contains("holder run"), "{holder_command}");
     assert!(
         !holder_command.contains("session serve"),
@@ -7717,5 +7744,77 @@ fn held_session_survives_server_restart() {
             .any(|name| name.to_string_lossy() == terminal),
         "the terminal's directory outlived its settlement: {receipts:?}"
     );
-    assert!(!view.wait_exit().success());
+    // The view ends as the agent did, not as a refused attach.
+    assert_eq!(view.wait_exit().code(), Some(3));
+    view.wait_text("The agent exited with 3.");
+    let screen = String::from_utf8_lossy(&view.screen.lock().unwrap()).into_owned();
+    assert!(!screen.contains("is not running"), "{screen:?}");
+}
+
+/// Every held terminal shares its build's one holder, which `lf ps` lists
+/// once across a server restart; no owner process runs per terminal.
+#[test]
+fn held_terminals_list_one_holder_process() {
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let home = fixture.home.path();
+    let start = |service: &ServerProof, request: &str| {
+        let script = format!("while [ ! -e {}/stop ]; do sleep 0.1; done", home.display());
+        let started = service
+            .connect()
+            .request(loopflow::server::wire::Operation::Server(
+                loopflow::server::wire::ServerOperation::SessionStart {
+                    session: None,
+                    request: request.into(),
+                    argv: vec!["/bin/sh".into(), "-c".into(), script],
+                    cwd: home.to_path_buf(),
+                    env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                    rows: 24,
+                    cols: 80,
+                    placement: None,
+                },
+            ))
+            .unwrap();
+        started.result["terminal_id"].as_str().unwrap().to_owned()
+    };
+    let terminals = [start(&service, "first"), start(&service, "second")];
+    let listed = |service: &ServerProof| {
+        let output = service
+            .command(&["process", "list", "--json"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let snapshot: Value = serde_json::from_slice(&output.stdout).unwrap();
+        snapshot["nodes"].as_array().unwrap().clone()
+    };
+    let holders = |nodes: &[Value]| -> Vec<u64> {
+        nodes
+            .iter()
+            .filter(|node| node["label"] == "lf holder")
+            .map(|node| node["pid"].as_u64().unwrap())
+            .collect()
+    };
+    let nodes = listed(&service);
+    let first = holders(&nodes);
+    assert_eq!(first.len(), 1, "{nodes:#?}");
+    assert!(command_line(first[0] as libc::pid_t)
+        .1
+        .contains("holder run"));
+    for node in &nodes {
+        if let Some(pid) = node["pid"].as_u64() {
+            let (_, command) = command_line(pid as libc::pid_t);
+            assert!(!command.contains("session serve"), "{nodes:#?}");
+        }
+    }
+    // A new server takes up the same holder and records nothing new.
+    service.stop();
+    service.child = Some(service.launch());
+    service.ready();
+    assert_eq!(holders(&listed(&service)), first);
+
+    std::fs::write(home.join("stop"), "").unwrap();
+    for terminal in &terminals {
+        fixture.held_ends(terminal);
+    }
 }

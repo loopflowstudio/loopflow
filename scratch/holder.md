@@ -731,7 +731,22 @@ No open product choice.
 
 ## QA — November 11, 2026
 
-`scratch/qa.html`. Fixed: a continuing held view was cleared by the relay's
-`handoff()`; the restart test now refuses `ESC[2J`. Open: no holder LfProcess
-row (README and gate acceptance claim one); a view whose agent exited while
-the server was down ends with an attach-style error.
+`scratch/qa.html`. Fixed in QA: a continuing held view was cleared by the
+relay's `handoff()`; the restart test now refuses `ESC[2J`.
+
+### Still wrong, after the QA fixes
+
+Fixed since: a holder is one LfProcess (id from pid + OS start time, written
+when a server starts or adopts it, settled by the server that spawned it;
+`held_terminals_list_one_holder_process`). A view whose agent exited while no
+server ran prints `The agent exited with 3.` and exits 3; the registry now
+settles adopted exits before answering views. The leaked QA holder came from an
+earlier draft of `a_held_pane_reads_reconnecting…` (an endless 0.2 s tick
+loop); the transport `Fixture` now kills every holder its store recorded on
+drop. Malformed `lf session attach` args name the expected form.
+
+Open: a holder adopted by a later server and idling out leaves its row
+unfinished; `lf ps` hides it by OS identity, nothing completes it.
+
+Checks: `transport_tests -- held_ a_held` 5 passed; `--lib -- transport::
+holder::` 85 passed; `documented_commands::` passed; clippy clean.

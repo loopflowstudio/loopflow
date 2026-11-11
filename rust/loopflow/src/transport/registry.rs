@@ -120,14 +120,22 @@ pub(crate) fn connect(terminal: &TerminalId) -> Result<UnixStream> {
     Ok(socket)
 }
 
-/// The refusal for a terminal no server hosts: it ended, or never started.
-/// Attaching never starts one.
+/// The refusal for a terminal no server hosts: its agent exited, or it never
+/// started. Attaching never starts one. An exit the store recorded carries its
+/// code as `exit_code`.
 pub(crate) fn ended(terminal: &TerminalId) -> crate::engine::Error {
-    crate::engine::Error::new(
-        crate::engine::ErrorCode::NotFound,
-        format!("terminal {terminal} is not running; nothing was started and no input replayed"),
-    )
-    .with(serde_json::json!({ "terminal_id": terminal }))
+    let code = crate::journal::process_ledger()
+        .and_then(|store| store.terminal_exit_code(terminal))
+        .ok()
+        .flatten();
+    let message = match code {
+        Some(code) => format!("the agent in terminal {terminal} exited with {code}"),
+        None => {
+            format!("terminal {terminal} is not running; nothing was started and no input replayed")
+        }
+    };
+    crate::engine::Error::new(crate::engine::ErrorCode::NotFound, message)
+        .with(serde_json::json!({ "terminal_id": terminal, "exit_code": code }))
 }
 
 /// What the entrance answers a named connection before the viewer protocol.
@@ -304,6 +312,7 @@ impl Registry {
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
         let mut client = Client::ensure(&self.place)?;
         let holder = client.hello()?;
+        crate::holder::client::record(holder.pid);
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
             .env
@@ -411,7 +420,7 @@ impl Registry {
             let listed = Client::connect(&place)
                 .map_err(anyhow::Error::from)
                 .and_then(|mut client| {
-                    client.hello()?;
+                    crate::holder::client::record(client.hello()?.pid);
                     client.list()
                 });
             let listed = match listed {
@@ -589,6 +598,9 @@ fn run(
                 Command::Stop => return,
             }
         }
+        // Exits are recorded before views are answered, so a view of a
+        // terminal that ended with no server running reads its exit code.
+        unsettled.retain_mut(|exit| exit.retry_at > Instant::now() || !settle(exit));
         let mut waiting = Vec::new();
         for mut connection in arriving.drain(..) {
             match connection.named() {
@@ -660,7 +672,6 @@ fn run(
                 retry_at: Instant::now(),
             });
         }
-        unsettled.retain_mut(|exit| exit.retry_at > Instant::now() || !settle(exit));
         let mut fds = vec![
             libc::pollfd {
                 fd: listener.as_raw_fd(),

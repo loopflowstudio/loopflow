@@ -1469,6 +1469,16 @@ fn run() -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    // Clap has no `session attach`: a relay that names no valid host stops here.
+    if raw_args
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
+    {
+        anyhow::bail!(
+            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            &raw_args[3..]
+        );
+    }
     if !raw_args
         .iter()
         .any(|arg| arg == "--machine" || arg.starts_with("--machine="))

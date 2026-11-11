@@ -65,12 +65,15 @@ The turn keeps streaming. The terminal showing it waits, drawing nothing and
 discarding what is typed, while the server is replaced; a Desktop pane on the
 same conversation says **Reconnecting…**. Each then continues where it left
 off, showing what the agent printed meanwhile. Nothing is resent to the agent.
+An agent that exits meanwhile ends its view with its own exit code, as if no
+server had been away: `The agent exited with 3.`
 
 A Task or Wave conversation's agent runs in a holder: one `lf holder run`
 process beside the server that keeps the terminals and agents of every such
 conversation. The server restarts on every install; a holder is never
 restarted for one. With ten Task conversations open, `ps` shows one
-`lf server run`, one `lf holder run` and ten agents.
+`lf server run`, one `lf holder run` and ten agents; `lf ps` lists the
+holder once.
 
 | Opened with | Runs in |
 |---|---|

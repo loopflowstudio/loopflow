@@ -2088,7 +2088,21 @@ fn view(
                     .map(|(socket, _)| socket)
             } else {
                 match owner {
-                    Host::Terminal(_) => reconnect_held(owner)?,
+                    Host::Terminal(_) => {
+                        let next = reconnect_held(owner);
+                        // An agent that exited while no server ran ends the
+                        // view as its exit would have.
+                        if let Some(code) = next.as_ref().err().and_then(exit_code) {
+                            drop(terminal.take());
+                            eprintln!("\nThe agent exited with {code}.");
+                            return if code == 0 {
+                                Ok(())
+                            } else {
+                                Err(crate::process::CommandExit(code).into())
+                            };
+                        }
+                        next?
+                    }
                     Host::Owner(owner) => reconnect(
                         owner,
                         if server {
@@ -2601,6 +2615,14 @@ fn reconnect_held(host: &Host) -> Result<Option<UnixStream>> {
         }
         wait = (wait * 2).min(Duration::from_secs(2));
     }
+}
+
+/// The code a held terminal's agent exited with, when `error` is a server's
+/// answer that the terminal ended and the store recorded its exit.
+fn exit_code(error: &anyhow::Error) -> Option<u8> {
+    let ended = error.downcast_ref::<crate::engine::Error>()?;
+    let code = ended.data.as_ref()?["exit_code"].as_u64()?;
+    u8::try_from(code).ok()
 }
 
 /// A bridge to `host` for a view that reconnects: an owner through the

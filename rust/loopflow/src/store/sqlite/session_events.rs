@@ -153,7 +153,8 @@ impl SqliteStore {
     }
 
     /// `session`'s current provider conversation and the last turn Loopflow
-    /// recorded in it; `None` when it has none.
+    /// recorded in it while it ran; `None` when it has none. Turns written
+    /// later from the transcript say nothing about what runs now.
     pub(crate) fn current_conversation(
         &self,
         session: &str,
@@ -175,6 +176,7 @@ impl SqliteStore {
             .query_row(
                 "SELECT provider_turn,kind,observed_at,payload FROM session_events
                  WHERE session_id=?1 AND provider_thread=?2 AND kind IN ('started','completed')
+                   AND json_extract(payload,'$.source') IS NOT 'transcript'
                  ORDER BY seq DESC LIMIT 1",
                 params![session, thread],
                 |row| {
@@ -562,6 +564,61 @@ impl SqliteStore {
             )
             .optional()?
             .is_some())
+    }
+
+    /// Each completion recorded in `thread`: its turn and when it was observed.
+    pub(crate) fn session_completions(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+    ) -> StoreResult<Vec<(String, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare_cached(
+            "SELECT provider_turn,observed_at FROM session_events
+             WHERE session_id=?1 AND provider_thread=?2 AND kind='completed'
+               AND provider_turn IS NOT NULL",
+        )?;
+        let rows = query.query_map(params![session, thread], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
+    /// Record a turn's usage and completion as its provider's transcript
+    /// shows them, dated `at`, when the turn ended.
+    pub(crate) fn record_transcript_turn(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
+        usage: Option<&Value>,
+        completed: &Value,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rows = [
+            (SessionEventKind::Usage, usage),
+            (SessionEventKind::Completed, Some(completed)),
+        ];
+        for (kind, payload) in rows {
+            if let Some(payload) = payload {
+                tx.execute(
+                    INSERT_NATIVE_EVENT,
+                    params![
+                        session,
+                        thread,
+                        turn,
+                        kind.as_str(),
+                        "",
+                        at,
+                        serde_json::to_string(payload)?
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Freeze the request's attribution while its attachment still owns dispatch.

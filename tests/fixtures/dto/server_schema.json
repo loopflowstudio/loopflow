@@ -14587,8 +14587,10 @@
       ]
     },
     "TurnState": {
+      "description": "`asking` is a turn stopped on a question the agent put to the person.",
       "enum": [
         "running",
+        "asking",
         "ended",
         "interrupted"
       ],

@@ -1,10 +1,12 @@
 //! Conversations as their providers keep them. Each harness's native
-//! transcript is read by one reader into the same `Turn` form; Loopflow stores
-//! none of the text. Where a transcript is, how long its provider keeps it,
+//! transcript is read by one reader into the same `Turn` form, and for Claude
+//! and Codex into the `Run`s those turns belong to; Loopflow stores none of
+//! the text. Where a transcript is, how long its provider keeps it,
 //! and what to say when it is gone are derived here when read.
 
 mod claude;
 mod codex;
+pub(crate) mod facts;
 pub mod live;
 pub(crate) mod opencode;
 mod pi;
@@ -61,6 +63,36 @@ pub enum RequestSource {
     /// A launch turn, hook, notification or instructions Loopflow or the
     /// harness wrote into the conversation.
     Injected,
+}
+
+/// One agent run: from the request that woke the agent until it hands back,
+/// across every model call and tool between. A `Turn` opens at each request,
+/// so one run can hold several of them.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Run {
+    /// The provider's name for it, which Loopflow's own recording of the
+    /// turn uses too: Claude's request row, Codex's turn.
+    pub id: Option<String>,
+    pub state: live::TurnState,
+    /// RFC 3339; absent when the run began before the rows read.
+    pub started_at: Option<String>,
+    /// RFC 3339; absent while it runs.
+    pub ended_at: Option<String>,
+    pub model: Option<String>,
+    pub usage: live::TurnUsage,
+    /// The run's usage as the provider's live stream reports it.
+    pub receipt: Value,
+    /// Wall time as the provider measured it.
+    pub duration_ms: Option<u64>,
+    /// Provider errors met on the way.
+    pub errors: Vec<Value>,
+}
+
+/// What one reader makes of a transcript's rows.
+#[derive(Debug, Default)]
+pub(crate) struct Transcript {
+    pub turns: Vec<Turn>,
+    pub runs: Vec<Run>,
 }
 
 /// Where a recorded conversation's text can be read.
@@ -167,11 +199,22 @@ pub(crate) fn read(harness: HarnessKind, source: &Source) -> Result<Vec<Turn>> {
         fs::File::open(path).with_context(|| format!("open transcript {}", path.display()))?;
     let rows = rows(file).collect::<Vec<_>>();
     Ok(match harness {
-        HarnessKind::Claude => claude::turns(&rows),
-        HarnessKind::Codex => codex::turns(&rows),
+        HarnessKind::Claude => claude::read(&rows).turns,
+        HarnessKind::Codex => codex::read(&rows).turns,
         HarnessKind::Pi => pi::turns(&rows),
         HarnessKind::OpenCode => anyhow::bail!("OpenCode keeps no transcript file"),
     })
+}
+
+/// Every run in the transcript at `path`, oldest first; none for a harness
+/// whose transcript keeps no run boundaries, or a file that cannot be read.
+pub(crate) fn runs(harness: HarnessKind, path: &Path) -> Vec<Run> {
+    let rows = json_lines(path).collect::<Vec<_>>();
+    match harness {
+        HarnessKind::Claude => claude::read(&rows).runs,
+        HarnessKind::Codex => codex::read(&rows).runs,
+        HarnessKind::Pi | HarnessKind::OpenCode => Vec::new(),
+    }
 }
 
 /// Rows of a JSONL file, skipping what does not parse.
@@ -541,6 +584,80 @@ impl Turns {
             };
             *output = Some(text);
         }
+    }
+}
+
+/// Builds runs in transcript order.
+#[derive(Debug, Default)]
+struct Runs {
+    runs: Vec<Run>,
+    /// A row that wakes the agent if a model call follows: its id and time.
+    woke: Option<(Option<String>, Option<String>)>,
+}
+
+impl Runs {
+    fn open(&mut self) -> Option<&mut Run> {
+        self.runs.last_mut().filter(|run| {
+            matches!(
+                run.state,
+                live::TurnState::Running | live::TurnState::Asking
+            )
+        })
+    }
+
+    fn push(&mut self, id: Option<String>, started_at: Option<String>) {
+        self.runs.push(Run {
+            id,
+            state: live::TurnState::Running,
+            started_at,
+            ended_at: None,
+            model: None,
+            usage: live::TurnUsage::default(),
+            receipt: Value::Null,
+            duration_ms: None,
+            errors: Vec::new(),
+        });
+    }
+
+    /// A request starts a run; one still open ends there, superseded.
+    fn start(&mut self, id: Option<String>, at: Option<String>) {
+        if let Some(run) = self.open() {
+            run.state = live::TurnState::Interrupted;
+            run.ended_at = at.clone();
+        }
+        self.woke = None;
+        self.push(id, at);
+    }
+
+    /// A row that is no person's request arrived: with no run open, it starts
+    /// one once the agent answers it.
+    fn wake(&mut self, id: Option<String>, at: Option<String>) {
+        if self.open().is_none() {
+            self.woke = Some((id, at));
+        }
+    }
+
+    /// The run a model call or tool result belongs to. With none open that is
+    /// what last woke the agent, else the last run going on, else one begun
+    /// before the rows read.
+    fn current(&mut self) -> &mut Run {
+        if self.open().is_none() {
+            if let Some((id, at)) = self.woke.take() {
+                self.push(id, at);
+            } else if let Some(run) = self.runs.last_mut() {
+                run.state = live::TurnState::Running;
+                run.ended_at = None;
+            } else {
+                self.push(None, None);
+            }
+        }
+        self.runs.last_mut().expect("a run was just ensured")
+    }
+
+    fn end(&mut self, state: live::TurnState, at: Option<String>) {
+        let run = self.current();
+        run.state = state;
+        run.ended_at = at;
     }
 }
 

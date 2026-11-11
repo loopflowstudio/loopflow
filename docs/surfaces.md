@@ -208,8 +208,9 @@ turn and `null` while it works. `lf resume <id>` opens it.
          "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100}}
 ```
 
-`state` is `running`, `ended` or `interrupted`; `ended_at` and `usage` are
-`null` while it runs. `source` says where the reading came from: `hooks` for a
+`state` is `running`, `asking` (stopped on a question to you), `ended` or
+`interrupted`; `ended_at` and `usage` are `null` until it ends. A conversation
+read from its transcript is `available` whenever its turn is not `running`. `source` says where the reading came from: `hooks` for a
 turn boundary lf recorded, `transcript` for the provider's own transcript.
 A live conversation lf never launched lists with `"raw": true` and its provider
 conversation ID as `id`.

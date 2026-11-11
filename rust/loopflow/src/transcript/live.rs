@@ -1,7 +1,7 @@
 //! A conversation's current or last turn, read from the end of its provider's
 //! transcript at the moment someone asks. Only Claude and Codex keep turn
-//! boundaries there. A transcript shows no permission prompt or question, so a
-//! turn waiting on a person reads as running.
+//! boundaries there. A transcript shows a question the agent asked and not a
+//! permission prompt, so a turn waiting on one of those reads as running.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,7 +12,7 @@ use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{is_user_input, unix_seconds};
+use super::{unix_seconds, Run};
 use crate::harness::HarnessKind;
 
 /// How much of a transcript's end is read first; the window grows fourfold
@@ -49,10 +49,12 @@ pub struct SessionTurn {
     pub usage: Option<TurnUsage>,
 }
 
+/// `asking` is a turn stopped on a question the agent put to the person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnState {
     Running,
+    Asking,
     Ended,
     Interrupted,
 }
@@ -77,24 +79,6 @@ pub struct TurnUsage {
     pub output_tokens: u64,
 }
 
-impl TurnUsage {
-    fn add(&mut self, other: Self) {
-        self.input_tokens += other.input_tokens;
-        self.cached_input_tokens += other.cached_input_tokens;
-        self.output_tokens += other.output_tokens;
-    }
-
-    fn since(self, earlier: Self) -> Self {
-        Self {
-            input_tokens: self.input_tokens.saturating_sub(earlier.input_tokens),
-            cached_input_tokens: self
-                .cached_input_tokens
-                .saturating_sub(earlier.cached_input_tokens),
-            output_tokens: self.output_tokens.saturating_sub(earlier.output_tokens),
-        }
-    }
-}
-
 impl SessionTurn {
     /// What `lf session list` prints for it.
     pub(crate) fn describe(&self, now: i64) -> String {
@@ -108,6 +92,7 @@ impl SessionTurn {
                 Some(running) => format!("turn running {running}"),
                 None => "turn running".into(),
             },
+            TurnState::Asking => "asked a question".into(),
             TurnState::Ended | TurnState::Interrupted => {
                 let what = if self.state == TurnState::Ended {
                     "last turn ended"
@@ -131,15 +116,21 @@ impl SessionTurn {
         }
     }
 
-    fn running(started_at: Option<String>) -> Self {
+    fn from_run(run: Run) -> Self {
         Self {
-            state: TurnState::Running,
+            state: run.state,
             source: TurnSource::Transcript,
-            started_at,
-            ended_at: None,
-            model: None,
-            usage: None,
+            started_at: run.started_at,
+            usage: run.ended_at.is_some().then_some(run.usage),
+            ended_at: run.ended_at,
+            model: run.model,
         }
+    }
+
+    /// Whether the conversation waits on a person: the agent handed back, or
+    /// asked a question.
+    pub(crate) fn waits(&self) -> bool {
+        self.state != TurnState::Running
     }
 
     /// A turn as Loopflow's hooks recorded its boundaries, in Unix seconds.
@@ -192,15 +183,15 @@ fn rfc3339(at: i64) -> Option<String> {
 /// The current or last turn of the transcript at `path`; `None` when it shows
 /// none or cannot be read.
 pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<SessionTurn> {
-    let decode = match harness {
-        HarnessKind::Claude => claude,
-        HarnessKind::Codex => codex,
+    let read = match harness {
+        HarnessKind::Claude => super::claude::read,
+        HarnessKind::Codex => super::codex::read,
         HarnessKind::Pi | HarnessKind::OpenCode => return None,
     };
     let mut limit = FIRST;
     loop {
         let (rows, whole) = tail(path, limit).ok()?;
-        let turn = decode(&rows);
+        let turn = read(&rows).runs.pop().map(SessionTurn::from_run);
         if whole || limit >= TAIL || turn.as_ref().is_some_and(|t| t.started_at.is_some()) {
             return turn;
         }
@@ -241,167 +232,31 @@ fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
     Ok((rows, start == 0))
 }
 
-/// Builds the latest turn in transcript order.
-#[derive(Debug, Default)]
-struct Latest(Option<SessionTurn>);
-
-impl Latest {
-    fn start(&mut self, at: Option<String>) {
-        self.0 = Some(SessionTurn::running(at));
-    }
-
-    /// The turn rows belong to; one begun before the window opens unstarted.
-    fn current(&mut self) -> &mut SessionTurn {
-        self.0.get_or_insert_with(|| SessionTurn::running(None))
-    }
-
-    fn end(&mut self, state: TurnState, at: Option<String>, usage: TurnUsage) {
-        let turn = self.current();
-        turn.state = state;
-        turn.ended_at = at;
-        turn.usage = Some(usage);
-    }
-
-    /// A turn that looked finished goes on.
-    fn resume(&mut self) {
-        let turn = self.current();
-        turn.state = TurnState::Running;
-        turn.ended_at = None;
-        turn.usage = None;
-    }
-}
-
-fn timestamp(row: &Value) -> Option<String> {
-    row["timestamp"].as_str().map(str::to_owned)
-}
-
-/// Claude ends a turn with an assistant message whose `stop_reason` is
-/// `end_turn`, usually followed by a `turn_duration` system row. Rows repeat
-/// one message's usage for each of its content blocks.
-fn claude(rows: &[Value]) -> Option<SessionTurn> {
-    let mut latest = Latest::default();
-    let mut usage = TurnUsage::default();
-    let mut counted = Vec::<String>::new();
-    for row in rows {
-        if row["isSidechain"].as_bool() == Some(true) {
-            continue;
-        }
-        match row["type"].as_str() {
-            Some("user") if is_interruption(row) => {
-                latest.end(TurnState::Interrupted, timestamp(row), usage);
-            }
-            Some("user") if is_user_input(row) => {
-                latest.start(timestamp(row));
-                usage = TurnUsage::default();
-                counted.clear();
-            }
-            Some("assistant") => {
-                let message = &row["message"];
-                let id = message["id"].as_str().unwrap_or_default().to_owned();
-                if !counted.contains(&id) {
-                    let reported = &message["usage"];
-                    let count = |key: &str| reported[key].as_u64().unwrap_or(0);
-                    usage.add(TurnUsage {
-                        input_tokens: count("input_tokens")
-                            + count("cache_creation_input_tokens")
-                            + count("cache_read_input_tokens"),
-                        cached_input_tokens: count("cache_read_input_tokens"),
-                        output_tokens: count("output_tokens"),
-                    });
-                    counted.push(id);
-                }
-                if let Some(model) = message["model"].as_str().filter(|m| *m != "<synthetic>") {
-                    latest.current().model = Some(model.to_owned());
-                }
-                if message["stop_reason"] == "end_turn" {
-                    latest.end(TurnState::Ended, timestamp(row), usage);
-                } else {
-                    latest.resume();
-                }
-            }
-            // A tool result after an answer: the turn goes on.
-            Some("user")
-                if latest
-                    .0
-                    .as_ref()
-                    .is_some_and(|t| t.state == TurnState::Ended) =>
-            {
-                latest.resume();
-            }
-            _ => {}
-        }
-    }
-    latest.0
-}
-
-fn is_interruption(row: &Value) -> bool {
-    let content = &row["message"]["content"];
-    let text = |text: &str| text.starts_with("[Request interrupted by user");
-    content.as_str().is_some_and(text)
-        || content.as_array().is_some_and(|blocks| {
-            blocks
-                .iter()
-                .any(|block| block["text"].as_str().is_some_and(text))
-        })
-}
-
-/// Codex marks turns with `task_started`, `task_complete` and `turn_aborted`
-/// events and reports running totals in `token_count`; a turn's usage is the
-/// total's growth across it.
-fn codex(rows: &[Value]) -> Option<SessionTurn> {
-    let mut latest = Latest::default();
-    let mut total: Option<TurnUsage> = None;
-    let mut before: Option<TurnUsage> = None;
-    let usage = |total: Option<TurnUsage>, before: Option<TurnUsage>| {
-        total.map_or_else(TurnUsage::default, |total| {
-            total.since(before.unwrap_or_default())
-        })
-    };
-    for row in rows {
-        let payload = &row["payload"];
-        match (row["type"].as_str(), payload["type"].as_str()) {
-            (Some("event_msg"), Some("task_started")) => {
-                latest.start(timestamp(row));
-                before = total;
-            }
-            (Some("turn_context"), _) => {
-                if let Some(model) = payload["model"].as_str() {
-                    latest.current().model = Some(model.to_owned());
-                }
-            }
-            (Some("event_msg"), Some("token_count")) => {
-                let info = &payload["info"];
-                let read = |usage: &Value| TurnUsage {
-                    input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
-                    cached_input_tokens: usage["cached_input_tokens"].as_u64().unwrap_or(0),
-                    output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
-                };
-                if info["total_token_usage"].is_object() {
-                    let now = read(&info["total_token_usage"]);
-                    // A turn begun before the window counts from its first report.
-                    if latest.0.as_ref().is_none_or(|t| t.started_at.is_none()) && before.is_none()
-                    {
-                        before = Some(now.since(read(&info["last_token_usage"])));
-                    }
-                    total = Some(now);
-                }
-            }
-            (Some("event_msg"), Some("task_complete")) => {
-                latest.end(TurnState::Ended, timestamp(row), usage(total, before));
-            }
-            (Some("event_msg"), Some("turn_aborted")) => {
-                latest.end(TurnState::Interrupted, timestamp(row), usage(total, before));
-            }
-            _ => {}
-        }
-    }
-    latest.0
-}
-
 // -- Finding a conversation's transcript --
 
 /// Where each conversation's transcript was found; a transcript never moves.
 static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::new(Mutex::default);
+
+/// The transcript of `provider`'s conversation `thread`, which a Session ran
+/// in `cwd`; `None` when its harness keeps none or its home is gone.
+pub(crate) fn locate(
+    store: &crate::store::sqlite::SqliteStore,
+    provider: &str,
+    thread: &str,
+    cwd: &Path,
+) -> anyhow::Result<Option<(HarnessKind, PathBuf)>> {
+    let Some(harness) = HarnessKind::parse(provider) else {
+        return Ok(None);
+    };
+    let Some(provider) = harness.provider() else {
+        return Ok(None);
+    };
+    let id = crate::id::AgentSessionId::from(thread);
+    let Some(home) = super::conversation_home(store, provider, &id)? else {
+        return Ok(None);
+    };
+    Ok(find(harness, &home, thread, cwd).map(|path| (harness, path)))
+}
 
 /// Conversation `id`'s transcript in `home`, which ran in `cwd`.
 pub(crate) fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathBuf> {
@@ -533,10 +388,10 @@ mod tests {
         // Start inside the second turn's first token report.
         let from = text.find("\"total_tokens\":45900").unwrap();
         let (rows, _) = tail(&fixture("codex_rollout.jsonl"), (text.len() - from) as u64).unwrap();
-        let turn = codex(&rows).unwrap();
-        assert_eq!(turn.started_at, None);
-        assert_eq!(turn.state, TurnState::Ended);
-        assert_eq!(turn.usage.unwrap().input_tokens, 25000);
+        let run = super::super::codex::read(&rows).runs.pop().unwrap();
+        assert_eq!(run.started_at, None);
+        assert_eq!(run.state, TurnState::Ended);
+        assert_eq!(run.usage.input_tokens, 25000);
     }
 
     #[test]
@@ -549,6 +404,12 @@ mod tests {
             (tokens(999), tokens(41_200), tokens(3_859_200)),
             ("999".into(), "41.2k".into(), "3.9M".into())
         );
+        let asking = SessionTurn {
+            state: TurnState::Asking,
+            ..turn.clone()
+        };
+        assert_eq!(asking.describe(0), "asked a question");
+        assert!(asking.waits() && !turn.waits());
         let ended = SessionTurn::from_hooks(Some(1), Some(2), Some("interrupted"));
         assert_eq!(ended.state, TurnState::Interrupted);
     }

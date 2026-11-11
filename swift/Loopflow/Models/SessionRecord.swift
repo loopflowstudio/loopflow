@@ -309,7 +309,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 /// provider's own transcript.
 public struct SessionTurn: Codable, Sendable, Hashable {
     public enum State: String, Codable, Sendable, Hashable {
-        case running, ended, interrupted
+        case running, asking, ended, interrupted
     }
 
     public enum Source: String, Codable, Sendable, Hashable {

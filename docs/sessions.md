@@ -154,12 +154,19 @@ turn runs. A missed filesystem event is caught by a periodic reread.
 
 | The transcript shows | It can't show |
 |---|---|
-| a turn running, and since when | whether that turn is waiting on a permission prompt or a question for you |
+| a turn running, and since when | whether that turn is waiting on a permission prompt |
+| a question Claude asked you that has no answer yet | a question Codex asked you |
 | when the last turn ended, or that it was interrupted | a turn cut off by a crash, until the provider process is gone |
 | the last turn's input, cached and output tokens, and its model | |
 
-A turn waiting on you reads as `turn running`; lf doesn't guess otherwise.
-Sessions lf manages also get that state from the agent's own status reports.
+A conversation read this way is waiting on you when its turn ended, was
+interrupted, or reads `asked a question`; `lf session list --available` lists
+it. A turn stopped on a permission prompt still reads as `turn running`; lf
+doesn't guess otherwise. Sessions lf manages also get that state from the
+agent's own status reports.
+
+A raw conversation open in a Task's checkout counts toward that Task:
+`lf session list --task <task>` includes it.
 A transcript caught halfway through writing a line is read up to its last
 complete line.
 

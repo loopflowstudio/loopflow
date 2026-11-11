@@ -36,6 +36,31 @@ pub(crate) struct NativeExit {
     pub diagnostics: (PathBuf, u64),
 }
 
+/// Write the usage and completion of each turn the store has none for, from
+/// the provider's transcript: the turns of a launch with no live stream to
+/// record them from, and any a recording gap dropped.
+fn record_transcript_turns(store: &SqliteStore, exit: &NativeExit) -> Result<usize> {
+    let Some(conversation) = store.current_conversation(&exit.session)? else {
+        return Ok(0);
+    };
+    let Some((harness, transcript)) = crate::transcript::live::locate(
+        store,
+        &conversation.provider,
+        &conversation.thread,
+        &exit.cwd,
+    )?
+    else {
+        return Ok(0);
+    };
+    Ok(crate::transcript::facts::record(
+        store,
+        &exit.session,
+        harness,
+        &conversation.thread.as_str().into(),
+        &transcript,
+    )?)
+}
+
 /// How the owner reports a settled provider exit.
 #[derive(Debug)]
 pub(crate) struct Settled {
@@ -89,6 +114,11 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             Err(error) => {
                 tracing::warn!(%error, %session, "cannot record the Session attachment's end")
             }
+        }
+    }
+    if let Some((store, ..)) = &owner {
+        if let Err(error) = record_transcript_turns(store, exit) {
+            tracing::warn!(%error, session = %exit.session, "cannot record turns from the provider's transcript");
         }
     }
     if let Some(capture) = &exit.capture {

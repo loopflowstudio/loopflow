@@ -131,7 +131,11 @@ A Claude Code 2.1.322 transcript read the same day ends a turn with an
 so `end_turn` with nothing after it is the signal and `turn_duration` a
 confirmation.
 
-On demand, `lf session list` and `lf session card` read the transcript's tail
+One reader per harness (`transcript/claude.rs`, `transcript/codex.rs`) turns a
+transcript's rows into the turns `lf history show` prints and the runs those
+turns belong to: one run from what woke the agent until it hands back, with
+its model, usage, and whether it stopped on a question. On demand,
+`lf session list` and `lf session card` give that reader the transcript's tail
 for any conversation with no hook report (`transcript/live.rs`). Watched, the
 server keeps one filesystem watch per provider home (`transcript/watch.rs`);
 an event makes the shared observation cache read that transcript within a
@@ -144,8 +148,15 @@ executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
 
 Provider transcripts expire, and the cost-per-PR work (LOO-732) reads per-turn
-`usage` and `completed` rows from the store, so a transcript read also has to
-write them; a bare run gets its rows from the read at exit. Not built. What
+`usage` and `completed` rows from the store, so a transcript read also writes
+them (`transcript/facts.rs`): when a provider lf launched exits, each finished
+run the store holds no completion for gets both rows, dated when the run
+ended, in the live stream's payload shape plus `"source":"transcript"`. A run
+is already recorded when a completion carries its id (Claude's request row,
+Codex's turn, the same ids the live stream uses) or was observed while it
+ran, since the live recording folds queued input into one turn. These rows
+carry no `cost_usd`. Not written: a run cut off with no end in the transcript,
+and anything for a raw conversation, which has no Session to hold rows. What
 each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
 0.167.0):
 

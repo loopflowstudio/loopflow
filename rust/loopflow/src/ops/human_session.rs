@@ -589,19 +589,29 @@ pub(crate) async fn list(
             .collect();
     }
     if lists_raw(filter) {
-        sessions.extend(turns::raw(&store.sqlite, filter.repo.as_deref())?);
+        let task = match &filter.task {
+            Some(selector) => Some(store.sqlite.resolve_task_id(selector, None)?),
+            None => None,
+        };
+        let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
+        sessions.extend(raw.into_iter().filter(|raw| {
+            (!filter.available || raw.availability.is_some())
+                && task.as_ref().is_none_or(|task| {
+                    task.as_ref()
+                        .is_some_and(|task| raw.task_ids.contains(task))
+                })
+        }));
     }
     Ok(sessions)
 }
 
-/// Raw conversations have no Task, account, history or page position, so a
-/// selection by any of those leaves them out.
+/// Raw conversations have no account, history or page position, so a
+/// selection by any of those leaves them out. One open in a Task's checkout
+/// counts toward that Task.
 fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
-    !filter.available
-        && !filter.orphan
+    !filter.orphan
         && !filter.blocked
         && !filter.history
-        && filter.task.is_none()
         && filter.on.is_none()
         && filter.search.is_none()
         && filter.interactive != Some(false)

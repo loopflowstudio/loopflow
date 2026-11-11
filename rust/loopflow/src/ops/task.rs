@@ -1776,14 +1776,28 @@ pub(crate) fn task_worktree_blocker_after(
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
+    match counted_task(&store.sqlite, repo)? {
+        Some(id) => store.get_task(&id).await.map_err(task_error),
+        None => Ok(None),
+    }
+}
+
+/// The Task a conversation run in `cwd` counts toward: the one whose checkout
+/// on this Machine holds it. Launches and conversations lf never launched
+/// both ask here, so whether a calling Session's Task should outrank its
+/// checkout's is decided by changing this function alone.
+pub(crate) fn counted_task(
+    store: &SqliteStore,
+    cwd: &Path,
+) -> OpsResult<Option<crate::durable::TaskId>> {
     // Branch names are not checkout identity: another clone can use the same
     // branch. Never probe a remote Machine's recorded path on this Machine.
-    let Ok(root) = crate::git::worktree_root(repo) else {
+    let Ok(root) = crate::git::worktree_root(cwd) else {
         return Ok(None);
     };
-    let local = store.local_machine().await.map_err(task_error)?.id;
+    let local = store.local_machine().map_err(task_error)?.id;
     let mut id = None;
-    for checkout in store.task_checkouts().await.map_err(task_error)? {
+    for checkout in store.task_checkouts().map_err(task_error)? {
         if checkout.machine_id.as_ref() != Some(&local) {
             if checkout.machine_id.is_none() && checkout.worktree == root {
                 return Err(task_error("Task checkout Machine is unknown"));
@@ -1797,10 +1811,7 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
             id = Some(checkout.task_id);
         }
     }
-    match id {
-        Some(id) => store.get_task(&id).await.map_err(task_error),
-        None => Ok(None),
-    }
+    Ok(id)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]

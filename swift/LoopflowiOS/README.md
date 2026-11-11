@@ -16,8 +16,8 @@ Settings → Mobile → **Enable mobile access**, then scan its code on the phon
 only the address: Tailscale identifies the caller and the Machine admits its
 owner. The phone keeps the address and Machine identity in Keychain.
 
-Use a physical phone. A Simulator on the server's Mac shares its Tailscale
-identity and is refused.
+A Simulator on the server's Mac shares its Tailscale identity and is refused
+until that Mac opts in with `touch ~/.lf/mobile-same-device`.
 
 ## Tasks
 

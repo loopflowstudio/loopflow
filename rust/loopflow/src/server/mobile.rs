@@ -289,7 +289,7 @@ impl Host {
         owner: &Owner,
     ) -> Result<Option<super::ticket::Admission>> {
         let who = self.json(&["whois", "--json", "--proto=tcp", &peer.to_string()])?;
-        Ok(permits_peer(&who, owner))
+        Ok(permits_peer(&who, owner, same_device_path().exists()))
     }
 
     pub(super) fn certificate(&self) -> Result<TlsAcceptor> {
@@ -362,13 +362,19 @@ fn owner_from_status(status: &Value) -> Result<Owner> {
     })
 }
 
-fn permits_peer(who: &Value, owner: &Owner) -> Option<super::ticket::Admission> {
+/// Present when this Machine also admits connections from itself, which is how
+/// an iOS Simulator on it arrives. Create it only on a Mac with one account.
+fn same_device_path() -> PathBuf {
+    crate::store::lf_home_dir().join("mobile-same-device")
+}
+
+fn permits_peer(who: &Value, owner: &Owner, same_device: bool) -> Option<super::ticket::Admission> {
     // Network identity belongs to the device, not its local OS accounts. A
-    // same-host connection cannot prove which account opened it; use the private
-    // Unix socket on this Machine instead. Phones arrive as a distinct node.
+    // same-host connection cannot prove which account opened it, so it is
+    // refused unless this Machine opted in. Phones arrive as a distinct node.
     let node = who["Node"]["StableID"]
         .as_str()
-        .filter(|id| !id.is_empty() && *id != owner.node)?;
+        .filter(|id| !id.is_empty() && (same_device || *id != owner.node))?;
     let permitted = who["UserProfile"]["ID"].as_u64() == Some(owner.user)
         && who["Node"]["User"].as_u64() == Some(owner.user)
         && !who["Node"]["Tags"]
@@ -412,16 +418,17 @@ mod tests {
         let mut status = json!({"BackendState":"Running", "Self":{"ID":"host", "UserID":1}, "User":{"1":{"LoginName":"owner@example.com"}}});
         let owner = owner_from_status(&status).unwrap();
         let mut who = json!({"Node":{"StableID":"phone", "User":1}, "UserProfile":{"ID":1}});
-        assert!(permits_peer(&who, &owner).is_some());
+        assert!(permits_peer(&who, &owner, false).is_some());
         who["Node"]["StableID"] = json!("host");
-        assert!(permits_peer(&who, &owner).is_none());
+        assert!(permits_peer(&who, &owner, false).is_none());
+        assert!(permits_peer(&who, &owner, true).is_some());
         who["Node"]["StableID"] = json!("phone");
         who["Node"]["Tags"] = json!(["tag:ci"]);
-        assert!(permits_peer(&who, &owner).is_none());
+        assert!(permits_peer(&who, &owner, false).is_none());
         who["Node"]["Tags"] = json!([]);
         who["UserProfile"]["ID"] = json!(2);
-        assert!(permits_peer(&who, &owner).is_none());
-        assert!(permits_peer(&json!({}), &owner).is_none());
+        assert!(permits_peer(&who, &owner, false).is_none());
+        assert!(permits_peer(&json!({}), &owner, false).is_none());
         status["Self"]["Tags"] = json!(["tag:server"]);
         assert!(owner_from_status(&status).is_err());
         status["Self"]["Tags"] = json!([]);

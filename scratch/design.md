@@ -9,16 +9,15 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At November 11 13:41 UTC, PR #1812 remained open and unmerged at
-`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`, with no auto-merge. Fetched main was
+At November 11 14:23 UTC, PR #1812 remained open and unmerged at
+`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs` (the 13:07 fetch was
-`976b53db0c5affa519af66bfe9bf58ee83fba347`). At 13:07, the PR's ticket, service
-and mobile modules had no diff
-from the previously inspected `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
-The 13:07 LOO-718 status read reported `feature` at `demo`, with PR settlement not
-armed. LOO-809's status read again timed out after 20 seconds at 13:42; its live Graph position
-remains unverified. The PR description still
+`server/ticket.rs`. The PR's ticket, service and mobile modules still had no
+diff from `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
+The 14:23 status reads found LOO-718 still at `feature` / `demo`;
+LOO-809 timed out after 20 seconds, leaving its live Graph position unverified.
+At 13:43 the PR had no auto-merge; the current metadata read did not expose that
+field. The PR description still
 stated: “The pull request is published for review; no Task settlement is requested.”
 
 Inspection found both WebSocket paths authenticate with node/user identity,
@@ -35,9 +34,8 @@ store and endpoints need reinspection after it lands. Desktop QA remains
 deferred in `questions.md`; no product decision is open.
 
 Earlier observations and compared revisions are in
-`496f1f56cd385c5db7f29282c96d69355acaea00:scratch/design.md`; that note links
-the older, conflicting 19:35 UTC status report. Keep the latest dependency result
-here and repeated observations in Git.
+`313f59abc56e30106f21994fe8e35d4552099571:scratch/design.md`, including the
+reference to the older, conflicting 19:35 UTC status report.
 
 ## Delete — do not maintain
 

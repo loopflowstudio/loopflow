@@ -283,19 +283,19 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let committed: Committed = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_committed.json"
+            "../../tests/fixtures/dto/server/checkout_committed.json"
         ));
         assert!(committed.committed);
         let created: Checkout = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_created.json"
+            "../../tests/fixtures/dto/server/checkout_created.json"
         ));
         assert!(created.created);
         let planned: Sync = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_sync_planned.json"
+            "../../tests/fixtures/dto/server/checkout_sync_planned.json"
         ));
         assert!(planned.render().starts_with("branch: "));
         let running: Sync = result(include_str!(
-            "../../../../tests/fixtures/dto/server/checkout_syncing.json"
+            "../../tests/fixtures/dto/server/checkout_syncing.json"
         ));
         assert!(running.render().contains("running as process"));
         assert!(serde_json::from_str::<Sync>(r#"{"state":"finished"}"#).is_err());

@@ -60,10 +60,16 @@ fn main() {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     link_ghostty_vt(&manifest_dir, &out_dir);
-    let git_root = manifest_dir
-        .ancestors()
-        .find(|ancestor| ancestor.join(".git").exists())
-        .map(Path::to_path_buf);
+    // Cargo verifies extracted archives under the checkout's target directory.
+    // That enclosing repository is not the archive's source tree.
+    let git_root = (!manifest_dir.join(".cargo_vcs_info.json").exists())
+        .then(|| {
+            manifest_dir
+                .ancestors()
+                .find(|ancestor| ancestor.join(".git").exists())
+                .map(Path::to_path_buf)
+        })
+        .flatten();
     let unmerged = emit_migration_catalog(&manifest_dir, git_root.as_deref(), &out_dir);
     emit_build_provenance(&manifest_dir, git_root.as_deref(), &unmerged);
     let builtins_dir = manifest_dir.join("src/builtins");
@@ -103,8 +109,8 @@ fn emit_migration_catalog(
                 .map(str::to_string)
                 .collect()
         }
-        None => git_root
-            .map(|root| {
+        None => match git_root {
+            Some(root) => {
                 let root = root
                     .canonicalize()
                     .expect("canonicalize Loopflow source root");
@@ -112,8 +118,17 @@ fn emit_migration_catalog(
                     .canonicalize()
                     .expect("canonicalize migrations directory");
                 migration_build::merged_order(&root, &directory)
-            })
-            .unwrap_or_default(),
+            }
+            None => {
+                let path = manifest_dir.join("migration-order.txt");
+                println!("cargo:rerun-if-changed={}", path.display());
+                fs::read_to_string(path)
+                    .expect("read packaged migration order")
+                    .lines()
+                    .map(str::to_string)
+                    .collect()
+            }
+        },
     };
     let catalog = migration_build::order_catalog(&directory, &merged_order)
         .unwrap_or_else(|error| panic!("order migrations: {error}"));

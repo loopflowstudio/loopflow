@@ -117,7 +117,7 @@ You want to do something; here's how through `lf`.
 | run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
 | use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
-| open work in Desktop, Rex, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
+| open a Task conversation here (a sibling tab from an agent) | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf session usage --weekly` |

@@ -1070,10 +1070,10 @@ pool availability, rental templates and admission limits. The database holds liv
 cooldowns, machine identity, Sessions, execution history and Desktop’s current saved
 Task arrangements. A saved Desktop arrangement is current state, not a default.
 
-`task_layout` holds the default Task layout, including Wave-scoped preferences
-([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
+`task_layout` holds the default layout for `lf workspace`, including Wave-scoped
+preferences ([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
 workspaces launched from it or from Desktop layouts; LF keeps no external-host
-workspace registry.
+workspace registry. Ordinary `lf open` does not apply these layouts.
 
 Credentials stay with their secret/provider owner. The database is not an
 additional preference override layer.

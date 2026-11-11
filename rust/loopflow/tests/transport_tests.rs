@@ -736,6 +736,203 @@ fn isolated_rex() -> (tempfile::TempDir, PathBuf, support::rex::IsolatedRex) {
     (root, bin, rex)
 }
 
+#[test]
+fn conversation_open_here_confirms_attachment_and_does_not_take_existing_input() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s\n' "$LF_CAPTURE_KEY" >> "$HOME/launches"
+printf 'open-ready\r\n'
+read -r answer < /dev/tty
+printf '%s' "$answer" > "$HOME/answer"
+"#,
+    );
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
+    let _stop = StopOwner(&fixture, owner.clone());
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let mut command = fixture.command(&["open", "--session", &session]);
+    // Direct CLI still attaches here inside Rex; no host request is needed.
+    command
+        .env("REX_SESSION", "isolated-caller")
+        .env("REX_BLOCK", "isolated-block")
+        .env("LF_OPEN_RECEIPT", fixture.home.path().join("attached"))
+        .env("PATH", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut viewer = command.spawn().unwrap();
+    assert_eq!(fixture.wait_file("attached"), "attached");
+    // The owner's asynchronous store update can lag its attachment handshake.
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=0 WHERE id=?1", [&owner])
+        .unwrap();
+    let report = fixture
+        .command(&["open", "--session", &session, "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(report.status.success(), "{report:?}");
+    let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "elsewhere");
+    viewer
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"still-here\n")
+        .unwrap();
+    assert_eq!(fixture.wait_file("answer"), "still-here");
+    let result = wait_for_viewer(viewer, Duration::from_secs(20));
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(fixture.launches(1).len(), 1);
+}
+
+#[test]
+fn conversation_open_pending_retry_waits_for_the_controlling_viewers_readiness() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let owner =
+        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
+    let _stop = StopOwner(&fixture, owner.clone());
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&owner);
+    let mut viewer = fixture.viewer(&owner, true);
+    let returned = viewer.until_event("return");
+    let ready = events(&returned, "return")[0]["detach"].clone();
+    // The opening caller can time out while its viewer has yet to accept Return.
+    // Repeating open must neither claim readiness nor create another attachment.
+    for _ in 0..2 {
+        let report = fixture
+            .command(&["open", "--session", &session, "--json"])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(report.status.success(), "{report:?}");
+        let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+        assert_eq!(report["receipts"][0]["status"], "opening");
+        assert!(report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Still opening"));
+    }
+    viewer.request(json!({"kind":"controlled", "ready":ready}));
+    viewer.until_reply();
+    // Wait for the owner to observe the acknowledgement, independently of caller timing.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        viewer.request(json!({"kind":"controlled"}));
+        if viewer.until_reply()["ready"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+    }
+    let report = fixture
+        .command(&["open", "--session", &session, "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(report.status.success(), "{report:?}");
+    let report: Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "elsewhere");
+    assert_eq!(fixture.session_of_owner(&owner), session);
+    assert_eq!(fixture.launches(1).len(), 1);
+    viewer.input("done\n");
+    viewer.finish();
+}
+
+#[test]
+fn conversation_open_continues_closed_history_without_replaying_the_request() {
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s\n' "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+    );
+    let first = fixture.owner(fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "original-request",
+    ));
+    let _stop = StopOwner(&fixture, first.clone());
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&first);
+    let mut source = fixture.viewer(&first, true);
+    source.input("done\n");
+    source.finish();
+    fixture.ends(&first);
+    // Stand in for the provider's saved thread after its first terminal exits.
+    let sql = fixture.sql();
+    let input: String = sql.query_row("SELECT json_extract(e.payload,'$.artifact_key') FROM agent_sessions s JOIN session_events e ON e.seq=s.current_capture WHERE s.id=?1", [&session], |row| row.get(0)).unwrap();
+    let native = uuid::Uuid::new_v4().to_string();
+    sql.execute(
+        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+        [&session, &native],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+         SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
+        [&session, &input, &native],
+    ).unwrap();
+    let transcript = fixture
+        .home
+        .path()
+        .join(format!("claude/projects/fixture/{native}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    std::fs::write(
+        transcript,
+        json!({"type":"user","userType":"external","message":{"content":"original-request"}})
+            .to_string(),
+    )
+    .unwrap();
+    let output = fixture
+        .command(&["open", "--session", &session, "--focus", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Not open"));
+    // A fresh native client needs the terminal a person opens from.
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-a",
+            "codex",
+            "open",
+            "--session",
+            &session,
+        ],
+    );
+    command
+        .env("PATH", &path)
+        .env("LF_SETTINGS", "agent: codex");
+    let owner = fixture.owner(command);
+    let _stop_reopened = StopOwner(&fixture, owner.clone());
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.until_event("return");
+    let launches = fixture.launches(2);
+    let (_, command) = launches[1].split_once(':').unwrap();
+    let args = shlex::split(command).unwrap();
+    let resume = args.iter().position(|arg| arg == "--resume").unwrap();
+    assert_eq!(args[resume + 1], native);
+    assert!(
+        !args.iter().any(|arg| arg == "--"),
+        "no new prompt: {args:?}"
+    );
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&owner);
+    assert_eq!(fixture.launches(2).len(), 2);
+}
+
 /// Workspace opening uses the same resume command as a person in a native tab.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
@@ -769,10 +966,11 @@ printf '%s' "$answer" > "$HOME/answer"
     assert!(bound.status.success(), "{bound:?}");
     let mut source = fixture.viewer(&owner, true);
     source.input("unfinished-");
+    drop(source);
     let path = format!("{}:{provider}", bin.display());
     let opened = fixture
         .command(&[
-            "open",
+            "workspace",
             "--task",
             "INF-123",
             "--session",
@@ -791,7 +989,7 @@ printf '%s' "$answer" > "$HOME/answer"
     let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
     let container = report["receipts"][0]["container"].as_str().unwrap();
     let block = rex.block_ids(container).into_iter().next().unwrap();
-    source.until_event("control");
+
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let pwd = rex.block_call(container, &block, "pwd");
@@ -866,7 +1064,7 @@ printf '%s' "$answer" > '{home}/answer'
             "rex",
             "--server",
             &rex.endpoint,
-            "--no-focus",
+            "--tab",
             "--json",
         ])
         .env("PATH", &path)
@@ -1539,7 +1737,7 @@ fn accept_attachment(listener: &UnixListener) -> UnixStream {
                     "controlled" => socket
                         .write_all(&frame(
                             REPLY,
-                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false})
+                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false,"ready":false})
                                 .to_string()
                                 .as_bytes(),
                         ))

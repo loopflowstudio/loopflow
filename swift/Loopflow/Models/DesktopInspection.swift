@@ -31,12 +31,14 @@ public struct DesktopChange: Codable, Sendable, Equatable {
 }
 
 public struct DesktopOpening: Codable, Sendable, Equatable {
-    public enum Status: String, Codable, Sendable { case opening, usable, failed }
+    public let revision: String
+    public enum Status: String, Codable, Sendable { case opening, usable, elsewhere, failed }
     public let url: String
     public let status: Status
     public let reason: String?
 
-    public init(url: String, status: Status, reason: String?) {
+    public init(revision: String, url: String, status: Status, reason: String?) {
+        self.revision = revision
         self.url = url; self.status = status; self.reason = reason
     }
 }
@@ -470,6 +472,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
     public let incarnation: String?
     public let surface: String?
+    public let attachment: DesktopOpening.Status?
     /// The designated kind: `session`, `shell` or `browser`.
     public let content: String?
     public let subject: String?
@@ -481,11 +484,43 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let selectedTab: String?
 
     enum CodingKeys: String, CodingKey {
-        case pane, incarnation, surface, content, subject, axis, ratio, children, location, tabs
+        case pane, incarnation, surface, attachment, content, subject, axis, ratio, children, location, tabs
         case selectedTab = "selected_tab"
     }
 
-    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?, commands: (PaneContent) -> DesktopCommandStatus?) {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        pane = try values.decode(String?.self, forKey: .pane)
+        incarnation = try values.decode(String?.self, forKey: .incarnation)
+        surface = try values.decode(String?.self, forKey: .surface)
+        attachment = try values.decode(DesktopOpening.Status?.self, forKey: .attachment)
+        content = try values.decode(String?.self, forKey: .content)
+        subject = try values.decode(String?.self, forKey: .subject)
+        axis = try values.decode(String?.self, forKey: .axis)
+        ratio = try values.decode(Double?.self, forKey: .ratio)
+        children = try values.decode([Self].self, forKey: .children)
+        location = try values.decode(WorkspaceIdentity?.self, forKey: .location)
+        tabs = try values.decode([DesktopTabInspection].self, forKey: .tabs)
+        selectedTab = try values.decode(String?.self, forKey: .selectedTab)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(pane, forKey: .pane)
+        try values.encode(incarnation, forKey: .incarnation)
+        try values.encode(surface, forKey: .surface)
+        try values.encode(attachment, forKey: .attachment)
+        try values.encode(content, forKey: .content)
+        try values.encode(subject, forKey: .subject)
+        try values.encode(axis, forKey: .axis)
+        try values.encode(ratio, forKey: .ratio)
+        try values.encode(children, forKey: .children)
+        try values.encode(location, forKey: .location)
+        try values.encode(tabs, forKey: .tabs)
+        try values.encode(selectedTab, forKey: .selectedTab)
+    }
+
+    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?, commands: (PaneContent) -> DesktopCommandStatus?, attachment: (String) -> DesktopOpening.Status?) {
         switch layout {
         case .leaf(let state):
             switch state.content {
@@ -513,6 +548,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
                 selectedTab = selected
             case .session: tabs = []; selectedTab = nil
             }
+            self.attachment = state.sessionId.flatMap(attachment)
             location = state.content.location
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
@@ -522,9 +558,10 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
             tabs = []; selectedTab = nil
+            self.attachment = nil
             location = nil
             pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
-            children = [Self(first, surface: surface, commands: commands), Self(second, surface: surface, commands: commands)]
+            children = [Self(first, surface: surface, commands: commands, attachment: attachment), Self(second, surface: surface, commands: commands, attachment: attachment)]
         }
     }
 }

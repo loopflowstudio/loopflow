@@ -114,13 +114,36 @@ fn folder(path: &Path) -> String {
     path.file_name().unwrap().to_string_lossy().into_owned()
 }
 
+/// Model a terminal that accepted input; real relay acknowledgements are covered
+/// by transport_tests. The failure fixture deliberately omits this acknowledgement.
+fn terminal_ack(bin: &Path) -> PathBuf {
+    let script = bin.join("terminal-ack");
+    std::fs::write(
+        &script,
+        r#"#!/usr/bin/perl
+for (@ARGV) {
+    if (/LF_OPEN_RECEIPT=([^'" ,]+)/) {
+        open(my $receipt, '>', $1) or die $!;
+        print $receipt 'attached';
+        close($receipt);
+    }
+}
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
 /// A host CLI stand-in that records its argv and prints `reply`.
 fn host(bin: &Path, name: &str, reply: &str, status: i32) -> PathBuf {
     let log = bin.join(format!("{name}.log"));
     let reply = reply.replace('\'', "'\"'\"'");
+    let ack = terminal_ack(bin);
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nprintf '%s\\n' '{reply}'\nexit {status}\n",
-        log.display()
+        "#!/bin/sh\n'{}' \"$@\"\nprintf '%s\\n' \"$*\" >> '{}'\nprintf '%s\\n' '{reply}'\nexit {status}\n",
+        ack.display(), log.display()
     );
     let path = bin.join(name);
     std::fs::write(&path, script).unwrap();
@@ -386,10 +409,10 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
             home.path(),
             repo.path(),
             Some(bin.path()),
-            &["open", &url, "--host", "cmux", "--json"],
+            &["workspace", &url, "--host", "cmux", "--json"],
         ));
         let receipt = &report["receipts"][0];
-        assert_eq!(receipt["status"], "opening");
+        assert_eq!(receipt["status"], "usable");
         assert_eq!(receipt["host"], "cmux");
         assert_eq!(receipt["destination"], "workspace:7");
     }
@@ -415,7 +438,11 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
         assert!(call.contains("'LF_HOME="), "{call}");
     }
     assert_eq!(calls.matches("workspace select workspace:7").count(), 2);
-    assert_eq!(sessions(home.path()), 0, "opening creates no conversation");
+    assert_eq!(
+        sessions(home.path()),
+        1,
+        "reopening reuses the conversation"
+    );
 }
 
 #[test]
@@ -437,9 +464,9 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["open", "--task", id, "--host", "cmux", "--json"],
+        &["workspace", "--task", id, "--host", "cmux", "--json"],
     ));
-    assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+    assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .query_row(
@@ -466,10 +493,11 @@ fn cmux_task_joins_the_group_its_caller_is_in_now() {
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let log = bin.path().join("cmux.log");
     // The caller's workspace moved into group G-2 after it launched.
+    let ack = terminal_ack(bin.path());
     let groups = r#"{"window_id":"W","groups":[{"id":"G-1","anchor_workspace_id":"A","member_workspace_ids":["A"]},{"id":"G-2","anchor_workspace_id":"B","member_workspace_ids":["B","CALLER"]}]}"#;
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$1 $2\" in\n  'workspace-group list') printf '%s\\n' '{groups}' ;;\n  *) echo 'OK workspace:9' ;;\nesac\n",
-        log.display()
+        "#!/bin/sh\n'{}' \"$@\"\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$1 $2\" in\n  'workspace-group list') printf '%s\\n' '{groups}' ;;\n  *) echo 'OK workspace:9' ;;\nesac\n",
+        ack.display(), log.display()
     );
     let path = bin.path().join("cmux");
     std::fs::write(&path, script).unwrap();
@@ -479,9 +507,12 @@ fn cmux_task_joins_the_group_its_caller_is_in_now() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &[("CMUX_WORKSPACE_ID", "CALLER")],
         &[
-            "open",
+            ("CMUX_WORKSPACE_ID", "CALLER"),
+            ("CMUX_SOCKET_PATH", "/fixture/cmux.sock"),
+        ],
+        &[
+            "workspace",
             "--task",
             "INF-123",
             "--host",
@@ -506,7 +537,7 @@ fn cmux_task_joins_the_group_its_caller_is_in_now() {
 }
 
 #[test]
-fn herdr_without_server_context_creates_no_session() {
+fn herdr_without_server_context_reports_failure() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -515,7 +546,9 @@ fn herdr_without_server_context_creates_no_session() {
         home.path(),
         repo.path(),
         None,
-        &["open", "--task", "INF-123", "--host", "herdr", "--json"],
+        &[
+            "open", "--tab", "--task", "INF-123", "--host", "herdr", "--json",
+        ],
     );
     assert!(!output.status.success());
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -523,7 +556,7 @@ fn herdr_without_server_context_creates_no_session() {
         .as_str()
         .unwrap()
         .contains("HERDR_SOCKET_PATH"));
-    assert_eq!(sessions(home.path()), 0);
+    assert_eq!(sessions(home.path()), 1);
 }
 
 #[test]
@@ -540,22 +573,19 @@ fn tmux_opens_a_named_window_after_the_callers() {
         repo.path(),
         Some(bin.path()),
         &[("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%3")],
-        &["open", &url, "--json"],
+        &["open", "--tab", &url, "--json"],
     ));
     assert_eq!(report["receipts"][0]["host"], "tmux");
-    assert_eq!(report["receipts"][0]["status"], "opening");
+    assert_eq!(report["receipts"][0]["status"], "usable");
     assert_eq!(report["receipts"][0]["destination"], "%7");
     let call = std::fs::read_to_string(log).unwrap();
     assert!(
         call.starts_with(
-            "new-window -a -t %3 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
+            "-S /tmp/tmux-1000/default new-window -a -t %3 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
         ),
         "{call}"
     );
-    assert!(
-        call.trim_end().ends_with(" session resume --task INF-123"),
-        "{call}"
-    );
+    assert!(call.contains("session resume --start-if-free"), "{call}");
 }
 
 #[test]
@@ -571,11 +601,11 @@ fn refused_host_reports_its_failure_without_another_host() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["open", &url, "--host", "cmux"],
+        &["open", "--tab", &url, "--host", "cmux"],
     );
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("nothing was retried"), "{text}");
+    assert!(text.contains("cmux"), "{text}");
     assert!(
         !text.contains("terminal"),
         "no other host was tried: {text}"
@@ -594,47 +624,32 @@ fn automatic_route_opens_where_the_caller_is() {
             repo.path(),
             None,
             env,
-            &["open", &url, "--link", "--json"],
+            &["open", &url, "--tab", "--link", "--json"],
         ));
         links[0]["route"].clone()
-    };
-    let desktop: &[&str] = if cfg!(target_os = "macos") {
-        &["desktop"]
-    } else {
-        &[]
-    };
-    // The caller's own host is the only destination; without one, Desktop
-    // then a plain terminal.
-    let order = |first: &[&str]| {
-        let hosts: Vec<&str> = if first.is_empty() {
-            desktop.iter().chain(&["terminal"]).copied().collect()
-        } else {
-            first.to_vec()
-        };
-        serde_json::json!(hosts)
     };
     let herdr = [
         ("HERDR_ENV", "1"),
         ("HERDR_SOCKET_PATH", "/tmp/herdr.sock"),
         ("HERDR_PANE_ID", "w1:p1"),
     ];
-    assert_eq!(route(&herdr)["hosts"], order(&["herdr"]));
+    assert_eq!(route(&herdr)["host"], "herdr");
     let tmux = [("TMUX", "/tmp/tmux-1000/default,1,0"), ("TMUX_PANE", "%0")];
-    assert_eq!(route(&tmux)["hosts"], order(&["tmux"]));
-    assert_eq!(route(&[])["hosts"], order(&[]));
+    assert_eq!(route(&tmux)["host"], "tmux");
+    assert_eq!(route(&[])["host"], "terminal");
     if cfg!(target_os = "macos") {
         let cmux = [
             ("CMUX_WORKSPACE_ID", "w"),
             ("CMUX_SOCKET_PATH", "/tmp/cmux.sock"),
         ];
-        assert_eq!(route(&cmux)["hosts"], order(&["cmux"]));
+        assert_eq!(route(&cmux)["host"], "cmux");
         let inside = route(&[("LF_DESKTOP", "com.loopflow.mac")]);
-        assert_eq!(inside["hosts"], order(&[]));
+        assert_eq!(inside["host"], "terminal");
         assert!(
             inside["reason"]
                 .as_str()
                 .unwrap()
-                .contains("this Desktop window"),
+                .contains("current terminal"),
             "{inside}"
         );
     }
@@ -652,7 +667,7 @@ fn linux_automatic_route_never_selects_desktop() {
         None,
         &["open", &url, "--link", "--json"],
     ));
-    assert_eq!(links[0]["route"]["hosts"], serde_json::json!(["terminal"]));
+    assert_eq!(links[0]["route"]["host"], "terminal");
     let output = lf(
         home.path(),
         repo.path(),
@@ -662,7 +677,7 @@ fn linux_automatic_route_never_selects_desktop() {
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("Loopflow Desktop requires macOS"), "{text}");
-    assert!(text.contains(&format!("Run: lf open {url}")), "{text}");
+    assert!(text.contains("retry with lf open --session "), "{text}");
 }
 
 /// Seed an interactive conversation whose provider is alive, with the given activity.
@@ -733,50 +748,21 @@ fn live_conversation(
     id
 }
 
-/// Its terminal closed: an execution owner runs the provider and nothing views it.
-fn detach(home: &Path, session: &str) {
-    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    let owner = loopflow::id::LfProcessId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
-        [&owner],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
-        rusqlite::params![session, owner],
-    )
-    .unwrap();
-}
-
-/// A terminal holds it again, as `live_conversation` seeds one.
-fn attach(home: &Path, session: &str) {
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET transport_lf_process_id=NULL WHERE id=?1",
-            [session],
-        )
-        .unwrap();
-}
-
 #[test]
 fn available_conversations_need_no_question_and_are_never_taken_over() {
-    struct Child(std::process::Child);
-    impl Drop for Child {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let empty = lf(home.path(), repo.path(), None, &["open", "--available"]);
+    let empty = lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["workspace", "--available", "--link"],
+    );
     assert!(empty.status.success(), "{empty:?}");
     assert_eq!(
         String::from_utf8_lossy(&empty.stdout),
@@ -831,7 +817,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         home.path(),
         repo.path(),
         None,
-        &["open", "--available", "--link"],
+        &["workspace", "--available", "--link"],
     );
     assert!(
         !String::from_utf8_lossy(&text.stdout).contains("Unknown:"),
@@ -841,7 +827,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         home.path(),
         repo.path(),
         None,
-        &["open", "--available", "--link", "--json"],
+        &["workspace", "--available", "--link", "--json"],
     ));
     let links = links.as_array().unwrap();
     assert_eq!(links.len(), 2, "{links:?}");
@@ -861,29 +847,9 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     assert_eq!(side["label"], "Side question");
     assert_eq!(
         side["fallback_argv"],
-        serde_json::json!(["lf", "session", "resume", secondary])
+        serde_json::json!(["lf", "open", "--session", secondary])
     );
 
-    let log = host(bin.path(), "tmux", "%1", 0);
-    let report = json(&lf(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &["open", "--available", "--host", "tmux", "--json"],
-    ));
-    let statuses: Vec<&str> = report["receipts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|receipt| receipt["status"].as_str().unwrap())
-        .collect();
-    assert_eq!(statuses, ["elsewhere", "elsewhere"]);
-    assert!(
-        !log.exists(),
-        "a live conversation never gets a second terminal"
-    );
-
-    // Desktop receives both Work and exact taskless Session addresses.
     if cfg!(target_os = "macos") {
         // A caller inside a Desktop addresses that Desktop by id; nothing here
         // is installed, so the Machine's own Loopflow.app never answers.
@@ -893,7 +859,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
             repo.path(),
             Some(bin.path()),
             &[("LF_DESKTOP", "com.loopflow.mac.test")],
-            &["open", "--available", "--host", "desktop", "--json"],
+            &["workspace", "--available", "--host", "desktop", "--json"],
         );
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
         let statuses: Vec<&str> = report["receipts"]
@@ -902,28 +868,17 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
             .iter()
             .map(|receipt| receipt["status"].as_str().unwrap())
             .collect();
-        assert_eq!(statuses, ["opening", "opening"], "{report}");
-        assert_eq!(
-            std::fs::read_to_string(opened).unwrap(),
-            format!(
-                "-b com.loopflow.mac.test {task_url} {}\n",
-                side["url"].as_str().unwrap()
-            ),
-            "one request focuses the final conversation"
+        assert_eq!(statuses, ["elsewhere", "elsewhere"], "{report}");
+        assert!(
+            !opened.exists(),
+            "opening available conversations never steals input"
         );
     }
 }
 
 #[test]
-fn reopening_a_live_conversation_focuses_its_tmux_pane() {
-    struct Child(std::process::Child);
-    impl Drop for Child {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
+    let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -946,24 +901,39 @@ fn reopening_a_live_conversation_focuses_its_tmux_pane() {
     )
     .unwrap();
     db.execute(
-        "UPDATE processes SET terminal_id='tmux:%5' WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
-        [&primary],
+        "UPDATE processes SET terminal_id=?2 WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
+        [&primary, &format!("tmux:{}", serde_json::json!({"socket":"/fixture/other-tmux.sock","pane":"%5"}))],
     )
     .unwrap();
     let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
 
     let log = host(bin.path(), "tmux", "", 0);
+    let ordinary = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", &url, "--json"],
+    ));
+    assert_eq!(ordinary["receipts"][0]["status"], "elsewhere");
+    assert!(ordinary["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("--focus"));
+    assert!(!log.exists());
     let report = json(&lf(
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["open", &url, "--host", "tmux", "--json"],
+        &["open", &url, "--focus", "--json"],
     ));
-    assert_eq!(report["receipts"][0]["status"], "usable");
-    assert_eq!(report["receipts"][0]["destination"], "%5");
+    assert_eq!(report["receipts"][0]["status"], "focused");
+    assert!(report["receipts"][0]["destination"]
+        .as_str()
+        .unwrap()
+        .contains("/fixture/other-tmux.sock"));
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(
-        calls.starts_with("select-window -t %5"),
+        calls.starts_with("-S /fixture/other-tmux.sock select-window -t %5"),
         "the existing pane is focused; nothing is created or resent: {calls}"
     );
     assert!(!calls.contains("new-window"), "{calls}");
@@ -971,74 +941,23 @@ fn reopening_a_live_conversation_focuses_its_tmux_pane() {
     // A closed pane leaves the conversation where it is.
     std::fs::remove_file(&log).unwrap();
     host(bin.path(), "tmux", "", 1);
-    let report = json(&lf(
+    let failed = lf(
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["open", &url, "--host", "tmux", "--json"],
-    ));
-    assert_eq!(report["receipts"][0]["status"], "elsewhere");
+        &["open", &url, "--focus", "--json"],
+    );
+    assert!(!failed.status.success());
+    let report: Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["status"], "failed");
     assert!(!std::fs::read_to_string(&log)
         .unwrap()
         .contains("new-window"));
 }
 
 #[test]
-fn concurrent_and_repeated_openings_create_one_destination() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let log = host(bin.path(), "tmux", "%7", 0);
-    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
-    let receipts: Vec<Value> = std::thread::scope(|scope| {
-        let openings: Vec<_> = (0..2)
-            .map(|_| {
-                scope.spawn(|| {
-                    json(&lf(
-                        home.path(),
-                        repo.path(),
-                        Some(bin.path()),
-                        &["open", &url, "--host", "tmux", "--json"],
-                    ))
-                })
-            })
-            .collect();
-        openings
-            .into_iter()
-            .map(|opening| opening.join().unwrap())
-            .collect()
-    });
-    let again = json(&lf(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &["open", &url, "--host", "tmux", "--json"],
-    ));
-    for report in receipts.iter().chain([&again]) {
-        assert_eq!(report["receipts"][0]["status"], "opening");
-        assert_eq!(report["receipts"][0]["destination"], "%7");
-    }
-    let calls = std::fs::read_to_string(log).unwrap();
-    assert_eq!(
-        calls.matches("new-window").count(),
-        1,
-        "one conversation destination: {calls}"
-    );
-    assert_eq!(calls.matches("select-window -t %7").count(), 2, "{calls}");
-}
-
-#[test]
 fn links_tell_the_current_conversation_from_another_on_the_same_task() {
-    struct Child(std::process::Child);
-    impl Drop for Child {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -1115,8 +1034,8 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         &[("LF_AGENT_CALLER", &own)],
         &["open", &url],
     );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("is this conversation; continue here"));
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Already open"));
 
     // A resumed conversation's live viewer outranks its stale launch environment.
     for (placement, expected) in [
@@ -1130,20 +1049,13 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         let links = json(&lf_with(home.path(), repo.path(), None,
             &[("LF_AGENT_CALLER", &own), ("REX_SESSION", "session:stale"), ("REX_BLOCK", "block:stale")],
             &["open", &url, "--link", "--json"]));
-        assert_eq!(links[0]["route"]["hosts"][0], expected);
+        assert_eq!(links[0]["route"]["host"], expected);
     }
 }
 
 #[test]
 fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
-    struct Child(std::process::Child);
-    impl Drop for Child {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let provider = Provider::start();
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -1239,7 +1151,7 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     rex_peer(bin.path());
     let args = [
-        "open",
+        "workspace",
         "--task",
         "INF-123",
         "--host",
@@ -1269,7 +1181,7 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     // Opening neither searches for nor touches an earlier native workspace.
     assert!(!bin.path().join("session.list.requests").exists());
     assert!(!bin.path().join("session.view.requests").exists());
-    assert_eq!(sessions(home.path()), 0);
+    assert_eq!(sessions(home.path()), 1);
 }
 
 /// A stand-in provider process, gone with its test.
@@ -1289,216 +1201,6 @@ impl Drop for Provider {
 }
 
 #[test]
-fn repository_open_reconnects_detached_conversations_and_starts_none() {
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    let url = format!("loopflow://{}", folder(repo.path()));
-    let open = || {
-        let (report, created) = rex_open(
-            home.path(),
-            repo.path(),
-            bin.path(),
-            &[],
-            &["open", &url, "--host", "rex", "--no-focus"],
-        );
-        assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
-        created.lines().next().unwrap().to_owned()
-    };
-
-    // No conversation: resume would start a provider and take a first turn.
-    let created = open();
-    assert!(created.contains("Task & workflow"), "{created}");
-    assert!(!created.contains("resume"), "{created}");
-    assert_eq!(sessions(home.path()), 0);
-
-    let primary = live_conversation(
-        home.path(),
-        &provider.0,
-        started,
-        repo.path(),
-        "Design",
-        0,
-        1,
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
-        rusqlite::params![registered.task.id.as_str(), primary],
-    )
-    .unwrap();
-    // Open in another terminal: it stays there, however often this runs.
-    for _ in 0..2 {
-        let created = open();
-        assert!(created.contains("Task & workflow"), "{created}");
-        assert!(!created.contains("resume"), "{created}");
-    }
-
-    // No terminal shows it: the first open reconnects it, the second leaves it there.
-    detach(home.path(), &primary);
-    let created = open();
-    assert!(
-        created.contains("resume") && created.contains(&primary),
-        "{created}"
-    );
-    attach(home.path(), &primary);
-    let created = open();
-    assert!(created.contains("Task & workflow"), "{created}");
-    assert!(!created.contains("resume"), "{created}");
-
-    // Selecting the Task moves it.
-    let (_, created) = rex_open(
-        home.path(),
-        repo.path(),
-        bin.path(),
-        &[],
-        &["open", "--task", "INF-123", "--host", "rex", "--no-focus"],
-    );
-    assert!(
-        created.contains("resume") && created.contains(&primary),
-        "{created}"
-    );
-
-    let ended = live_conversation(home.path(), &provider.0, started, repo.path(), "Side", 0, 1);
-    db.execute(
-        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
-        [&ended],
-    )
-    .unwrap();
-
-    // The provider is gone: its Session stays recorded and is not relaunched.
-    let set_primary = |session: &str| {
-        db.execute(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
-            rusqlite::params![registered.task.id.as_str(), session],
-        )
-        .unwrap();
-    };
-    set_primary(&ended);
-    let created = open();
-    assert!(created.contains("Task & workflow"), "{created}");
-    assert!(!created.contains("resume"), "{created}");
-
-    // A saved pane answers for its own Session, whatever the primary is doing.
-    set_primary(&primary);
-    detach(home.path(), &primary);
-    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
-        .unwrap()
-        .save_pane_layout(
-            &serde_json::from_value(serde_json::json!({
-                "work": {
-                    "repository": registered.task.repository_id.as_str(),
-                    "kind": "task",
-                    "id": registered.task.id.as_str(),
-                },
-                "revision": 0,
-                "tree": {
-                    "kind": "split",
-                    "axis": "vertical",
-                    "ratio": 0.5,
-                    "first": {
-                        "kind": "pane",
-                        "id": "pane-0",
-                        "content": {"kind": "session", "session_id": ended, "location": null},
-                    },
-                    "second": {
-                        "kind": "split",
-                        "axis": "horizontal",
-                        "ratio": 0.5,
-                        "first": {
-                            "kind": "pane",
-                            "id": "pane-1",
-                            "content": {"kind": "shell", "tabs": [], "selected": null},
-                        },
-                        "second": {
-                            "kind": "pane",
-                            "id": "pane-2",
-                            "content": {"kind": "browser", "location": null, "tabs": [], "selected": null},
-                        },
-                    },
-                },
-                "focused": null,
-                "zoomed": null,
-                "hidden": [],
-                "drafts": [],
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-    let created = open();
-    assert!(created.contains("Task & workflow"), "{created}");
-    assert!(!created.contains("resume"), "{created}");
-}
-
-#[test]
-fn wave_open_reconnects_its_detached_conversation_and_starts_none() {
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    let open = || {
-        rex_open(
-            home.path(),
-            repo.path(),
-            bin.path(),
-            &[],
-            &[
-                "open",
-                "--wave",
-                "task-pr-tests",
-                "--host",
-                "rex",
-                "--no-focus",
-            ],
-        )
-    };
-    let conversation = |report: &serde_json::Value| {
-        report["receipts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|receipt| receipt["label"] == "Wave conversation")
-    };
-
-    let session = live_conversation(home.path(), &provider.0, started, repo.path(), "Wave", 0, 1);
-    wave_primary(
-        home.path(),
-        &session,
-        registered.task.wave_id.as_ref().unwrap().as_str(),
-    );
-    // Open in another terminal: it stays there.
-    let (report, created) = open();
-    assert!(!conversation(&report), "{report}");
-    assert!(!created.contains(&session), "{created}");
-
-    detach(home.path(), &session);
-    let (report, created) = open();
-    assert!(conversation(&report), "{report}");
-    assert!(created.contains(&session), "{created}");
-
-    // The provider is gone: the Session stays primary and is not relaunched.
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
-        [&session],
-    )
-    .unwrap();
-    let (report, created) = open();
-    assert!(!conversation(&report), "{report}");
-    assert!(!created.contains(&session), "{created}");
-    assert!(created.contains("Task & workflow"), "{created}");
-}
-
-#[test]
 fn opening_a_task_without_a_harness_reports_it_instead_of_an_empty_tab() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -1514,7 +1216,9 @@ fn opening_a_task_without_a_harness_reports_it_instead_of_an_empty_tab() {
         repo.path(),
         Some(bin.path()),
         &[("LF_SETTINGS", "{}")],
-        &["open", "--task", "INF-123", "--host", "rex", "--json"],
+        &[
+            "open", "--tab", "--task", "INF-123", "--host", "rex", "--json",
+        ],
     );
     assert!(!output.status.success(), "{output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1565,7 +1269,7 @@ fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["open", "--task", "INF-123", "--host", "rex", "--json"],
+        &["workspace", "--task", "INF-123", "--host", "rex", "--json"],
     ));
     assert!(
         report["receipts"][0]["reason"]
@@ -1594,7 +1298,7 @@ fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
         repo.path(),
         Some(bin.path()),
         &[
-            "open",
+            "workspace",
             "--task",
             "INF-123",
             "--host",
@@ -1618,6 +1322,7 @@ fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
 // The peer exposes inventory independently of replies, including writes whose reply is lost.
 fn rex_peer(bin: &Path) {
     use std::os::unix::fs::PermissionsExt;
+    terminal_ack(bin);
     let script = bin.join("rex");
     std::fs::write(
         &script,
@@ -1629,6 +1334,7 @@ if [ "$1" = whoami ]; then
   exit
 fi
 method="$2"
+'{bin}/terminal-ack' "$3"
 printf '%s\n' "$3" >> '{bin}/'"$method.requests"
 cat '{bin}/'"$method.reply"
 "#,
@@ -1699,7 +1405,7 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     let requests = host(bin.path(), "ssh", &receipt.to_string(), 0);
     let follow = |remote: Option<String>| {
         let mut args = vec![
-            "open".to_owned(),
+            "workspace".to_owned(),
             url.clone(),
             "--host".into(),
             "rex".into(),
@@ -1761,7 +1467,7 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         repo.path(),
         Some(bin.path()),
         &[
-            "open",
+            "workspace",
             &url,
             "--host",
             "rex",
@@ -1801,7 +1507,7 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
     rex_peer(bin.path());
     let shell = bin.path().join("fixture-shell");
     std::fs::write(&shell, format!(
-        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' open --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
+        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' workspace --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
     )).unwrap();
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
     json(&lf_with(
@@ -1810,7 +1516,7 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
         Some(bin.path()),
         &[("SHELL", shell.to_str().unwrap())],
         &[
-            "open",
+            "workspace",
             "--task",
             "INF-123",
             "--host",
@@ -1870,7 +1576,7 @@ fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
     );
     let containers = std::fs::read_to_string(bin.path().join("session.create.requests")).unwrap();
     assert_eq!(containers.lines().count(), 1, "{containers}");
-    assert_eq!(sessions(home.path()), 0);
+    assert_eq!(sessions(home.path()), 1);
 }
 
 #[test]
@@ -1890,11 +1596,12 @@ fn rex_agent_tool_open_uses_the_moved_viewer_instead_of_startup_context() {
             .spawn()
             .unwrap(),
     );
+    let caller_repo = TestRepo::new();
     let session = live_conversation(
         home.path(),
         &provider.0,
         time::OffsetDateTime::now_utc().unix_timestamp(),
-        repo.path(),
+        caller_repo.path(),
         "Agent tool caller",
         1,
         0,
@@ -1976,7 +1683,7 @@ esac
                 ("REX_SESSION", "session:stale"),
                 ("REX_BLOCK", "block:stale"),
             ],
-            &["open", "--task", "INF-123", "--no-focus", "--json"],
+            &["open", "--task", "INF-123", "--json"],
         ));
         assert_eq!(report["receipts"][0]["host"], "rex");
         assert_eq!(
@@ -1992,7 +1699,7 @@ esac
         )
         .unwrap();
     assert_eq!(retained, (origin, token));
-    assert_eq!(sessions(home.path()), 1);
+    assert_eq!(sessions(home.path()), 2);
 }
 
 #[test]
@@ -2011,11 +1718,12 @@ fn rex_agent_without_a_current_viewer_opens_on_the_local_server() {
             .spawn()
             .unwrap(),
     );
+    let caller_repo = TestRepo::new();
     let session = live_conversation(
         home.path(),
         &provider.0,
         time::OffsetDateTime::now_utc().unix_timestamp(),
-        repo.path(),
+        caller_repo.path(),
         "Detached caller",
         1,
         0,
@@ -2035,34 +1743,15 @@ fn rex_agent_without_a_current_viewer_opens_on_the_local_server() {
             ("REX_SESSION", "session:stale"),
             ("REX_BLOCK", "block:stale"),
         ],
-        &[
-            "open",
-            "--task",
-            "INF-123",
-            "--host",
-            "rex",
-            "--no-focus",
-            "--json",
-        ],
+        &["open", "--task", "INF-123", "--host", "rex", "--json"],
     ));
-    assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+    assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     assert_eq!(report["receipts"][0]["destination"], "window:fixture");
     assert!(bin.path().join("session.create.requests").exists());
     assert!(
         !bin.path().join("session.view.requests").exists(),
         "no stale block is inspected"
     );
-}
-
-/// Make `session` the primary conversation of `wave`.
-fn wave_primary(home: &Path, session: &str, wave: &str) {
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET primary_scope='wave',wave_id=?2 WHERE id=?1",
-            rusqlite::params![session, wave],
-        )
-        .unwrap();
 }
 
 /// `LF_AGENT_CALLER` for an agent running `session`.
@@ -2084,320 +1773,6 @@ fn agent_caller_env(home: &Path, session: &str) -> String {
 
 const FIXTURE_REX: &[&str] = &["--host", "rex", "--server", "unix:///fixture/rex.sock"];
 
-/// Run `lf open` against a fixture Rex; its report and the tabs it created.
-fn rex_open(
-    home: &Path,
-    repo: &Path,
-    bin: &Path,
-    env: &[(&str, &str)],
-    args: &[&str],
-) -> (Value, String) {
-    let args = [args, &["--json"]].concat();
-    let report = json(&lf_with(home, repo, Some(bin), env, &args));
-    let requests = bin.join("session.new_window.requests");
-    let created = std::fs::read_to_string(&requests).unwrap_or_default();
-    let _ = std::fs::remove_file(requests);
-    (report, created)
-}
-
-#[test]
-fn a_conversation_running_lf_open_stays_where_it_is() {
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    let wave = registered.task.wave_id.as_ref().unwrap().as_str();
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let conversation =
-        |title| live_conversation(home.path(), &provider.0, started, repo.path(), title, 1, 0);
-    let primary = conversation("Task primary");
-    db.execute(
-        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-        rusqlite::params![primary, registered.task.id.as_str(), wave],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
-        rusqlite::params![registered.task.id.as_str(), primary],
-    )
-    .unwrap();
-    let open = |caller: &str, args: &[&str]| {
-        let caller = agent_caller_env(home.path(), caller);
-        rex_open(
-            home.path(),
-            repo.path(),
-            bin.path(),
-            &[("LF_AGENT_CALLER", &caller)],
-            &[args, FIXTURE_REX].concat(),
-        )
-    };
-    let url = format!("loopflow://{}", folder(repo.path()));
-
-    // Its own Task, selected directly and through a repository opening.
-    for args in [&["open", "--task", "INF-123"][..], &["open", &url][..]] {
-        let (_, created) = open(&primary, args);
-        assert!(created.contains("Task & workflow"), "{created}");
-        assert!(!created.contains("resume"), "{created}");
-    }
-
-    // A Graph step on the same Task is another conversation.
-    let step = conversation("Graph step");
-    let (_, created) = open(&step, &["open", "--task", "INF-123"]);
-    assert!(created.contains(&primary), "{created}");
-    assert!(created.contains("resume"), "{created}");
-
-    let wave_session = conversation("Wave conversation");
-    wave_primary(home.path(), &wave_session, wave);
-    let wave_open = ["open", "--wave", "task-pr-tests"];
-    let (report, created) = open(&wave_session, &wave_open);
-    assert!(
-        !report["receipts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|receipt| receipt["label"] == "Wave conversation"),
-        "{report}"
-    );
-    assert!(!created.contains(&wave_session), "{created}");
-    detach(home.path(), &wave_session);
-    let (report, created) = open(&step, &wave_open);
-    assert!(report.to_string().contains("Wave conversation"), "{report}");
-    assert!(created.contains(&wave_session), "{created}");
-}
-
-#[test]
-fn a_task_conversation_stays_put_when_the_task_has_no_primary() {
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    let caller = live_conversation(
-        home.path(),
-        &provider.0,
-        started,
-        repo.path(),
-        "Unchosen conversation",
-        1,
-        0,
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-        rusqlite::params![
-            caller,
-            registered.task.id.as_str(),
-            registered.task.wave_id.as_ref().unwrap().as_str()
-        ],
-    )
-    .unwrap();
-
-    let env = agent_caller_env(home.path(), &caller);
-    let (_, created) = rex_open(
-        home.path(),
-        repo.path(),
-        bin.path(),
-        &[("LF_AGENT_CALLER", &env)],
-        &[&["open", "--task", "INF-123"], FIXTURE_REX].concat(),
-    );
-
-    assert!(created.contains("Task & workflow"), "{created}");
-    assert!(!created.contains("resume"), "{created}");
-}
-
-#[test]
-fn a_session_without_a_task_opens_one_conversation_tab_here() {
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    rex_reply(
-        bin.path(),
-        "session.list",
-        serde_json::json!({"sessions":[{"session_id":"session:here"}]}),
-    );
-    rex_reply(
-        bin.path(),
-        "session.view",
-        serde_json::json!({"windows":[{"window_id":"window:here","layers":[{"blocks":[{"block_id":"block:here"}]}]}]}),
-    );
-    let in_rex = [
-        ("REX_SERVER", "unix:///fixture/rex.sock"),
-        ("REX_SESSION", "session:here"),
-        ("REX_BLOCK", "block:here"),
-    ];
-    let side = live_conversation(
-        home.path(),
-        &provider.0,
-        started,
-        repo.path(),
-        "Side question",
-        0,
-        1,
-    );
-    let tabs = |created: &str| {
-        created
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .collect::<Vec<_>>()
-    };
-
-    let (report, created) = rex_open(
-        home.path(),
-        repo.path(),
-        bin.path(),
-        &in_rex,
-        &["open", "--session", &side, "--host", "rex", "--no-focus"],
-    );
-    let tabs_created = tabs(&created);
-    assert_eq!(tabs_created.len(), 1, "{created}");
-    assert_eq!(tabs_created[0]["session_id"], "session:here");
-    assert_eq!(tabs_created[0]["layout"]["block"]["label"], "Conversation");
-    assert!(created.contains(&side), "{created}");
-    assert!(!created.contains(registered.task.id.as_str()), "{created}");
-    assert_eq!(report["receipts"].as_array().unwrap().len(), 1, "{report}");
-    assert!(!bin.path().join("session.create.requests").exists());
-
-    // Every available conversation with no Task, Wave primaries included.
-    let wave = live_conversation(home.path(), &provider.0, started, repo.path(), "Wave", 0, 1);
-    wave_primary(
-        home.path(),
-        &wave,
-        registered.task.wave_id.as_ref().unwrap().as_str(),
-    );
-    let (_, created) = rex_open(
-        home.path(),
-        repo.path(),
-        bin.path(),
-        &in_rex,
-        &["open", "--available", "--host", "rex", "--no-focus"],
-    );
-    let tabs_created = tabs(&created);
-    assert_eq!(tabs_created.len(), 2, "{created}");
-    assert!(tabs_created
-        .iter()
-        .all(|tab| tab["session_id"] == "session:here"
-            && tab["layout"]["block"]["label"] == "Conversation"));
-    assert!(
-        created.contains(&side) && created.contains(&wave),
-        "{created}"
-    );
-    assert!(!created.contains("--follow"), "{created}");
-
-    // Naming the calling conversation opens nothing. In a Task checkout it
-    // belongs to that Task, which the first test covers.
-    let elsewhere = TestRepo::new();
-    let plain = live_conversation(
-        home.path(),
-        &provider.0,
-        started,
-        elsewhere.path(),
-        "Plain repository",
-        1,
-        0,
-    );
-    let caller = agent_caller_env(home.path(), &plain);
-    let (report, created) = rex_open(
-        home.path(),
-        elsewhere.path(),
-        bin.path(),
-        &[("LF_AGENT_CALLER", &caller)],
-        &[&["open", "--session", &plain], FIXTURE_REX].concat(),
-    );
-    assert!(created.is_empty(), "{created}");
-    assert!(
-        report["receipts"][0]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("continue here"),
-        "{report}"
-    );
-}
-
-#[test]
-fn lf_a_reaches_only_a_tasks_first_conversation() {
-    use loopflow::durable::MachineId;
-    use loopflow::store::sqlite::SqliteStore;
-
-    let provider = Provider::start();
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    for harness in ["claude", "codex"] {
-        host(bin.path(), harness, "", 0);
-    }
-    let args = [&["-a", "codex", "open", "--task", "INF-123"], FIXTURE_REX].concat();
-    let env = [("LF_SETTINGS", "{}")];
-    let open = || rex_open(home.path(), repo.path(), bin.path(), &env, &args).1;
-    let forwarded = format!(
-        "\"--task\",\"{}\",\"--agent\",\"codex\"",
-        registered.task.id.as_str()
-    );
-
-    let warned = lf_with(home.path(), repo.path(), Some(bin.path()), &env, &args);
-    let stderr = String::from_utf8_lossy(&warned.stderr);
-    assert!(!stderr.contains("has no effect"), "{stderr}");
-    let created = open();
-    assert!(created.contains(&forwarded), "{created}");
-
-    // An ended conversation keeps its harness, though no primary is recorded.
-    let ended = live_conversation(
-        home.path(),
-        &provider.0,
-        started,
-        repo.path(),
-        "Ended",
-        0,
-        1,
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-        rusqlite::params![
-            ended,
-            registered.task.id.as_str(),
-            registered.task.wave_id.as_ref().unwrap().as_str()
-        ],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE processes SET completed_at=unixepoch() WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
-        [&ended],
-    )
-    .unwrap();
-    let created = open();
-    assert!(created.contains("resume"), "{created}");
-    assert!(!created.contains("--agent"), "{created}");
-
-    // The Task's own Machine starts its conversation.
-    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let peer = MachineId::new();
-    store
-        .add_machine(&peer, "remote.invalid", "Remote")
-        .unwrap();
-    store.claim_task(&registered.task.id).unwrap();
-    store.handoff_task(&registered.task.id, &peer).unwrap();
-    let requests = host(bin.path(), "ssh", r#"{"receipts":[],"unknown":[]}"#, 0);
-    open();
-    let sent = std::fs::read_to_string(requests).unwrap();
-    assert!(sent.contains("'--agent' 'codex'"), "{sent}");
-}
-
 #[test]
 fn rex_unavailable_context_never_falls_through_to_desktop() {
     let repo = TestRepo::new();
@@ -2415,7 +1790,7 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
             ("REX_SESSION", "session:missing"),
             ("REX_BLOCK", "block:missing"),
         ],
-        &["open", "--task", "INF-123", "--json"],
+        &["open", "--tab", "--task", "INF-123", "--json"],
     );
     assert!(!output.status.success());
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2430,7 +1805,7 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
             .contains("Rex caller server is unavailable from its process ancestry"));
     }
     assert!(!desktop.exists());
-    assert_eq!(sessions(home.path()), 0);
+    assert_eq!(sessions(home.path()), 1);
 }
 
 // Arrangement tests exercise tools only; conversation execution has its own
@@ -2491,7 +1866,14 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let server = IsolatedRex::start(root.path(), &bin, &viewer);
     let endpoint = server.endpoint.clone();
     let args = [
-        "open", "--task", "INF-123", "--host", "rex", "--server", &endpoint, "--json",
+        "workspace",
+        "--task",
+        "INF-123",
+        "--host",
+        "rex",
+        "--server",
+        &endpoint,
+        "--json",
     ];
     let first = json(&lf(&home, repo.path(), None, &args));
     let window = first["receipts"][0]["destination"].as_str().unwrap();
@@ -2525,7 +1907,11 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
             if settled {
                 break;
             }
-            assert!(Instant::now() < deadline, "{block}: {process}");
+            assert!(
+                Instant::now() < deadline,
+                "{block}: {process}\n{}",
+                server.screen(container, id)
+            );
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -2545,7 +1931,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let reply = root.path().join("caller.json");
     call(
         "session.new_window",
-        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 open --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
+        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 workspace --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
     );
     let deadline = Instant::now() + Duration::from_secs(15);
     let automatic = loop {
@@ -2563,7 +1949,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         }
         assert!(
             Instant::now() < deadline,
-            "Rex shell did not return its automatic-open receipt: {}",
+            "Rex shell did not return its workspace receipt: {}",
             std::fs::read_to_string(reply.with_extension("json.err")).unwrap_or_default(),
         );
         std::thread::sleep(Duration::from_millis(50));
@@ -2589,7 +1975,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         repo.path(),
         None,
         &[
-            "open",
+            "workspace",
             &repository_url,
             "--host",
             "rex",
@@ -2789,7 +2175,14 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
         assert!(result.get("error").is_none(), "{result}");
         result["result"].clone()
     };
-    let args = ["open", "--task", "INF-123", "--host", "herdr", "--json"];
+    let args = [
+        "workspace",
+        "--task",
+        "INF-123",
+        "--host",
+        "herdr",
+        "--json",
+    ];
     let environment = [("HERDR_SOCKET_PATH", socket.to_str().unwrap())];
     let first = json(&lf_with(&home, repo.path(), None, &environment, &args));
     let tab = first["receipts"][0]["destination"]
@@ -2831,4 +2224,477 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
             serde_json::json!({"workspace_id":workspace["workspace_id"]}),
         );
     }
+}
+
+#[test]
+fn focus_absence_and_plain_agent_open_create_no_session_or_host() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let launches = host(bin.path(), "open", "", 0);
+    for flags in [vec!["--focus"], vec!["--tab"]] {
+        let args = [&["open", "--task", "INF-123", "--json"][..], &flags].concat();
+        let output = lf(home.path(), repo.path(), Some(bin.path()), &args);
+        assert!(!output.status.success());
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let reason = report["receipts"][0]["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("Not open") || reason.contains("no sibling-tab support"),
+            "{reason}"
+        );
+        assert_eq!(sessions(home.path()), 0);
+        assert!(!launches.exists());
+    }
+}
+
+#[test]
+fn own_session_and_same_rex_open_report_identity_without_creating_or_focusing() {
+    let provider = Provider::start();
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Renamed tab",
+        1,
+        0,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+        rusqlite::params![
+            session,
+            registered.task.id.as_str(),
+            registered.task.wave_id.as_ref().unwrap().as_str()
+        ],
+    )
+    .unwrap();
+    let placement = serde_json::json!({"server":"unix:///fixture/rex.sock","session":"native-session","block":"native-block"});
+    db.execute("UPDATE processes SET terminal_id=?2 WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)", rusqlite::params![session, format!("rex:{placement}")]).unwrap();
+    rex_peer(bin.path());
+    let caller = agent_caller_env(home.path(), &session);
+    for selector in [vec!["--task", "INF-123"], vec!["--session", &session]] {
+        let args = [&["open", "--json"][..], &selector].concat();
+        let report = json(&lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &[("LF_AGENT_CALLER", &caller)],
+            &args,
+        ));
+        assert_eq!(report["receipts"][0]["status"], "elsewhere");
+        assert_eq!(report["receipts"][0]["host"], "rex");
+        assert!(report["receipts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("native-block"));
+        assert!(!bin.path().join("session.new_window.requests").exists());
+        assert!(!bin.path().join("session.focus_window.requests").exists());
+    }
+    let refused = lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &[("LF_AGENT_CALLER", &caller)],
+        &["open", "--session", &session, "--here", "--json"],
+    );
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stdout).contains("interactive terminal"));
+    rex_reply(
+        bin.path(),
+        "session.view",
+        serde_json::json!({"windows":[{
+            "window_id":"moved-window", "label":"Different title", "layers":[{
+                "blocks":[{"block_id":"native-block"}]
+            }]
+        }]}),
+    );
+    rex_reply(bin.path(), "session.focus_window", serde_json::json!({}));
+    rex_reply(
+        bin.path(),
+        "client.list",
+        serde_json::json!({"clients":[{"client_id":"app","info":{"kind":"app"}}]}),
+    );
+    rex_reply(
+        bin.path(),
+        "client.inspect",
+        serde_json::json!({"actions":[{"name":"session.select"}]}),
+    );
+    rex_reply(bin.path(), "client.perform", serde_json::json!({}));
+    let focused = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", "--session", &session, "--focus", "--json"],
+    ));
+    assert_eq!(focused["receipts"][0]["status"], "focused");
+    let selected =
+        std::fs::read_to_string(bin.path().join("session.focus_window.requests")).unwrap();
+    assert!(selected.contains("moved-window"), "{selected}");
+    assert!(!bin.path().join("session.new_window.requests").exists());
+    assert_eq!(sessions(home.path()), 1);
+}
+
+#[test]
+fn repository_and_wave_open_one_conversation_independent_of_layout() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    for selector in [
+        vec!["--repo", repo.path().to_str().unwrap()],
+        vec!["--wave", "task-pr-tests"],
+    ] {
+        let args = [&["open", "--tab", "--json"][..], FIXTURE_REX, &selector].concat();
+        let report = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+        assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
+    }
+    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
+    assert_eq!(created.lines().count(), 2);
+    for request in created.lines() {
+        let request: Value = serde_json::from_str(request).unwrap();
+        assert_eq!(request["layout"]["block"]["label"], "Conversation");
+        assert!(!request.to_string().contains("Task & workflow"));
+        assert!(!request.to_string().contains("--follow"));
+    }
+    assert_eq!(sessions(home.path()), 2);
+}
+
+#[test]
+fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let ack = bin.path().join("terminal-ack");
+    let success = std::fs::read_to_string(&ack).unwrap();
+    std::fs::write(
+        &ack,
+        success.replace(
+            "print $receipt 'attached'",
+            "print $receipt 'provider launch failed'",
+        ),
+    )
+    .unwrap();
+    let args = [
+        &["open", "--tab", "--task", "INF-123", "--json"][..],
+        FIXTURE_REX,
+    ]
+    .concat();
+    let failed = lf(home.path(), repo.path(), Some(bin.path()), &args);
+    assert!(!failed.status.success());
+    let report: Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert_eq!(report["receipts"][0]["destination"], "window:fixture");
+    assert!(report["receipts"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("provider launch failed"));
+    // A provider configuration error can leave a reservation after its
+    // transport removes the socket. That retired owner cannot block a retry.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let session: String = db
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let owner = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&owner],
+    )
+    .unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    store
+        .claim_session_attachment(&session, None, &owner, true)
+        .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![session, owner],
+    )
+    .unwrap();
+    let focus = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", "--session", &session, "--focus", "--json"],
+    );
+    assert!(!focus.status.success());
+    assert!(String::from_utf8_lossy(&focus.stdout).contains("Not open"));
+    std::fs::write(ack, success).unwrap();
+    let report = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
+    assert_eq!(report["receipts"][0]["status"], "usable");
+    assert_eq!(
+        sessions(home.path()),
+        1,
+        "retry reuses the prepared Session"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn desktop_workspace_and_default_view_open_arrangements_without_starting_sessions() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let opened = host(bin.path(), "open", "", 0);
+    for command in [
+        vec!["workspace", "--host", "desktop"],
+        vec!["desktop", "view"],
+    ] {
+        let args = [command.as_slice(), &["--task", "INF-123", "--json"]].concat();
+        let report = json(&lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &[("LF_DESKTOP", "com.loopflow.mac.test")],
+            &args,
+        ));
+        assert_eq!(report["receipts"][0]["status"], "opening", "{report}");
+        assert_eq!(sessions(home.path()), 0);
+    }
+    let requests = std::fs::read_to_string(opened).unwrap();
+    assert_eq!(requests.lines().count(), 2, "{requests}");
+    assert!(
+        requests
+            .lines()
+            .all(|line| line.contains("view=task%3A") && !line.contains("session=")),
+        "{requests}"
+    );
+}
+
+#[test]
+fn workspace_attachment_failure_keeps_the_created_tools_and_destination() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    rex_peer(bin.path());
+    let ack = bin.path().join("terminal-ack");
+    let script = std::fs::read_to_string(&ack).unwrap().replace(
+        "print $receipt 'attached'",
+        "print $receipt 'conversation failed'",
+    );
+    std::fs::write(ack, script).unwrap();
+    let args = [
+        &["workspace", "--task", "INF-123", "--json"][..],
+        FIXTURE_REX,
+    ]
+    .concat();
+    let result = lf(home.path(), repo.path(), Some(bin.path()), &args);
+    assert!(!result.status.success(), "{result:?}");
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let receipt = &report["receipts"][0];
+    assert_eq!(receipt["status"], "failed", "{report}");
+    assert_eq!(receipt["destination"], "window:fixture", "{report}");
+    assert!(
+        receipt["reason"]
+            .as_str()
+            .unwrap()
+            .contains("conversation failed"),
+        "{report}"
+    );
+    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
+    assert!(
+        created.contains("Task & workflow") && created.contains("shell"),
+        "{created}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn desktop_conversation_attachment_retry_and_focus_keep_the_retained_view() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixListener;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    struct Peer {
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for Peer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            self.thread.take().unwrap().join().unwrap();
+        }
+    }
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let provider = Provider::start();
+    let session = live_conversation(
+        home.path(),
+        &provider.0,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        repo.path(),
+        "Retry",
+        0,
+        1,
+    );
+    drop(provider);
+    let log = host(bin.path(), "open", "", 0);
+    let reading_path = home.path().join("desktop.json");
+    let corrected = home.path().join("corrected");
+    let mut reading: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/desktop_inspection.json"
+    ))
+    .unwrap();
+    reading["openings"] = serde_json::json!([]);
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["subject"] =
+        session.clone().into();
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] = "failed".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    let socket_dir = home.path().join("run/desktop");
+    std::fs::create_dir_all(&socket_dir).unwrap();
+    let listener = UnixListener::bind(socket_dir.join("com.loopflow.mac.test.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let peer_stop = stop.clone();
+    let peer_reading = reading_path.clone();
+    let peer_log = log.clone();
+    let peer_corrected = corrected.clone();
+    let thread = std::thread::spawn(move || {
+        let mut launches = 0;
+        while !peer_stop.load(Ordering::SeqCst) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            let mut reading: Value =
+                serde_json::from_str(&std::fs::read_to_string(&peer_reading).unwrap()).unwrap();
+            let sent = std::fs::read_to_string(&peer_log).unwrap_or_default();
+            if sent.lines().count() != launches {
+                launches = sent.lines().count();
+                let status = if peer_corrected.exists() {
+                    "usable"
+                } else {
+                    "failed"
+                };
+                reading["windows"][0]["opening"] = serde_json::json!({
+                    "revision": format!("attempt-{launches}"),
+                    "url": sent.split_whitespace().last().unwrap(), "status": status,
+                    "reason": if status == "failed" { Some("Attachment failed") } else { None }
+                });
+                reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] =
+                    status.into();
+                std::fs::write(&peer_reading, reading.to_string()).unwrap();
+            }
+            let result = if request["method"] == "inspect" {
+                reading
+            } else {
+                assert_eq!(request["params"]["action"], "focus");
+                let action: Value = serde_json::from_str(include_str!(
+                    "../../../tests/fixtures/dto/desktop_action.json"
+                ))
+                .unwrap();
+                action["receipt"].clone()
+            };
+            writeln!(
+                stream,
+                "{}",
+                serde_json::json!({"id":request["id"],"result":result})
+            )
+            .unwrap();
+        }
+    });
+    let _peer = Peer {
+        stop,
+        thread: Some(thread),
+    };
+    let env = [("LF_DESKTOP", "com.loopflow.mac.test")];
+    let open = || {
+        lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &env,
+            &["open", "--session", &session, "--host", "desktop", "--json"],
+        )
+    };
+    let focus = || {
+        lf_with(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &env,
+            &["open", "--session", &session, "--focus", "--json"],
+        )
+    };
+    let focused = focus();
+    assert!(focused.status.success(), "focus retained view: {focused:?}");
+    assert_eq!(json(&focused)["receipts"][0]["status"], "focused");
+    assert!(!log.exists());
+    let failed = open();
+    assert!(!failed.status.success(), "{failed:?}");
+    assert!(String::from_utf8_lossy(&failed.stdout).contains("Attachment failed"));
+    std::fs::write(&corrected, "").unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "usable");
+    let focused = focus();
+    assert!(focused.status.success(), "focus retained view: {focused:?}");
+    assert_eq!(json(&focused)["receipts"][0]["status"], "focused");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
+    let companion = lf_with(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &env,
+        &[
+            "open",
+            "--session",
+            &session,
+            "--host",
+            "desktop",
+            "--diff",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&companion)["receipts"][0]["status"], "usable");
+    let mut reading: Value =
+        serde_json::from_str(&std::fs::read_to_string(&reading_path).unwrap()).unwrap();
+    reading["windows"][0]["workspaces"][0]["layout"]["children"][0]["attachment"] =
+        "opening".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "opening");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    reading["windows"][0]["workspaces"] = serde_json::json!([]);
+    reading["windows"][0]["opening"]["status"] = "opening".into();
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    assert_eq!(json(&open())["receipts"][0]["status"], "opening");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3);
+    let pending_focus = focus();
+    assert!(!pending_focus.status.success());
+    assert!(String::from_utf8_lossy(&pending_focus.stdout).contains("Not open"));
+    reading["windows"] = serde_json::json!([]);
+    std::fs::write(&reading_path, reading.to_string()).unwrap();
+    let absent = focus();
+    assert!(!absent.status.success());
+    assert!(String::from_utf8_lossy(&absent.stdout).contains("Not open"));
+    assert_eq!(sessions(home.path()), 1);
 }

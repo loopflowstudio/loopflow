@@ -31,8 +31,9 @@ Remaining: demo (run `transport_tests`, ps diff, open a fresh report) and the
 count check (report totals against a fresh `ps`), both at demo/gate.
 
 Checks:
-- `cargo test -p loopflow --test transport_tests`: 108 passed, 8 ignored; no new
-  process from `target/`, `/tmp/lf-7501-*` or stand-ins afterwards (ps diff).
+- `cargo test -p loopflow --test transport_tests` after the reaper move, load ~80:
+  107 passed, 1 read timeout (`unanswering_superseded_owner_…`, passed alone);
+  ps diff empty for `target/` and `/tmp/lf-7501-*`.
 - Compress, load average 200-330: full suite twice, 6 then 2 different
   timeouts (`launches(..)` 30 s deadline); each failure passed alone.
 - Regression test fails with the owner fix removed (verified), passes with it.
@@ -47,11 +48,8 @@ Checks:
 
 Next implement direction, settled by the design:
 
-- One reaper. `rust/loopflow/tests/README.md` says to copy `transport_tests`'
-  `Fixture` Drop into new fixtures; that makes N copies of "end what my store
-  recorded". Move it to `loopflow-test-support` as a function of a home path
-  and the test `lf` path, call it from `Fixture::drop`, and have the README
-  name the function instead of "copy it".
+- One reaper: done. `loopflow_test_support::end_recorded_processes(home, lf)`;
+  `transport_tests`' `Fixture::drop` calls it and the tests README names it.
 - `Pipe.uninherited()` covers every Desktop `Pipe()` today, but a new `Pipe()`
   reintroduces the leak silently. Panes are forked by GhosttyKit, so the
   one-place fix (pane children start with only their PTY) is not ours to make.

@@ -60,6 +60,57 @@ impl RunningParent {
     }
 }
 
+/// End every `lf` Process a fixture's store at `home` still records as running.
+/// Detached owners leave the test's process group and outlive it otherwise. A
+/// recorded PID is signalled only while its command line still names `home` or
+/// starts with `lf`, so a reused PID is never touched.
+#[cfg(unix)]
+pub fn end_recorded_processes(home: &Path, lf: &Path) {
+    let Ok(sql) = rusqlite::Connection::open_with_flags(
+        home.join("loopflow.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return;
+    };
+    let Ok(mut rows) =
+        sql.prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+    else {
+        return;
+    };
+    let pids: Vec<libc::pid_t> = rows
+        .query_map([], |r| r.get(0))
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default();
+    let home = home.to_string_lossy().into_owned();
+    let lf = lf.to_string_lossy().into_owned();
+    let ours = |pid: libc::pid_t| {
+        Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .map(|out| {
+                let command = String::from_utf8_lossy(&out.stdout);
+                command.contains(&home) || command.starts_with(&lf)
+            })
+            .unwrap_or(false)
+    };
+    let mut running: Vec<libc::pid_t> = pids.into_iter().filter(|pid| ours(*pid)).collect();
+    for signal in [libc::SIGCONT, libc::SIGTERM] {
+        for pid in &running {
+            // SAFETY: a live PID this store recorded, checked above.
+            unsafe { libc::kill(*pid, signal) };
+        }
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !running.is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        running.retain(|pid| ours(*pid));
+    }
+    for pid in running {
+        // SAFETY: as above; it ignored SIGTERM for five seconds.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+}
+
 /// Use the runner's prepared CLI, or build it with Cargo's target-directory selection.
 pub fn lf_binary() -> &'static str {
     static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();

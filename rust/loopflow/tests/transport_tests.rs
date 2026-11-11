@@ -27,54 +27,12 @@ struct Fixture {
     repo: TestRepo,
 }
 
-/// Owners detach from the test and outlive it unless ended here. Every lf
-/// process the fixture caused is recorded in its private store; a recorded PID
-/// is signalled only while its command line still names this fixture's home
-/// or the test build of lf, so a reused PID is never touched.
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let Ok(sql) = rusqlite::Connection::open_with_flags(
-            self.home.path().join("loopflow.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
-            return;
-        };
-        let Ok(mut rows) =
-            sql.prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
-        else {
-            return;
-        };
-        let pids: Vec<libc::pid_t> = rows
-            .query_map([], |r| r.get(0))
-            .map(|rows| rows.flatten().collect())
-            .unwrap_or_default();
-        let home = self.home.path().to_string_lossy().into_owned();
-        let ours = |pid: libc::pid_t| {
-            Command::new("ps")
-                .args(["-o", "command=", "-p", &pid.to_string()])
-                .output()
-                .map(|out| {
-                    let command = String::from_utf8_lossy(&out.stdout);
-                    command.contains(&home) || command.starts_with(env!("CARGO_BIN_EXE_lf"))
-                })
-                .unwrap_or(false)
-        };
-        let mut running: Vec<libc::pid_t> = pids.into_iter().filter(|pid| ours(*pid)).collect();
-        for signal in [libc::SIGCONT, libc::SIGTERM] {
-            for pid in &running {
-                // SAFETY: a live PID this fixture's store recorded, checked above.
-                unsafe { libc::kill(*pid, signal) };
-            }
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !running.is_empty() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-            running.retain(|pid| ours(*pid));
-        }
-        for pid in running {
-            // SAFETY: as above; it ignored SIGTERM for five seconds.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-        }
+        loopflow_test_support::end_recorded_processes(
+            self.home.path(),
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+        );
     }
 }
 

@@ -732,6 +732,12 @@ cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | t
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
+Conversation opening changes run `cargo test -p loopflow --test transport_tests conversation_open_`.
+Keep the stored viewer flag stale after a successful attachment in the duplicate-open
+proof: the transport handshake precedes its asynchronous database update.
+Run `work_open_tests::` on Linux too; its Desktop refusal and retry command are
+not exercised by macOS-only checks.
+
 ### Native Rex proofs
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which

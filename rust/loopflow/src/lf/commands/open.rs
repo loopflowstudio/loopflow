@@ -1064,12 +1064,12 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     let Some(store) = crate::store::read_existing_registry()? else {
         return Ok(desktop);
     };
-    let Some(summary) = crate::ops::human_session::viewed_summary(&store.sqlite, id)? else {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let Some(summary) = store.sqlite.session_summary(id, now)? else {
         return Ok(desktop);
     };
-    if summary.unviewed {
-        return Ok(desktop);
-    }
+    // The owner's stored viewer flag can lag the attachment handshake.
+    // Ask the live transport before using that flag to decide whether to attach.
     let (viewed, ready) = if let Some(owner) = store.sqlite.session_transport(id)? {
         match crate::transport::attachment(&owner) {
             Ok(attachment) => attachment,
@@ -1080,7 +1080,8 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         }
     } else {
         (
-            summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live,
+            !summary.unviewed
+                && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live,
             true,
         )
     };

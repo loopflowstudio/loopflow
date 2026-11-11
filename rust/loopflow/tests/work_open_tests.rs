@@ -677,7 +677,7 @@ fn linux_automatic_route_never_selects_desktop() {
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("Loopflow Desktop requires macOS"), "{text}");
-    assert!(text.contains(&format!("Run: lf open {url}")), "{text}");
+    assert!(text.contains("retry with lf open --session "), "{text}");
 }
 
 /// Seed an interactive conversation whose provider is alive, with the given activity.

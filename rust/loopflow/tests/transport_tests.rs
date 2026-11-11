@@ -794,6 +794,11 @@ printf '%s' "$answer" > "$HOME/answer"
         .stderr(Stdio::piped());
     let mut viewer = command.spawn().unwrap();
     assert_eq!(fixture.wait_file("attached"), "attached");
+    // The owner's asynchronous store update can lag its attachment handshake.
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=0 WHERE id=?1", [&owner])
+        .unwrap();
     let report = fixture
         .command(&["open", "--session", &session, "--json"])
         .env("PATH", &path)

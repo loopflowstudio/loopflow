@@ -23,8 +23,9 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining, at demo/gate: `transport_tests` with a ps diff, a fresh report,
-its totals against a fresh `ps`.
+Remaining, at demo: regenerate the report (the committed one is the 17:30
+reading) and compare its totals with a fresh `ps`; show the `transport_tests`
+ps diff again. Open: `scratch/questions.md` 1a-1d.
 
 Checks:
 - `cargo test -p loopflow --test transport_tests`, load 40-60, after dropping

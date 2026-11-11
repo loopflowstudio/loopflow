@@ -1,9 +1,0 @@
-# Fixed build integration · November10
-
-Jack Heart: “we gotta rebase onto teh fixed build”
-
-Installed CLI changed at15:38 local to6f2af09b9. `git diff origin/main 6f2af09b9` is empty; both contain #1874’s fix. Mobile source311941bfe already contains main454f76894; fresh `lf sync --manual` completed without changes or conflicts. The installed CLI lacks `server mobile` and reports an executable mismatch with the retained protocol5 server, so a matching signed mobile-branch Mac bundle is being built. Preserve the fixed source and use normal promotion; no raw executable swap or store edit.
-
-Build handle92636/log/tmp/mobile-fixed-base-build.log. Previous published-head CI42923084193 is still running only its final native iOS job; watcher84275/log/tmp/mobile-icon-prior-ci-watch.log. No publication until it finishes. Icon and native insertion regression are local commitsf8cac5b95 and311941bfe. The native regression passed unchanged production; this proves no physical dictation.
-
-Build92636 passed in138.0s (Rust126.9s, Swift4.7s); signature verified. Candidate /Users/jack/.lf-machine/demos/mobile-718-mac-311941bfe/Loopflow.app. Preflight31788 returned promote, no migration required. Normal promotion36128 succeeded; installed signature/CLI hash match candidate. New server instance6eb01ea1-7931-4093-bd8f-4985014413df, protocol5 ready/listening=true, mobile-ready=true,errornull,clients=[]. Same endpoint https://jacks-macbook-pro.tail0eda02.ts.net:53747. No raw store edits or manual executable replacement. Build/preflight/promotion/status logs retained in reviewroot/fixed-base. Phone artifactf8cac5b95 remains installed; no phone pairing/input established. Current CI42923084193 still in progress; watcher84275 remains live. Publish icon/test changes after that run finishes, using prepared reviewroot/app-icon/pr-copy.json updated for the new Mac installation.

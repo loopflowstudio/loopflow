@@ -1674,7 +1674,7 @@ fn the_stream_keeps_its_run_and_takes_model_and_usage_from_the_transcript() {
         stream_turn("u1", RUN_STARTED + 1, None),
         stream_turn("folded", RUN_STARTED, Some(RUN_ENDED + 1)),
     ] {
-        let turn = combine(&stream, Some(transcript_run(None)));
+        let turn = combine(&stream, Some(transcript_run(None)), RUN_ENDED + 1);
         assert_eq!(turn.source, TurnSource::Stream);
         assert_eq!(
             turn.state,
@@ -1693,13 +1693,13 @@ fn a_run_the_stream_missed_after_its_turn_is_the_reading() {
     use crate::transcript::live::{combine, TurnSource, TurnState};
     // The stream's last hook landed ten minutes before; the transcript runs.
     let stale = stream_turn("old", RUN_STARTED - 700, Some(RUN_STARTED - 600));
-    let turn = combine(&stale, Some(transcript_run(Some(6))));
+    let turn = combine(&stale, Some(transcript_run(Some(6))), RUN_ENDED);
     assert_eq!(turn.source, TurnSource::Transcript);
     assert_eq!(turn.state, TurnState::Running);
     assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:37.000Z"));
     assert!(!turn.waits());
     // Once that run ends, it waits on a person with the transcript's usage.
-    let ended = combine(&stale, Some(transcript_run(None)));
+    let ended = combine(&stale, Some(transcript_run(None)), RUN_ENDED + 1);
     assert_eq!(ended.source, TurnSource::Transcript);
     assert!(ended.waits() && ended.usage.is_some());
 }
@@ -1709,7 +1709,48 @@ fn a_transcript_behind_the_stream_leaves_its_turn_alone() {
     use crate::transcript::live::{combine, SessionTurn};
     let stream = stream_turn("next", RUN_ENDED + 60, None);
     let alone = SessionTurn::from_stream(stream.started_at, None, None);
-    assert_eq!(combine(&stream, None), alone);
-    assert_eq!(combine(&stream, Some(transcript_run(None))), alone);
-    assert_eq!(combine(&stream, Some(transcript_run(Some(6)))), alone);
+    assert_eq!(combine(&stream, None, RUN_ENDED + 120), alone);
+    assert_eq!(
+        combine(&stream, Some(transcript_run(None)), RUN_ENDED + 120),
+        alone
+    );
+    assert_eq!(
+        combine(&stream, Some(transcript_run(Some(6))), RUN_ENDED + 120),
+        alone
+    );
+}
+
+#[test]
+fn a_question_in_the_run_the_stream_recorded_reads_asking() {
+    use crate::transcript::live::{combine, TurnSource, TurnState};
+    let stream = stream_turn("u1", RUN_STARTED + 1, None);
+    let mut run = transcript_run(None);
+    run.turn.state = TurnState::Asking;
+    run.turn.ended_at = None;
+    run.turn.usage = None;
+    let turn = combine(&stream, Some(run), RUN_STARTED + 30);
+    assert_eq!(turn.state, TurnState::Asking);
+    assert_eq!(turn.source, TurnSource::Transcript);
+    assert!(turn.waits());
+}
+
+#[test]
+fn a_run_that_ended_long_ago_reads_ended_though_its_completion_was_never_recorded() {
+    use crate::transcript::live::{combine, TurnSource, TurnState};
+    let stream = stream_turn("u1", RUN_STARTED + 1, None);
+    let turn = combine(&stream, Some(transcript_run(None)), RUN_ENDED + 600);
+    assert_eq!(turn.state, TurnState::Ended);
+    assert_eq!(turn.source, TurnSource::Transcript);
+    assert!(turn.waits() && turn.usage.is_some());
+}
+
+#[test]
+fn a_run_that_ended_just_now_stays_the_streams_running_turn() {
+    use crate::transcript::live::{combine, TurnSource, TurnState};
+    // The completion may fold a prompt dequeued after `end_turn`.
+    let stream = stream_turn("u1", RUN_STARTED + 1, None);
+    let turn = combine(&stream, Some(transcript_run(None)), RUN_ENDED + 1);
+    assert_eq!(turn.state, TurnState::Running);
+    assert_eq!(turn.source, TurnSource::Stream);
+    assert!(!turn.waits());
 }

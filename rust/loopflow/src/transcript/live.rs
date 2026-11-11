@@ -168,11 +168,12 @@ impl SessionTurn {
 }
 
 /// The current turn of a conversation whose last turn Loopflow recorded from
-/// the live stream as `stream`, given its transcript's last run. The stream
-/// keeps the state of a run it recorded, which takes its model and usage
-/// from the transcript; a run it never saw, after its turn, is the reading on
-/// its own; a transcript behind it leaves it as it is.
-pub(crate) fn combine(stream: &RecordedTurn, run: Option<TranscriptRun>) -> SessionTurn {
+/// the live stream as `stream`, given its transcript's last run, at `now` in
+/// Unix seconds. The stream keeps the state of a run it recorded, which takes
+/// its model and usage from the transcript, until the transcript shows that
+/// run asked or ended more than `LAG` ago; a run it never saw, after its
+/// turn, is the reading on its own; a transcript behind it leaves it as it is.
+pub(crate) fn combine(stream: &RecordedTurn, run: Option<TranscriptRun>, now: i64) -> SessionTurn {
     let mut turn = SessionTurn::from_stream(
         stream.started_at,
         stream.settled_at,
@@ -182,6 +183,15 @@ pub(crate) fn combine(stream: &RecordedTurn, run: Option<TranscriptRun>) -> Sess
         return turn;
     };
     match Order::of(stream, &run) {
+        // A completion folds a prompt dequeued after `end_turn` into the same
+        // stream turn, so a run that ended just now is not yet a hand-back.
+        Order::Same
+            if turn.state == TurnState::Running
+                && (run.turn.state == TurnState::Asking
+                    || seconds(&run.turn.ended_at).is_some_and(|end| end + LAG < now)) =>
+        {
+            run.turn
+        }
         Order::Same => {
             turn.model = run.turn.model;
             turn.usage = run.turn.usage;

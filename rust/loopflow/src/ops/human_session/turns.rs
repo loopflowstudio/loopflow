@@ -43,7 +43,11 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
     let run = crate::transcript::live::locate(store, &conversation, cwd)?
         .and_then(|(harness, path)| crate::observe::transcript_run(harness, &path));
     Ok(match &conversation.turn {
-        Some(stream) => Some(crate::transcript::live::combine(stream, run)),
+        Some(stream) => Some(crate::transcript::live::combine(
+            stream,
+            run,
+            crate::store::rows::now_unix(),
+        )),
         None => run.map(|run| run.turn),
     })
 }

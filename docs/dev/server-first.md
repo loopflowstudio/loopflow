@@ -140,7 +140,8 @@ its model, usage, and whether it stopped on a question. On demand,
 for every live conversation (`transcript/live.rs`). Where lf also recorded the
 turn from the provider's live stream (`harness/fact_writer.rs`), the stream
 keeps the state of a run it recorded, matched by id or by its start and
-completion times, and that run's model and usage come from the transcript; a
+completion times, until the transcript shows it asked or ended, and that
+run's model and usage come from the transcript; a
 run started after the stream's last turn and never recorded is the reading on
 its own; a transcript behind the stream leaves the stream's turn. Watched, the
 server keeps one filesystem watch per provider home (`transcript/watch.rs`);

@@ -326,7 +326,16 @@ Logging each request body shows whether steers and the context block reached
 the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
 runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
 the scripted tool a few thousand lines of output first, and type the command
-and Enter separately or its autocomplete picks another command.
+and Enter separately or its autocomplete picks another command. A real model
+does not get there: Pi truncates its tool output, so even `seq 1 60000` leaves
+the session "too small". Write each typed line to Pi's PTY in one write, not
+per character, and drain output between writes of more than a few KB.
+
+Real providers on their existing logins: keep the real `HOME` with a private
+`LF_HOME`. Plain `lf -b` and `lf -i` launch there, as does `lf -i --task <id>`
+in a Task checkout; only `-b` in a Task checkout asks for a managed login. In a
+private home with no Linear, `lf task update` needs the full `task_…` ID; the
+short identifier resolves through Linear.
 
 To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
 that appends its argv to a file and execs the branch binary; plugins run

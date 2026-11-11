@@ -7,7 +7,53 @@ pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
 h2{margin-top:2em}.ok{color:#1a7f37}.bad{color:#b3261e}
 </style>
 <h1>LOO-828 QA: Session identity and child agents</h1>
-<p>Historical observations before the LOO-821 integration. Current checks and remaining work are in <code>scratch/loo-828.md</code>.</p>
+<h2>Integrated build (4469b6597), 2026-11-11</h2>
+<p>Branch-built <code>target/debug/lf</code>, private <code>LF_HOME=/tmp/lf-qa-828i/home</code>, real <code>HOME</code>
+(each provider's own existing login; no credentials copied, no sign-in changed), disposable repo with local Git identity,
+inherited <code>LF_*</code> cleared. Foreground <code>lf server run</code> for the private home; no launchd job registered.
+Each conversation was asked: <i>"Without running any tool or command, reply with exactly two lines: your lf Session ID,
+then your Task identifier and title, or NONE."</i></p>
+
+<h3>A. Fresh bare headless Session names itself <span class="ok">works on all four</span></h3>
+<pre>$ lf -b -a claude   : "…"   session_c2b139aeb6c646f7b6ca62cafb95ec04 / NONE
+$ lf -b -a codex    : "…"   session_368633702b054b85b7918e106e445489 / NONE
+$ lf -b -a pi       : "…"   session_646ff62bf736466ca6ddc6617f146763 / UNKNOWN
+$ lf -b -a opencode : "…"   session_28b6a2ea31e648c0994fc445750afb42 / NONE</pre>
+<p>Each ID matches <code>agent_sessions</code>. Pi answered UNKNOWN for the Task line: a Session with no Task gets no Task line,
+so "no Task" is inferred, not stated.</p>
+
+<h3>B. Managed Task launch: start, rename, compact, ask again <span class="ok">works on Claude, Codex, OpenCode</span></h3>
+<p><code>lf task create --worktree … --title 'Recover a report'</code> → Task <code>c105ba</code>. In a 160×50 PTY:
+<code>lf -i --task task_c105… -a &lt;agent&gt; : "…"</code>, answer, then <code>lf task update task_c105… --title &lt;new&gt;</code>,
+then <code>/compact</code>, then the question again.</p>
+<pre>claude    start: session_17ba6b0d… c105ba "Recover Axolotl report"   → Compacted → c105ba "Recover Gecko report"
+codex     start: session_6ef471a6… c105ba Recover Ibis report         → compacted → c105ba Recover Kiwi report
+opencode  start: session_fdb834f4… c105ba "Recover Gecko report"     → Compaction queued → c105ba "Recover Ibis report"
+pi        start: session_55872f9e… c105ba "Recover Kiwi report"      → "Compaction failed: Nothing to compact (session too small)"
+          next turn: c105ba "Recover Lemur report"</pre>
+<p>Plain interactive <code>lf -i</code> (no <code>--task</code>) in the same checkout: Claude ("a report" → "the quarterly report")
+and Codex ("the annual report" → "Zephyr report") refreshed the same way. Plain OpenCode kept its launch title
+("Platypus") after compaction: its plugin reaches the server only when the launch is managed (unchanged from main), and its
+compact block still names the Session and Task from the launch snapshot.</p>
+
+<h3>C. Server stopped mid-Session <span class="ok">works</span></h3>
+<p>Claude started with the server up and named <code>"Recover the quarterly report"</code>. The server was then stopped, the Task
+renamed to "annual", and <code>/compact</code> run. The conversation kept going and named the last saved title,
+<code>"Recover the quarterly report"</code>. <code>logs/lf.log</code>:</p>
+<pre>WARN loopflow::store::recording_gap: recording gap: session boundary: Loopflow server unavailable; … Connection refused
+(os error 61); the conversation goes on without lf's records</pre>
+
+<h3>Not reached</h3>
+<ul>
+<li>Pi compaction: <code>/compact</code> refused as "session too small" three times, including after Pi ran <code>seq 1 60000</code>
+(its tool output is truncated). Pi re-renders the block every turn (<code>before_agent_start</code>), so renamed titles did reach it.</li>
+<li>Headless <code>lf -b</code> in a Task checkout: "no eligible managed claude account" (codex the same). The private home has
+no managed login; connecting one would change sign-ins.</li>
+<li>Branch <code>lf</code> against the real Machine: its store is at installed build 49037487d, and main since added
+<code>steer_delivery_lookups.sql</code>; a branch launch there would migrate the live store ahead of the installed lf.</li>
+</ul>
+
+<h2>Pre-integration observations</h2>
 <p>Branch-built <code>target/debug/lf</code>, private <code>LF_HOME=/tmp/lf-qa-828/home</code>,
 disposable Git repo, inherited <code>LF_*</code> cleared, stdin closed. Real Claude (2.1.322) on the account's own login.</p>
 

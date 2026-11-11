@@ -64,17 +64,23 @@ struct WorkNavigationTests {
             // Rust lists a Wave's Working Tasks only, as at the repository.
             fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now")]),
         ], reason: "")
+        model.applyStartedFixture(working: ["issue-now"])
         #expect(model.workingTaskIDs == ["issue-now"])
         #expect(model.sidebarTaskIDs == ["issue-now"])
 
         model.select(.wave(id: wave))
         #expect(model.navigation.sidebarWaveID == wave)
+        #expect(model.workScope.taskListWave == wave)
+        // Until the Wave's list answers, the repository's rows don't stand in for it.
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.applyStartedFixture(working: ["issue-now"], wave: wave)
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.sidebarWaves.isEmpty)
         model.select(.task(id: "issue-review"))
         #expect(model.sidebarTaskIDs == ["issue-now"])
         model.select(nil)
         #expect(model.selection == nil)
+        model.applyStartedFixture(working: ["issue-now"])
         #expect(model.sidebarTaskIDs == ["issue-now"])
     }
 
@@ -196,6 +202,7 @@ struct WorkNavigationTests {
     func waveScopeSlotsCountTheWave() throws {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
+        model.applyStartedFixture(working: ["issue-now"], wave: "wave-1")
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-now"])
         model.selectSidebarTask(slot: 0)
@@ -226,9 +233,8 @@ struct WorkNavigationTests {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try claimedRoadmap()), waves: .available([]), workActivity: .loading, repos: [])
         // Rust's Working Tasks leave shipping issue-now out; its Autonomous section holds it.
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-            members: [fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "issue-review"), title: "issue-review")])],
-            reason: "")
+        // The started list holds both; its states split Working from Autonomous.
+        model.applyStartedFixture(working: ["issue-review"], autonomous: ["issue-now"])
         #expect(model.sidebarTaskIDs == ["issue-review"])
         #expect(model.sidebarAutonomousTaskIDs == ["issue-now"])
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in }).environment(\.colorScheme, scheme)
@@ -257,6 +263,20 @@ struct WorkNavigationTests {
         await write.value
     }
 
+    @Test("Ready and Working-now filters read the started list's Task states, as the phone's filters do")
+    func sidebarFiltersReadTaskStates() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
+        model.applyStartedFixture([("ready", [.working, .available]), ("running", [.working, .busy]),
+                                   ("quiet", [.working]), ("shipping", [.autonomous, .available])])
+        #expect(model.sidebarTaskIDs == ["ready", "running", "quiet"])
+        #expect(model.sidebarAutonomousTaskIDs == ["shipping"])
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs == ["ready"])
+        model.navigation.sidebarFilter = .busy
+        #expect(model.sidebarTaskIDs == ["running"])
+        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
+    }
+
     @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
     func abandonLeavesTheSidebarAtOnce() async throws {
         let model = WorkModel(query: RegistryQuery { args, _ in
@@ -272,6 +292,7 @@ struct WorkNavigationTests {
         }
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                                                    members: [task("issue-review"), task("issue-now")])], reason: "")
+        model.applyStartedFixture(working: ["issue-review", "issue-now"])
         model.select(.task(id: "issue-review"))
         let abandoned = try #require(model.task(id: "issue-review")?.task)
         let abandon = Task { await model.abandonTask(abandoned) }
@@ -1145,6 +1166,7 @@ struct WorkNavigationTests {
                             members: [content(.task, "issue-now")]),
             dashboard,
         ], reason: "")
+        model.applyStartedFixture(working: ["issue-review", "issue-now"])
         return model
     }
     private func roadmap() throws -> RoadmapSnapshot {

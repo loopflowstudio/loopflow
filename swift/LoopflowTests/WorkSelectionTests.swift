@@ -36,7 +36,7 @@ struct WorkSelectionTests {
             as? [[String: Any]])
         let entry = try #require(entries.first { $0["part"] as? String == "selections" })
         let frame = try WorkFrame.decode(
-            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil),
+            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil, taskListWave: nil),
             sequence: 1, line: JSONSerialization.data(withJSONObject: try #require(entry["frame"])))
         guard case .selections(let plans?) = frame.content else {
             Issue.record("Missing Dashboard plans"); return
@@ -99,6 +99,22 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
 }
+extension WorkModel {
+    /// The sidebar's started list as the server reads it for `wave`: each Task with its states, in order.
+    func applyStartedFixture(_ tasks: [(id: String, states: [WorkSelectionState])], wave: String? = nil, repository: String = "repo") {
+        let members = tasks.map {
+            WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
+                states: [.open] + $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        }
+        applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members),
+                      wave: wave, reason: "")
+    }
+
+    func applyStartedFixture(working: [String], autonomous: [String] = [], wave: String? = nil, repository: String = "repo") {
+        applyStartedFixture(working.map { ($0, [.working]) } + autonomous.map { ($0, [.autonomous]) }, wave: wave, repository: repository)
+    }
+}
+
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
         states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])

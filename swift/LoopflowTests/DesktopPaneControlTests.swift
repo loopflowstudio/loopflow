@@ -147,6 +147,7 @@ struct DesktopPaneControlTests {
         model.applySelectionPlans([plan(dashboard: "review", expression: .filter(.state(.open))),
                                    plan(dashboard: nil, expression: .repository, also: [waveKey]),
                                    plan(dashboard: nil, expression: .wave(wave))], reason: "")
+        model.applyStartedFixture(working: ["a", "b"], repository: repository)
         let router = WorkLinkRouter()
         let window = UUID()
         router.register(window, repository: repository, focus: {},

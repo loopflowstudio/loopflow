@@ -931,6 +931,10 @@ impl Read {
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
+            Self::DesktopViewGet {
+                directory,
+                expression,
+            } => super::desktop::subscribe_view_plan(directory, expression, transport),
             Self::ViewSelect { expression } => {
                 super::desktop::subscribe_all_view_plans(expression, transport)
             }

@@ -739,6 +739,32 @@ pub(crate) fn subscribe_plans(
     )
 }
 
+/// `desktop.view.get` kept current: one repository's plan for `expression`,
+/// the list Desktop's sidebar and the phone both show.
+pub(crate) fn subscribe_view_plan(
+    directory: std::path::PathBuf,
+    expression: Option<String>,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    if let Some(expression) = &expression {
+        crate::work::selection::Selection::parse(expression, None)?;
+    }
+    super::subscribe::start(
+        (),
+        move |store, ()| {
+            let result = store
+                .ok_or(crate::store::StoreError::NotFound)
+                .context("Work registry is unavailable")
+                .and_then(|store| {
+                    let repository = repository_in(None, &directory, &store.sqlite)?;
+                    Ok(store.sqlite.view_plan(&repository, expression.as_deref())?)
+                });
+            async move { result }
+        },
+        transport,
+    )
+}
+
 /// The portfolio's repositories as canonical paths: the set Desktop's sidebar
 /// lists and the phone creates Tasks in. Unreadable members have no Work.
 fn portfolio_repos() -> Result<Vec<String>> {

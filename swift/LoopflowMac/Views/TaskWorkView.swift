@@ -797,7 +797,7 @@ struct GraphProcessLog: View {
                     for try await line in subscription.lines {
                         try Task.checkCancellation()
                         let frame = try WorkFrame.decode(part: .task,
-                            scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil), sequence: 0, line: line)
+                            scope: WorkScope(repo: nil, headless: false, task: subject, activity: nil, taskListWave: nil), sequence: 0, line: line)
                         guard case .task(let reading?) = frame.content else {
                             self.error = frame.unavailable ?? "Task reading is unavailable"
                             continue

@@ -2,13 +2,7 @@ import Loopflow
 import Observation
 import SwiftUI
 
-/// Which Tasks the list asks the Machine for. `started` is Desktop's sidebar:
-/// Working Tasks, then Autonomous ones.
-enum TaskFilter: String, CaseIterable, Identifiable {
-    case started, available, busy, backlog, done
-
-    var id: String { rawValue }
-
+extension TaskList {
     var title: String {
         switch self {
         case .started: "Started"
@@ -17,22 +11,6 @@ enum TaskFilter: String, CaseIterable, Identifiable {
         case .backlog: "Backlog"
         case .done: "Done"
         }
-    }
-
-    private var states: [String] {
-        switch self {
-        case .started: ["working", "autonomous"]
-        case .available: ["available"]
-        case .busy: ["busy"]
-        case .backlog: ["backlog"]
-        case .done: ["done"]
-        }
-    }
-
-    /// The view expression for these Tasks, within one Wave when `wave` names it.
-    func expression(wave: String?) -> String {
-        let scope = wave.map { "wave:\($0) " } ?? ""
-        return states.map { "\(scope)kind:task state:\($0)" }.joined(separator: " or ")
     }
 }
 
@@ -44,7 +22,7 @@ final class TaskFeed {
     private(set) var loaded = false
     private(set) var error: String?
     private(set) var waves: [MobileWave] = []
-    var filter = TaskFilter.started
+    var filter = TaskList.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
     @ObservationIgnored private var waiting: Perf.Wait?
@@ -277,7 +255,7 @@ struct TaskListView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
                         Picker("Show", selection: $feed.filter) {
-                            ForEach(TaskFilter.allCases) { Text($0.title).tag($0) }
+                            ForEach(TaskList.allCases) { Text($0.title).tag($0) }
                         }
                         if !waves.isEmpty {
                             Picker("Wave", selection: $feed.wave) {

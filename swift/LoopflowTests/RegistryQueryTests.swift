@@ -68,7 +68,7 @@ struct RegistryQueryTests {
         var iterator = subscription.lines.makeAsyncIterator()
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
-            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil), sequence: 0, line: line)
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))

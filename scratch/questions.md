@@ -3,10 +3,9 @@
 Visual inspection remains for QA; it does not block headless work. No product
 question is open.
 
-At November 11 07:52 UTC, `lf open --host desktop --file docs/server.md --file
+At November 11 07:52 and 08:28 UTC, `lf open --host desktop --file docs/server.md --file
 rust/loopflow/src/server/README.md` returned:
 `No Desktop Files view attached; nothing opened.`
 
 The November 10 opening report, subsequent timeouts and repeated unattached-view
 results are in `578aff17ccb214ff9648153b5eb85802df62470f:scratch/questions.md`.
-Keep the latest result here; the repeated attempts do not change the QA work.

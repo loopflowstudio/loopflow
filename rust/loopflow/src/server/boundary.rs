@@ -199,7 +199,10 @@ pub(super) fn after_stop(after: AfterStop) {
             };
             // The turn ended: an update that arrived during it goes out now.
             let (sqlite, ended) = (store.sqlite.clone(), session.clone());
-            tokio::task::spawn_blocking(move || super::wake::after_turn(&sqlite, &ended)).await?;
+            crate::journal::request::spawn_blocking(move || {
+                super::wake::after_turn(&sqlite, &ended)
+            })
+            .await?;
             if store.sqlite.pending_session_move(session)?.is_none() {
                 return Ok(());
             }

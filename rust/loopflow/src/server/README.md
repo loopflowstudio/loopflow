@@ -487,8 +487,10 @@ it again at the next boundary:
 - Codex: a `turn/start` on the Session's private app-server whose tool output
   is the message.
 
-A server that restarts reads the same conversations again. One it cannot
-reach keeps its news for its next boundary. Bare Sessions are never woken. No
+A server that restarts reads the same conversations again. An unreachable
+Claude inbox leaves its news unclaimed. A failed send after claiming can lose
+the Task update; the steer remains retryable. LOO-841 replaces the progress
+receipt with inbox confirmation. Bare Sessions are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 

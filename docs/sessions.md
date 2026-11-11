@@ -168,19 +168,19 @@ Delivery proves the agent saw the steer, not that it followed it;
 
 ```bash
 lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake and report it
-lf process list       # one lf server, no process per conversation
+lf process list       # no Task-update watcher per conversation
 ```
 
 Leave Task conversations open while their Graphs run. When a Graph step
 settles, the Graph moves, a comment arrives on its Task or a steer is saved for
-it, this Machine's lf server wakes each managed conversation on it that is
-waiting for you, one opened through a Task or Wave command or from Desktop,
+it, this Machine's lf server wakes each managed Claude or Codex conversation on
+it that is waiting for you, one opened through a Task or Wave command or from Desktop,
 even if the server restarted since its last turn. Claude takes the news as a
 message from `loopflow`, Codex as a turn of its own. A comment with direction
-arrives once, as a steer; other comments arrive as Task updates. A
-conversation in the middle of a turn hears it when that turn ends. Ten idle
-conversations cost nothing beyond the one server: no watcher per conversation
-and no clock tick.
+arrives as a steer; other comments arrive as Task updates. A
+conversation in the middle of a turn hears updates at its next boundary.
+Pi and OpenCode hear updates at their next boundary too. Idle update delivery
+needs no watcher or timer per conversation.
 
 A conversation you start with a bare `lf <skill>` in a terminal is never woken.
 In a Task's checkout it hears the Task's progress at its next turn; a headless
@@ -189,9 +189,10 @@ bare run hears none.
 Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. An update that
 lands while the server is down reaches the idle conversation when the server
-comes back. One the server cannot reach a conversation with waits for that
-conversation's next turn, and lf records the gap in `logs/lf.log`. Each update
-reaches a conversation once.
+comes back. Failed wake attempts are logged in `logs/lf.log`. Steers remain
+pending until sent; Task progress is marked delivered before sending, so a
+failed send can lose that progress update. Progress delivery confirmation is
+tracked in [LOO-841](https://linear.app/loopflow/issue/LOO-841).
 
 ## One more headless turn
 

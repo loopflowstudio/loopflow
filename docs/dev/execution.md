@@ -234,8 +234,8 @@ the Session's AgentSession.
 
 Attachment alone does not revoke the old client's writes, and with lf out of the
 path no dispatch can check them. A client lf waits on checks its attachment every
-two seconds and stops once a mover replaces it; a client under an execution owner
-goes with that owner. Native launch carries the frozen attachment
+two seconds and stops once a mover replaces it; an execution owner performs the
+same check for its exec'd client. Native launch carries the frozen attachment
 in memory, separately from stable tool provenance. Admission validates that token;
 it never reconstructs authority from the current record. Both initial validation
 and the launch reject a replaced attachment, including A → B → A.

@@ -155,7 +155,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         Ok(())
     })();
     if let Err(error) = delivered {
-        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its next turn hears the update");
+        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; steers remain retryable, claimed Task progress may be lost");
     }
 }
 

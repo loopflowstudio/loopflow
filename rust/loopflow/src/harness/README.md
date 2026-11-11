@@ -94,7 +94,8 @@ one.
 History from before its first boundary is a baseline, not a report to repeat.
 
 `task_updates::read` compares the Tasks against the last update the Session
-received, recorded in its history; it keeps no state between calls. It runs
+received, recorded in its history. It caches the revision at which a Session
+had no news, avoiding history rebuilds until that revision changes. It runs
 at two places in the Machine server, never in a process of its own: each
 `session.boundary` answer carries the update to the hook, which prints it with
 the steers, and the server wakes an idle managed conversation when the store's

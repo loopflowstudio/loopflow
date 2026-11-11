@@ -173,6 +173,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
+            ("session_status", "status-1", .sessionStatus(
+                directory: "/", id: "session_5e55105e000040008000000000000001", terminal: "pane-1",
+                agentProcess: "5e55105e-0000-4000-8000-000000000007", stream: "5e55105e-0000-4000-8000-000000000008",
+                sequence: 1, records: ProgramStatusRecords(seen: true, records: [
+                    ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil, app: nil,
+                                        title: nil, msg: "Proceed?")]))),
             ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
             ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,

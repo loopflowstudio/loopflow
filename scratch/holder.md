@@ -622,11 +622,33 @@ Checks:
   without `terminal_id` (`ServerOperation::SessionAttach` doc, server README,
   `server_schema.json`); fixed. `cargo test -p loopflow --lib server::schema`: 7 passed.
 
+- Pane placement: `session.start` and holder `Start` carry `placement`
+  (the pane `current_terminal_id` validated on the caller's terminal); the
+  holder sets `LF_TERMINAL_ID` and the held slave's tty name for the child.
+  `held_desktop_launch_links_its_session_to_the_pane` (fails with the holder
+  lines disabled).
+- Desktop wording already existed (`ServerConnectionReading.title`,
+  "Reconnecting… Input paused; last screen may be stale."), driven by the
+  relay's `reconnecting` reading. Found on the way: after a restart a held
+  pane read `connected` with `native_ready:false` forever, so Desktop showed
+  Opening… and refused keys. The launcher announces `NativeStarted` once and
+  execs its provider (CLOEXEC closes the socket), so only the server can keep
+  it: `native-client.json` beside the terminal, removed when the client ends,
+  read back in `Hosted::keep_in`. `a_held_pane_reads_reconnecting_until_the_next_server_answers`
+  (fails without). Swift `ServerConnectionTests` asserts the title.
+- A launcher that waits beside its provider (non-exec path) still sends
+  `NativeEnded` to the server it announced to; after a restart that end is
+  lost and the exit text is replaced at the child's exit instead. Untested.
+- Checks: `cargo test -p loopflow --lib -- transport:: holder:: server::schema::tests:: server::wire::tests::`
+  92 passed; `--test transport_tests` 110/111, `resume_takes_over_an_owner_from_another_build`
+  (owner path, untouched) failed once in the full run and passed alone;
+  `documented_commands::` passes; clippy clean. Swift tests: gate.
+
 **Remaining, in order:**
 
-1. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).
-2. The Desktop overlay wording; slice 0 mode probe.
-3. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
+1. Slice 0 mode probe (resize nudge through production Ghostty with real
+   Claude and Codex): not run; does not block gate.
+2. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
    of the bump answers `incompatible` until both are installed.
 
 **Not as planned, open without a slot:**

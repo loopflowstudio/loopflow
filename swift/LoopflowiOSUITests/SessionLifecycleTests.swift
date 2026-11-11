@@ -1,9 +1,63 @@
 import XCTest
+import Vision
 
 /// Operate the shipped view/lifecycle wiring with the explicit offline peer.
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testDesktopScreenReadingSurvivesNewOutput() throws {
+        let output = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).terminal")
+        try Data().write(to: output)
+        defer { try? FileManager.default.removeItem(at: output) }
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture", "--fixture-desktop"]
+        app.launchEnvironment["LOOPFLOW_FIXTURE_OUTPUT"] = output.path
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        XCTAssertTrue(app.buttons["Use keyboard"].waitForExistence(timeout: 5))
+        let history = (1...160).map { "\r\nHistory line \($0)" }.joined()
+        try Data(history.utf8).write(to: output, options: .atomic)
+        let terminal = app.textViews["session-terminal"]
+        let scrollBar = terminal.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Vertical scroll bar")).firstMatch
+        XCTAssertTrue(scrollBar.waitForExistence(timeout: 5))
+        let viewport = app.descendants(matching: .any).matching(identifier: "terminal-viewport").firstMatch
+        viewport.swipeDown()
+        let latest = app.buttons["terminal-latest"]
+        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        capture(app, "desktop-screen-reading")
+        let before = try visibleHistoryLines(app)
+        XCTAssertGreaterThan(before.count, 5)
+        let middle = try XCTUnwrap(before.sorted().dropFirst(before.count / 2).first)
+        let previousPages = scrollBar.label
+        let more = (161...240).map { "\r\nHistory line \($0)" }.joined()
+        try Data((history + more).utf8).write(to: output, options: .atomic)
+        let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != %@", previousPages), object: scrollBar)
+        XCTAssertEqual(XCTWaiter.wait(for: [arrived], timeout: 5), .completed)
+        capture(app, "desktop-screen-after-output")
+        XCTAssertTrue(try visibleHistoryLines(app).contains(middle), "The line being read must remain visible after output")
+        XCTAssertTrue(app.buttons["Use keyboard"].exists, "Reading must remain passive")
+        latest.tap()
+        XCTAssertTrue(latest.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(try visibleHistoryLines(app).contains(240), "Latest must reveal the newest output")
+    }
+
+    private func visibleHistoryLines(_ app: XCUIApplication) throws -> Set<Int> {
+        let image = try XCTUnwrap(app.screenshot().image.cgImage)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return Set((request.results ?? []).compactMap { observation in
+            guard let text = observation.topCandidates(1).first?.string,
+                  text.hasPrefix("History line ") else { return nil }
+            return Int(text.dropFirst("History line ".count))
+        })
+    }
+
     func testStreamingOutputKeepsTheSwipedReadingPosition() throws {
         let output = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).terminal")
         try Data().write(to: output)

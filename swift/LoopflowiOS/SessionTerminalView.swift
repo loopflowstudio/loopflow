@@ -197,7 +197,13 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             } else if readingHistory {
                 terminal.synchronizeReadingPosition()
             }
+            let readingRow = readingHistory ? terminal.getTerminal().buffer.yDisp : nil
             terminal.feed(byteArray: Array(bytes)[...])
+            if let readingRow, terminal.canScroll, terminal.getTerminal().buffer.yDisp != readingRow {
+                // Panning within a tall Desktop screen can leave the inner view
+                // at its tail. Hold its row too when output extends that tail.
+                terminal.scrollTo(row: readingRow, notifyAccessibility: false)
+            }
             if reset, !bytes.isEmpty, snapshotSessionID != workspace.sessionID {
                 snapshotSessionID = workspace.sessionID
                 revealLatestAfterLayout = true
@@ -670,9 +676,9 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if scrollView === terminal,
-           scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
-            readingHistory = scrollView.contentOffset.y + scrollView.bounds.height < scrollView.contentSize.height - 1
+        if scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
+            readingHistory = terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
+                || viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
         }
         updateLatestButton()
     }

@@ -15,6 +15,10 @@ final class FixtureClient: MobileClient, MobileSessionListingClient {
 
     func attach(sessionID: String) async throws -> any MobileAttachment {
         let terminal = sessions[sessionID] ?? FixtureTerminal()
+        if sessions[sessionID] == nil, ProcessInfo.processInfo.arguments.contains("--fixture-desktop") {
+            terminal.columns = 120
+            terminal.rows = 80
+        }
         sessions[sessionID] = terminal
         return FixtureAttachment(sessionID: sessionID, terminal: terminal)
     }

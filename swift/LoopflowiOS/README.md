@@ -17,6 +17,7 @@ For offline UI testing only, add `--fixture` to the launch arguments. This uses
 the native terminal renderer with a simulated editor: no shell, provider or
 Loopflow Session runs, and no commands execute. UI tests opt into it individually.
 Submit `history` for numbered scrollback or `permission` for a simulated question.
+Add `--fixture-desktop` alongside `--fixture` to begin with a 120×80 remote grid.
 This mode cannot demonstrate working with a real Session.
 **Keys** shows arrows, Tab and Escape for provider menus and cursor movement.
 The keyboard icon returns to the typing controls. Switching keys preserves the

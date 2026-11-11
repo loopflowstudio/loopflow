@@ -17,7 +17,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::program_status;
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -28,15 +28,6 @@ struct Fixture {
 }
 
 struct PausedOwner(libc::pid_t);
-
-struct MachineServer(Child);
-
-impl Drop for MachineServer {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 struct StopOwner<'a>(&'a Fixture, String);
 
@@ -218,19 +209,7 @@ impl Fixture {
     }
     /// The Machine server under this home, stopped when dropped.
     fn machine_server(&self) -> MachineServer {
-        let server = MachineServer(
-            self.command(&["server", "run"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap(),
-        );
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while loopflow::server::client::Connection::open_at(&self.endpoint("machine")).is_err() {
-            assert!(Instant::now() < deadline, "Machine server did not start");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        server
+        MachineServer::start(env!("CARGO_BIN_EXE_lf"), self.home.path())
     }
     #[track_caller]
     fn viewer(&self, id: &str, control: bool) -> Viewer {

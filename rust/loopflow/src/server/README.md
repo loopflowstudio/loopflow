@@ -442,7 +442,7 @@ The hook renders the context block from the delivery file itself, prefixes
 a hook that gets no answer still prints the block.
 
 An agent for a Task or a Wave starts only once the server answers. The launch
-asks for the server's status; when nothing answers it runs `lf install server`
+opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`
 through the selected installation, as a managed view does, and asks again.
 Still nothing, and the launch fails before the agent starts:
 

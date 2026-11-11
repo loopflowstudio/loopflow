@@ -22,10 +22,9 @@ Looked at and left alone:
 
 Open, with why it matters:
 
-- Nothing on the launch check. A custom `LF_HOME` (a World, a source
-  experiment) with no server gets a launchd or systemd job for that home the
-  first time it launches Task work; that is what `lf install server` does
-  there.
+- A custom `LF_HOME` (a World, a source experiment) with no server gets a
+  launchd or systemd job for that home the first time it launches Task work;
+  that is what `lf install server` does there.
 
 Remaining:
 
@@ -107,6 +106,8 @@ Checks (November 10, on the launch check):
 - Every loopflow test with `readiness_command` swapped for a marker file (3671 run): no test reaches the supervisor after the `two_people` fixture got its servers. Failures in that run that passed alone on the real code: `claude_body_activity…`, `real_process_cpu_sampling…`, `reconnect_preserves_live_credential…`, `an_interrupt_ends_the_running_agent_step…`, `release_run_repairs_failed_checks…`, `unanswering_superseded_owner…`
 - `served_reads screen_reads_are_compact_passive_and_match_cli` fails with or without the launch check (`tasks.items` empty); `scripts/testing.md` says to run `served_reads` with a resolved `TMPDIR`, not tried — gate
 - clippy — pass
+- Compress: `transport_tests` uses the shared `MachineServer`;
+  `retained_hooks_survive_upgrade`, `native_drafts_remain_editable…` — pass
 - `cargo test -p loopflow --test integration dto_fixtures` — 50 pass (before this pass)
 - Swift `ServerProtocolTests` (`hookBoundarySharesTheRustServerContract`) — gate (`--swift`)
 - `transport_tests` hook tests other than the two `continue_session…` ones, `harness::` — gate

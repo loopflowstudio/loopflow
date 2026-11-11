@@ -8,8 +8,9 @@ scratch (quotes, measurements, receipts) is in git at `e65ddaed7:scratch/`.
 
 Ten Task Sessions open: `ps` shows one `lf server run`, one `lf holder run`,
 ten agents and no `lf session serve --terminal`. `lf install` mid-turn: the
-turn keeps streaming, Desktop panes and `lf resume --task` terminals say
-Reconnecting… and come back repainted. `kill` the server: agents keep running
+turn keeps streaming, Desktop panes say Reconnecting… until the next
+server answers, and `lf resume --task` terminals draw nothing meanwhile and
+continue from their PTY position. `kill` the server: agents keep running
 (and keep writing into the holder's ring); launchd restarts it; views return.
 
 ## Said, relevant here
@@ -647,6 +648,11 @@ Checks:
 - Compress after placement: kept handoffs read through one `hosted::read_kept`
   and are dropped through `Hosted::forget_kept`. `cargo test -p loopflow --lib transport::`:
   73 passed; `--test transport_tests -- held_ a_held_pane`: 3 passed; clippy clean.
+
+- Realign after placement: the previous pass's two open items (pane
+  placement, Desktop wording) are built above; the Outcome's plain-terminal
+  "Reconnecting…" contradicted the view-drawing addition and now reads as
+  the code does.
 
 **Remaining, in order:**
 

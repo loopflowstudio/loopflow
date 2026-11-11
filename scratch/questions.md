@@ -46,10 +46,11 @@ Choices taken (reversible):
 - The watcher's only clock is `StoreChanges`' 60 s fallback (missed WAL event,
   checkpoint, sleep). On Linux `StoreChanges` has no vnode watch and polls at
   50 ms, as served subscriptions already do.
-- Wake candidates are read from the store, so a restart forgets none. The
-  watcher's first revision reading is a baseline: news that landed while no
-  server ran waits for each conversation's next boundary (matches
-  `docs/sessions.md`). Waking on startup instead is a one-line change.
+- Wake candidates are read from the store, so a restart forgets none. Built
+  with the watcher's first revision reading as a baseline (news that landed
+  while no server ran waited for the next boundary). Settled by the design in
+  concept review 3: the first reading wakes, since claims already skip what a
+  conversation heard and the steer asks for waking "as today".
 - Claude's `status` in `<pid>.json` is not consulted: the Stop hook can run
   before Claude flips to `idle`, which would skip every turn-end wake, and
   `priority: next` queues a message for a busy session anyway. Idle is

@@ -23,11 +23,19 @@ pub(crate) fn watch(home: &std::path::Path, input: &serde_json::Value) -> Result
         return Ok(());
     };
     let adapter: SteerAdapter = serde_json::from_str(&adapter)?;
+    let mut recovery = super::claude_recovery::Recovery::default();
+    let recovery_adapter = adapter.clone();
     super::task_updates::watch(
         home,
         input,
         adapter,
         thread,
+        |store| {
+            if let Some(path) = input["transcript_path"].as_str() {
+                recovery.tick(store, &recovery_adapter, thread, std::path::Path::new(path))?;
+            }
+            Ok(())
+        },
         |store, adapter, thread, update| deliver(store, adapter, thread, &socket, &token, update),
     )
 }
@@ -56,7 +64,7 @@ fn deliver(
         "<cross-session-message from=\"loopflow\" from-name=\"Loopflow worker progress\">\n{}\n</cross-session-message>",
         body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
     );
-    let bytes = format!(
+    let wire = format!(
         "{}\n{}\n",
         json!({"type":"auth","token":token}),
         json!({"type":"user","session_id":thread,"uuid":uuid::Uuid::new_v4().to_string(),
@@ -71,10 +79,9 @@ fn deliver(
         )? {
             return Ok(());
         }
-        socket.write_all(bytes.as_bytes()).map_err(io_error)?;
         // No acknowledgement exists on this connection. A successful write is
         // not consumption; retain uncertainty and never replay it on reconnect.
-        Ok(())
+        socket.write_all(wire.as_bytes()).map_err(io_error)
     })
 }
 

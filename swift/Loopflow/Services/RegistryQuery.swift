@@ -334,6 +334,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case waveMachine(directory: String, wave: String, machine: String)
     /// Move the open Sessions the selector names to an agent.
     case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
+    case sessionRecover(directory: String, ids: [String])
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
     case wavePlanBind(directory: String, wave: String, project: String)
@@ -446,6 +447,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionMove(_, let blocked, let on, let agent):
             return ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
                 + argument("--on", on) + ["--json"]
+        case .sessionRecover(_, let ids): return ["session", "recover", "--json", "--"] + ids
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
         case .wavePlanBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
@@ -650,6 +652,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.machine", ["directory": directory, "wave": wave, "machine": machine])
         case .sessionMove(let directory, let blocked, let on, let agent):
             TaggedFields("session.move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
+        case .sessionRecover(let directory, let ids):
+            TaggedFields("session.recover", ["directory": directory, "ids": ids])
         case .waveCreate(let directory, let wave, let objective):
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
@@ -1343,6 +1347,10 @@ public struct RegistryQuery: Sendable {
     public func moveBlockedSessions(agent: String, cwd: String?) async throws -> SessionMoveReport {
         try Self.decode(SessionMoveReport.self, from: await write(
             .sessionMove(directory: cwd ?? "/", blocked: true, on: nil, agent: agent)))
+    }
+
+    public func recoverSessions(ids: [String], cwd: String?) async throws -> [SessionRecord] {
+        try Self.decode([SessionRecord].self, from: await write(.sessionRecover(directory: cwd ?? "/", ids: ids)))
     }
 
     /// Create a Task around the selected conversation without launching work.

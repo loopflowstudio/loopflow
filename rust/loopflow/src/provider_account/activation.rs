@@ -135,7 +135,8 @@ pub(crate) fn claude_credential_home(profile: &Path) -> PathBuf {
 
 /// Sign `native` in as `account_id`. Returns the provider credential lock
 /// through divergent-copy verification or installation and the following spawn.
-/// `None` means the active credential needed no verification or replacement.
+/// `None` means the selected login was already active; Claude's native items
+/// and reload marker are reconciled before returning it.
 pub(crate) async fn activate(
     store: &SharedStore,
     provider: Provider,
@@ -143,6 +144,18 @@ pub(crate) async fn activate(
     native: &Path,
     cause: SwitchCause,
 ) -> Result<Option<fs::File>, ProviderAccountError> {
+    activate_while(store, provider, account_id, native, cause, &|| Ok(())).await
+}
+
+pub(super) async fn activate_while(
+    store: &SharedStore,
+    provider: Provider,
+    account_id: &ProviderAccountId,
+    native: &Path,
+    cause: SwitchCause,
+    admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+) -> Result<Option<fs::File>, ProviderAccountError> {
+    admitted()?;
     if !matches!(provider, Provider::Codex | Provider::Claude) {
         return Err(ProviderAccountError::UnsupportedProvider);
     }
@@ -166,22 +179,22 @@ pub(crate) async fn activate(
             ),
         });
     };
-    let is_active = || {
-        same_login(provider, native, profile)
-            && (provider != Provider::Codex
-                || read_login(provider, native) == read_login(provider, profile))
+    let codex_is_active = || {
+        provider == Provider::Codex
+            && same_login(provider, native, profile)
+            && read_login(provider, native) == read_login(provider, profile)
     };
-    if is_active() {
+    if codex_is_active() {
         return Ok(None);
     }
-    let lock = lock_native_credential(provider)?;
-    if is_active() {
+    let lock = lock_native_credential_while(provider, admitted)?;
+    if codex_is_active() {
         return Ok(None);
     }
     // Claude must not refresh the outgoing login between its save-back and
     // the install, or the rotated refresh token is lost with the old copy.
     let refresh = (provider == Provider::Claude)
-        .then(|| ClaudeRefreshLock::acquire(native))
+        .then(|| ClaudeRefreshLock::acquire_while(native, admitted))
         .transpose()?;
     if provider == Provider::Codex {
         require_file_credential_store(native)?;
@@ -192,23 +205,35 @@ pub(crate) async fn activate(
     }
     match save_back(store, provider, native, &accounts, refresh.as_ref()).await? {
         // The native login was this account's all along, rotated since it was stored.
-        Kept::Profile(owner) if owner == *account_id => return Ok(None),
+        Kept::Profile(owner) if owner == *account_id => {
+            if provider == Provider::Claude {
+                // Save-back may have refreshed this login. Reconcile from the
+                // native copy under both locks, never from an older profile.
+                let credential = read_login(provider, native).ok_or_else(|| {
+                    ProviderAccountError::Filesystem("read native Claude credential".into())
+                })?;
+                write_login_while(provider, native, &credential, admitted)?;
+            }
+            return Ok(None);
+        }
         Kept::Profile(_) | Kept::Nothing => {}
         Kept::Unplaced(credential) => keep_aside(provider, &credential)?,
     }
     let credential = read_login(provider, profile).ok_or_else(|| {
         ProviderAccountError::Filesystem(format!("read stored {provider} credential"))
     })?;
+    admitted()?;
     // Record first: a switch the log cannot hold must not move every running
     // agent onto an account their usage would not be attributed to.
     store
         .record_provider_account_switch(provider, account_id, cause.as_str())
         .await?;
+    admitted()?;
     if provider == Provider::Codex && native.join("auth.json").exists() {
         super::codex_access::switch(selected, native)
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
     } else {
-        write_login(provider, native, &credential)?;
+        write_login_while(provider, native, &credential, admitted)?;
     }
     Ok(Some(lock))
 }
@@ -244,13 +269,26 @@ fn write_login(
     home: &Path,
     credential: &[u8],
 ) -> Result<(), ProviderAccountError> {
+    write_login_while(provider, home, credential, &|| Ok(()))
+}
+
+fn write_login_while(
+    provider: Provider,
+    home: &Path,
+    credential: &[u8],
+    admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+) -> Result<(), ProviderAccountError> {
+    admitted()?;
     if provider != Provider::Claude {
         return write_private(&home.join("auth.json"), credential);
     }
     let credential = String::from_utf8(credential.to_vec())
         .map_err(|_| ProviderAccountError::Filesystem("Claude login is not UTF-8".into()))?;
-    crate::provider_auth::write_claude_login(home, &SecretString::new(credential))
-        .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))?;
+    crate::provider_auth::write_claude_login_while(home, &SecretString::new(credential), &|| {
+        admitted().map_err(|error| crate::provider_auth::AuthError::Filesystem(error.to_string()))
+    })
+    .map_err(|error| ProviderAccountError::Filesystem(error.to_string()))?;
+    admitted()?;
     touch_claude_credentials_marker(home)
 }
 
@@ -259,8 +297,15 @@ fn write_login(
 /// switch makes every open Claude pick the new login up on its next request.
 fn touch_claude_credentials_marker(home: &Path) -> Result<(), ProviderAccountError> {
     let marker = home.join(".credentials.json");
-    let Ok(file) = fs::OpenOptions::new().append(true).open(&marker) else {
-        return Ok(());
+    let file = match fs::OpenOptions::new().append(true).open(&marker) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ProviderAccountError::Filesystem(format!(
+                "open {}: {error}",
+                marker.display()
+            )));
+        }
     };
     file.set_modified(std::time::SystemTime::now())
         .map_err(|error| {
@@ -277,7 +322,14 @@ fn has_login(provider: Provider, home: &Path) -> bool {
 }
 
 /// A launch waits here rather than failing: a switch in progress is short.
-fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccountError> {
+pub(super) fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccountError> {
+    lock_native_credential_while(provider, &|| Ok(()))
+}
+
+pub(super) fn lock_native_credential_while(
+    provider: Provider,
+    admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+) -> Result<fs::File, ProviderAccountError> {
     let directory = crate::store::lf_home_dir()
         .join("accounts")
         .join(provider.as_str());
@@ -292,7 +344,16 @@ fn lock_native_credential(provider: Provider) -> Result<fs::File, ProviderAccoun
         .truncate(false)
         .open(directory.join(".native.lock"))
         .map_err(filesystem)?;
-    fs2::FileExt::lock_exclusive(&lock).map_err(filesystem)?;
+    loop {
+        admitted()?;
+        match fs2::FileExt::try_lock_exclusive(&lock) {
+            Ok(()) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(filesystem(error)),
+        }
+    }
     Ok(lock)
 }
 
@@ -318,6 +379,13 @@ impl ClaudeRefreshLock {
     /// # Errors
     /// The lock stayed held and fresh for over a minute.
     pub(crate) fn acquire(home: &Path) -> Result<Self, ProviderAccountError> {
+        Self::acquire_while(home, &|| Ok(()))
+    }
+
+    fn acquire_while(
+        home: &Path,
+        admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+    ) -> Result<Self, ProviderAccountError> {
         let mut lock = Self {
             directories: Vec::new(),
             _keep_fresh: None,
@@ -330,7 +398,7 @@ impl ClaudeRefreshLock {
         let mut legacy = real.into_os_string();
         legacy.push(".lock");
         for directory in [home.join(".oauth_refresh.lock"), PathBuf::from(legacy)] {
-            take_lock_directory(&directory)?;
+            take_lock_directory(&directory, admitted)?;
             lock.directories.push(directory);
         }
         let (sender, stop) = std::sync::mpsc::channel::<()>();
@@ -360,9 +428,13 @@ impl Drop for ClaudeRefreshLock {
     }
 }
 
-fn take_lock_directory(directory: &Path) -> Result<(), ProviderAccountError> {
+fn take_lock_directory(
+    directory: &Path,
+    admitted: &(dyn Fn() -> Result<(), ProviderAccountError> + Sync),
+) -> Result<(), ProviderAccountError> {
     let started = std::time::SystemTime::now();
     loop {
+        admitted()?;
         let error = match fs::create_dir(directory) {
             Ok(()) => return Ok(()),
             Err(error) => error,
@@ -650,6 +722,28 @@ mod refresh_lock_tests {
         assert!(claude.is_dir() && legacy(&home).is_dir());
         drop(lock);
         assert!(!claude.exists() && !legacy(&home).exists());
+    }
+
+    #[test]
+    fn cancelled_refresh_lock_releases_only_its_own_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join(".claude");
+        fs::create_dir(&home).unwrap();
+        let held = legacy(&home);
+        fs::create_dir(&held).unwrap();
+        let expires = SystemTime::now() + Duration::from_millis(50);
+        let result = ClaudeRefreshLock::acquire_while(&home, &|| {
+            if SystemTime::now() >= expires {
+                Err(super::ProviderAccountError::Runtime(
+                    "Native admission closed".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_err());
+        assert!(!home.join(".oauth_refresh.lock").exists());
+        assert!(held.is_dir());
     }
 
     #[test]

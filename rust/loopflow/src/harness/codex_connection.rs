@@ -31,7 +31,7 @@ use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{ProviderAccountId, RecordingGap, StoreError};
 
-type Upstream = WebSocketStream<UnixStream>;
+pub(super) type Upstream = WebSocketStream<UnixStream>;
 
 #[cfg(test)]
 #[path = "observer_measurement.rs"]
@@ -163,7 +163,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
     Ok(())
 }
 
-async fn initialized(endpoint: &Path, name: &str) -> Result<Upstream> {
+pub(super) async fn initialized(endpoint: &Path, name: &str) -> Result<Upstream> {
     let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
     rpc_request(
         &mut upstream,
@@ -375,15 +375,16 @@ async fn observe(observer: CodexObserver, ready: impl FnOnce()) -> Result<()> {
     }
 }
 
-struct Recorder {
-    observer: CodexObserver,
-    route: Option<crate::provider_account::ProviderAccountRoute>,
+pub(super) struct Recorder {
+    pub(super) observer: CodexObserver,
+    pub(super) route: Option<crate::provider_account::ProviderAccountRoute>,
     store: Option<(SqliteStore, CodexStream)>,
     retry_at: Option<Instant>,
     failure: RecordingGap,
     updates: TaskUpdates,
     /// A turn is running, or may be; updates wait for it.
-    busy: bool,
+    pub(super) busy: bool,
+    pub(super) recovery: super::codex_recovery::Recovery,
     update_request: Option<(Value, TaskUpdate)>,
     /// The person moved to this thread and the store has not recorded it yet.
     selection: Option<&'static str>,
@@ -394,15 +395,12 @@ struct Recorder {
 }
 
 impl Recorder {
-    async fn new(observer: CodexObserver) -> Self {
+    async fn new(mut observer: CodexObserver) -> Self {
         let route = match &observer.account {
-            Some(account) => crate::provider_account::resolve_provider_account_exact(
+            Some(account) => crate::provider_account::session_account_route(
                 Provider::Codex,
-                Some(&observer.thread),
-                Some(account),
-                None,
-                None,
-                Some(&observer.cwd),
+                &observer.thread,
+                account,
             )
             .await
             .unwrap_or_else(|error| {
@@ -411,6 +409,9 @@ impl Recorder {
             }),
             None => None,
         };
+        if let Some(route) = &route {
+            observer.account = Some(route.account_id().clone());
+        }
         Self {
             observer,
             route,
@@ -419,6 +420,7 @@ impl Recorder {
             failure: RecordingGap::default(),
             updates: TaskUpdates::default(),
             busy: true,
+            recovery: Default::default(),
             update_request: None,
             selection: None,
             following: false,
@@ -427,7 +429,7 @@ impl Recorder {
     }
 
     /// The store, reopened at most every `STORE_RETRY` while it stays broken.
-    fn stream(&mut self) -> Option<&mut (SqliteStore, CodexStream)> {
+    pub(super) fn stream(&mut self) -> Option<&mut (SqliteStore, CodexStream)> {
         if self.store.is_none() && self.retry_at.is_none_or(|at| at <= Instant::now()) {
             match SqliteStore::new(&self.observer.database) {
                 Ok(store) => {
@@ -552,6 +554,9 @@ impl Recorder {
                     if self.following && self.resume_request.is_none() {
                         self.resume(&mut writer).await;
                     }
+                    if let Err(error) = self.recovery_tick(&mut writer).await {
+                        tracing::warn!(%error, "Codex recovery remains pending");
+                    }
                     if !self.busy && self.update_request.is_none() {
                         self.deliver_update(&mut writer).await;
                     }
@@ -602,6 +607,9 @@ impl Recorder {
             _ => {}
         }
         self.record(rpc).await;
+        if let Err(error) = self.recovery_message(rpc, writer).await {
+            tracing::warn!(%error, "Codex recovery remains pending");
+        }
         let answered = self
             .update_request
             .as_ref()
@@ -650,6 +658,7 @@ impl Recorder {
             tracing::warn!(%error, "Codex conversation's hooks have no lf context");
         }
         self.observer.thread = thread;
+        self.recovery = Default::default();
         self.selection = Some(source);
         self.select();
         (self.busy, self.following) = (true, true);
@@ -839,7 +848,11 @@ fn turn_running(result: &Value) -> bool {
         .is_none_or(|turns| turns.iter().any(|turn| turn["status"] == "inProgress"))
 }
 
-async fn rpc_request(upstream: &mut Upstream, method: &str, params: Value) -> Result<Value> {
+pub(super) async fn rpc_request(
+    upstream: &mut Upstream,
+    method: &str,
+    params: Value,
+) -> Result<Value> {
     rpc_within(upstream, method, params, REPLY_LIMIT).await
 }
 
@@ -881,7 +894,7 @@ async fn rpc_within(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::{observe, CodexObserver};
     use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
@@ -895,6 +908,23 @@ mod tests {
     use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
     type Provider = WebSocketStream<UnixStream>;
+
+    pub(in crate::harness) async fn recovery_fixture(
+        home: &Path,
+    ) -> (SqliteStore, super::Recorder) {
+        let (store, attachment, database) = fixture(home);
+        let observer = observer(home, database, attachment, std::process::id());
+        let recorder = super::Recorder::new(observer).await;
+        store
+            .record_session_connection(
+                "conversation",
+                &recorder.observer.attachment,
+                "codex",
+                &"native-thread".into(),
+            )
+            .unwrap();
+        (store, recorder)
+    }
 
     fn fixture(home: &Path) -> (SqliteStore, SessionAttachment, PathBuf) {
         let database = home.join("store.db");
@@ -1004,9 +1034,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn turns_a_client_started_are_recorded_with_their_origin() {
+    async fn client_turns_keep_their_origin_during_a_recovery_read() {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let (store, attachment, database) = fixture(home.path());
+        let origin = attachment.lf_process_id.as_ref().map(ToString::to_string);
+        assert!(origin.is_some());
         let client = client();
         let listener = UnixListener::bind(home.path().join("provider.sock")).unwrap();
         let watching = tokio::spawn(observe(
@@ -1014,23 +1046,37 @@ mod tests {
             || {},
         ));
         let mut provider = subscribed(&listener).await;
-        send(&mut provider, turn("turn/started", "typed", "inProgress")).await;
-        send(&mut provider, turn("turn/completed", "typed", "completed")).await;
-        eventually(|| {
-            store
-                .session_history("conversation", 0, 0)
-                .unwrap()
-                .iter()
-                .any(|event| event.provider_turn.as_deref() == Some("typed"))
-        })
-        .await;
+        for id in ["typed", "typed-during-read"] {
+            if id == "typed-during-read" {
+                let mut failed = turn("turn/completed", "rejected", "failed");
+                failed["params"]["turn"]["error"] = json!({"codexErrorInfo":"usageLimitExceeded"});
+                send(&mut provider, failed).await;
+                let read = receive(&mut provider).await;
+                assert_eq!(read["method"], "thread/read");
+                // Hold the history reply while the native client submits input.
+            }
+            send(&mut provider, turn("turn/started", id, "inProgress")).await;
+            send(&mut provider, turn("turn/completed", id, "completed")).await;
+            eventually(|| {
+                store
+                    .session_turn_completed("conversation", &"native-thread".into(), id)
+                    .unwrap()
+            })
+            .await;
+        }
         drop(listener);
         drop(provider);
         end(client);
         watching.await.unwrap().unwrap();
-        assert!(store
-            .session_turn_completed("conversation", &"native-thread".into(), "typed")
-            .unwrap());
+        let history = store.session_history("conversation", 0, 0).unwrap();
+        for id in ["typed", "typed-during-read"] {
+            assert!(
+                history.iter().any(|event| {
+                    event.provider_turn.as_deref() == Some(id) && event.lf_process_id == origin
+                }),
+                "{id} lost its initiating Session"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

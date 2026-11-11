@@ -231,7 +231,7 @@ def _discover_providers(root: Path) -> set[str]:
 
 
 def _production_rust(source: str) -> str:
-    pattern = re.compile(r"#\[cfg\(test\)]\s*mod\s+[A-Za-z0-9_]+\s*\{")
+    pattern = re.compile(r"#\[cfg\(test\)]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z0-9_]+\s*\{")
     while match := pattern.search(source):
         opening = source.find("{", match.start())
         depth = 0

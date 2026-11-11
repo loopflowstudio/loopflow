@@ -29,10 +29,11 @@ pub enum ContextMoment {
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
+    /// A recovery-only native prompt admission, separate from ordinary context.
+    Recovery,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
-    /// Started by a limit hook: record the limit and move the shared login to
-    /// an account with capacity.
+    /// Started by a limit hook: record the rejected prompt and check eligible logins.
     RecordLimit,
     /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
     PiEvent,
@@ -235,6 +236,7 @@ impl ContextDelivery {
         serde_json::to_writer(file.as_file(), self)?;
         file.persist(&path)?;
         command.env(CONTEXT_DELIVERY_ENV, path);
+        command.env("LF_RECOVERY_GUARD", "1");
         Ok(())
     }
 

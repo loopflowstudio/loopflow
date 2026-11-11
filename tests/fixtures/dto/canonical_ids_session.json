@@ -10,6 +10,7 @@
   "provider": "codex",
   "model": null,
   "blocked": false,
+  "recovery": null,
   "cwd": "/Case/Worktree",
   "state": "unknown",
   "ready_summary": "The design now reflects Jack's requested changes.",

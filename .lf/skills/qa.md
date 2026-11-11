@@ -222,6 +222,34 @@ production Work model against a real private server: last reading during an
 outage, offline edits, continued updates after replacement, and cancellation
 during another outage. It is a headless automated check, not a window walkthrough.
 
+## Native account switching
+
+Use the branch CLI with private `LF_HOME` and `CLAUDE_CONFIG_DIR`, clearing
+inherited `LF_*`. On macOS a temporary config directory gets a scoped Keychain
+service; changing `HOME` alone does not isolate the login Keychain. Do not probe
+the unsuffixed service beside open production conversations.
+
+`tests/e2e/claude_shared_home.py` drives the real CLI, Keychain and Claude through
+`scripts/test_network.py`, with external egress denied. Its synthetic accounts
+and local inference response make it a supplemental boundary check, not live
+login acceptance. A disposable marker chmod 0400 exercises a real installation
+error; restore 0600, repeat the same account command, then inspect both items,
+marker time and hold. Seeded stale items show reconciliation, not a failed native
+Keychain write. Live refresh, running-client continuity and unsuffixed-service
+checks need disposable or idle provider logins and suitable OS-account isolation.
+Afterward verify the exact temporary service items and child processes are gone.
+
+For interactive recovery, create linked disposable Task checkouts and select each
+bound primary Session before triggering rejection; binding a running conversation
+adds Task input and changes the failed-turn scenario. Drive `session.recover`
+through the shared server and require a correlated native retry, retained draft,
+and later completed input. Check a pending approval in one Session while another
+recovers, then answer it and count its effect. Cancellation with the credential
+lock held covers cancellation before installation only.
+Synthetic logins and local quota responses remain supplemental native checks,
+not real-login acceptance. No provider login is needed to check an empty Machine
+or reopen a Session created by `lf -a codex session resume --prepare --json`.
+
 ## Keep what you learned
 
 How to launch and drive this product belongs in this skill. When you had to work

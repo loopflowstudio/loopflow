@@ -214,6 +214,40 @@ then any eligible login with room. A resumed Session runs on the active login.
 A Graph carries its selection to every step; run a fresh Graph to choose
 again. Connecting logins and setting routes: [Ops](ops.md).
 
+## Recover after a usage limit
+
+In Desktop, **Recover affected sessions** checks eligible logins for waiting
+Claude and Codex conversations together. Each conversation shows its wait reason
+and any known capacity reset. Keep it open to retain history, editable drafts
+and pending approvals.
+
+When another eligible login has room, a native submission guard admits one
+retry in the same conversation. It checks that the rejected turn is still
+current before preparing credentials. Claude waits for its credential cache to
+expire while holding that submission. History, model and editable drafts remain
+in the native client; pending approvals remain answerable.
+
+The guard must already be loaded in the running client. Older clients without
+it keep waiting and explain why. Recovery never restarts them to install it.
+
+Checking again does not resend a dispatched retry. Its progress follows the
+original attempt, even after a reconnect. Newer submitted input supersedes an
+old rejection; input submitted after recovery is admitted follows that retry.
+
+| What is waiting | What happens next |
+|---|---|
+| No eligible login has room for the selected model | Recovery waits for capacity and shows the reset time when known. Connect a login or adjust the account route if needed, then choose **Recover affected sessions** to check again. |
+| This client has no native recovery guard | Recovery waits without changing credentials or queuing a retry. Continue from the open conversation. |
+| Preparation was cancelled, timed out, or only partly installed credentials | Recovery keeps the attempt uncertain and does not resend it. Review the conversation and continue from what happened. |
+| A turn may have been delivered or a tool may already have acted | Recovery leaves the conversation intact and explains the uncertainty. Review its history and continue from what happened; the input is not automatically resent. |
+
+Incomplete native history stays uncertain. Recovery does not replay completed
+tool actions or finished Graph steps. Capacity checks use the selected model
+and respect the Session's account restrictions; recovery
+does not change your preferences or answer approvals for you. See
+[Subscriptions](subscriptions.md#when-an-account-runs-out) for account routing
+and the separate model fallback available to headless Graph steps.
+
 ## Move what a limit blocks
 
 ```bash
@@ -225,11 +259,14 @@ lf account use claude=work@                  # switch the Machine's login and st
 `--blocked` and `--on <account|harness[:model]>` select Sessions; `list`
 previews what an `-a` move moves. An idle Session continues on the new agent at
 its next open, seeded with its conversation; a busy one moves after its turn.
-Logins belong to the Machine, not to a Session: every open Claude runs on the
-active one. A running Codex keeps its login until you restart it on another:
-`lf --account codex=<login> resume <session>`. `--blocked` and `--on` read the
-login each Session uses. `use` holds launches there until the login fills up
-or `lf account use auto`.
+Use a move when you want to choose another model or provider.
+`--blocked` and `--on` read the login each Session uses. Logins belong
+to the Machine, not to a Session: `use` switches the shared login and holds
+launches there until the login fills up or `lf account use auto`.
+
+A running Codex keeps its login. An explicit `lf --account codex=<login> resume <session>` restarts it.
+An explicit restart restores native history, but does not retain the old client's
+draft or pending approval.
 
 Interactive Sessions only; nothing is written to your preferences. More: [Subscriptions](subscriptions.md#when-an-account-runs-out).
 

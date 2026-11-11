@@ -2212,6 +2212,248 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
     }
 
+    #[cfg(target_os = "macos")]
+    mod claude_keychain {
+        use std::fs;
+        use std::path::Path;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+
+        use serde_json::json;
+        use tokio::runtime::Runtime;
+
+        use super::EnvRestore;
+        use crate::lf::commands::account::install_login;
+        use crate::profile::EmailAddress;
+        use crate::provider_account::{new_account, parse_account_id};
+        use crate::provider_auth::tests::{set_keychain_accounts, with_keychain_fixture};
+        use crate::provider_auth::Provider;
+        use crate::store::{ProviderAccount, SharedStore, StorageConfig};
+
+        fn credential(login: &str) -> String {
+            json!({"claudeAiOauth": {
+                "accessToken": format!("access-{login}"),
+                "refreshToken": format!("refresh-{login}"),
+                "expiresAt": 4102444800000i64
+            }})
+            .to_string()
+        }
+
+        fn with_logins(
+            native_name: &str,
+            check: impl AsyncFnOnce(&SharedStore, &[ProviderAccount], &Path, &Path),
+        ) {
+            with_keychain_fixture(|config, items, service| {
+                let _env = EnvRestore::capture(&["HOME", "LF_HOME"]);
+                let root = config.parent().unwrap();
+                std::env::set_var("HOME", root);
+                std::env::set_var("LF_HOME", root.join("lf"));
+                let native = root.join(native_name);
+                let (service, items) = if native_name == ".claude" {
+                    let service = "Claude Code-credentials";
+                    (service, items.parent().unwrap().join(service))
+                } else {
+                    (service, items.to_path_buf())
+                };
+                set_keychain_accounts(
+                    service,
+                    &["fixture-third", "fixture-current", "fixture-legacy"],
+                );
+                fs::create_dir_all(&native).unwrap();
+                fs::create_dir_all(&items).unwrap();
+                fs::write(native.join(".credentials.json"), "{}").unwrap();
+                fs::write(items.join("fixture-third"), "untouched").unwrap();
+                for item in ["fixture-current", "fixture-legacy"] {
+                    fs::write(items.join(item), credential("first")).unwrap();
+                }
+                let runtime = Runtime::new().unwrap();
+                runtime.block_on(async {
+                    let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                        root.join("lf/loopflow.db"),
+                    ))
+                    .await
+                    .unwrap();
+                    let mut accounts = Vec::new();
+                    for login in ["first", "second"] {
+                        let home = root.join("lf/accounts/claude").join(login);
+                        fs::create_dir_all(&home).unwrap();
+                        fs::write(home.join(".credentials.json"), credential(login)).unwrap();
+                        let mut account = new_account(
+                            Provider::Claude,
+                            parse_account_id(login).unwrap(),
+                            home,
+                            Some(EmailAddress::parse(&format!("{login}@example.com")).unwrap()),
+                        );
+                        account.observed_email = Some(format!("{login}@example.com"));
+                        account.observed_subject = Some(login.into());
+                        store.upsert_provider_account(&account).await.unwrap();
+                        accounts.push(account);
+                    }
+                    check(&Arc::new(store), &accounts, &native, &items).await;
+                });
+                assert!(!native.join(".oauth_refresh.lock").exists());
+                assert_eq!(
+                    fs::read_to_string(items.join("fixture-third")).unwrap(),
+                    "untouched"
+                );
+            });
+        }
+
+        fn assert_items(items: &Path, expected: &str) {
+            for item in ["fixture-current", "fixture-legacy"] {
+                assert_eq!(fs::read_to_string(items.join(item)).unwrap(), expected);
+            }
+        }
+
+        fn age_marker(native: &Path) -> SystemTime {
+            let stale = SystemTime::now() - Duration::from_secs(3_600);
+            fs::File::options()
+                .append(true)
+                .open(native.join(".credentials.json"))
+                .unwrap()
+                .set_modified(stale)
+                .unwrap();
+            stale
+        }
+
+        #[test]
+        fn failed_switch_retry_keeps_newer_native_login_and_normal_switches_work() {
+            // The same recovery contract holds for scoped and unsuffixed services.
+            for native_name in ["native", ".claude"] {
+                with_logins(native_name, async |store, accounts, native, items| {
+                    let stale = age_marker(native);
+                    let reject = items.join("fixture-legacy.reject");
+                    fs::write(&reject, "").unwrap();
+                    // A failed switch and a still-broken same-login retry both fail.
+                    for _ in 0..2 {
+                        let error = install_login(store, Provider::Claude, &accounts[1], native)
+                            .await
+                            .unwrap_err();
+                        assert!(error.to_string().contains("fixture-legacy"));
+                        assert_eq!(
+                            fs::read_to_string(items.join("fixture-current")).unwrap(),
+                            credential("second")
+                        );
+                        assert_eq!(
+                            fs::read_to_string(items.join("fixture-legacy")).unwrap(),
+                            credential("first")
+                        );
+                        assert_eq!(
+                            fs::metadata(native.join(".credentials.json"))
+                                .unwrap()
+                                .modified()
+                                .unwrap(),
+                            stale
+                        );
+                    }
+                    let rotated =
+                        credential("second").replace("access-second", "new-access-second");
+                    fs::write(items.join("fixture-current"), &rotated).unwrap();
+                    fs::remove_file(reject).unwrap();
+                    assert!(install_login(store, Provider::Claude, &accounts[1], native)
+                        .await
+                        .unwrap()
+                        .contains("already signed in"));
+                    assert_items(items, &rotated);
+                    assert_eq!(
+                        fs::read_to_string(
+                            accounts[1].home.as_ref().unwrap().join(".credentials.json")
+                        )
+                        .unwrap(),
+                        rotated
+                    );
+                    assert!(
+                        fs::metadata(native.join(".credentials.json"))
+                            .unwrap()
+                            .modified()
+                            .unwrap()
+                            > stale
+                    );
+
+                    // Complete repeats keep the same login, then B → A → B keeps rotation.
+                    assert!(install_login(store, Provider::Claude, &accounts[1], native)
+                        .await
+                        .unwrap()
+                        .contains("already signed in"));
+                    assert_items(items, &rotated);
+                    for (account, expected) in
+                        [(&accounts[0], credential("first")), (&accounts[1], rotated)]
+                    {
+                        assert!(install_login(store, Provider::Claude, account, native)
+                            .await
+                            .unwrap()
+                            .contains("now signed in"));
+                        assert_items(items, &expected);
+                    }
+                });
+            }
+        }
+
+        #[test]
+        fn retry_after_both_tokens_rotate_reconciles_the_identified_owner() {
+            with_logins("native", async |store, accounts, native, items| {
+                let reject = items.join("fixture-legacy.reject");
+                fs::write(&reject, "").unwrap();
+                assert!(install_login(store, Provider::Claude, &accounts[1], native)
+                    .await
+                    .is_err());
+                let rotated = credential("rotated-second");
+                fs::write(items.join("fixture-current"), &rotated).unwrap();
+                let (_endpoints, server) = crate::subscription::observation_tests::serve(
+                    vec![(
+                        200,
+                        json!({"account": {"email": "second@example.com", "uuid": "second"}})
+                            .to_string(),
+                    )],
+                    |_| {},
+                )
+                .await;
+                // Provider identification saves back the rotation but cannot hide the failed write.
+                let error = install_login(store, Provider::Claude, &accounts[1], native)
+                    .await
+                    .unwrap_err();
+                server.await.unwrap();
+                assert!(error.to_string().contains("fixture-legacy"));
+                assert_eq!(
+                    fs::read_to_string(
+                        accounts[1].home.as_ref().unwrap().join(".credentials.json")
+                    )
+                    .unwrap(),
+                    rotated
+                );
+                fs::remove_file(reject).unwrap();
+                assert!(install_login(store, Provider::Claude, &accounts[1], native)
+                    .await
+                    .unwrap()
+                    .contains("already signed in"));
+                assert_items(items, &rotated);
+            });
+        }
+
+        #[test]
+        fn retry_recovers_a_marker_failure_after_both_items_were_written() {
+            with_logins("native", async |store, accounts, native, items| {
+                let marker = native.join(".credentials.json");
+                fs::remove_file(&marker).unwrap();
+                fs::create_dir(&marker).unwrap();
+                let error = install_login(store, Provider::Claude, &accounts[1], native)
+                    .await
+                    .unwrap_err();
+                assert!(error.to_string().contains(".credentials.json"));
+                assert_items(items, &credential("second"));
+                fs::remove_dir(&marker).unwrap();
+                fs::write(&marker, "{}").unwrap();
+                let stale = age_marker(native);
+                assert!(install_login(store, Provider::Claude, &accounts[1], native)
+                    .await
+                    .unwrap()
+                    .contains("already signed in"));
+                assert!(fs::metadata(&marker).unwrap().modified().unwrap() > stale);
+                assert_items(items, &credential("second"));
+            });
+        }
+    }
+
     fn account(account_home: Option<&Path>, login: &str) -> ProviderAccount {
         ProviderAccount {
             provider: "codex".to_string(),

@@ -439,6 +439,15 @@ struct SessionPaneView: View {
                 strip
                 Rectangle().fill(theme.palette.border).frame(height: 1)
             }
+            if let recovery = item?.record.recovery {
+                SessionRecoveryView(recovery: recovery) {
+                    let affected = sessions.sessions.filter { $0.record.recovery?.canRetry == true }.map(\.id)
+                    Task { @MainActor in
+                        do { _ = try await sessions.query.recoverSessions(ids: affected, cwd: item?.record.cwd) }
+                        catch { shellError = error.localizedDescription }
+                    }
+                }
+            }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
                 .padding(pane.terminal == nil ? 0 : PaneGeometry.inset)

@@ -1602,6 +1602,7 @@ dependencies = [
  "rusqlite",
  "schemars",
  "secrecy",
+ "security-framework",
  "serde",
  "serde_json",
  "serde_urlencoded",

@@ -20,36 +20,42 @@ Preserved refs/bundle establish committed-history recovery only; no pre-deletion
 inventory establishes whether uncommitted/ignored data existed. Recovery must
 preserve MTG-193's active checkout and Task. LOO-543 remains separate.
 
-## Limit recovery (c0b373, reconciled 2026-11-07)
+## Limit recovery (LOO-747/811, reconciled 2026-11-09)
 
-c0b373 (PR #1828): work moves on when an account or model runs out.
-`provider_rate_limited` types the failure. Limits keep the
-provider's window name and scope; a model-suffixed window cools one model.
-Every launch takes the login with the most weekly quota left per hour until
-reset. A Graph step recovers inside its own Process (no step replays): another
-account carrying its thread, another model (bare harness only), the next
-`default_agent` provider, then a wall-clock wait. An explicit `harness:model`
-changes accounts only. `lf task run` restarts at a step that died waiting;
-`restarts_by_itself` decides sweep and status. Running Claude re-reads its
-login only on a `.credentials.json` mtime change (2.1.318), so `activate`
-touches it. One selector (`--blocked`, `--on`) serves `session list` and
-`session move -a`; `lf account pause` on the active login switches away, and
-`lf account use` holds, over any order, until that login is full or `use auto`.
-`lf resume --account` restarts a running Codex on another login; a running
-Claude's login switches, then it attaches. Busy
-Sessions move at their Stop hook; moves never write preferences; the repo pins
-no provider.
+LOO-747 (#1828) owns Graph recovery without replay; LOO-811 owns interactive
+continuation and Desktop recovery. LOO-813/#1863 is complete opening/reconnect
+work. Account switching alone does not establish continuation. Keep history,
+model, drafts and approvals; distinguish rejection from uncertain/completed work.
 
-One shared home and login per provider per Machine, no isolation; a login
-switch moves (and reports) every open Session of that provider. Remote logins
-are fresh; rentals get laptop-refreshed Claude access tokens (~8h), resent
-every 2h by `lf install schedule`; no long-lived tokens. Lessons: a thread
-without a transcript gets a seeded one; provider words cool an account only on
-a failed exit; the pin follows the real launch. Claude's `StopFailure` calls
-every 429 `rate_limit`: only the displayed line tells spent quota and names its
-model; a usage poll then supplies the reset. Jack Heart, November 7: overage
-cooling and unbounded waits stay as built. Open: prompt-cache cost of a switch,
-LOO-435.
+Restart is allowed, but idle account adoption proves no preservation: Codex
+replacement loses active work/approvals; SIGHUP drain exits on racing input;
+active-response handoff fails.
+
+Claude 2.1.322's recovery-only wrapper blocks gate failure/timeout while ordinary
+hook failure permits typing. Cancellation requeues async wake: claim an attempt
+once. Codex 0.167.0's native hook timeout fails open; a shorter recovery-only
+watchdog blocks it. Older work/approvals finish before stale queued recovery is
+rejected without handoff. `turn/start` can return an existing turn ID; completion
+must match the admitted hook and exact retry input. Claude joins inbox UUID,
+admitted prompt ID and Stop. Cache expiry and outside history reads reserve no input.
+
+Guarded sends now use existing Session owners and the account broker. A one-use
+socket holds native submission through preparation. Cancellation stops subsequent
+installation/retry, but cannot undo a native installation already sent: retain
+uncertainty and track confirmed account changes. Refresh/save-back must finish
+outside the cancelled hook so received grants survive. Late waits retain dispatch
+and completion; only recovery depends on its gate, ordinary input stays best-effort.
+
+Synthetic native checks now cover two Task primary Sessions per provider through
+Desktop's served protocol: bulk continuation, drafts/later input, held-lock
+cancellation and an approval retained while the other Task recovers, executed
+once when answered. Release's entry-point lesson still applies: these are
+neither rendered Desktop nor installed/real-token acceptance. Model/routes,
+merged-tree gate and the ordinary-typing incident remain open. Scoped Keychain
+checks cover USER plus one lexical legacy item, not native write rejection or
+installed/unsuffixed repair. Sources and candidate hashes:
+`16efb4f8ee531901e8ac707dc5c78067aae72fa2:scratch/interactive-limit-recovery.md`
+and `scratch/live-recovery.md` at that revision.
 
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 

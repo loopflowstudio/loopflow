@@ -1,0 +1,973 @@
+# /// script
+# dependencies = ["websockets>=15,<16"]
+# ///
+import argparse
+import fcntl
+import hashlib
+import http.server
+import json
+import os
+import pathlib
+import pty
+import select
+import shlex
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import threading
+import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tests/e2e"))
+from codex_auth_reload_probe import _auth
+from codex_connect import Client
+from websockets.exceptions import ConnectionClosed
+
+parser = argparse.ArgumentParser(
+    description="Probe native Codex recovery admission with synthetic local inference."
+)
+parser.add_argument("--codex", required=True, type=pathlib.Path)
+parser.add_argument("--output", required=True, type=pathlib.Path)
+parser.add_argument("--approval", action="store_true")
+parser.add_argument("--token-handoff", action="store_true")
+parser.add_argument("--control", action="store_true")
+parser.add_argument("--conditional-steer", action="store_true")
+parser.add_argument("--replace-server", action="store_true")
+parser.add_argument("--submission-gate", action="store_true")
+parser.add_argument(
+    "--gate-fault", choices=("none", "failure", "timeout", "cancel"), default="none"
+)
+parser.add_argument("--guard-recovery", action="store_true")
+parser.add_argument("--gate-race", choices=("none", "preparation", "dispatch"), default="none")
+parser.add_argument(
+    "--race", choices=("none", "preparation", "dispatch", "disconnected"), default="none"
+)
+parser.add_argument("--quota", action="store_true")
+parser.add_argument("--refresh", action="store_true")
+parser.add_argument("--refresh-request", type=int, default=2)
+args = parser.parse_args()
+if args.conditional_steer:
+    args.quota = True
+if args.replace_server:
+    args.quota = not args.approval
+    args.token_handoff = True
+if args.submission_gate:
+    args.quota = True
+    args.token_handoff = True
+if os.environ.get("LOOPFLOW_NETWORK_ISOLATED") != "1":
+    raise RuntimeError("run through scripts/test_network.py")
+out = args.output.resolve()
+out.mkdir(parents=True, exist_ok=True)
+codex = str(args.codex.resolve())
+held = threading.Event()
+release = threading.Event()
+requests = []
+request_accounts = []
+refresh_requests = []
+refreshed = threading.Event()
+approval = args.approval
+hooks = []
+gate_entered = threading.Event()
+gate_prepare = threading.Event()
+gate_prepared = threading.Event()
+gate_dispatch = threading.Event()
+
+
+class RefreshClient(Client):
+    def _read(self):
+        try:
+            for message in self.socket:
+                event = json.loads(message)
+                self.events.append(event)
+                self.pending.put(event)
+                if event.get("method") == "account/chatgptAuthTokens/refresh":
+                    refresh_requests.append(event["params"])
+                    # Let the native TUI answer first if this request is broadcast.
+                    time.sleep(1)
+                    self.socket.send(
+                        json.dumps(
+                            {
+                                "id": event["id"],
+                                "result": refresh_tokens,
+                            }
+                        )
+                    )
+                    refreshed.set()
+        except ConnectionClosed:
+            pass
+
+
+class Model(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        payload = (
+            {
+                "accounts": [
+                    {
+                        "id": name,
+                        "name": name,
+                        "workspace_backend_origin": "https://fixture.example.test",
+                        "account_routing_override": "NO_CONSTRAINT",
+                    }
+                    for name in ("first", "second")
+                ]
+            }
+            if "/accounts/check" in self.path
+            else {}
+        )
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path == "/hook":
+            event = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            hooks.append(event)
+            decision = {}
+            if "RECOVERY_SUBMISSION_FIXTURE" in event.get("prompt", ""):
+                rows = [
+                    json.loads(line)
+                    for line in pathlib.Path(event["transcript_path"]).read_text().splitlines()
+                ]
+                (out / "submission-history.json").write_text(json.dumps(rows, indent=2))
+                prior = [
+                    row["payload"].get("content", [])
+                    for row in rows
+                    if row.get("type") == "response_item"
+                    and row.get("payload", {}).get("type") == "message"
+                    and row["payload"].get("role") == "user"
+                    and "RECOVERY_SUBMISSION_FIXTURE" not in json.dumps(row["payload"])
+                ]
+                latest_input = (
+                    "".join(part.get("text", "") for part in prior[-1]) if prior else None
+                )
+                results["native_prior_input"] = latest_input
+                gate_entered.set()
+                if args.gate_fault != "none":
+                    decision = {"fixtureFault": args.gate_fault}
+                elif not gate_prepare.wait(25):
+                    decision = {"decision": "block", "reason": "Fixture preparation timed out"}
+                elif latest_input != "Run the disposable fixture.":
+                    decision = {"decision": "block", "reason": "Newer input superseded recovery"}
+                    results["stale_rejected"] = True
+                else:
+                    saved = _auth(home, "second")
+                    broker = Client(endpoint)
+                    try:
+                        broker.call(
+                            "account/login/start",
+                            {
+                                "type": "chatgptAuthTokens",
+                                "accessToken": json.loads(saved)["tokens"]["access_token"],
+                                "chatgptAccountId": "second",
+                                "chatgptPlanType": "plus",
+                            },
+                        )
+                        results["credentials_installed_in_gate"] = True
+                    finally:
+                        broker.close()
+                    gate_prepared.set()
+                    if not gate_dispatch.wait(25):
+                        decision = {"decision": "block", "reason": "Fixture dispatch timed out"}
+            body = json.dumps(decision).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except BrokenPipeError:
+                results["hook_cancelled"] = True
+            return
+        if self.path != "/v1/responses":
+            self.send_error(404)
+            return
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        requests.append(request)
+        request_accounts.append(self.headers.get("chatgpt-account-id"))
+        if args.refresh and len(requests) == args.refresh_request:
+            body = b'{"error":{"type":"authentication_error","message":"fixture expired"}}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if len(requests) == 1 and args.quota:
+            body = json.dumps(
+                {
+                    "error": {
+                        "type": "usage_limit_reached",
+                        "message": "Synthetic fixture usage limit",
+                        "plan_type": "plus",
+                        "resets_at": 4102444800,
+                    }
+                }
+            ).encode()
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if (len(requests) == 1 and not approval) or (
+            (
+                args.conditional_steer
+                or ((args.replace_server or args.submission_gate) and args.race == "preparation")
+            )
+            and len(requests) == 2
+            and not approval
+        ):
+            held.set()
+            if not release.wait(30):
+                return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        item = {
+            "id": "msg_fixture",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "DRAIN_TURN_COMPLETED"}],
+        }
+        if approval and len(requests) == (2 if args.submission_gate else 1):
+            item = {
+                "id": "fc_approval",
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "approval",
+                "arguments": json.dumps(
+                    {
+                        "cmd": "/bin/echo APPROVAL_EXECUTED",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Allow disposable recovery fixture?",
+                    }
+                ),
+            }
+        response = {"id": "resp_fixture", "status": "in_progress", "output": []}
+        events = [
+            ("response.created", {"response": response}),
+            ("response.output_item.added", {"output_index": 0, "item": item}),
+            ("response.output_item.done", {"output_index": 0, "item": item}),
+            (
+                "response.completed",
+                {
+                    "response": {
+                        **response,
+                        "status": "completed",
+                        "output": [item],
+                        "usage": {"input_tokens": 20, "output_tokens": 5, "total_tokens": 25},
+                    }
+                },
+            ),
+        ]
+        for kind, data in events:
+            try:
+                self.wfile.write(
+                    f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
+                )
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                results["model_connection_closed"] = True
+                return
+
+
+model = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Model)
+worker = threading.Thread(target=model.serve_forever)
+worker.start()
+children = []
+connections = []
+master = None
+transcript = bytearray()
+results = {"case": "approval" if approval else "racing_input"}
+
+with tempfile.TemporaryDirectory(prefix="loo811-drain-", dir="/tmp") as temporary:
+    root = pathlib.Path(temporary)
+    home = root / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text(f"""cli_auth_credentials_store="file"
+chatgpt_base_url="http://127.0.0.1:{model.server_port}/backend-api/"
+model="fixture"
+model_provider="fixture"
+[model_providers.fixture]
+name="fixture"
+base_url="http://127.0.0.1:{model.server_port}/v1"
+wire_api="responses"
+requires_openai_auth={str(args.token_handoff).lower()}
+[projects.{json.dumps(str(root))}]
+trust_level="trusted"
+""")
+    if args.token_handoff:
+        _auth(home, "first")
+    refresh_tokens = (
+        {
+            "accessToken": json.loads(_auth(home, "second", "refreshed@example.test"))["tokens"][
+                "access_token"
+            ],
+            "chatgptAccountId": "second",
+            "chatgptPlanType": "plus",
+        }
+        if args.refresh
+        else None
+    )
+    if args.refresh:
+        _auth(home, "first")
+    env = {
+        "HOME": str(root),
+        "CODEX_HOME": str(home),
+        "PATH": "/usr/bin:/bin",
+        "TERM": "xterm-256color",
+        "RUST_LOG": "warn",
+    }
+    endpoint = root / "agent.sock"
+    log = open(out / f"drain-{results['case']}-agent.log", "w")
+
+    def server():
+        process = subprocess.Popen(
+            [codex, "app-server", "--listen", "unix://" + str(endpoint)],
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+        children.append(process)
+        deadline = time.monotonic() + 10
+        while not endpoint.exists() and time.monotonic() < deadline and process.poll() is None:
+            time.sleep(0.05)
+        return process
+
+    def stop(process):
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+    def read(seconds):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if select.select([master], [], [], 0.05)[0]:
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    time.sleep(max(0, deadline - time.monotonic()))
+                    return
+                transcript.extend(data)
+                if b"\x1b[6n" in data:
+                    os.write(master, b"\x1b[1;1R")
+            if client.poll() is not None:
+                time.sleep(max(0, deadline - time.monotonic()))
+                return
+
+    def _wait_for(predicate, label):
+        deadline = time.monotonic() + 15
+        while not predicate() and time.monotonic() < deadline:
+            read(0.1)
+        assert predicate(), label
+
+    try:
+        provider = server()
+        setup = RefreshClient(endpoint) if args.refresh else Client(endpoint)
+        connections.append(setup)
+        hook_config = {}
+        if args.submission_gate:
+            hook_script = root / "submit.py"
+            hook_script.write_text("""import json, sys, time, urllib.request
+event = json.load(sys.stdin)
+request = urllib.request.Request(sys.argv[1], data=json.dumps(event).encode())
+with urllib.request.urlopen(request, timeout=55) as response:
+    decision = json.load(response)
+if decision.get('fixtureFault') == 'failure':
+    sys.exit(1)
+if decision.get('fixtureFault') in ('timeout', 'cancel'):
+    time.sleep(30)
+print(json.dumps(decision))
+""")
+            hook_command = shlex.join(
+                [sys.executable, str(hook_script), f"http://127.0.0.1:{model.server_port}/hook"]
+            )
+            if args.guard_recovery:
+                hook_command = (
+                    'payload=$(/bin/cat); case "$payload" in *RECOVERY_SUBMISSION_FIXTURE*) '
+                    "printf '%s' \"$payload\" | " + hook_command + " & gate=$!; "
+                    '(sleep 2 & sleeper=$!; trap \'kill "$sleeper" 2>/dev/null; '
+                    'wait "$sleeper" 2>/dev/null; exit\' TERM INT; '
+                    'wait "$sleeper"; kill -TERM "$gate") & timer=$!; '
+                    'wait "$gate"; gate_status=$?; kill "$timer" 2>/dev/null; '
+                    'wait "$timer" 2>/dev/null; '
+                    '[ "$gate_status" = 0 ] || '
+                    'printf \'{"decision":"block","reason":"Recovery gate did not finish"}\\n\' '
+                    ";; *) exit 0 ;; esac"
+                )
+            handler = {
+                "type": "command",
+                "command": hook_command,
+                "timeout": 10 if args.guard_recovery else 2 if args.gate_fault == "timeout" else 60,
+                "async": False,
+            }
+            digest = hashlib.sha256(
+                json.dumps(
+                    {"event_name": "user_prompt_submit", "hooks": [handler]},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            hook_config = {
+                "config": {
+                    "hooks": {
+                        "UserPromptSubmit": [{"hooks": [handler]}],
+                        "state": {
+                            "/<session-flags>/config.toml:user_prompt_submit:0:0": {
+                                "trusted_hash": "sha256:" + digest
+                            }
+                        },
+                    }
+                }
+            }
+        thread = setup.call(
+            "thread/start",
+            {
+                "cwd": str(root),
+                "model": "fixture",
+                "modelProvider": "fixture",
+                "approvalPolicy": "on-request" if approval else "never",
+                "sandbox": "read-only" if approval else "danger-full-access",
+                **hook_config,
+            },
+        )["thread"]["id"]
+        setup.call("thread/name/set", {"threadId": thread, "name": "Drain probe"})
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+
+        def own():
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+        client = subprocess.Popen(
+            [codex, "--no-alt-screen", "--remote", "unix://" + str(endpoint), "resume", thread],
+            cwd=root,
+            env=env,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            preexec_fn=own,
+        )
+        children.append(client)
+        os.close(slave)
+        read(3)
+        turn = setup.start_turn(thread, "Run the disposable fixture.")
+        read(3)
+        if args.submission_gate:
+            assert hooks or args.guard_recovery, "native submission hook did not run"
+            results["mechanism"] = "UserPromptSubmit with supplied-token login"
+            if args.race != "none" or approval:
+                os.write(master, b"NEWER_BEFORE_RECOVERY")
+                read(0.3)
+                os.write(master, b"\r")
+                read(3)
+            if not approval:
+                os.write(master, b"DRAFT_BEFORE_RECOVERY")
+                read(0.3)
+            retry = setup.start_turn(thread, "RECOVERY_SUBMISSION_FIXTURE")
+            if args.race == "preparation" or approval:
+                read(1)
+                results["retry_waited_for_active_work"] = not gate_entered.is_set()
+                results["no_handoff_during_active_work"] = not results.get(
+                    "credentials_installed_in_gate", False
+                )
+                if approval:
+                    results["approval_still_pending"] = any(
+                        e.get("method") == "item/commandExecution/requestApproval"
+                        for e in setup.events
+                    )
+                    os.write(master, b"y")
+                    read(0.3)
+                    os.write(master, b"\r")
+                release.set()
+            _wait_for(gate_entered.is_set, "retry did not reach native hook")
+            if args.gate_fault != "none":
+                if args.gate_fault == "cancel":
+                    os.write(master, b"\x1b")
+                read(4)
+                results["failed_gate_rejected_recovery"] = len(requests) == (
+                    2 if args.race != "none" else 1
+                )
+                results["gate_fault"] = args.gate_fault
+                results["guard_recovery"] = args.guard_recovery
+            if args.gate_race == "preparation":
+                os.write(master, b"_DURING_PREPARATION")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            gate_prepare.set()
+            if args.gate_fault == "none":
+                _wait_for(
+                    lambda: gate_prepared.is_set() or results.get("stale_rejected"),
+                    "gate did not prepare or reject",
+                )
+            if args.gate_race == "dispatch":
+                os.write(master, b"_DURING_DISPATCH")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            gate_dispatch.set()
+            read(3)
+            release.set()
+            read(4)
+            results["turns_before_subsequent_input"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            if args.gate_race != "none":
+                os.write(master, b"DRAFT_BEFORE_RECOVERY")
+                read(0.3)
+            os.write(master, b"_AFTER_RECOVERY")
+            read(0.3)
+            os.write(master, b"\r")
+            read(4)
+            results["native_turns"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            results["request_accounts"] = request_accounts
+            results["hooks"] = hooks
+            results["requests"] = requests
+            turns = results["native_turns"]["thread"]["turns"]
+            results["retry_reply_turn"] = retry
+            submissions = [h for h in hooks if h.get("prompt") == "RECOVERY_SUBMISSION_FIXTURE"]
+            assert len(submissions) == 1, "expected one native recovery submission"
+            results["retry_prompt_turn"] = submissions[0]["turn_id"]
+            # Queued input can return the earlier active turn's ID. Completion
+            # belongs to the hook's turn only if that turn contains our input.
+            results["retry_completed"] = any(
+                t["id"] == results["retry_prompt_turn"]
+                and t["status"] == "completed"
+                and any(
+                    part.get("text") == "RECOVERY_SUBMISSION_FIXTURE"
+                    for item in t["items"]
+                    if item["type"] == "userMessage"
+                    for part in item["content"]
+                )
+                for t in turns
+            )
+            results["completed_inputs"] = [
+                i["content"]
+                for t in turns
+                if t["status"] == "completed"
+                for i in t["items"]
+                if i["type"] == "userMessage"
+            ]
+            results["interrupted_turns"] = [t["id"] for t in turns if t["status"] == "interrupted"]
+            results["client_alive"] = client.poll() is None
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in setup.events
+            )
+            completed_text = [
+                i["text"]
+                for content in results["completed_inputs"]
+                for i in content
+                if i["type"] == "text"
+            ]
+            results["draft_submitted_intact"] = (
+                "DRAFT_BEFORE_RECOVERY_AFTER_RECOVERY" in completed_text
+            )
+            if args.gate_race != "none":
+                results["queued_input_completed"] = (
+                    "DRAFT_BEFORE_RECOVERY_DURING_" + args.gate_race.upper() in completed_text
+                )
+                assert results["queued_input_completed"]
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            assert results["client_alive"]
+            if args.gate_fault != "none":
+                assert results["draft_submitted_intact"]
+                if args.guard_recovery or args.gate_fault == "cancel":
+                    assert results["failed_gate_rejected_recovery"]
+                else:
+                    assert not results["failed_gate_rejected_recovery"]
+            elif args.race == "none" and not approval:
+                assert results["retry_completed"] and results["draft_submitted_intact"]
+                assert request_accounts == ["first"] + ["second"] * (len(requests) - 1)
+            else:
+                assert results["stale_rejected"]
+                assert not results.get("credentials_installed_in_gate", False)
+                assert not any("RECOVERY_SUBMISSION_FIXTURE" in json.dumps(r) for r in requests)
+                assert not results["interrupted_turns"]
+                assert all(a == "first" for a in request_accounts)
+                if approval:
+                    assert results["approval_still_pending"] and results["completed_commands"] == 1
+                else:
+                    assert results["draft_submitted_intact"]
+            raise SystemExit(0)
+        if approval:
+            results["approval_before_drain"] = any(
+                e.get("method") == "item/commandExecution/requestApproval" for e in setup.events
+            )
+        elif not args.quota:
+            assert held.is_set(), "model never received admitted input"
+        if args.replace_server:
+            results["mechanism"] = "server replacement without drain"
+            results["race"] = args.race
+            results["original_turn"] = turn
+            if args.race == "preparation":
+                os.write(master, b"NEWER_BEFORE_REPLACEMENT")
+                read(0.3)
+                os.write(master, b"\r")
+                read(2)
+                assert held.is_set(), "newer native request did not reach model"
+            if not approval and args.race != "disconnected":
+                os.write(master, b"DRAFT_BEFORE_REPLACEMENT")
+                read(0.3)
+            # End only this disposable server. No drain, proxy, or TUI restart.
+            stop(provider)
+            endpoint.unlink(missing_ok=True)
+            if args.race == "disconnected":
+                os.write(master, b"TYPED_WHILE_DISCONNECTED")
+                read(0.3)
+                os.write(master, b"\r")
+                read(1)
+            _auth(home, "second")
+            replacement = server()
+            successor = Client(endpoint)
+            connections.append(successor)
+            results["account_after_replacement"] = successor.call("account/read", {})
+            read(4)
+            results["client_alive_after_replacement"] = client.poll() is None
+            release.set()
+            results["resumed_thread"] = successor.call("thread/resume", {"threadId": thread})
+            if args.race == "none" and not approval:
+                retry = successor.start_turn(thread, "Run the disposable fixture.")
+                read(3)
+                results["retry_completed"] = any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == retry
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in successor.events
+                )
+            elif approval:
+                os.write(master, b"y")
+                read(0.3)
+                os.write(master, b"\r")
+                read(3)
+            else:
+                read(3)
+            results["request_count_before_subsequent_input"] = len(requests)
+            results["turns_before_subsequent_input"] = successor.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            if client.poll() is None:
+                os.write(master, b"_AFTER_REPLACEMENT")
+                read(0.3)
+                os.write(master, b"\r")
+                read(5)
+            results["client_alive"] = client.poll() is None
+            results["client_exit"] = client.poll()
+            results["requests"] = requests
+            results["request_accounts"] = request_accounts
+            results["successor_events"] = successor.events
+            results["native_turns"] = successor.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            turns = results["native_turns"]["thread"]["turns"]
+            results["interrupted_turns"] = [t["id"] for t in turns if t["status"] == "interrupted"]
+            results["completed_inputs"] = [
+                item["content"]
+                for t in turns
+                if t["status"] == "completed"
+                for item in t["items"]
+                if item["type"] == "userMessage"
+            ]
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in successor.events
+            )
+            results["draft_submitted_intact"] = (
+                "DRAFT_BEFORE_REPLACEMENT_AFTER_REPLACEMENT"
+                in json.dumps(results["completed_inputs"])
+            )
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            assert results["account_after_replacement"]["account"]["email"] == "second@example.test"
+            if approval:
+                assert turn in results["interrupted_turns"] and results["completed_commands"] == 0
+            elif args.race == "preparation":
+                assert results["interrupted_turns"], (
+                    "expected the admitted response to be interrupted"
+                )
+                assert results["draft_submitted_intact"]
+            elif args.race == "none":
+                assert results["retry_completed"] and results["draft_submitted_intact"]
+            raise SystemExit(0)
+        if args.conditional_steer:
+
+            def complete(ident):
+                return any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == ident
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                )
+
+            def steer(expected, text):
+                try:
+                    return {
+                        "result": setup.call(
+                            "turn/steer",
+                            {
+                                "threadId": thread,
+                                "expectedTurnId": expected,
+                                "input": [{"type": "text", "text": text, "text_elements": []}],
+                            },
+                        )
+                    }
+                except AssertionError as error:
+                    return {"error": error.args[0]["error"]}
+
+            results["mechanism"] = "turn/steer.expectedTurnId"
+            results["failed_turn"] = turn
+            results["rejected_turn_observed"] = any(
+                e.get("method") == "turn/completed"
+                and e["params"]["turn"]["id"] == turn
+                and e["params"]["turn"]["status"] == "failed"
+                and e["params"]["turn"].get("error", {}).get("codexErrorInfo")
+                == "usageLimitExceeded"
+                for e in setup.events
+            )
+            assert results["rejected_turn_observed"]
+            os.write(master, b"DRAFT_BEFORE_ADMISSION")
+            read(0.3)
+            results["idle_rejected_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            os.write(master, b"_DURING_PREPARATION")
+            read(0.3)
+            os.write(master, b"\r")
+            _wait_for(held.is_set, "newer typed turn did not reach model")
+            active = [
+                e["params"]["turn"]["id"] for e in setup.events if e.get("method") == "turn/started"
+            ][-1]
+            results["newer_turn"] = active
+            results["during_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            results["active_turn_control"] = steer(active, "ACTIVE_STEER_CONTROL")
+            release.set()
+            _wait_for(lambda: complete(active), "newer typed turn did not complete")
+            results["after_newer_turn"] = steer(turn, "STALE_RETRY_FIXTURE")
+            os.write(master, b"SUBSEQUENT_TYPED_INPUT")
+            read(0.3)
+            os.write(master, b"\r")
+            _wait_for(
+                lambda: any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] not in (active, turn)
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                ),
+                "subsequent typed input did not complete",
+            )
+            results["client_alive"] = client.poll() is None
+            results["draft_submitted_intact"] = any(
+                "DRAFT_BEFORE_ADMISSION_DURING_PREPARATION" in json.dumps(r) for r in requests
+            )
+            results["stale_retry_reached_model"] = any(
+                "STALE_RETRY_FIXTURE" in json.dumps(r) for r in requests
+            )
+            results["subsequent_turn_completed"] = True
+            results["local_fixture_requests"] = len(requests)
+            results["version"] = subprocess.check_output(
+                [codex, "--version"], env=env, cwd=root, text=True
+            ).strip()
+            results["native_turns"] = setup.call(
+                "thread/read", {"threadId": thread, "includeTurns": True}
+            )
+            assert all(
+                "error" in results[name]
+                for name in ("idle_rejected_turn", "during_newer_turn", "after_newer_turn")
+            )
+            assert "result" in results["active_turn_control"]
+            assert results["client_alive"] and results["draft_submitted_intact"]
+            assert not results["stale_retry_reached_model"]
+            raise SystemExit(0)
+        if args.token_handoff:
+            if not approval:
+                os.write(master, b"\x1b[200~DRAFT_BEFORE_HANDOFF\x1b[201~")
+                read(0.5)
+            if not args.control:
+                saved = _auth(home, "second")
+                results["token_handoff"] = setup.call(
+                    "account/login/start",
+                    {
+                        "type": "chatgptAuthTokens",
+                        "accessToken": json.loads(saved)["tokens"]["access_token"],
+                        "chatgptAccountId": "second",
+                        "chatgptPlanType": "plus",
+                    },
+                )
+            results["account_after_handoff"] = setup.call("account/read", {})
+            if args.quota:
+                retry = setup.start_turn(thread, "Run the disposable fixture.")
+                read(2)
+                results["quota_retry_completed"] = any(
+                    e.get("method") == "turn/completed"
+                    and e["params"]["turn"]["id"] == retry
+                    and e["params"]["turn"]["status"] == "completed"
+                    for e in setup.events
+                )
+        else:
+            provider.send_signal(signal.SIGHUP)
+        read(1)
+        results["provider_waits_for_admitted_turn"] = provider.poll() is None
+        if provider.poll() is not None:
+            raise RuntimeError("drain killed admitted turn")
+        # This call observes the native rejection, never retries it.
+        if not args.token_handoff:
+            try:
+                setup.start_turn(thread, "RPC_DURING_DRAIN")
+            except AssertionError as error:
+                results["new_turn_rejection"] = error.args[0].get("error")
+        if approval:
+            os.write(master, b"y")
+            read(0.5)
+            os.write(master, b"\r")
+        else:
+            os.write(master, b"\x1b[200~TYPED_DURING_DRAIN\x1b[201~")
+            read(0.5)
+            os.write(master, b"\r")
+            read(1)
+            release.set()
+        read(5)
+        results["client_survived_drain"] = client.poll() is None
+        results["client_exit"] = client.poll()
+        results["native_drain_error"] = b"turn/steer failed: Server is draining" in transcript
+        results["old_provider_exited"] = provider.poll() is not None
+        results["old_turn_completed"] = any(
+            e.get("method") == "turn/completed"
+            and e["params"]["turn"]["id"] == turn
+            and e["params"]["turn"]["status"] == "completed"
+            for e in setup.events
+        )
+        results["approval_executed"] = any(
+            "APPROVAL_EXECUTED" in json.dumps(r.get("input", []))
+            and "function_call_output" in json.dumps(r.get("input", []))
+            for r in requests
+        )
+        if not args.token_handoff:
+            if provider.poll() is None:
+                raise RuntimeError("drain did not complete")
+            endpoint.unlink(missing_ok=True)
+            replacement = server()
+        read(5)
+        before = len(transcript)
+        if client.poll() is None:
+            os.write(master, b"\x1b[200~_AFTER_REPLACEMENT\x1b[201~")
+            read(0.5)
+            os.write(master, b"\r")
+        read(8)
+        results["client_survived"] = client.poll() is None
+        results["typed_input_reached_model"] = any(
+            "TYPED_DURING_DRAIN" in json.dumps(r) for r in requests
+        )
+        results["subsequent_input_reached_model"] = any(
+            "_AFTER_REPLACEMENT" in json.dumps(r) for r in requests
+        )
+        results["subsequent_turn_completed"] = b"DRAIN_TURN_COMPLETED" in transcript[before:]
+        results["local_fixture_requests"] = len(requests)
+        results["turn_results"] = [
+            {"id": e["params"]["turn"]["id"], "status": e["params"]["turn"]["status"]}
+            for e in setup.events
+            if e.get("method") == "turn/completed"
+        ]
+        results["original_turn_id"] = turn
+        if args.token_handoff:
+            results["request_accounts"] = request_accounts
+            results["completed_commands"] = sum(
+                e.get("method") == "item/completed"
+                and e["params"]["item"].get("type") == "commandExecution"
+                for e in setup.events
+            )
+            results["draft_reached_model"] = any(
+                "DRAFT_BEFORE_HANDOFF" in json.dumps(r) for r in requests
+            )
+        results["version"] = subprocess.check_output(
+            [codex, "--version"], env=env, cwd=root, text=True
+        ).strip()
+        if args.refresh:
+            results["refresh_requests"] = refresh_requests
+            results["refresh_answered"] = refreshed.is_set()
+            results["account_after_refresh"] = setup.call("account/read", {})
+        results["native_turns"] = setup.call(
+            "thread/read", {"threadId": thread, "includeTurns": True}
+        )
+    finally:
+        release.set()
+        gate_prepare.set()
+        gate_dispatch.set()
+        for connection in connections:
+            connection.close()
+        # Close the PTY before wait: native exit may block flushing an unread tty.
+        if master is not None:
+            os.close(master)
+        for process in reversed(children):
+            stop(process)
+        log.close()
+        model.shutdown()
+        model.server_close()
+        worker.join()
+        results["http_worker_reaped"] = not worker.is_alive()
+        results["all_children_reaped"] = all(p.poll() is not None for p in children)
+        if args.submission_gate:
+            results["hooks"] = hooks
+            results["requests"] = requests
+        (out / f"drain-{results['case']}-terminal.bin").write_bytes(transcript)
+        (out / f"drain-{results['case']}-results.json").write_text(json.dumps(results, indent=2))
+        print(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in results.items()
+                    if key
+                    not in (
+                        "native_turns",
+                        "hooks",
+                        "requests",
+                        "successor_events",
+                        "resumed_thread",
+                        "turns_before_subsequent_input",
+                    )
+                }
+            )
+        )
+
+assert results["client_survived_drain"], "native client exited on drain rejection"
+if args.quota:
+    assert any(t["id"] == turn and t["status"] == "failed" for t in results["turn_results"])
+    assert results["quota_retry_completed"]
+else:
+    assert results["old_turn_completed"], "admitted turn was not completed"
+assert results["subsequent_turn_completed"], "subsequent typed turn did not complete"
+if approval:
+    assert results["approval_before_drain"] and results["approval_executed"]
+else:
+    assert results["typed_input_reached_model"], "input submitted during draining was lost"
+if args.token_handoff:
+    assert request_accounts[0] == "first"
+    expected = "first" if args.control else "second"
+    assert request_accounts[-1] == expected
+    assert results["account_after_handoff"]["account"]["email"] == expected + "@example.test"
+    if approval:
+        assert results["completed_commands"] == 1
+    else:
+        assert results["draft_reached_model"]
+if args.refresh:
+    assert results["refresh_answered"]
+    assert results["account_after_refresh"]["account"]["email"] == "refreshed@example.test"

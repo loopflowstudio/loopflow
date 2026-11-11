@@ -11,6 +11,18 @@
   "account": "work",
   "model": null,
   "blocked": false,
+  "recovery": {
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "thread": "native-quota-thread",
+    "failed_turn": "rejected-turn",
+    "model": "gpt-5",
+    "account": "work",
+    "state": "waiting_capacity",
+    "reason": "No eligible login has capacity for this model",
+    "retry_at": 1794270600,
+    "request": null,
+    "retry_turn": null
+  },
   "cwd": "/src/loopflow.task",
   "state": "unknown",
   "ready_summary": "The design now reflects Jack's requested changes.",

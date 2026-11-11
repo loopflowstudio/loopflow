@@ -1,4 +1,16 @@
 #[test]
+fn session_record_requires_the_nullable_recovery_key() {
+    let mut value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/dto/session.json"
+    ))
+    .unwrap();
+    value["recovery"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<super::SessionRecord>(value.clone()).is_ok());
+    value.as_object_mut().unwrap().remove("recovery");
+    assert!(serde_json::from_value::<super::SessionRecord>(value).is_err());
+}
+
+#[test]
 fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();

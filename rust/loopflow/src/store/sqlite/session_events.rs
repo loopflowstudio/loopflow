@@ -9,6 +9,136 @@ use crate::store::{ProviderAccountId, StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn has_recovery_phase(
+        &self,
+        session: &str,
+        recovery: &crate::session_recovery::SessionRecovery,
+        phase: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2)",
+            params![session, format!("{}:{phase}", recovery.key())], |row| row.get(0))?)
+    }
+    pub(crate) fn request_session_recovery(&self, session: &str) -> StoreResult<()> {
+        let Some(recovery) = self.session_recovery(session)? else {
+            return Ok(());
+        };
+        if !recovery.can_retry() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+            SELECT id,'observed',?2,unixepoch(),'{}',current_capture FROM agent_sessions
+            WHERE id=?1 AND interactive=1 AND completed_at IS NULL",
+            params![crate::id::canonical_session(session), format!("quota_retry:{}", uuid::Uuid::new_v4())])?;
+        Ok(())
+    }
+
+    pub(crate) fn recovery_request_revision(&self, session: &str) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM session_events
+            WHERE session_id=?1 AND kind='observed' AND receipt_key LIKE 'quota_retry:%'",
+            [crate::id::canonical_session(session)],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub(crate) fn record_recovery_boundary(
+        &self,
+        session: &str,
+        thread: &str,
+        prompt: &str,
+        phase: &str,
+        account: Option<&ProviderAccountId>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture
+             FROM agent_sessions WHERE id=?1 ON CONFLICT DO NOTHING",
+            params![session, format!("quota_boundary:{thread}:{prompt}:{phase}"), serde_json::json!({"account":account}).to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn recovery_boundary(
+        &self,
+        session: &str,
+        thread: &str,
+        prompt: &str,
+        phase: &str,
+    ) -> StoreResult<Option<Value>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let payload: Option<String> = conn.query_row(
+            "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+            params![session, format!("quota_boundary:{thread}:{prompt}:{phase}")], |row| row.get(0),
+        ).optional()?;
+        payload
+            .map(|payload| serde_json::from_str(&payload).map_err(Into::into))
+            .transpose()
+    }
+
+    pub(crate) fn session_recovery(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<crate::session_recovery::SessionRecovery>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // Select the latest failed turn by its first observation, not its last
+        // worker. Late facts for an older attempt cannot replace a new rejection.
+        // Writer fences still belong to the current owner; replacing that owner
+        // cannot erase dispatch for the same native conversation.
+        // One statement also keeps the selected attempt and its facts in the
+        // same snapshot when this reader runs outside a Work read transaction.
+        let mut query = conn.prepare(
+            "WITH facts AS (
+                SELECT e.seq,e.receipt_key,e.payload,
+                       json_extract(e.payload,'$.failed_turn') AS failed_turn
+                FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
+                WHERE e.session_id=?1 AND e.kind='observed' AND e.receipt_key LIKE 'recovery:%'
+                  AND json_extract(e.payload,'$.thread')=s.provider_thread
+             ), latest AS (
+                SELECT failed_turn FROM facts GROUP BY failed_turn ORDER BY MIN(seq) DESC LIMIT 1
+             )
+             SELECT receipt_key,payload FROM facts
+             WHERE failed_turn=(SELECT failed_turn FROM latest) ORDER BY seq",
+        )?;
+        let mut rows = query.query([crate::id::canonical_session(session)])?;
+        let mut recovery: Option<crate::session_recovery::SessionRecovery> = None;
+        while let Some(row) = rows.next()? {
+            let key: String = row.get(0)?;
+            let observation: crate::session_recovery::SessionRecovery =
+                serde_json::from_str(&row.get::<_, String>(1)?)?;
+            let prefix = format!("{}:", observation.key());
+            let Some(phase) = key.strip_prefix(&prefix) else {
+                continue;
+            };
+            match &mut recovery {
+                Some(recovery) => recovery.observe(phase, observation),
+                None => recovery = Some(observation),
+            }
+        }
+        Ok(recovery)
+    }
+
+    /// The dispatch phase has a fixed key for this failed turn, regardless of
+    /// attachment or request UUID. A lost reply can never authorize another send.
+    pub(crate) fn record_session_recovery(
+        &self,
+        session: &str,
+        recovery: &crate::session_recovery::SessionRecovery,
+        phase: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture
+             FROM agent_sessions WHERE id=?1 ON CONFLICT DO NOTHING",
+            params![crate::id::canonical_session(session), format!("{}:{phase}", recovery.key()),
+                serde_json::to_string(recovery)?],
+        )? != 0)
+    }
+
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
@@ -450,16 +580,27 @@ impl SqliteStore {
         thread: &AgentSessionId,
         turn: &str,
     ) -> StoreResult<bool> {
+        Ok(self.session_turn_result(session, thread, turn)?.is_some())
+    }
+
+    pub(crate) fn session_turn_result(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<Option<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
+        let payload: Option<String> = conn
             .query_row(
-                "SELECT 1 FROM session_events WHERE session_id=?1 AND provider_thread=?2
+                "SELECT payload FROM session_events WHERE session_id=?1 AND provider_thread=?2
                  AND provider_turn=?3 AND kind=?4",
                 params![session, thread, turn, SessionEventKind::Completed.as_str()],
-                |_| Ok(()),
+                |row| row.get(0),
             )
-            .optional()?
-            .is_some())
+            .optional()?;
+        payload
+            .map(|payload| serde_json::from_str(&payload).map_err(Into::into))
+            .transpose()
     }
 
     /// Freeze the request's attribution while its attachment still owns dispatch.

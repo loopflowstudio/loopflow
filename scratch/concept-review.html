@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-811 · Keep the conversation open</title>
+<style>
+:root { color-scheme:light dark; --ink:#202b31; --paper:#faf9f5; --line:#a2acac; --accent:#795718; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 system-ui,sans-serif; }
+main { max-width:850px; margin:auto; padding:24px 24px 36px; }
+header { font-size:12px; overflow-wrap:anywhere; }
+h1 { font-size:clamp(26px,4vw,34px); line-height:1.15; margin:18px 0 12px; }
+h2 { font-size:18px; margin:20px 0 8px; }
+p { margin:8px 0; }
+.decision { border-left:3px solid var(--accent); padding-left:15px; }
+code { font-size:.88em; overflow-wrap:anywhere; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th,td { text-align:left; vertical-align:top; padding:7px 9px 7px 0; border-bottom:1px solid var(--line); }
+ol { padding-left:22px; } li { margin:7px 0; }
+a { color:inherit; text-underline-offset:3px; }
+@media (prefers-color-scheme:dark) { :root { --ink:#e7e9e5; --paper:#182126; --line:#617276; --accent:#e6bd7c; } }
+@media (max-width:560px) { main { padding:20px 16px; } table,tbody,tr,td { display:block; } thead { display:none; } tr { margin-bottom:12px; } td { border:0; padding:3px 0; } td:first-child { font-weight:600; } }
+</style>
+</head>
+<body><main>
+<header>LOO-811 · concept-review · November 9, 2026<br>
+Sources: scratch/{interactive-limit-recovery,live-recovery}.md; docs/sessions.md;
+session_recovery.rs; harness/{recovery_gate,codex_recovery,claude_recovery}.rs;
+store/sqlite/session_events.rs; WorkspacePanesView.swift; SessionRecoveryView.swift</header>
+<h1>Keep the conversation open</h1>
+<div class="decision"><p><strong>Graph decision: advance.</strong> No design change or open product choice.
+The prior review’s retained-progress and native-admission repairs are built.
+The complete Desktop and real-login outcome remains unverified.</p></div>
+<h2>Actions → concepts → APIs</h2>
+<table><thead><tr><th>Action</th><th>Concept</th><th>State change</th></tr></thead><tbody>
+<tr><td>Leave limited Sessions open</td><td>Existing conversation + rejected turn</td><td>Native observer → eligible login → guarded submission → same-thread continuation.</td></tr>
+<tr><td>Recover affected sessions</td><td>Check waiting conversations together</td><td><code>session.recover</code> → <code>request_session_recovery</code>. No new owner or Graph step.</td></tr>
+<tr><td>Keep typing or answer an approval</td><td>Native input order</td><td>Newer work supersedes the old rejection; input after admission follows recovery. Approvals stay native.</td></tr>
+<tr><td>Read progress</td><td>One retained attempt</td><td><code>session_recovery</code> → Desktop: waiting, recovering, review conversation, or continued.</td></tr>
+</tbody></table>
+<h2>Before → built now</h2>
+<p><strong>Earlier review:</strong> a delayed wait could hide dispatch; reading history
+before sending left newer input exposed. <strong>Built:</strong> retained facts keep
+one attempt across reconnect, and the native submission hook holds admission through
+credential preparation. Only its correlated completion establishes “Continued”.</p>
+<p><strong>Current usage:</strong> “Checking again does not resend a dispatched retry.
+Its progress follows the original attempt, even after a reconnect.”
+See <a href="../docs/sessions.md#recover-after-a-usage-limit">Session usage</a>.
+No new usage or skill workflow is proposed.</p>
+<h2>Normal, failure, recovery</h2>
+<p>Two limited Task conversations continue on eligible logins, retaining their models,
+history and drafts. No capacity: keep waiting and show a known reset. A client without
+the guard stays open with an explanation. Cancelled or unconfirmed dispatch: keep the
+attempt and show “Review conversation”; a late correlated completion can settle it.
+An already-sent login change may take effect after cancellation without releasing the retry.</p>
+<p><strong>Remaining mismatch:</strong> served native fixtures establish continuation,
+drafts and selected approval/cancellation cases. They do not establish the rendered
+Desktop experience, physical typing after reopen, or installed real-login behavior.
+Neither account adoption nor an unrelated completed turn closes that gap.</p>
+<h2>Questions for the remaining checks</h2>
+<ol>
+<li><strong>Gate:</strong> do restricted routes, distinct models, later capacity,
+repeated limits, lost/late installation replies and cancellation after installation
+retain truthful progress and effects? Use the <a href="interactive-limit-recovery.md">working design’s matrix</a>.</li>
+<li><strong>Demo:</strong> do the visible controls explain every wait, and does physical
+keyboard input work after reopen? The ordinary-typing incident remains unresolved.</li>
+<li><strong>Configured review:</strong> do real refresh/rotation and installed two-item
+Keychain behavior match the disposable checks? Retain the limits in
+<a href="live-recovery.md">live recovery</a>.</li>
+</ol>
+</main></body></html>

@@ -1338,6 +1338,29 @@ fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
 }
 
 #[test]
+fn session_recovery_round_trips_the_failed_turn_and_wait() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/session.json")).unwrap();
+    let recovery: loopflow::session_recovery::SessionRecovery =
+        serde_json::from_value(raw["recovery"].clone()).unwrap();
+    assert_eq!(
+        recovery.state,
+        loopflow::session_recovery::RecoveryState::WaitingCapacity
+    );
+    assert_eq!(recovery.failed_turn, "rejected-turn");
+    assert_eq!(serde_json::to_value(recovery).unwrap(), raw["recovery"]);
+    for key in ["model", "account", "retry_at", "request", "retry_turn"] {
+        let mut incomplete = raw["recovery"].clone();
+        incomplete.as_object_mut().unwrap().remove(key);
+        assert!(
+            serde_json::from_value::<loopflow::session_recovery::SessionRecovery>(incomplete)
+                .is_err(),
+            "missing {key} was accepted"
+        );
+    }
+}
+
+#[test]
 fn creation_recovery_dispositions_round_trip() {
     let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
     let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =

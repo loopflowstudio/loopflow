@@ -1,6 +1,8 @@
 pub mod agent_process;
 pub mod claude;
 mod claude_decode;
+#[cfg(unix)]
+pub(crate) mod claude_recovery;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
 pub(crate) mod claude_updates;
@@ -8,6 +10,8 @@ pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
 mod codex_decode;
+#[cfg(unix)]
+mod codex_recovery;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
@@ -23,6 +27,8 @@ pub mod opencode;
 mod opencode_decode;
 pub mod pi;
 mod pi_decode;
+#[cfg(unix)]
+pub(crate) mod recovery_gate;
 pub(crate) mod task_updates;
 
 use crate::id::AgentSessionId;

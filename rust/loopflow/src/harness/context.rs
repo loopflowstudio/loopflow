@@ -13,6 +13,7 @@ use crate::prompt::write_prompt_log;
 pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings()?;
     hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
+    add_recovery_hook(&mut hooks, context, true)?;
     let settings = json!({"hooks": hooks});
     let bytes = serde_json::to_vec(&settings)?;
     let path = save_hook(&context.home, "claude", "json", &bytes)?;
@@ -28,7 +29,8 @@ pub(crate) fn codex_hooks(
     session_hooks: Option<&Value>,
 ) -> Result<Value> {
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
-    let additions = context.hook_settings()?;
+    let mut additions = context.hook_settings()?;
+    add_recovery_hook(&mut additions, context, false)?;
     let mut states = hooks
         .get("state")
         .and_then(Value::as_object)
@@ -79,6 +81,18 @@ pub(crate) fn codex_hooks(
     }
     hooks["state"] = Value::Object(states);
     Ok(hooks)
+}
+
+fn add_recovery_hook(hooks: &mut Value, context: &ContextDelivery, claude: bool) -> Result<()> {
+    let mut handler = json!({"type":"command", "command":super::recovery_gate::hook_command(&context.home)?, "timeout":60});
+    if claude {
+        handler["onFailure"] = json!("block");
+    }
+    hooks["UserPromptSubmit"]
+        .as_array_mut()
+        .expect("prompt hooks are an array")
+        .push(json!({"hooks":[handler]}));
+    Ok(())
 }
 
 pub(crate) fn add_opencode_context(
@@ -258,6 +272,7 @@ mod tests {
                 "/<session-flags>/config.toml:stop:0:0",
                 "/<session-flags>/config.toml:stop:0:1",
                 "/<session-flags>/config.toml:user_prompt_submit:0:0",
+                "/<session-flags>/config.toml:user_prompt_submit:1:0",
             ]
         );
         // Codex hashes a handler with its defaults filled in (codex-cli 0.166.0

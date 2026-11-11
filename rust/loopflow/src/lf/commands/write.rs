@@ -388,6 +388,14 @@ writes! {
         blocked, on, agent, ..
     } => super::session::moved(*blocked, on.as_deref(), agent)?,
 
+    /// Request another capacity check for these exact open Sessions.
+    #[serde(rename = "session.recover")]
+    SessionRecover {
+        directory: PathBuf,
+        ids: Vec<String>,
+    } => Vec<crate::ops::human_session::SessionRecord>;
+    { ids, .. } => super::session::recovered(ids)?,
+
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
     #[serde(rename = "wave.create")]
@@ -1239,6 +1247,7 @@ impl Write {
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::SessionMove { directory, .. }
+            | Self::SessionRecover { directory, .. }
             | Self::WaveCreate { directory, .. }
             | Self::WaveRename { directory, .. }
             | Self::WaveRemove { directory, .. }

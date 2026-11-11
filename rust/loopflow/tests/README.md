@@ -296,16 +296,17 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins and provider
 conversation IDs in `lf session`.
-`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
-target/debug/lf --output <dir>` proves the same for Claude with synthetic
-logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, and a launch gets no account home or credential variable.
-On macOS it writes and removes one Keychain item scoped to its temporary config
-directory. The fixture copies the candidate, uses private Machines and stops
-only its identified provider process children. Native execution uses synthetic
-Responses, not configured accounts or installed data. Ordinary retry, usage,
+The [native Claude fixture](../../../tests/e2e/README.md#native-claude-account-switching)
+checks shared-home switching, multiple Keychain items and holds overriding
+repository order. Both fixtures copy the candidate and use private Machines,
+synthetic logins and local endpoints. Ordinary retry, usage,
 binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
 `ops::linear::adoption_tests`.
+
+`cargo test -p loopflow --lib lf::commands::account::account_first_tests::claude_keychain::`
+checks partial-write retries through command installation on macOS, including
+rotated credentials and reload-marker recovery. It registers disposable homes
+with the Keychain stand-in; other unit tests continue to use credential files.
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
@@ -964,7 +965,14 @@ executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
 
 `served_reads` covers CLI/server effect parity and concurrent request traces
-without request Process rows. The transport watch proof covers live Task
+without request Process rows. Its Task-bound bulk recovery check retains dispatch
+through delayed waits and reads correlated completion on a new served connection,
+without starting an owner or Graph. `session_recovery::` covers subsequent
+rejections and provider replacement; `harness::claude_recovery::` joins the native
+inbox UUID, prompt ID and Stop after reconnect. Native-admission acceptance still
+requires input arriving during credential preparation and immediately before
+dispatch, with drafts, approvals and completed effects intact. A native wait does
+not establish automatic continuation. The transport watch proof covers live Task
 changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.

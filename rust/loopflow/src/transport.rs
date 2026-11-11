@@ -362,7 +362,7 @@ fn delegate(
         if !held && viewed && !stream && json_session.is_none() {
             return Ok(false);
         }
-        let preview = if std::env::var_os(STREAM_ENV).is_some() {
+        let preview = if stream {
             if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
                 io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
             }
@@ -392,9 +392,10 @@ fn delegate(
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
 /// server, so that it outlives every lf process that views it. A held launch
 /// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too)
-/// with a terminal viewing it, or a Desktop pane. A bare launch, one in a
-/// Task's checkout runs in the calling terminal; a piped, `-b` or JSON
-/// execution and a Desktop Task shell keep an owner process of their own.
+/// with a terminal viewing it, or a Desktop pane. A bare launch, even in a
+/// Task's checkout, runs in the calling terminal; a piped, `-b` or JSON
+/// execution, a framed remote viewer and a Desktop Task shell keep an owner
+/// process of their own.
 #[cfg_attr(test, allow(dead_code))]
 fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
     if !viewed {

@@ -1284,10 +1284,10 @@ impl SqliteStore {
             };
             if !ended && !reserved {
                 closed = close()?;
-                running = !closed && beside;
                 if !closed && !beside {
                     return Err(no_observed_exit());
                 }
+                running = !closed;
             }
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");

@@ -19,7 +19,9 @@ Wave or repository conversations.
 
 The Rex-owner exploration (probe, receipts contract, failure matrix) is
 retired; it reads at `fdb457e38:scratch/native-provider.md`, with
-`scratch/probe_rex.py`, `rex-probe-receipts.json` and `explore.html`.
+`scratch/probe_rex.py` and `scratch/rex-probe-receipts.json` at the same
+commit. `scratch/explore.html`, `concept-review.html` and `qa.html` are
+LOO-824's.
 
 ## Built
 
@@ -58,7 +60,6 @@ retired; it reads at `fdb457e38:scratch/native-provider.md`, with
 
 ## Delete — do not maintain
 
-- Bare use of `Host::Owner(start(..))` in `transport::delegate` (done).
 - `ExitRecord`/`DropExitRecord`/`hand_exit_record` stay: held terminals use
   them through `transport/hosted.rs`; bare launches no longer reach them.
 - Deleted from `transport_tests.rs`, bare-owner behavior by design:
@@ -81,3 +82,4 @@ so at send time, or skip bare Sessions?
 - `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed; implement.
 - `cargo test -p loopflow --test transport_tests` — 15 failed against the first cut; after keeping owners for headless/JSON and the test changes above, the 15 rerun: 12 pass, 3 deleted; full binary rerun left to gate.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — clean; implement.
+- compress: `cargo build -p loopflow --bin lf` — clean; `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed.

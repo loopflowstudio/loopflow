@@ -758,6 +758,9 @@ watched.
 Compress (after d695dacce): holder row writes share one `write`; rest kept.
 `transport_tests -- held_terminals_list_one_holder_process held_session_survives` 2 passed.
 
-Checks: `transport_tests -- held_ a_held` 5 passed; `--lib -- transport::
-holder::` 85 passed; clippy clean (after the adopted-holder settle);
-`documented_commands::` passed (before it).
+Compress (after 6dc4041fa): the two settle helpers are one, `settle(pid,
+started, Option<ExitStatus>)`.
+
+Checks (after that): `transport_tests -- held_ a_held` 5 passed; `--lib --
+transport:: holder::` 85 passed; clippy clean; `documented_commands::` passed
+before 6dc4041fa (no command changed since).

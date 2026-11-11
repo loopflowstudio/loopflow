@@ -182,8 +182,9 @@ conversation in the middle of a turn hears it when that turn ends. Ten idle
 conversations cost nothing beyond the one server: no watcher per conversation
 and no clock tick.
 
-A conversation you start with a bare `lf <skill>` in a terminal is never woken
-and gets no Task progress.
+A conversation you start with a bare `lf <skill>` in a terminal is never woken.
+In a Task's checkout it hears the Task's progress at its next turn; a headless
+bare run hears none.
 
 Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. An update that

@@ -500,6 +500,49 @@ mod tests {
         );
     }
 
+    /// A bare interactive `lf <skill>` in the Task's checkout: never woken,
+    /// it hears the update at its next prompt.
+    #[test]
+    fn a_bare_conversation_is_not_woken_and_hears_the_update_at_its_next_prompt() {
+        let fixture = fixture("wake-bare");
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET work_source='checkout' WHERE id='wake-bare'",
+                [],
+            )
+            .unwrap();
+        let (listener, _) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
+        after_turn(&fixture.store, "wake-bare");
+        wake_idle(&fixture.store, None);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "never woken"
+        );
+        let prompt = SessionBoundary {
+            moment: BoundaryMoment::Tool,
+            delivery: fixture.delivery.clone(),
+            adapter: Some(fixture.adapter.clone()),
+            callback: serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                "prompt_id":"p-1","prompt":"go"}),
+            gap: None,
+            printed: Vec::new(),
+            inbox: None,
+        };
+        let update = super::super::boundary::answer(&fixture.store, &prompt)
+            .unwrap()
+            .0
+            .update
+            .expect("the next prompt hears the Task");
+        assert!(update.contains("pr/1"));
+    }
+
     #[test]
     fn an_unreachable_inbox_leaves_its_news_for_the_next_boundary() {
         let fixture = fixture("wake-gone");

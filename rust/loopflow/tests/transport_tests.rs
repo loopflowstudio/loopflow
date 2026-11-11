@@ -1880,6 +1880,76 @@ fn held_desktop_launch_links_its_session_to_the_pane() {
     assert_eq!(placement.as_deref(), Some("desktop-shell"));
 }
 
+/// A held terminal is no process: the lf process that takes up its handoff
+/// names it, so a Graph started inside the conversation holds the terminal
+/// against idle retention as it would hold an owner, until the Graph ends.
+#[test]
+fn a_graph_started_in_a_held_conversation_keeps_it() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held graph"]);
+    command.env("PATH", path).env("LF_SERVER", "1");
+    let view = Terminal::spawn_with_placement(command, Some(true));
+    let launch = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    let session = session_of(&fixture.sql(), &launch);
+    let held = fixture.terminal_of(&session);
+    let sql = fixture.sql();
+    let (conversation, named): (String, Option<String>) = sql
+        .query_row(
+            "SELECT p.id,p.held_terminal_id FROM agent_sessions s
+             JOIN processes a ON a.id=s.agent_process_id
+             JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(named.as_deref(), Some(held.as_str()));
+    // `lf task run` typed into the conversation: a Graph beneath its lf process.
+    let graph = loopflow::id::LfProcessId::new();
+    sql.execute(
+        "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+        rusqlite::params![graph, conversation],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+        [&graph],
+    )
+    .unwrap();
+    drop(sql);
+    view.stop();
+    std::thread::sleep(Duration::from_secs(5));
+    let ended: bool = fixture
+        .sql()
+        .query_row(
+            "SELECT ended_at IS NOT NULL FROM held_terminals WHERE id=?1",
+            [&held],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        !ended,
+        "idle retention ended a conversation running a Graph"
+    );
+    // A finished Graph holds nothing.
+    fixture
+        .sql()
+        .execute(
+            "UPDATE processes SET completed_at=unixepoch(),outcome='succeeded' WHERE id=?1",
+            [&graph],
+        )
+        .unwrap();
+    fixture.held_ends(&held);
+}
+
 #[test]
 fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
     let fixture = Fixture::new();

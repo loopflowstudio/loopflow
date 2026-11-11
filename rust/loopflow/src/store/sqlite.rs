@@ -1989,8 +1989,17 @@ impl SqliteStore {
     /// writer holds the lock only briefly; a row an interrupted exit leaves is
     /// forgotten by the retention prune.
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
+        self.record_hosted_process(process, None)
+    }
+
+    /// Record a Process start or exit; a start inside a held terminal names it.
+    fn record_hosted_process(
+        &self,
+        process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        record_process_in(&conn, process)?;
+        record_process_in(&conn, process, held_terminal)?;
         if process.completed_at.is_some() {
             let forget = |scope: &str| {
                 conn.execute(
@@ -2014,6 +2023,7 @@ impl SqliteStore {
     pub(crate) fn record_process_within(
         &self,
         process: &crate::process::LfProcess,
+        held_terminal: Option<&crate::id::TerminalId>,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2022,7 +2032,7 @@ impl SqliteStore {
             conn.busy_timeout(wait)?;
             previous
         };
-        let result = self.record_process(process);
+        let result = self.record_hosted_process(process, held_terminal);
         self.conn
             .lock()
             .expect("store mutex poisoned")
@@ -2038,22 +2048,25 @@ impl SqliteStore {
 }
 
 /// A start record never overwrites an existing row; a terminal record completes
-/// the row it started.
+/// the row it started. `held_terminal` is the terminal a held lf process runs
+/// in, so rules scoped to that terminal find the work started inside it.
 pub(super) fn record_process_in(
     conn: &rusqlite::Connection,
     process: &crate::process::LfProcess,
+    held_terminal: Option<&crate::id::TerminalId>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
+            held_terminal_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
          ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
             outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
          WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
         params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
             process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
             process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-            process.os_started_at],
+            process.os_started_at,held_terminal],
     )?;
     Ok(())
 }

@@ -438,7 +438,11 @@ means no server hosts that terminal: it ended or never started, and the
 connection is refused as `not_found`. Attaching never starts anything. The
 child's own control requests (`status`, `directory`, `exit_record`, …) use the
 same entrance; `LF_TRANSPORT_HELD` names its terminal the way
-`LF_TRANSPORT_OWNER` names an owner.
+`LF_TRANSPORT_OWNER` names an owner. A terminal is no process, so the lf
+process that takes up that handoff records it as `processes.held_terminal_id`.
+Rules scoped to an owner's descendants start from those processes instead: a
+Graph started inside the conversation holds the terminal against idle
+retention, and Task retirement excuses the work beneath it.
 
 `lf session attach --terminal TERMINAL` is the relay for a held terminal.
 When its connection drops it connects again on its own, with backoff, until a

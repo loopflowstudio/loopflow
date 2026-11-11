@@ -290,9 +290,18 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
                     "Requested work, a draft or a pending request still holds this Task",
                 ));
             }
-            // A held terminal is no process: nothing beneath it is excused.
-            if let Host::Owner(owner) = host {
-                allowed.insert(owner);
+            // A held terminal is no process: the lf processes that started
+            // inside it stand where an owner would.
+            match host {
+                Host::Owner(owner) => {
+                    allowed.insert(owner);
+                }
+                Host::Terminal(terminal) => allowed.extend(
+                    store
+                        .sqlite
+                        .held_terminal_processes(&terminal)
+                        .map_err(task_error)?,
+                ),
             }
         }
     }

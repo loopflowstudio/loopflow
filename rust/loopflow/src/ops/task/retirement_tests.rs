@@ -191,6 +191,93 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
     });
 }
 
+/// A held terminal is no process. The conversation's lf process names it, so
+/// an idle held conversation is excused like work under an owner, and the
+/// closing intent is what the server reads to end the terminal.
+#[test]
+fn retirement_ends_an_idle_held_conversation() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        fixture.due();
+        let terminal = crate::id::TerminalId::new();
+        fixture
+            .sql()
+            .execute(
+                "INSERT INTO held_terminals(id,holder_build,created_at) VALUES(?1,'fixture',1)",
+                [&terminal],
+            )
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .test_session("held", &crate::session_record::new_artifact_key());
+        fixture
+            .sql()
+            .execute(
+                "UPDATE agent_sessions SET task_id=?1,interactive=1,held_terminal_id=?2 WHERE id='held'",
+                params![fixture.task.id.as_str(), terminal],
+            )
+            .unwrap();
+        // The conversation's lf process, a child of the holder, which records no Process.
+        let live = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        let conversation = crate::process::LfProcess {
+            id: LfProcessId::new(),
+            pid: Some(live.pid),
+            os_started_at: Some(live.started_at),
+            trace_id: crate::id::TraceId::new(),
+            parent_lf_process_id: None,
+            via_agent: Some(false),
+            caller_session_id: None,
+            caller_agent_process_id: None,
+            command: None,
+            repo: None,
+            cwd: Some(fixture.checkout.display().to_string()),
+            started_at: live.started_at,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture
+            .store
+            .sqlite
+            .record_process_within(&conversation, Some(&terminal), std::time::Duration::ZERO)
+            .unwrap();
+        // Its provider, attached to it, binds the conversation to the Task.
+        let agent = crate::id::AgentProcessId::new();
+        fixture.sql().execute(
+            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
+                agent_session_id,agent_provider,agent_interactive,attached_lf_process_id)
+             VALUES(?1,'agent',?2,?3,?4,?5,?4,'held','claude',1,?3)",
+            params![agent, conversation.trace_id, conversation.id, live.started_at, live.pid],
+        ).unwrap();
+        fixture
+            .sql()
+            .execute("UPDATE agent_sessions SET agent_process_id=?1 WHERE id='held'", [&agent])
+            .unwrap();
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        let reason = fixture.diagnostics().0.unwrap_or_default();
+        assert!(!reason.contains("still has live"), "{reason}");
+        assert_eq!(fixture.intent().phase, "closing");
+        assert!(super::owner_retiring(&fixture.store.sqlite, &terminal).unwrap());
+        fixture.assert_retained();
+        // The server ends the terminal; its conversation settles with it.
+        fixture.sql().execute_batch(&format!(
+            "UPDATE held_terminals SET ended_at=2,exit_code=0 WHERE id='{terminal}';
+             UPDATE agent_sessions SET completed_at=2 WHERE id='held';
+             UPDATE processes SET completed_at=2,outcome='succeeded' WHERE id IN ('{}','{agent}');",
+            conversation.id
+        )).unwrap();
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        assert!(!fixture.checkout.exists());
+        assert_eq!(fixture.intent().phase, "retired");
+    });
+}
+
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)

@@ -252,6 +252,16 @@ pub(crate) fn current() -> Option<&'static Host> {
     HANDOFF.get().map(|handoff| &handoff.owner)
 }
 
+/// The held terminal this process runs in, when it took up a held handoff.
+/// Its start receipt names it: a terminal is no process, so the work started
+/// inside it is found through the processes that name it.
+pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
+    match current()? {
+        Host::Terminal(terminal) => Some(terminal),
+        Host::Owner(_) => None,
+    }
+}
+
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 ///

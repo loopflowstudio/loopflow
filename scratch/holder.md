@@ -668,8 +668,6 @@ Checks:
   `lf ps --json` holder rows are not automated (the registry still holds
   one socket per viewer and one per held source).
 - No snapshot file on graceful stop; rebuild is ring replay plus nudge.
-- `require_settled_work` excuses processes under an owner; nothing is
-  excused under a held terminal. Direction below, "Concept review".
 - `attaches` for a held terminal is "its child runs": a superseded build in
   a holder is never moved onto the installed lf by `lf resume`.
 - `lf ship` interactive steps and Wave session commands are held only
@@ -686,24 +684,21 @@ The steers on positions, queries and view drawing are in the plan above and
 in `docs/dev/server-first.md` (every-view-types row). No open product choice.
 
 **A held terminal stands where the owner stood for the lf processes inside
-it.** An owner is an ancestor of every lf process it runs, so owner-scoped
-rules walk `parent_lf_process_id`. A terminal is no process; the migration
-gives it `processes.held_terminal_id` ("the terminal an lf process runs in")
-for this, but nothing writes that column. Two rules read as if it were set:
+it.** Built. The start receipt of the lf process that takes up the
+`LF_TRANSPORT_HELD` handoff writes `processes.held_terminal_id`
+(`transport::held_terminal()`, through `record_process_in` on all three
+start-row paths). Graph steps receive the same handoff and name it too, as
+they sit under an owner. `require_settled_work` seeds its allowed set with
+`held_terminal_processes(terminal)`, as it seeds owners.
 
-- `owner_retention(Transport::Terminal)` (`store/sqlite/sessions.rs`) asks
-  whether a Graph started inside the terminal is running. It never finds one,
-  so idle retention can end a held conversation whose `lf task run` Graph is
-  still going, which an owner prevents.
-- `require_settled_work` (`ops/task/retirement.rs`) excuses everything under
-  an owner the retirement ends; under a held terminal nothing is excused, so
-  a Task whose idle conversation is held refuses retirement with "Process …
-  still has live or unresolved work".
+Checks, each failing with the write removed:
 
-Next implement: the lf process that takes up the `LF_TRANSPORT_HELD` handoff
-records `held_terminal_id` on its row (nested lf calls inherit nothing; their
-ancestry reaches that row). `require_settled_work` seeds its allowed set with
-the processes naming the Session's held terminal, as it seeds owners. Tests,
-each failing without the write: a Graph started from a held conversation
-holds it against idle retention; retiring a Task with an idle held
-conversation succeeds and ends the terminal.
+- `cargo test -p loopflow --test transport_tests a_graph_started_in_a_held_conversation_keeps_it`:
+  passed (fails "idle retention ended a conversation running a Graph").
+- `cargo test -p loopflow --lib ops::task::retirement::tests::`: 7 passed;
+  `retirement_ends_an_idle_held_conversation` fails "Process … still has live
+  or unresolved work" without it.
+- `cargo test -p loopflow --lib journal::`: 35 passed.
+- Catch-up discard is covered by
+  `transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`;
+  no new test.

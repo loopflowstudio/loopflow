@@ -644,6 +644,10 @@ Checks:
   (owner path, untouched) failed once in the full run and passed alone;
   `documented_commands::` passes; clippy clean. Swift tests: gate.
 
+- Compress after placement: kept handoffs read through one `hosted::read_kept`
+  and are dropped through `Hosted::forget_kept`. `cargo test -p loopflow --lib transport::`:
+  73 passed; `--test transport_tests -- held_ a_held_pane`: 3 passed; clippy clean.
+
 **Remaining, in order:**
 
 1. Slice 0 mode probe (resize nudge through production Ghostty with real

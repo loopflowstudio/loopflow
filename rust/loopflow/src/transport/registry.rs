@@ -785,7 +785,8 @@ fn settle(exit: &mut Unsettled) -> bool {
     // An exit no server was hosting for still settles its launcher's record,
     // once: the record goes before the terminal's end is written.
     let file = exit_record_file(&exit.place, &exit.terminal);
-    if let Some(record) = super::hosted::read_exit_record(&file) {
+    if let Some(record) = super::hosted::read_kept::<crate::harness::native_exit::NativeExit>(&file)
+    {
         use std::os::unix::process::ExitStatusExt;
         // An end nobody saw reads as killed.
         let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);

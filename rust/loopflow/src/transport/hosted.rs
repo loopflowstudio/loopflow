@@ -388,7 +388,7 @@ impl Hosted {
     /// Keep the launcher's exit record and native client in `directory`,
     /// taking up what an earlier server kept there.
     pub fn keep_in(&mut self, directory: std::path::PathBuf) {
-        if let Some(record) = read_exit_record(&directory.join(EXIT_RECORD)) {
+        if let Some(record) = read_kept::<Box<NativeExit>>(&directory.join(EXIT_RECORD)) {
             self.planning = start_planning(&record.cwd);
             self.exit_record = Some(record);
         }
@@ -398,10 +398,10 @@ impl Hosted {
         self.kept = Some(directory);
     }
 
-    /// The native client ended; a later server takes up none.
-    fn forget_client(&self) {
+    /// Stop keeping `name`: a later server takes none up.
+    fn forget_kept(&self, name: &str) {
         if let Some(directory) = &self.kept {
-            remove_kept(&directory.join(NATIVE_CLIENT));
+            remove_kept(&directory.join(name));
         }
     }
 
@@ -905,7 +905,7 @@ impl Hosted {
         {
             self.pending_input.native_ended(&self.id);
             if let Some(ended) = self.client.take() {
-                self.forget_client();
+                self.forget_kept(NATIVE_CLIENT);
                 self.finish_client(ended, child, answering);
             }
             for viewer in self.viewers.iter_mut() {
@@ -923,7 +923,7 @@ impl Hosted {
             } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = self.client.take().map(native::NativeClient::release) {
-                    self.forget_client();
+                    self.forget_kept(NATIVE_CLIENT);
                     self.deliver(1, &held, answering, Span::Aside { through: None });
                 }
                 self.exit = Some((provider_exit_code(status), Instant::now()));
@@ -935,9 +935,7 @@ impl Hosted {
         });
         if let Some((settled, process)) = delivered {
             // Recorded, or past waiting for: a later server settles it no more.
-            if let Some(directory) = &self.kept {
-                remove_kept(&directory.join(EXIT_RECORD));
-            }
+            self.forget_kept(EXIT_RECORD);
             for line in &settled.lines {
                 self.deliver(
                     1,
@@ -1184,12 +1182,8 @@ struct NativeStarted {
     detach: String,
 }
 
-/// The exit record kept in `file`; none when it is absent or unreadable.
-pub(super) fn read_exit_record(file: &std::path::Path) -> Option<Box<NativeExit>> {
-    read_kept(file)
-}
-
-fn read_kept<T: serde::de::DeserializeOwned>(file: &std::path::Path) -> Option<T> {
+/// What is kept in `file`; none when it is absent or unreadable.
+pub(super) fn read_kept<T: serde::de::DeserializeOwned>(file: &std::path::Path) -> Option<T> {
     let bytes = std::fs::read(file).ok()?;
     serde_json::from_slice(&bytes)
         .inspect_err(

@@ -20,8 +20,8 @@ Wave or repository conversations.
 The Rex-owner exploration (probe, receipts contract, failure matrix) is
 retired; it reads at `fdb457e38:scratch/native-provider.md`, with
 `scratch/probe_rex.py` and `scratch/rex-probe-receipts.json` at the same
-commit. `scratch/explore.html`, `concept-review.html` and `qa.html` are
-LOO-824's.
+commit. LOO-824's scratch (`holder.md`, `explore.html`, `concept-review.html`,
+`qa.html`) is on its branch; `holder.md` reads at `d7901ea6e:scratch/holder.md`.
 
 ## Built
 
@@ -55,8 +55,6 @@ LOO-824's.
 2. Pi: launch bare interactive Pi with `--session-id <minted id>` (probe in
    `questions.md`) once the turn hook that reports `sessionFile` is gone;
    the thread becomes the id, resolved to `*_<id>.jsonl` by LOO-822's reader.
-3. The repository conversation records no WorkSource, so a CLI
-   `lf resume <repo session>` reads as bare (LOO-824 concept review, open).
 
 ## Delete — do not maintain
 
@@ -72,6 +70,10 @@ LOO-824's.
 
 ## Open
 
+Repository and Wave primaries record `WorkSource::Declared` since LOO-824's
+`196faad43`, so they stay managed. Primaries recorded before it carry no
+WorkSource and resume bare in the terminal; nothing migrates them.
+
 With turn hooks gone, a steer to a bare Session arrives only at its next start
 or resume, or at compaction. Should `lf session steer` / `lf task steer` say
 so at send time, or skip bare Sessions?
@@ -82,4 +84,5 @@ so at send time, or skip bare Sessions?
 - `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed; implement.
 - `cargo test -p loopflow --test transport_tests` — 15 failed against the first cut; after keeping owners for headless/JSON and the test changes above, the 15 rerun: 12 pass, 3 deleted; full binary rerun left to gate.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — clean; implement.
+- realign: no tests; plan repairs only.
 - compress: `cargo build -p loopflow --bin lf` — clean; `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed.

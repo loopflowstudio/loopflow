@@ -46,7 +46,7 @@ Recommendation: launch bare interactive Pi with `--session-id`.
 # LOO-824
 
 Its choices and reversible assumptions are in the parent branch,
-`8bfcccdfc:scratch/questions.md` and `8bfcccdfc:scratch/holder.md`.
+`8bfcccdfc:scratch/questions.md` and `d7901ea6e:scratch/holder.md`.
 
 ## Assumptions, LOO-820, reversible
 

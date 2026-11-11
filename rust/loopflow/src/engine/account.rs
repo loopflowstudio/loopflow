@@ -224,17 +224,19 @@ mod tests {
     #[test]
     fn reports_match_the_shared_fixtures_without_defaults() {
         let report: AccountReport = result(include_str!(
-            "../../tests/fixtures/dto/server/account_report.json"
+            "../../../../tests/fixtures/dto/server/account_report.json"
         ));
         assert_eq!(report.accounts.len(), 1);
         let routes: Vec<NextLaunch> = result(include_str!(
-            "../../tests/fixtures/dto/server/account_next.json"
+            "../../../../tests/fixtures/dto/server/account_next.json"
         ));
         assert_eq!(routes.len(), 2);
-        let account: Account = result(include_str!("../../tests/fixtures/dto/server/account.json"));
+        let account: Account = result(include_str!(
+            "../../../../tests/fixtures/dto/server/account.json"
+        ));
         assert_eq!(account.login.as_deref(), Some("maya@example.com"));
         let redeemed: Redemption = result(include_str!(
-            "../../tests/fixtures/dto/server/account_redeemed.json"
+            "../../../../tests/fixtures/dto/server/account_redeemed.json"
         ));
         assert!(redeemed.after.is_none());
         assert!(serde_json::from_str::<Account>(r#"{"login":"maya@example.com"}"#).is_err());

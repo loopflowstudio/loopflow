@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let ci: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dto/server/repo_ci_report.json"
+            "../../../../tests/fixtures/dto/server/repo_ci_report.json"
         ))
         .unwrap();
         let report: CiReportDto = serde_json::from_value(ci["result"].clone()).unwrap();

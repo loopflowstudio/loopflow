@@ -132,23 +132,17 @@ command: the actions, the managed rule in `server/README.md` and
 to change, no open choice. `scratch/concept-review.html` now shows the rule as
 built.
 
-Concept review, third pass (November 11, headless, after `open_through`).
-Desktop opens a Task's conversation through `--task` only on the first
-prepare. Its Task workspace reopens a pane that already has a Session by id
-(`SessionsView.swift` `prepareSession(id:)` when
-`multiplexer.sessionPane?.sessionId` is set: a layout restored after a
-relaunch, a conversation reopened after it exited), and so does connecting to
-a Task-run step's Session (`executionLocations`, which has the `taskID`). Both
-resume bare: no server check, a steer waits unseen if the server is down.
-`server-first.md` says Desktop opening a Task's conversation is managed, so
-this is the rule's own gap, not a new choice.
-
-Built (November 11): `from_selectors` lets the id win beside `--task`/`--wave`
-(Task and Wave together still fail); `SessionConnectionArgs::work_flag`
-decides managed and is appended to a prepare's `open_argv`; `open_through` is
-gone. Desktop: `prepareSession(id:work:)`, `SessionsStore.work` from its
-workspace key, `executionLocations` first. Checks: `session_steers::`
-9/9 (incl. `a_task_pane_reopened_by_session_id_fails_naming_a_missing_server`),
+Concept review, third pass (November 11): Desktop reopened a Task pane by
+Session id (`SessionsView.swift` `prepareSession(id:)` with a restored
+`sessionPane?.sessionId`; `executionLocations` for Task-run steps) and resumed
+bare, so a steer could wait unseen with the server down. Built:
+`from_selectors` lets the id select beside `--task`/`--wave` (Task and Wave
+together still fail); `SessionConnectionArgs::work_flag` decides managed and is
+appended to a prepare's `open_argv`; `open_through` is gone. Desktop:
+`prepareSession(id:work:)`, `SessionsStore.work` from its workspace key,
+`executionLocations` first; `openSessionLink` stays bare. Checks:
+`session_steers::` 9/9 (incl.
+`a_task_pane_reopened_by_session_id_fails_naming_a_missing_server`),
 `lf::tests::` 40/40, `scripts/test_desktop.sh --filter SessionsStoreTests`
 36/36.
 

@@ -8075,6 +8075,208 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
     assert!(!view.wait_exit().success());
 }
 
+/// `session.attach` for a terminal whose holder has not answered this server
+/// is told to ask again, never that the terminal ended; once the holder
+/// answers, the same request attaches. A ticket for a terminal that ended
+/// before it was presented is refused by name.
+#[test]
+fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
+    use loopflow::engine::{Error, ErrorCode};
+    use loopflow::server::wire::{Operation, ServerOperation};
+
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let home = fixture.home.path();
+    let session: loopflow::id::LfSessionId = "session_held_attach".into();
+    let script = format!(
+        "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
+        home = home.display()
+    );
+    let started = service
+        .connect()
+        .request(Operation::Server(ServerOperation::SessionStart {
+            session: Some(session.clone()),
+            request: "held-attach".into(),
+            argv: vec!["/bin/sh".into(), "-c".into(), script],
+            cwd: home.to_path_buf(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            rows: 24,
+            cols: 80,
+            placement: None,
+        }))
+        .unwrap();
+    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let agent: libc::pid_t = loop {
+        if let Some(pid) = std::fs::read_to_string(home.join("agent.pid"))
+            .ok()
+            .and_then(|pid| pid.trim().parse().ok())
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the agent never started");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let _agent = KillOnDrop(agent);
+    let holder = command_line(agent).0;
+    let signal = |signal| {
+        // SAFETY: the holder this fixture's server started.
+        assert_eq!(unsafe { libc::kill(holder, signal) }, 0);
+    };
+    let ticket = |service: &ServerProof, terminal_id: Option<&str>| {
+        service
+            .connect()
+            .request(Operation::Server(ServerOperation::SessionAttach {
+                session: session.clone(),
+                owner_lf_process_id: None,
+                terminal_id: terminal_id.map(|id| serde_json::from_value(json!(id)).unwrap()),
+            }))
+    };
+    let refused = |failure: anyhow::Error| failure.downcast::<Error>().unwrap();
+
+    // The holder is stopped while a new server starts.
+    service.stop();
+    signal(libc::SIGSTOP);
+    service.child = Some(service.launch());
+    service.ready();
+    for named in [None, Some(terminal.as_str())] {
+        let waiting = refused(ticket(&service, named).unwrap_err());
+        assert_eq!(waiting.code, ErrorCode::Unavailable, "{waiting:?}");
+        let data = waiting.data.unwrap();
+        assert_eq!(data["terminal_id"], terminal.as_str(), "{data}");
+        assert_eq!(data["retry"], true, "{data}");
+    }
+
+    // It answers: asking again attaches to the same agent.
+    signal(libc::SIGCONT);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut socket = loop {
+        match loopflow::server::client::attach(&fixture.endpoint("machine"), &session, None) {
+            Ok(socket) => break socket,
+            Err(failure) => {
+                let waiting = refused(failure);
+                assert_eq!(waiting.code, ErrorCode::Unavailable, "{waiting:?}");
+                assert!(Instant::now() < deadline, "the holder was never taken up");
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    };
+    socket
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    socket
+        .write_all(&frame(
+            REQUEST,
+            json!({"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80})
+                .to_string()
+                .as_bytes(),
+        ))
+        .unwrap();
+    let mut seen = Vec::new();
+    while !String::from_utf8_lossy(&seen).contains("tick:") {
+        let (tag, payload) = read_frame(&mut socket).expect("the bridge closed before output");
+        if tag == SNAPSHOT || tag == OUT {
+            seen.extend(payload);
+        }
+    }
+    drop(socket);
+
+    // A ticket issued while the terminal ran, presented after it ended.
+    let issued = ticket(&service, Some(&terminal)).unwrap();
+    std::fs::write(home.join("stop"), "").unwrap();
+    fixture.held_ends(&terminal);
+    let mut bridge = UnixStream::connect(fixture.endpoint("machine")).unwrap();
+    bridge
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .unwrap();
+    bridge
+        .write_all(
+            format!(
+                "{}\n",
+                json!({"type":"attach","ticket":issued.result["ticket"]})
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut answer = String::new();
+    BufReader::new(bridge).read_line(&mut answer).unwrap();
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(answer["type"], "error", "{answer}");
+    assert_eq!(answer["code"], "not_found", "{answer}");
+    assert_eq!(answer["data"]["terminal_id"], terminal.as_str(), "{answer}");
+}
+
+/// How many threads `pid` runs.
+fn thread_count(pid: u32) -> usize {
+    if let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) {
+        return tasks.count();
+    }
+    let output = Command::new("ps")
+        .args(["-M", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).lines().count() - 1
+}
+
+/// One server thread hosts every held terminal and its views: starting more
+/// terminals and viewing them adds no thread each.
+#[test]
+fn server_threads_do_not_grow_with_held_terminals() {
+    let fixture = Fixture::new();
+    let service = ServerProof::start(&fixture, false);
+    let home = fixture.home.path();
+    let server = service.child.as_ref().unwrap().id();
+    let start = |request: String| {
+        let script = format!(
+            "while [ ! -e {}/stop ]; do echo tick; sleep 0.1; done",
+            home.display()
+        );
+        let started = service
+            .connect()
+            .request(loopflow::server::wire::Operation::Server(
+                loopflow::server::wire::ServerOperation::SessionStart {
+                    session: None,
+                    request,
+                    argv: vec!["/bin/sh".into(), "-c".into(), script],
+                    cwd: home.to_path_buf(),
+                    env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                    rows: 24,
+                    cols: 80,
+                    placement: None,
+                },
+            ))
+            .unwrap();
+        let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+        let (view, answer) = fixture.held_entrance(&terminal);
+        assert_eq!(answer, "hosted");
+        (terminal, view)
+    };
+    let mut held = vec![start("first".into())];
+    let one = thread_count(server);
+    const MORE: usize = 8;
+    held.extend((0..MORE).map(|more| start(format!("more-{more}"))));
+    // The runtime's own pool may add a worker; a thread per terminal or per
+    // view would add at least MORE.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let many = thread_count(server);
+        if many <= one + 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{many} server threads with {} held terminals, {one} with one",
+            MORE + 1
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    std::fs::write(home.join("stop"), "").unwrap();
+    for (terminal, _view) in &held {
+        fixture.held_ends(terminal);
+    }
+}
+
 /// Every held terminal shares its build's one holder, which `lf ps` lists
 /// once across a server restart; no owner process runs per terminal.
 #[test]

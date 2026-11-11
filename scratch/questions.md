@@ -57,6 +57,11 @@ saying which conversations a killed holder took) are proposals in holder.md
   keeps reconnecting instead of ending; the cross-build proposal in holder.md
   is where that skew belongs.
 
+- `session.attach` for a pending holder's terminal answers `unavailable` with
+  `retry: true` (the smaller of the two options; the route stays for held
+  terminals). `unavailable` over `busy`: the holder is a dependency not
+  answering, not the server at capacity. No client reads `retry` yet.
+
 ## Sync onto main — November 10, 2026
 
 Keep this Task’s `explore.html` and `questions.md`: main removed its scratch

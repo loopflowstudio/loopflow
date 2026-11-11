@@ -376,6 +376,11 @@ part of what a phone or bot client is offered.
   The bridged connection speaks the viewer protocol with the server's
   terminal registry. A terminal that has ended answers `not_found` with
   `terminal_id` and `current_terminal_id` (null when the Session has none).
+  A terminal whose holder has not answered this server since it started
+  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+  agent keeps running, and the same request attaches once the holder answers.
+  A ticket presented after its terminal ended, or while its holder is not
+  answering, gets the same two errors with a null `id` in place of `bridged`.
   The owner form below serves owners only, with `terminal_id` null in its
   ticket and its `bridged`; an owner ID is never a terminal ID.
 - `session.attach {session, owner_lf_process_id}` answers a ticket

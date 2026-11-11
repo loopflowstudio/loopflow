@@ -120,13 +120,31 @@ pub(crate) fn connect(terminal: &TerminalId) -> Result<UnixStream> {
     match serde_json::from_slice(&line)? {
         Answered::Hosted => {}
         // Not an engine error: the relay keeps trying, as for a lost server.
-        Answered::Waiting => anyhow::bail!(
-            "the holder of terminal {terminal} has not answered yet; its agent keeps running"
-        ),
+        Answered::Waiting => anyhow::bail!(waiting(terminal).message),
         Answered::Ended => return Err(ended(terminal).into()),
     }
     socket.set_read_timeout(None)?;
     Ok(socket)
+}
+
+/// The refusal in the entrance's answer `line`, for a client of the server
+/// protocol; none when the viewer protocol follows.
+pub(crate) fn refusal(line: &[u8], terminal: &TerminalId) -> Result<Option<crate::engine::Error>> {
+    Ok(match serde_json::from_slice(line)? {
+        Answered::Hosted => None,
+        Answered::Waiting => Some(waiting(terminal)),
+        Answered::Ended => Some(ended(terminal)),
+    })
+}
+
+/// The answer for a terminal whose holder keeps its lock and has not answered
+/// this server: nothing ended, and asking again later attaches.
+pub(crate) fn waiting(terminal: &TerminalId) -> crate::engine::Error {
+    crate::engine::Error::new(
+        crate::engine::ErrorCode::Unavailable,
+        format!("the holder of terminal {terminal} has not answered yet; its agent keeps running"),
+    )
+    .with(serde_json::json!({ "resource": "holder", "terminal_id": terminal, "retry": true }))
 }
 
 /// The refusal for a terminal no server hosts: its agent exited, or it never
@@ -236,7 +254,7 @@ impl Unsettled {
 /// A holder that keeps its lock and did not answer at startup: alive and slow,
 /// or stopped. Its terminals are neither hosted nor ended; their views wait
 /// until it answers, or until its lock is free and it is gone.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Pending {
     place: Place,
     terminals: Vec<TerminalId>,
@@ -262,11 +280,14 @@ pub(crate) struct Registry {
     started: Mutex<HashMap<String, TerminalId>>,
     /// The terminals hosted now and the Session each was started for.
     live: Live,
+    /// The holders that have not answered this server yet.
+    pending: Waiting,
     #[cfg(test)]
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 type Live = Arc<Mutex<HashMap<TerminalId, Option<LfSessionId>>>>;
+type Waiting = Arc<Mutex<Vec<Pending>>>;
 
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -306,6 +327,7 @@ impl Registry {
             watchers: Watchers::spawn(),
             started: Mutex::new(HashMap::new()),
             live: Live::default(),
+            pending: Waiting::default(),
             #[cfg(test)]
             thread: Mutex::new(None),
         });
@@ -316,6 +338,8 @@ impl Registry {
             let (registry, holder) = (registry.clone(), holder.clone());
             spawn_with_ledger("held-pending", move || registry.retry(holder))?;
         }
+        *registry.pending.lock().expect("registry lock poisoned") = pending;
+        let pending = registry.pending.clone();
         let _thread = spawn_with_ledger("held-terminals", move || {
             run(listener, wake, received, entries, pending, unsettled, live)
         })?;
@@ -343,6 +367,33 @@ impl Registry {
             .iter()
             .find(|(_, held)| held.as_ref() == Some(session))
             .map(|(terminal, _)| terminal.clone())
+    }
+
+    /// The terminal a holder that has not answered yet may be running for
+    /// `session`: `wanted` when that holder keeps it, else the one started for
+    /// the Session.
+    pub(crate) fn pending_terminal(
+        &self,
+        session: &LfSessionId,
+        wanted: Option<&TerminalId>,
+    ) -> Option<TerminalId> {
+        let pending = self.pending.lock().expect("registry lock poisoned");
+        let mut kept = pending.iter().flat_map(|holder| {
+            holder
+                .terminals
+                .iter()
+                .map(move |terminal| (&holder.place, terminal))
+        });
+        match wanted {
+            Some(wanted) => kept.find(|(_, terminal)| *terminal == wanted),
+            None => kept.find(|(place, terminal)| {
+                Meta::read(place, terminal)
+                    .and_then(|meta| meta.session)
+                    .as_ref()
+                    == Some(session)
+            }),
+        }
+        .map(|(_, terminal)| terminal.clone())
     }
 
     /// Start `start`'s command in this build's holder and host it. Repeating a
@@ -697,7 +748,7 @@ fn run(
     wake: UnixStream,
     commands: mpsc::Receiver<Command>,
     adopted: Vec<(TerminalId, Entry)>,
-    mut pending: Vec<Pending>,
+    pending: Waiting,
     mut unsettled: Vec<Unsettled>,
     live: Live,
 ) {
@@ -724,7 +775,10 @@ fn run(
                     entries,
                     unsettled: ended,
                 } => {
-                    pending.retain(|holder| holder.place != place);
+                    pending
+                        .lock()
+                        .expect("registry lock poisoned")
+                        .retain(|holder| holder.place != place);
                     terminals.extend(entries);
                     unsettled.extend(ended);
                 }
@@ -745,6 +799,8 @@ fn run(
                     let answer = wire::line(&if entry.is_some() {
                         Answered::Hosted
                     } else if pending
+                        .lock()
+                        .expect("registry lock poisoned")
                         .iter()
                         .any(|holder| holder.terminals.contains(&terminal))
                     {

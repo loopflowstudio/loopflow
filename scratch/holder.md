@@ -364,7 +364,8 @@ identity, start reconciliation, exit receipts) stand.
 - A viewer whose position is older than `ring_start` receives one snapshot
   whose position is inside the ring.
 - Server thread count does not grow with held terminals (sockets do: one
-  holder connection per terminal and per view). Not automated yet.
+  holder connection per terminal and per view):
+  `server_threads_do_not_grow_with_held_terminals`.
 - `lf ps --json` lists one holder LfProcess per build and no owner row per
   held terminal.
 
@@ -601,12 +602,9 @@ Checks:
 
 **Remaining, in order:**
 
-1. `session.attach` for a pending holder's terminal (QA section, "Remaining
-   from this gap").
-2. A test that server thread count does not grow with held terminals.
-3. Slice 0 mode probe (resize nudge through production Ghostty with real
+1. Slice 0 mode probe (resize nudge through production Ghostty with real
    Claude and Codex): not run; does not block gate.
-4. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
+2. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
    of the bump answers `incompatible` until both are installed.
 
 **Not as planned, open without a slot:**
@@ -664,7 +662,8 @@ match the design that follows from 4a, and are settled here:
   named is processes and threads. The acceptance line becomes: server thread
   count does not grow with held terminals; `lf ps --json` lists one holder
   LfProcess per build and no owner row per held terminal. The second is
-  `held_terminals_list_one_holder_process`; no test counts threads.
+  `held_terminals_list_one_holder_process`; the first is
+  `server_threads_do_not_grow_with_held_terminals`.
 
 No open product choice.
 
@@ -717,19 +716,25 @@ queue behavior not probed. Test:
 `a_holder_that_refuses_connections_and_keeps_its_lock_is_waited_for` (not run
 against the old code).
 
-Checks after this: `--lib -- transport::registry::` 10 passed;
-`transport_tests -- held_ a_held` 6 passed; clippy clean. `--lib -- transport::
-holder::` 85 of 87: two owner-path `viewer_tests::snapshot_preview_*` failed in
-the full run and passed alone twice (8 of 8); gate reruns them.
+**`session.attach` knows pending holders** (built November 11). The registry
+shares its pending holders with the server route: a Session's or a named
+terminal that one of them keeps answers `unavailable {resource: "holder",
+terminal_id, retry: true}`; `not_found` is left for a terminal no live or
+pending holder could hold. The ticket bridge reads the entrance's line and
+answers `waiting`/`ended` as those errors in place of `bridged`. Test:
+`session_attach_waits_for_a_holder_stopped_at_server_startup` (SIGSTOP: both
+request forms retryable; SIGCONT: the same request bridges and reads ticks; a
+ticket presented after its terminal ended is `not_found`).
 
-**Remaining from this gap:** the server-protocol route does not know pending
-holders. `session.attach` for a terminal whose holder is pending answers
-`not_found` "terminal has ended" (`Registry::session_terminal` reads hosted
-terminals only), and the ticket bridge forwards the entrance's
-`"waiting"`/`"ended"` line to its client unread. No client presents a terminal
-ticket today (the relay and Desktop panes use `held.sock`). Needs a retryable
-answer for a pending terminal, or the route removed for held terminals; which
-is undecided.
+Thread count: `server_threads_do_not_grow_with_held_terminals` starts one
+terminal with an open view, then eight more, and allows two threads of slack
+for the runtime's pool (`ps -M`, `/proc/<pid>/task` on Linux). It was not run
+against a thread-per-terminal build.
+
+Checks, November 11: `transport_tests -- held_ a_held session_attach_waits
+server_threads_do_not` 8 passed; `--lib -- transport:: holder::` 87 passed (the
+two `snapshot_preview_*` that failed in an earlier full run passed in this one);
+`documented_commands::` 4 passed; clippy clean.
 
 ## Concept review with a person — November 11, 2026
 

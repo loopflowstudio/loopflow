@@ -331,13 +331,30 @@ impl Connection<'_> {
                 let owner = match host {
                     Host::Owner(owner) => owner,
                     Host::Terminal(terminal) => {
-                        // The registry closes a connection that names a
-                        // terminal it no longer hosts.
                         let mut destination =
                             UnixStream::connect(crate::transport::registry::entrance()?).await?;
                         destination
                             .write_all(&crate::transport::registry::named(&terminal))
                             .await?;
+                        // The entrance says whether the viewer protocol
+                        // follows; a terminal that ended or whose holder has
+                        // not answered since the ticket is refused by name.
+                        let mut answer = Vec::new();
+                        tokio::time::timeout(FIRST_MESSAGE, async {
+                            loop {
+                                match destination.read_u8().await? {
+                                    b'\n' => return std::io::Result::Ok(()),
+                                    byte => answer.push(byte),
+                                }
+                            }
+                        })
+                        .await
+                        .context("held terminal entrance did not answer")??;
+                        if let Some(refusal) =
+                            crate::transport::registry::refusal(&answer, &terminal)?
+                        {
+                            return send(&mut lines, &ServerMessage::error(None, refusal)).await;
+                        }
                         send(
                             &mut lines,
                             &ServerMessage::Bridged {
@@ -629,7 +646,9 @@ async fn session(
                     }
                     Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact, terminal_id }), None) => {
                         let held = terminals.and_then(|terminals| terminals.session_terminal(&session));
-                        if exact.is_none() && (terminal_id.is_some() || held.is_some()) {
+                        // A terminal whose holder has not answered this server yet.
+                        let pending = terminals.and_then(|terminals| terminals.pending_terminal(&session, terminal_id.as_ref()));
+                        if exact.is_none() && (terminal_id.is_some() || held.is_some() || pending.is_some()) {
                             let message = match (terminal_id, held) {
                                 (wanted, Some(held)) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
                                     let ticket = tickets.issue(Host::Terminal(held.clone()), uid, Instant::now());
@@ -640,9 +659,13 @@ async fn session(
                                         expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
                                     }).expect("a ticket serializes") }
                                 }
-                                (wanted, current) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
-                                    "terminal has ended; nothing was started and no input replayed",
-                                ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
+                                (wanted, current) => match pending {
+                                    // Nothing ended; asking again later attaches.
+                                    Some(pending) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
+                                    None => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                                        "terminal has ended; nothing was started and no input replayed",
+                                    ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
+                                },
                             };
                             send(&mut lines, &message).await?;
                             continue;

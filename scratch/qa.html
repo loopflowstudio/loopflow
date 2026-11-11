@@ -1,0 +1,66 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-821 QA: hooks call the Machine server</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
+pre{background:#f6f6f4;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px solid #ddd;padding:.3rem .5rem;text-align:left;vertical-align:top}
+.ok{color:#17702d;font-weight:600}.no{color:#a33;font-weight:600}
+</style></head><body>
+<h1>LOO-821 QA: managed Sessions' hooks call the Machine server</h1>
+<p>Branch build <code>lf 0.15.3+6c7acde28</code>, private Machine at <code>/tmp/lf-qa-821</code> (own <code>HOME</code>, <code>LF_HOME</code>, Claude config,
+fake Keychain), a fresh repository with a bare local origin and <code>planning: {provider: git, personal: true}</code>.
+The provider is a stand-in <code>claude</code> that reads lf's <code>--settings</code> and runs each installed hook command with Claude's callback JSON,
+one turn per marker file, sampling <code>lsof loopflow.db</code> while each hook runs. Drivers are in <code>scratch/qa/</code>.
+Everything else is the real CLI, the real server under launchd, and the real hook commands.</p>
+
+<h2>Results</h2>
+<table>
+<tr><th>Scenario</th><th>What happened</th><th></th></tr>
+<tr><td>A. Skill with no Task, no server (<code>lf -b -a claude skill qa-proof</code> on main)</td>
+<td>7 hooks (start, 2×prompt/tool/stop), all exit 0, 0.32–0.49 s each. One gap line for the conversation:
+<code>Loopflow server unavailable; check `lf server status` …: No such file or directory</code></td><td class="ok">works</td></tr>
+<tr><td>B. Task launch, no server (<code>lf -i -a claude skill qa-proof</code> in the Task checkout)</td>
+<td>Launch ran <code>lf install server</code>; launchd gained <code>com.loopflow.server.0d99b6f9fdeb7a88</code> running the branch <code>lf server run</code>;
+<code>lf server status</code> → <code>ready:true</code>; then the agent started. Whole launch 3 s.</td><td class="ok">works</td></tr>
+<tr><td>C1. Server up, steer between turns</td>
+<td><code>lf session steer</code> → pending. Turn 1's UserPromptSubmit printed <code>&lt;lf:steers batch="278c96ff…"&gt; … QA_STEER_ONE</code>; the next hook named the batch and
+<code>lf session steers --json</code> showed <code>"evidence": "emitted"</code>. Hooks 0.34 s. During every hook the only process holding <code>loopflow.db</code>
+was the Session's own <code>lf session serve</code> owner (PID 33668); no hook <code>lf</code> opened the store.</td><td class="ok">works</td></tr>
+<tr><td>C2. Server frozen (SIGSTOP) during a turn, steer pending</td>
+<td>Prompt, tool, stop hooks each exit 0 after 2.15–2.19 s, empty context. One gap line:
+<code>Loopflow server did not welcome the connection within 2s</code>. Steer stayed <code>pending</code>.</td><td class="ok">works</td></tr>
+<tr><td>C3. Server thawed, next turn</td>
+<td>Prompt hook delivered QA_STEER_TWO; history gained <code>{"first_miss":1794375612,"last_miss":1794375616,"source":"store-gap"}</code>.</td><td class="ok">works</td></tr>
+<tr><td>C4. Server stopped (<code>launchctl bootout</code>), another turn</td>
+<td>Hooks exit 0 in 0.35–0.40 s; one new gap line. <code>lf session steers</code>:
+<pre>authenticated provider callback observed; output acceptance unconfirmed; 1 pending
+Loopflow server unavailable; check `lf server status` and the selected installation. Steers wait and turns go unrecorded until it runs.</pre></td><td class="ok">works</td></tr>
+<tr><td>D1. Resume the Task Session with no server</td>
+<td><code>lf resume &lt;session&gt;</code> re-registered the launchd server; the start hook delivered QA_STEER_FOUR (<code>uncertain</code> until the next hook confirmed it).</td><td class="ok">works</td></tr>
+<tr><td>D2. Printed, never confirmed ("arrive twice")</td>
+<td>Prompt hook printed QA_STEER_FIVE in batch <code>54d5c243</code>; the stand-in deleted <code>.printed</code> and waited 3 s; the tool hook got QA_STEER_FIVE again in a new batch <code>a6fe6da4</code>, then <code>emitted</code>.</td><td class="ok">works</td></tr>
+<tr><td>D3. Branch hooks beside the installed 0.15.2 server</td>
+<td>Hooks exit 0 in 0.33 s; gap line <code>this server has no operation `session.boundary`; update the selected installation</code>; steer stays pending.</td><td class="ok">works</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>Nothing in the product. Two driver mistakes, corrected: the stand-in waited for a second stdin line that only <code>-c</code> sends; and one
+<code>lf comment</code> ran from inside the loopflow checkout, so it resolved loopflow's Linear planning and asked for a Linear credential
+(the same command from the Task checkout works on the branch and on 0.15.2). The repository's qa skill gained a "Turn and tool hooks" section with the working steps.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>A real Claude turn: the private home has no Claude login, and headless Task-checkout launches require a managed login. The stand-in runs the installed hook commands, so the lf side is real; Claude's own hook scheduling and timeouts are not.</li>
+<li><code>lf --machine M</code> Task work on a remote Machine: no reachable Machine with this build (<code>mini</code> has 0.15.1).</li>
+<li>Two tool hooks finishing together (<code>waiting: true</code>): the stand-in runs hooks serially; <code>server::boundary</code> unit tests cover it.</li>
+<li>Linux <code>systemctl --user</code> lingering after logout.</li>
+</ul>
+
+<h2>Still worth a look</h2>
+<ul>
+<li>A Task launch beside a server running another executable (D3's 0.15.2 server) is allowed to start, by design (the launch probes with the hook's hello, not <code>lf server status</code>), and then every boundary of that conversation is a gap. The gap line says to update the installation; nothing at launch says so.</li>
+<li>Task work from a private <code>LF_HOME</code> leaves a launchd job for that home (<code>KeepAlive</code>, <code>RunAtLoad</code>) until booted out, as the design notes accept.</li>
+<li><code>lf session steer</code> run from outside the Task's repository records author "attribution unresolved"; from the Task checkout <code>lf comment</code> records "QA". Not specific to this branch.</li>
+</ul>
+</body></html>

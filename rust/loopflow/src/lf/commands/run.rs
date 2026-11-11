@@ -38,14 +38,16 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
     // `--wave` resolved its Wave once for this process.
-    built.work = cli.wave.as_ref().and_then(|_| {
+    if let Some(wave) = cli.wave.as_ref().and_then(|_| {
         let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
-        Some(crate::session::SessionWork {
+        crate::id::WaveId::parse(&id).ok()
+    }) {
+        built.name_work(crate::session::SessionWork {
             task_id: None,
-            wave_id: Some(crate::id::WaveId::parse(&id).ok()?),
+            wave_id: Some(wave),
             source: crate::session::WorkSource::Declared,
-        })
-    });
+        });
+    }
 
     print_context_header(&built, cli);
     run_prompt(&built, cli).map(|_| ())
@@ -251,7 +253,7 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.work = Some(crate::session::SessionWork {
+    built.name_work(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),
             crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
@@ -309,6 +311,15 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::SessionWork>,
+}
+
+impl PromptBuild {
+    /// Record the launch's Work; how it was named decides whether the launch
+    /// is managed.
+    fn name_work(&mut self, work: crate::session::SessionWork) {
+        self.agent_config.managed = work.source.is_managed();
+        self.work = Some(work);
+    }
 }
 
 fn build_prompt(

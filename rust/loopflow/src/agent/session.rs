@@ -172,6 +172,7 @@ pub(crate) fn build_session_command(
 pub(crate) fn session_environment(
     config: &AgentConfig,
     context_file: Option<&Path>,
+    native: bool,
 ) -> Result<BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     if crate::config::parse_agent(config.agent()?).0 == "opencode" {
@@ -216,6 +217,7 @@ pub(crate) fn session_environment(
                 &mut settings,
                 context,
                 &super::system_prompt_with_structured_replies(config),
+                native || config.managed,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
@@ -306,6 +308,9 @@ pub(crate) fn resolve_session_config(
         chrome: current.chrome,
         codex_service_tier: current.codex.service_tier,
         output_schema: cli.output_schema.clone(),
+        managed: session
+            .work_source
+            .is_some_and(crate::session::WorkSource::is_managed),
         ..Default::default()
     };
     let mut needs_execution_boundary = false;
@@ -460,7 +465,7 @@ mod tests {
                     .iter()
                     .any(|arg| arg.contains("failIfUnavailable")));
             } else {
-                let environment = session_environment(&config, None).unwrap();
+                let environment = session_environment(&config, None, true).unwrap();
                 let settings: serde_json::Value =
                     serde_json::from_str(&environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
                 assert_eq!(
@@ -553,7 +558,7 @@ mod tests {
             let launch = format!(
                 "{:?} {:?} {:?}",
                 command.args,
-                session_environment(&config, None).unwrap(),
+                session_environment(&config, None, true).unwrap(),
                 build_codex_thread_start_params(&config, false)
             );
             assert!(

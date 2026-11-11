@@ -302,26 +302,37 @@ impl SqliteStore {
         gap: &mut crate::store::RecordingGap,
     ) -> StoreResult<()> {
         if let Some(span) = gap.span() {
-            let session = self.session(session)?.ok_or(StoreError::NotFound)?;
-            let input = session
-                .input_key()
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .clone();
-            self.retain_session_observation(
-                &session,
-                &crate::session::SessionObservation {
-                    artifact_key: input,
-                    source: format!("store-gap:{}:{}", span.first_miss, span.last_miss),
-                    observed_at: span.first_miss,
-                    task_id: session.task_id.clone(),
-                    wave_id: session.wave_id.clone(),
-                    payload: serde_json::json!({"source":"store-gap",
-                        "first_miss":span.first_miss,"last_miss":span.last_miss}),
-                },
-            )?;
+            self.record_recording_gap(session, span.first_miss, span.last_miss)?;
         }
         gap.recovered();
         Ok(())
+    }
+
+    /// One `store-gap` observation for boundaries missed from `first_miss` to
+    /// `last_miss`.
+    pub(crate) fn record_recording_gap(
+        &self,
+        session: &str,
+        first_miss: i64,
+        last_miss: i64,
+    ) -> StoreResult<()> {
+        let session = self.session(session)?.ok_or(StoreError::NotFound)?;
+        let input = session
+            .input_key()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .clone();
+        self.retain_session_observation(
+            &session,
+            &crate::session::SessionObservation {
+                artifact_key: input,
+                source: format!("store-gap:{first_miss}:{last_miss}"),
+                observed_at: first_miss,
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+                payload: serde_json::json!({"source":"store-gap",
+                    "first_miss":first_miss,"last_miss":last_miss}),
+            },
+        )
     }
 
     pub(crate) fn retain_session_observation(

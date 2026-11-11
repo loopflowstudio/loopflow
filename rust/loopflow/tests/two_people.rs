@@ -11,6 +11,8 @@ use std::process::{Command, Output, Stdio};
 use serde_json::Value;
 
 struct Pair {
+    /// Each person's Task conversations start only beside their Machine server.
+    _servers: Vec<loopflow_test_support::MachineServer>,
     root: tempfile::TempDir,
     world: PathBuf,
 }
@@ -36,7 +38,20 @@ impl Pair {
         for home in [world.clone(), world.join("lee")] {
             std::fs::write(home.join(".gitconfig"), "").unwrap();
         }
-        Self { root, world }
+        let mut pair = Self {
+            _servers: Vec::new(),
+            root,
+            world,
+        };
+        pair._servers = [Person::Maya, Person::Lee]
+            .map(|person| {
+                loopflow_test_support::MachineServer::start(
+                    env!("CARGO_BIN_EXE_lf"),
+                    pair.env(person)["LF_HOME"].as_str().unwrap().as_ref(),
+                )
+            })
+            .into();
+        pair
     }
 
     fn clean(binary: &str, home: &Path) -> Command {

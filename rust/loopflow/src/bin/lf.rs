@@ -1723,6 +1723,20 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
+    // A turn or tool boundary asks the Machine server and binds no Work, so
+    // the hook opens no store.
+    if let Some(Commands::ContextBlock {
+        delivery,
+        moment:
+            moment @ (ContextMoment::Start
+            | ContextMoment::Compact
+            | ContextMoment::Tool
+            | ContextMoment::Stop),
+        ..
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment);
+    }
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
         .repo
@@ -1756,13 +1770,6 @@ fn run() -> anyhow::Result<()> {
                                 | loopflow::lf::RepoCommand::Ci { .. }
                                 | loopflow::lf::RepoCommand::Plan { .. }
                         ),
-                        ..
-                    }
-                    | Commands::ContextBlock {
-                        moment: ContextMoment::Start
-                            | ContextMoment::Compact
-                            | ContextMoment::Tool
-                            | ContextMoment::Stop,
                         ..
                     }
             )
@@ -2859,10 +2866,6 @@ fn execute_command(
             loopflow::provider_account::record_limit();
             Ok(())
         }
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::Move,
-            ..
-        }) => loopflow::lf::commands::context::apply_session_move(),
         Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),

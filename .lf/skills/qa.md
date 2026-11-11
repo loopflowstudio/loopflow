@@ -287,6 +287,27 @@ establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
 Use different names for a headless Graph and its skill so Graph resolution does
 not treat the step as a recursive Graph call.
 
+## Turn and tool hooks
+
+A Session launched in a Task's checkout is Task work. Headless (`-b`) there
+confines the agent and needs a managed login (`claude=<email>`), which a private
+home cannot get without real OAuth; launch interactively (`-i`) in a PTY
+instead. `lf account connect claude --api-key` with a placeholder
+`ANTHROPIC_API_KEY` satisfies account selection for that launch. A stand-in
+`claude` on `PATH` can read `--settings` and run each hook command exactly as
+installed, with Claude's callback JSON on stdin; release its turns with marker
+files so steers and server changes can happen between them. Run `lf` commands
+from the disposable repository: from inside this checkout they resolve
+loopflow's Linear planning.
+
+A Task launch with no server runs `lf install server`, which registers
+`com.loopflow.server.<hash>` for the private home; boot it out with the label in
+`$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
+server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
+delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
+`store-gap` row in `lf session history <id>`. Read the store with
+`sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with

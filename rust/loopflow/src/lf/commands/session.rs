@@ -104,6 +104,11 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
                 println!("{}; {} pending", status.capability, status.pending);
+                // Hooks deliver steers through the Machine server and nothing else.
+                let server = crate::server::client::status()?;
+                if let Some(error) = server.error.filter(|_| !server.listening) {
+                    println!("{error}. Steers wait and turns go unrecorded until it runs.");
+                }
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }

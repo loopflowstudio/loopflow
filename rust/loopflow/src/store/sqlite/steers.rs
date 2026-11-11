@@ -465,7 +465,7 @@ impl SqliteStore {
         let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'capability reserved; no authenticated callback observed (hook may be unavailable or untrusted)'
+            WHEN a.activated_at IS NULL THEN 'capability reserved; the Machine server has recorded no callback from this conversation'
             ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
             FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
             LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
@@ -525,16 +525,75 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Returns whether a payload was written, not whether it was accepted. Only
-    /// owned provider history containing the batch and hash could confirm it.
+    /// What a hook's request settles: batches it `printed` become `emitted`,
+    /// and any other batch an answer carried more than `deadline_secs` ago goes
+    /// back to pending, since the hook that asked for it had given up. Returns
+    /// whether a newer unconfirmed batch is still waiting for its hook.
+    pub(crate) fn confirm_session_steers(
+        &self,
+        adapter: &SteerAdapter,
+        printed: &[crate::id::SteerBatchId],
+        deadline_secs: u64,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owns: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_adapters a
+            JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                adapter.capability
+            ],
+            |row| row.get(0),
+        )?;
+        if !owns {
+            return Err(StoreError::InvalidAuthority(
+                "Context adapter no longer owns this provider".into(),
+            ));
+        }
+        for batch in printed {
+            tx.execute(
+                "UPDATE steer_batches SET evidence='emitted'
+                WHERE id=?1 AND session_id=?2 AND agent_process_id=?3 AND evidence='uncertain'",
+                params![batch, adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        // Whole seconds: a batch counts as older only once it is past the
+        // deadline whatever the fraction it was created at.
+        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?2";
+        tx.execute(
+            &format!(
+                "DELETE FROM steer_deliveries WHERE batch_id IN (
+                SELECT id FROM steer_batches WHERE {older})"
+            ),
+            params![adapter.session, deadline_secs as i64],
+        )?;
+        tx.execute(
+            &format!("UPDATE steer_batches SET evidence='cancelled' WHERE {older}"),
+            params![adapter.session, deadline_secs as i64],
+        )?;
+        let waiting = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_batches
+            WHERE session_id=?1 AND evidence='uncertain')",
+            [&adapter.session],
+            |row| row.get(0),
+        )?;
+        tx.commit()?;
+        Ok(waiting)
+    }
+
+    /// The Session's next batch of pending steers and its rendered text, for a
+    /// hook to print. The batch stays `uncertain` until a later request
+    /// confirms it through [`Self::confirm_session_steers`].
     pub(crate) fn emit_session_steers(
         &self,
         adapter: &SteerAdapter,
         provider_thread: &str,
         boundary: &str,
         render: impl FnOnce(&str, &[Steer], usize) -> StoreResult<SteerContext>,
-        write: impl FnOnce(&str) -> StoreResult<()>,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<(crate::id::SteerBatchId, String)>> {
         let _lock = self.lock_session_dispatch(&adapter.session)?;
         let batch = crate::id::SteerBatchId::new();
         let (steers, remaining) = {
@@ -552,14 +611,14 @@ impl SqliteStore {
             reconcile(&tx, &adapter.session)?;
             let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
             if duplicate {
-                return Ok(false);
+                return Ok(None);
             }
             let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steers p ON p.id=s.steer_id
                 WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
                 WHERE d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt)
                 ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],read_steer)?.collect::<rusqlite::Result<Vec<_>>>()?;
             if rows.is_empty() {
-                return Ok(false);
+                return Ok(None);
             }
             tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
                 VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
@@ -603,15 +662,10 @@ impl SqliteStore {
                 params![batch,hash])? == 1;
             tx.commit()?;
             if !retained {
-                return Ok(false);
+                return Ok(None);
             }
         }
-        write(&payload.text)?;
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE steer_batches SET evidence='emitted' WHERE id=?1",
-            [batch],
-        )?;
-        Ok(true)
+        Ok(Some((batch, payload.text)))
     }
 }
 

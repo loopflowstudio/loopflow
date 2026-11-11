@@ -73,7 +73,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     };
     let delivery_path = files.path().join("delivery.json");
     fs::write(&delivery_path, serde_json::to_vec(&delivery).unwrap()).unwrap();
-    let hooks = delivery.hook_settings().unwrap();
+    let hooks = delivery.hook_settings(true).unwrap();
     let hook = hooks["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
     assert!(hook.contains(gate.to_str().unwrap()));
     let caller = json!({"session_id":session.id,"agent_process_id":null,"origin_exec_id":"e3904e02-0219-45fd-8c4e-c7f289c60552"}).to_string();

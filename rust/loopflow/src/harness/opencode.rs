@@ -187,7 +187,7 @@ impl OpenCodeHarness {
             command.current_dir(cwd);
         }
         super::configure_agent_env(&mut command, config);
-        command.envs(crate::agent::session_environment(config, None)?);
+        command.envs(crate::agent::session_environment(config, None, false)?);
         command.env("OPENCODE_PASSWORD", &self.password);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let diagnostic_path = config

@@ -174,7 +174,7 @@ impl ClaudeHarness {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
-            cmd.args(super::context::claude_args(context)?);
+            cmd.args(super::context::claude_args(context, config.managed)?);
         }
         super::configure_agent_env(&mut cmd, config);
         if let Some(context) = &config.conversation_context {

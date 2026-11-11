@@ -60,7 +60,7 @@ pub(crate) fn launch_session(
         },
         context_file,
     )?;
-    let environment = session_environment(config, context_file)?;
+    let environment = session_environment(config, context_file, true)?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -118,7 +118,7 @@ pub(crate) fn resume_session_with_env(
         },
         context_file.as_deref(),
     )?;
-    let environment = session_environment(&config, context_file.as_deref())?;
+    let environment = session_environment(&config, context_file.as_deref(), true)?;
     spawn_session_command_with_env(
         &command,
         &environment,

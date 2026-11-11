@@ -5,19 +5,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use serde_json::Value;
 
 struct Fixture {
+    /// Task and Wave launches start their agent only once it answers.
+    _server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new(provider: &str) -> Self {
+        let home = tempfile::tempdir().unwrap();
         let fixture = Self {
+            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),
-            home: tempfile::tempdir().unwrap(),
+            home,
         };
         fs::create_dir(fixture.home.path().join("bin")).unwrap();
         fixture.repo.create_file(

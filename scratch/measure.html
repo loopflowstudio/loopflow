@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Optimize: Desktop and phone</title>
+<style>
+  :root { color-scheme: light dark; --ink:#1d1b1a; --dim:#6b6560; --line:#d9d4cd; --bg:#faf8f4; --hit:#722f37; }
+  @media (prefers-color-scheme: dark) { :root { --ink:#ece8e1; --dim:#a39d95; --line:#3a3633; --bg:#191716; --hit:#d9949c; } }
+  body { background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system, system-ui, sans-serif; max-width:1040px; margin:40px auto; padding:0 20px; }
+  h1 { font-size:28px; margin:0 0 4px; } h2 { font-size:19px; margin:32px 0 8px; }
+  .dim { color:var(--dim); } .hit { color:var(--hit); font-weight:600; }
+  table { border-collapse:collapse; width:100%; margin:10px 0; font-size:14.5px; }
+  th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:600; } td.n { white-space:nowrap; font-variant-numeric:tabular-nums; }
+  code { font:13px ui-monospace, Menlo, monospace; }
+</style>
+
+<h1>Optimize: Desktop and phone</h1>
+<p class="dim">2026-11-11. The Machine's load average was 140–250 throughout (other agents' builds), so times are reported
+as alternating pairs and the claims rest on counts wherever a count exists.</p>
+
+<h2>Verdict</h2>
+<p id="verdict"><strong>Better, on counts.</strong> Two reads that launched <code>git</code> once per worktree no longer launch it:
+portfolio discovery 111 → 0 launches (3.5–4.6 s → 0.06–0.15 s, n=5 each side, alternating; branch side is an
+unoptimized build), and with it the phone's Task list read 120 → 9 launches (median 4.9 s → 1.3 s, ranges 3.8–17.9 s
+and 1.2–3.7 s, n=5 each; one run overlaps). Outputs match on both. <strong>Inconclusive</strong> for Desktop's 13 s
+to current planning: about 3 s is the Machine, one cause (about a hundred serial <code>git</code> launches) is removed
+but its share was not measured in the app, and the rest is unattributed. A launch on this build settles it, because
+the journal now records where each slow reading waited. Nothing here was run on a quiet Machine or a real phone.</p>
+
+<h2>Where Desktop's time went, from its own journal</h2>
+<p>Source: <code>~/.lf/desktop-cache/timings/</code>, written by real use (1,762 reads, 254 launches). Last 40 launches,
+November 2–11:</p>
+<table>
+  <tr><th>Milestone</th><th>p50</th><th>p90</th><th>Means</th></tr>
+  <tr><td>launch</td><td class="n">189 ms</td><td class="n">797 ms</td><td>app code starts</td></tr>
+  <tr><td>restored</td><td class="n">894 ms</td><td class="n">2.1 s</td><td>saved workspace decoded into the model</td></tr>
+  <tr><td>first_frame</td><td class="n">1.5 s</td><td class="n">2.7 s</td><td>first window frame</td></tr>
+  <tr><td class="hit">fresh</td><td class="n hit">15.0 s</td><td class="n hit">19.9 s</td><td>current planning and Sessions shown</td></tr>
+</table>
+<p>The wait a person feels is <strong>fresh</strong>: for about 13 seconds after the window appears it shows the last
+session's data. The journal times each part from the moment the subscription opens: planning p50 12.9 s (n=48),
+Sessions p50 3.7 s (n=43). The Machine answers the same subscriptions in 2.9–3.3 s and 0.3 s (below), so roughly
+9.5 s of planning's wait is spent inside Desktop.</p>
+
+<h2>Changes</h2>
+<table>
+  <tr><th>Commit</th><th>Value</th><th>Verdict</th><th>Hypothesis</th><th>Limiter</th></tr>
+  <tr><td><code>423f34e4d</code></td><td class="n">111 → 0 git launches<br>3.5–4.6 s → 0.06–0.15 s</td><td>keep</td><td>Portfolio discovery asks git for the main checkout of every linked worktree; the answer is in <code>.git</code> and <code>commondir</code>.</td><td>Was process launches: 28% of all time Desktop spent in <code>lf</code> reads (84 s of 298 s, 33 reads, p50 1.15 s). Same output digest.</td></tr>
+  <tr><td><code>423f34e4d</code></td><td class="n">120 → 9 git launches<br>median 4.9 s → 1.3 s</td><td>keep</td><td>The phone's list read (<code>desktop view list --all</code>) walks the portfolio first.</td><td>Same cause. Reaches the phone once the Machine's server runs this build. Same plans and Task counts (7, 40).</td></tr>
+  <tr><td><code>44ce87bbe</code></td><td class="n">~100 → 0 git launches at launch</td><td>keep</td><td>Desktop resolved each repository its first readings name (38 from planning, 6 from processes, 11 from the portfolio) with two serial <code>git rev-parse</code> each, before showing them.</td><td>Count from reading the code and the live readings; not timed in the app. Three origin tests pass on real repositories.</td></tr>
+  <tr><td><code>23fd0fdd4</code></td><td class="n">16 ms (85 KB) / 48 ms (330 KB) of JSON per reading: 9 / 27 ms moved off main</td><td>keep</td><td>Each reading was decoded to a tree, re-encoded and decoded again on the main actor, then written to disk even when unchanged.</td><td>Timed on this Mac with a stand-in tree type, n=9; a phone is slower. The first pass (text → tree) is still on main, in the connection.</td></tr>
+  <tr><td><code>44ce87bbe</code></td><td class="n">usable: 0 of 13 launches marked → marked</td><td>keep</td><td>The <code>usable</code> milestone and <code>cold_start</code> interval were dropped when the sidebar was rebuilt; <code>hierarchy_interaction</code> was never emitted.</td><td>Instrumentation only. Compiles; journal tests pass.</td></tr>
+</table>
+
+<h2>Measured and left alone</h2>
+<ul>
+  <li><strong>Planning decode is not the 13 s.</strong> <code>WorkFrame.decode</code> on a captured 1.68 MB frame: median 67 ms (45–104, n=7, debug build); comparing two snapshots: 2 ms.</li>
+  <li><strong>The Machine does not slow down when Desktop's subscriptions open together.</strong> Planning's first frame: 2.94 s alone, 3.32 s with the other five (n=5 each, alternating; ranges 2.8–4.5 and 3.3–4.4).</li>
+  <li><strong>The diff/file read storm is gone.</strong> 19% + 12% of journal time, all from builds on November 2 and earlier; recent heartbeats show 1–3 reads per five minutes.</li>
+  <li><strong>Not verified on screen.</strong> The phone's Brief, Changes, Runs and Wave filter build and are committed; the walkthrough on a disposable Simulator failed twice, first on a handshake timeout and then because the Simulator could not boot ("Failed to start launchd_sim") at this load.</li>
+  <li><strong>Deferred to "Keep Desktop work running through the Loopflow server"</strong> (note posted on that Task): the 1.68 MB whole-replacement planning reading and its 35 <code>git status</code> launches in a bare read; <code>task location</code> failing 126 of 126; a repository-scoped expression for the phone's list.</li>
+</ul>

@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Felt-performance metrics</title>
+<style>
+  :root { color-scheme: light dark; --ink:#1d1b1a; --dim:#6b6560; --line:#d9d4cd; --bg:#faf8f4; --hit:#722f37; }
+  @media (prefers-color-scheme: dark) { :root { --ink:#ece8e1; --dim:#a39d95; --line:#3a3633; --bg:#191716; --hit:#d9949c; } }
+  body { background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system, system-ui, sans-serif; max-width:980px; margin:40px auto; padding:0 20px; }
+  h1 { font-size:28px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 8px; }
+  p { margin:8px 0; } .dim { color:var(--dim); }
+  table { border-collapse:collapse; width:100%; margin:10px 0; font-size:14.5px; }
+  th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:600; }
+  td.n { white-space:nowrap; font-variant-numeric:tabular-nums; }
+  code { font:13px ui-monospace, Menlo, monospace; }
+  .gap { color:var(--hit); font-weight:600; }
+  li { margin:4px 0; }
+</style>
+
+<h1>Felt-performance metrics</h1>
+<p class="dim">A proposal for what to measure on Desktop and the phone, what exists today, and what to change. Written 2026-11-11.</p>
+
+<h2>What "fast" means here</h2>
+<p>A wait starts at the person's input (or the process starting) and ends when the thing they wanted is on screen <em>and takes input</em>. Three rules follow, taken from how the two frameworks studied measure themselves:</p>
+<ul>
+  <li><strong>End at a named, usable point, not at "the model changed".</strong> Desktop's signposts end when a view observes a change; its own benchmark README says that does "not prove completed layout or on-screen presentation". Usable is: the result is drawn, and nothing the person needs is still outstanding.</li>
+  <li><strong>Log wall time beside CPU time.</strong> A main thread blocked on the socket looks like a fast frame unless both are recorded (rune measured 263 ms wall against 3 ms CPU for one such case).</li>
+  <li><strong>Gate on counts, report on times.</strong> Counts (rows built, readings applied, frames drawn at rest) do not flake; times go in a per-commit report with medians. Exact's rule: a count "cannot flake the way a timer does".</li>
+</ul>
+
+<h2>The metrics</h2>
+<p>Seven waits and three steady-state measures. Targets are starting points to argue with, drawn from rune's and Exact's own budgets; none is a gate.</p>
+<table>
+  <tr><th>Wait</th><th>Starts</th><th>Ends (usable)</th><th>Target p50 / p95</th><th>Desktop today</th><th>Phone today</th></tr>
+  <tr><td><strong>Cold start</strong></td><td>kernel starts the process</td><td>saved Tasks drawn; then current Tasks drawn</td><td class="n">saved 400 / 800 ms<br>current 1.0 / 2.0 s</td><td><code>first_frame</code>, <code>fresh</code> recorded. <span class="gap"><code>usable</code> and the <code>cold_start</code> signpost never close.</span></td><td>New: <code>launch tasks_saved</code>, <code>launch tasks_current</code>. First live load observed at about 10 s.</td></tr>
+  <tr><td><strong>Open a Task</strong></td><td>click or tap on the row</td><td>terminal shows the Session's screen and accepts input</td><td class="n">warm 100 / 250 ms<br>cold 500 ms / 1.0 s</td><td><code>task_workspace_ready</code> (ends at commit or first responder), <code>time_to_live_pane</code></td><td>New: <code>session_open</code> (attach asked → first screen handed to the terminal)</td></tr>
+  <tr><td><strong>Switch Task</strong></td><td>click another row</td><td>its terminal is drawn and focused</td><td class="n">50 / 100 ms</td><td><code>task_workspace_ready</code>; the test measures to an OCR'd bitmap</td><td>same as Open (the phone holds one Session)</td></tr>
+  <tr><td><strong>Change what the nav shows</strong> (filter, repository, "all Tasks")</td><td>the choice</td><td>rows for the new choice drawn</td><td class="n">in memory 16 / 50 ms<br>needs the Machine 300 / 800 ms</td><td><span class="gap"><code>hierarchy_interaction</code> is defined and never emitted</span>; one test, <code>filter</code></td><td>New: <code>tasks_current</code> per filter change. Repository switch is in memory.</td></tr>
+  <tr><td><strong>Create a Task</strong></td><td>Create pressed</td><td>the new Task's conversation takes input</td><td class="n">1.0 / 2.0 s</td><td><span class="gap">none on the UI path</span>; a test times the sqlite write to pixels</td><td class="gap">none</td></tr>
+  <tr><td><strong>Input echo</strong></td><td>key down, or Reply sent</td><td>the echoed output is drawn</td><td class="n">local 16 / 35 ms<br>phone 80 / 200 ms</td><td><code>terminal_key_to_draw</code> measures key → next local draw, <span class="gap">not the round trip through the PTY</span>; a test has <code>pty_echo_ms</code></td><td>New: <code>input_echo</code> (bytes sent → next output handed to the terminal)</td></tr>
+  <tr><td><strong>Come back</strong> (app to foreground, lid open)</td><td>app becomes active</td><td>the Session is live again</td><td class="n">500 ms / 1.5 s</td><td class="gap">none</td><td><code>session_open</code> covers the re-attach</td></tr>
+</table>
+<table>
+  <tr><th>Steady state</th><th>Measure</th><th>Target</th><th>Today</th></tr>
+  <tr><td><strong>Scrolling</strong> (nav list, terminal scrollback)</td><td>share of frames later than 1.5 display periods during a scripted fling; longest frame</td><td>under 0.1% late; none over 250 ms</td><td><span class="gap">Not measured anywhere.</span> The Desktop harness says "Compositor presentation and frame hitches are not measured".</td></tr>
+  <tr><td><strong>At rest</strong></td><td>frames drawn and readings applied over 10 idle seconds; CPU %</td><td>zero frames, zero applies</td><td>Desktop heartbeat logs memory and threads every 5 minutes; no idle-draw count</td></tr>
+  <tr><td><strong>Work per update</strong> (a count)</td><td>rows rebuilt and readings applied per Machine reading</td><td>only changed rows; one apply per display frame</td><td><code>work_frame_apply</code> times the apply; nothing counts rows</td></tr>
+</table>
+
+<h2>What is wrong with the current setup</h2>
+<ul>
+  <li><strong>Nothing reads the numbers.</strong> Desktop has signposts, a launch journal, a vitals heartbeat and a 16-scenario opt-in test suite. CI runs one pytest that checks the benchmark script's checkout handling, not a timing. A person has to run the scripts.</li>
+  <li><strong>Two documented endpoints are never written.</strong> <code>usable</code> is marked only by tests, so <code>timings.py</code>'s 1000 ms budget column is empty; <code>cold_start</code> begins and never ends.</li>
+  <li><strong>The endpoints are proxies.</strong> Most intervals end "after commit", which the code itself calls "a scheduling proxy, not a render or compositor completion fence".</li>
+  <li><strong>The phone had no timing code.</strong> It now logs four waits (commit <code>ios: time the waits a person feels…</code>); they end when bytes are handed to the terminal, one frame short of drawn.</li>
+  <li><strong>The October 7 retirement still stands</strong> — "retires arbitrary numeric performance targets, soak requirements and deeper optimization while the product surface changes". This proposal reports numbers; it does not bring back acceptance gates.</li>
+</ul>
+
+<h2>Principles worth taking from rune and Exact</h2>
+<p class="dim">Both get their speed from doing less per update, not from a faster renderer. The parts that depend on owning the renderer (glyph atlases, instance buffers, precompiled shaders) do not transfer; libghostty already does the equivalent for the terminal.</p>
+<table>
+  <tr><th>Principle</th><th>Here</th><th>Hits</th></tr>
+  <tr><td>Paint first from stored data, connect after</td><td>Phone: done for the Task list. Desktop restores a cache already (<code>restored</code>). Next: the phone's last terminal screen per Session.</td><td>cold start, come back</td></tr>
+  <tr><td>A no-change update draws nothing</td><td>Drop a reading equal to the last one applied before touching observable state. Phone list: done.</td><td>at rest, list updates</td></tr>
+  <tr><td>Coalesce to one apply per display frame, latest wins, and count what was dropped</td><td>The phone keeps only the newest reading; Desktop applies each frame as it arrives.</td><td>list updates, scrolling</td></tr>
+  <tr><td>Decode and derive off the main thread; main only assigns</td><td>Both apps decode whole-replacement JSON on the main actor today.</td><td>scrolling, switch Task</td></tr>
+  <tr><td>Skip unchanged at the leaf</td><td>Equatable row inputs, stable IDs, observation scoped per row rather than per list.</td><td>nav changes, list updates</td></tr>
+  <tr><td>Keep old pixels until the new frame is ready</td><td>On switch, leave the outgoing terminal up until the incoming one presents.</td><td>switch Task</td></tr>
+  <tr><td>Park and rebind instead of destroy and create; prewarm on press-down</td><td>Keep recent libghostty surfaces alive and hidden; start the attach on mouse-down or touch-down, not on release.</td><td>open and switch Task</td></tr>
+  <tr><td>Hidden things run slowly or not at all</td><td>Throttle offscreen panes; rune refreshes hidden windows at most every 250 ms.</td><td>at rest</td></tr>
+  <tr><td>Split launch into app parts and framework parts</td><td>Mark each step from process start to first present; move anything not needed for pixels after it.</td><td>cold start</td></tr>
+</table>
+
+<h2>Next steps, in order</h2>
+<ol>
+  <li><strong>Close the two dead endpoints on Desktop</strong>: mark <code>usable</code> in production and end <code>cold_start</code>; emit <code>hierarchy_interaction</code> for filter and repository changes. Small, and it makes the existing reports true.</li>
+  <li><strong>One report, both apps.</strong> A script that reads the <code>studio.loopflow</code> <code>perf</code> log lines from a run (Desktop, Simulator or phone) and prints the table above with medians over 7 runs after one warm-up, wall and CPU side by side.</li>
+  <li><strong>A driver agents can use.</strong> An env-gated listener in each app with <code>tree</code>, <code>tap</code>, <code>type</code>, <code>screenshot</code> and <code>settle</code>, where <code>settle</code> waits on the same outstanding-work ledger that defines usable. This replaces OCR'd bitmaps and my coordinate clicking in the Simulator.</li>
+  <li><strong>Frame pacing.</strong> A display-link histogram during scripted scrolls, on a real phone and a real display; the Simulator's deadlines are not trustworthy.</li>
+  <li><strong>Then optimise</strong>, starting with whichever wait the report shows is furthest from its target. The phone's first live load (about 10 s) is the obvious first suspect: the Machine answers the same read in 2.8 s from the command line.</li>
+</ol>
+
+<h2>Open questions</h2>
+<ul>
+  <li>Are the targets right? They are borrowed (rune: first frame p50 ≤ 150 ms, event → frame p95 ≤ 16.7 ms, key → photon p95 ≤ 35 ms; Exact: cold start to interactive 100 ms p50) and loosened where a network hop is unavoidable.</li>
+  <li>Should any count become a blocking check, given numeric acceptance was retired on October 7?</li>
+  <li>Where should the per-commit report live so that someone reads it?</li>
+</ul>

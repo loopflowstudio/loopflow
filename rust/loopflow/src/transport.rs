@@ -1770,9 +1770,14 @@ struct RelayOutput {
 
 impl RelayOutput {
     fn recover(&mut self, terminal: bool, held: bool) -> Request {
-        // A held terminal's screen continues from the PTY position it shows.
-        if held && self.positioned {
-            return self.continuation(true);
+        // A held terminal's screen continues from the PTY position it shows;
+        // its viewers keep no spool, so a resume has nothing to replay.
+        if held {
+            return if self.positioned {
+                self.continuation(true)
+            } else {
+                self.fresh_attachment(true)
+            };
         }
         // A fresh terminal screen restores parser state even if the bridge
         // interrupted an escape sequence; byte streams continue at their offset.

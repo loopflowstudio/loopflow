@@ -803,18 +803,21 @@ impl Hosted {
                     }
                 }
             }
-            let ready = match self.client.as_mut().filter(|_| terminal) {
-                Some(client) => client.accept(chunk.raw, &chunk.bytes),
-                None => chunk.bytes.clone(),
-            };
-            let span = match chunk.end {
-                Some(end) if ready == chunk.bytes => Span::Pty {
-                    start: end - chunk.bytes.len() as u64,
-                    end,
-                },
-                through => Span::Aside { through },
-            };
             let answering = answering && chunk.end.is_none_or(|end| end > self.replayed_through);
+            let pty = chunk.end.map(|end| Span::Pty {
+                start: end - chunk.bytes.len() as u64,
+                end,
+            });
+            let aside = Span::Aside { through: chunk.end };
+            let (ready, span) = match self.client.as_mut().filter(|_| terminal) {
+                Some(client) => {
+                    // A native client that changed the output sends lf's text.
+                    let ready = client.accept(chunk.raw, &chunk.bytes);
+                    let span = pty.filter(|_| ready == chunk.bytes).unwrap_or(aside);
+                    (ready, span)
+                }
+                None => (chunk.bytes, pty.unwrap_or(aside)),
+            };
             self.deliver(chunk.stream, &ready, answering, span);
             if self
                 .output_told
@@ -994,27 +997,26 @@ impl Hosted {
                 viewer.catch_up = None;
                 continue;
             }
-            if at < live && viewer.catch_up.is_none() {
-                viewer.catch_up = child.catch_up(at);
-            }
-            let caught = match &mut viewer.catch_up {
-                Some(catch_up) if at < live => catch_up.read(live).map(Some),
-                Some(_) => Ok(None),
-                None if at == live => Ok(None),
-                None => Err(io::ErrorKind::NotFound.into()),
-            };
-            match caught {
-                Ok(Some(bytes)) => {
-                    viewer.stream(Tag::Out, &bytes)?;
-                    viewer.position = Some(at + bytes.len() as u64);
+            if at < live {
+                if viewer.catch_up.is_none() {
+                    viewer.catch_up = child.catch_up(at);
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    tracing::debug!(%error, viewer = %viewer.id, "view cannot continue from its position; painting it afresh");
-                    viewer.catch_up = None;
-                    paint(&self.output, child, viewer)?;
-                    viewer.event(Event::Live);
-                    continue;
+                let caught = match &mut viewer.catch_up {
+                    Some(catch_up) => catch_up.read(live),
+                    None => Err(io::ErrorKind::NotFound.into()),
+                };
+                match caught {
+                    Ok(bytes) => {
+                        viewer.stream(Tag::Out, &bytes)?;
+                        viewer.position = Some(at + bytes.len() as u64);
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, viewer = %viewer.id, "view cannot continue from its position; painting it afresh");
+                        viewer.catch_up = None;
+                        paint(&self.output, child, viewer)?;
+                        viewer.event(Event::Live);
+                        continue;
+                    }
                 }
             }
             if viewer.position == Some(live) {

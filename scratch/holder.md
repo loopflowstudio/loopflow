@@ -586,6 +586,11 @@ Checks:
   pass alone, as in the earlier pass (load timing). Gate reruns them.
 - `documented_commands::`: 4 passed. Clippy clean.
 
+- Compress after 4a: a held relay never sends `resume` (its viewers keep no
+  spool): it continues from its position or attaches fresh; catch-up and
+  chunk-span code flattened. `cargo test -p loopflow --lib -- transport:: holder::`:
+  80 passed; `held_session_survives_server_restart` passes; clippy clean.
+
 **Not as planned, still open:**
 
 - The gate test's `ps` step checks the agent's parent is `lf holder run`,

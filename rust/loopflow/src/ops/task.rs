@@ -1189,7 +1189,7 @@ async fn stack_existing_task(
     requested: &str,
 ) -> OpsResult<()> {
     fetch_task_refs(main_repo)?;
-    let (parent, diverged) = record_stack_parent(store, main_repo, task, requested).await?;
+    let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
     store
         .stack_task_placement(task, &parent.id)
@@ -1199,7 +1199,7 @@ async fn stack_existing_task(
         "Task {} stacks on {requested} ({}){}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
         task.identifier,
         parent.branch,
-        diverged.map(|note| format!("; {note}")).unwrap_or_default(),
+        note.map(|note| format!("; {note}")).unwrap_or_default(),
         task.worktree()?.display()
     );
     Ok(())
@@ -1280,7 +1280,7 @@ async fn select_stack_parent(
 
 /// Select the parent, push its branch when origin lacks it or is behind, then
 /// return its PR record, recording an unpublished one when the parent has none.
-/// The note says what the child leaves out when origin's branch has diverged.
+/// The note says what stacking pushed, or what the child leaves out of a diverged branch.
 async fn record_stack_parent(
     store: &SharedStore,
     main_repo: &Path,
@@ -1298,12 +1298,9 @@ async fn record_stack_parent(
             ))
         })?;
     }
-    let diverged = match state {
-        StackParentBranch::Diverged { .. } => state.note(&parent),
-        _ => None,
-    };
+    let note = state.note(&parent);
     if let Some(pr) = parent.pr {
-        return Ok((pr, diverged));
+        return Ok((pr, note));
     }
     let pr = delivery::next_task_pr(store, &parent.task).await?;
     if let Err(error) = store.insert_task_pr(&pr).await {
@@ -1314,9 +1311,9 @@ async fn record_stack_parent(
             .map_err(task_error)?
             .filter(|active| !active.is_settled())
             .ok_or_else(|| task_error(format!("failed to record stack parent PR: {error}")))?;
-        return Ok((active, diverged));
+        return Ok((active, note));
     }
-    Ok((pr, diverged))
+    Ok((pr, note))
 }
 
 /// How the parent's local branch relates to origin's, from refs already fetched.
@@ -1502,8 +1499,8 @@ async fn prepare_task_placement(
     let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = match options.stack_on.as_deref() {
         Some(requested) => {
-            let (parent, diverged) = record_stack_parent(store, main_repo, task, requested).await?;
-            if let Some(note) = diverged {
+            let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
+            if let Some(note) = note {
                 eprintln!("Task {} stacks on {requested}: {note}.", task.identifier);
             }
             Some(parent)

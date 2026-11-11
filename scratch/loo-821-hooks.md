@@ -160,11 +160,15 @@ Remaining:
   direct" (above).
 - Gate: the suites under Checks marked gate.
 - `limit` / `record-limit` still open the store, on a usage limit only.
-- Desktop opening a Task's conversation is not managed. It prepares with
+- Desktop opening a Task: in scope (steer 33c309b1 lists "Desktop opening a
+  Task" among the managed entry points), not built. Desktop prepares with
   `session resume --prepare --task X`, then runs the record's `open_argv`,
-  which `surface` builds per Session as `lf session resume <id>`: a Session
-  target, so bare. Making it managed means `open_argv` names the Task, which
-  would decide managed from the Session's row (see `scratch/questions.md`).
+  which `human_session_argv` builds per Session as `lf session resume <id>`:
+  a Session target, so bare, with no launch check. The record already appends
+  the prepare intent's flag to `open_argv` (`human_session.rs`,
+  `intent.flag()`), so the prepare command can add to it. How is open in
+  `scratch/questions.md`; the test is the Desktop-path twin of
+  `an_interactive_task_resume_with_no_machine_server_fails_naming_it`.
   Interactive resumes keep every hook either way.
 
 Choices taken (reversible):

@@ -97,4 +97,6 @@ running `lf session resume <id>` (`human_session_argv`, built per Session in
 (a) `open_argv` carries `--task`/`--wave` when the prepare command named one,
 so the record differs by how it was asked for; (b) Desktop runs
 `lf --task X session resume <id>`, which `SessionTarget::from_selectors` refuses
-today ("select one Session, Task or Wave target"). Left as is in this pass.
+today ("select one Session, Task or Wave target"). Not a choice of whether:
+steer 33c309b1 names "Desktop opening a Task" as managed. (a) has a
+precedent: the prepare already appends `intent.flag()` to `open_argv`.

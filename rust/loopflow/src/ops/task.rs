@@ -1288,6 +1288,11 @@ async fn record_stack_parent(
     requested: &str,
 ) -> OpsResult<(TaskPr, Option<String>)> {
     let parent = select_stack_parent(store, task, requested).await?;
+    // A retry keeps its historical parent identity for sync.
+    // Its branch may already be deleted and must not be republished.
+    if parent.pr.as_ref().is_some_and(TaskPr::is_settled) {
+        return Ok((parent.pr.expect("settled parent has a PR record"), None));
+    }
     let branch = parent.branch();
     let state = stack_parent_branch(main_repo, &parent)?;
     if state == StackParentBranch::Behind {

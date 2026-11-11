@@ -1939,6 +1939,51 @@ async fn stacking_is_idempotent_and_preserves_history() {
 }
 
 #[tokio::test]
+async fn stacking_retry_keeps_a_merged_parent_without_republishing_its_branch() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    let mut pr = parent
+        .store
+        .active_task_pr(&parent.task.id)
+        .await
+        .unwrap()
+        .unwrap();
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: None,
+        }),
+        merge: None,
+    });
+    pr.merge_commit = Some(repo.head_sha());
+    parent.store.update_task_pr(&pr).await.unwrap();
+    let child = Task {
+        id: TaskId::new(),
+        parent_pr_id: Some(pr.id.clone()),
+        ..parent.task.clone()
+    };
+
+    // Cleanup can leave the branch locally or delete it entirely.
+    for local_branch in [false, true] {
+        if local_branch {
+            repo.create_branch(&pr.branch);
+        }
+        let (selected, note) =
+            super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+                .await
+                .unwrap();
+        assert_eq!(selected, pr);
+        assert_eq!(note, None);
+        assert!(
+            !super::ref_exists(repo.bare_path(), &format!("refs/heads/{}", pr.branch)).unwrap()
+        );
+    }
+}
+
+#[tokio::test]
 async fn task_placement_accepts_shared_worktree_names() {
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;

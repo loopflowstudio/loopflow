@@ -197,10 +197,15 @@ fn push_stack_effects(
     parent: &super::StackParent,
     report: &mut TaskCheckoutExplanation,
 ) {
+    if parent.pr.as_ref().is_some_and(super::TaskPr::is_settled) {
+        return;
+    }
     match super::stack_parent_branch(repo, parent) {
-        Ok(state) => report
-            .unavailable
-            .extend(state.note(parent).map(|note| format!("Not run: {note}"))),
+        Ok(state) => report.unavailable.extend(
+            state
+                .note(parent)
+                .map(|note| format!("Not run (based on already-fetched refs): {note}")),
+        ),
         Err(error) => report.impediments.push(error.to_string()),
     }
     if parent.pr.is_none() {

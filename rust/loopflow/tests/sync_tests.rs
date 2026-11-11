@@ -866,6 +866,21 @@ fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .arg("sync")
+        .current_dir(&child_path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+        "parent work\n"
+    );
 }
 
 #[test]

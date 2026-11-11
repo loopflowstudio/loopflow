@@ -347,8 +347,9 @@ Sessions, Asks and Graph reviews remain available. A headless conversation
 completes when its AgentProcess exits, whatever its Work, purpose or Graph:
 completion means it is no longer doing work, not that it cannot continue.
 A new AgentProcess on it, such as a Graph correcting its own step, reopens it
-until that process exits. A stopped turn or missing process never completes a
-conversation, and retirement never settles a Graph.
+until that process exits. Pruning a dead AgentProcess also completes its headless
+Session. A stopped turn alone never completes a conversation, and retirement
+never settles a Graph.
 Completed Sessions retain their history but contribute no current rows or counts.
 Terminal Tasks cannot acquire current review obligations;
 independent unresolved Asks remain discoverable.

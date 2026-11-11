@@ -1675,11 +1675,12 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, primary, retired) in [
-            ("orphan", None, true),
-            ("primary", Some("repository"), false),
-            ("task", None, false),
-            ("task-run", None, true),
+        for (id, primary, outcome, retired) in [
+            ("orphan", None, "interrupted", true),
+            ("primary", Some("repository"), "interrupted", false),
+            ("task", None, "interrupted", false),
+            ("task-run", None, "interrupted", true),
+            ("task-failed-run", None, "failed", true),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let process = crate::id::LfProcessId::new();
@@ -1707,7 +1708,7 @@ mod tests {
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &attachment, "interrupted", None, || Ok(false))
+                .finish_session_attachment(id, &attachment, outcome, None, || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1716,7 +1717,7 @@ mod tests {
             assert!(history
                 .iter()
                 .any(|event| event.payload["type"] == "attachment_exit"
-                    && event.payload["outcome"] == "interrupted"));
+                    && event.payload["outcome"] == outcome));
             assert!(!history
                 .iter()
                 .any(|event| event.kind == SessionEventKind::Completed));

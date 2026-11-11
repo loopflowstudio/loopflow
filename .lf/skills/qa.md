@@ -295,7 +295,7 @@ home cannot get without real OAuth (`--import` checks the token against
 Anthropic). To drive real headless Task runs anyway, run a throwaway
 `rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
 `tests/session_steers.rs`'s `connect_fixture_account` does, against the private
-store, then delete it. Do not repeat this with the installed release: its
+store, then delete it. Do not repeat this with release 0.15.3: its
 launch from a private home tries to write a Claude Keychain item. Dead
 AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
 Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder

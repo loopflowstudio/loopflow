@@ -574,6 +574,8 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
+View a Session's running terminal from a phone: request a ticket on the control
+connection, then redeem it on a separate bridge from the same device and account.
 This planned contract requires LOO-718's authenticated remote transport.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host

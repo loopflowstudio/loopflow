@@ -9,15 +9,16 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 15:42 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
-`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main was
+At 16:40 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
+`7e779e650b72ccb806888713c4e3d8756445fb82`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs`. `lf task status LOO-718 --json` reported `feature` / `demo`.
-Implementation and authenticated acceptance require that landing; the Graph
-decision must stop for this external dependency. Landing PR #1812 is outside
-this Task's scope. Reinspect its shared store and endpoints after it lands.
+`server/ticket.rs`. `lf task status LOO-718 --json` still reported
+`feature` / `demo`. Implementation and authenticated acceptance require that
+landing. Landing PR #1812 is outside this Task's scope. Reinspect its shared
+store and endpoints after it lands; the remaining acceptance below still applies.
 
-At that revision, both WebSocket paths authenticate with node/user identity,
+At the previously inspected `ac2cba2a3b6b28be3b1e3fb97d609221981f126e`,
+both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.
 Only bulk tickets have direct store coverage; background expiry already releases
 abandoned bulk reservations. `mobile-same-device` permits the host's own node
@@ -42,6 +43,9 @@ the socket peer UID against the server's effective UID. Keep that admission
 model; local/remote separation does not require a second per-ticket UID field.
 
 ## Implementation and acceptance
+
+Read the shipping docs in this checkout before implementation:
+`docs/server.md` and `rust/loopflow/src/server/README.md`.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Test matching node/user success once, different node,

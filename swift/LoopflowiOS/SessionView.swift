@@ -81,7 +81,7 @@ struct SessionView: View {
 
     private var keys: some View {
         HStack(spacing: 0) {
-            ForEach(TerminalKey.allCases, id: \.self) { key in
+            ForEach(DesktopKey.phoneRow, id: \.self) { key in
                 Button { actions.press(key) } label: {
                     Image(systemName: key.symbol).frame(maxWidth: .infinity, minHeight: 44)
                 }

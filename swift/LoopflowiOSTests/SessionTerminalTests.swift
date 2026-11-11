@@ -37,7 +37,7 @@ final class SessionTerminalTests: XCTestCase {
         XCTAssertTrue(done(), what)
     }
 
-    private func sent(_ key: TerminalKey) -> String {
+    private func sent(_ key: DesktopKey) -> String {
         written = Data()
         terminal.press(usage: key.usage)
         wait("\(key.title) sent nothing") { !written.isEmpty }

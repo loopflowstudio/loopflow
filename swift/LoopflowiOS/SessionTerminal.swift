@@ -2,9 +2,10 @@ import Loopflow
 import SwiftUI
 import UIKit
 
-/// Keys a provider's menus need that a reply field cannot type.
-enum TerminalKey: CaseIterable {
-    case escape, tab, up, down, left, right, enter
+/// The keys a provider's menus need that a reply field cannot type, in the
+/// key row's order. The keys are Desktop's; the codes are this platform's.
+extension DesktopKey {
+    static let phoneRow: [DesktopKey] = [.escape, .tab, .up, .down, .left, .right, .enter]
 
     var title: String {
         switch self {
@@ -15,6 +16,10 @@ enum TerminalKey: CaseIterable {
         case .left: "Left"
         case .right: "Right"
         case .enter: "Return"
+        case .backspace: "Delete"
+        case .delete: "Forward Delete"
+        case .home: "Home"
+        case .end: "End"
         }
     }
 
@@ -27,10 +32,14 @@ enum TerminalKey: CaseIterable {
         case .left: "arrow.left"
         case .right: "arrow.right"
         case .enter: "return"
+        case .backspace: "delete.left"
+        case .delete: "delete.right"
+        case .home: "arrow.up.to.line"
+        case .end: "arrow.down.to.line"
         }
     }
 
-    /// The key's USB keyboard usage, which is how the terminal names keys.
+    /// The key's USB keyboard usage, which is how the terminal names keys on iOS.
     var usage: UInt32 {
         switch self {
         case .escape: 0x29
@@ -40,6 +49,10 @@ enum TerminalKey: CaseIterable {
         case .left: 0x50
         case .right: 0x4F
         case .enter: 0x28
+        case .backspace: 0x2A
+        case .delete: 0x4C
+        case .home: 0x4A
+        case .end: 0x4D
         }
     }
 }
@@ -49,7 +62,7 @@ enum TerminalKey: CaseIterable {
 final class TerminalActions {
     fileprivate weak var controller: SessionTerminalController?
     func reply(_ text: String) { controller?.reply(text) }
-    func press(_ key: TerminalKey) { controller?.press(key) }
+    func press(_ key: DesktopKey) { controller?.press(key) }
 }
 
 struct SessionTerminal: UIViewControllerRepresentable {
@@ -180,7 +193,7 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
         showLatest()
     }
 
-    func press(_ key: TerminalKey) { terminal.press(usage: key.usage) }
+    func press(_ key: DesktopKey) { terminal.press(usage: key.usage) }
 
     @objc private func focusTerminal() { terminal.becomeFirstResponder() }
 

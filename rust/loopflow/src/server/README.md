@@ -362,12 +362,12 @@ part of what a phone or bot client is offered.
   connection. A separate bridge sends `{"type":"attach","ticket":"<ticket>"}`
   as its only JSON message. After `bridged {owner_lf_process_id}`, it speaks the
   [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
-  as 22 base64url characters, opens one bridge, lasts 60 seconds and is bound
-  to the requesting client's Unix peer UID on the local socket; remote clients
-  follow the [remote attach contract](#remote-attach-contract). Presenting a
-  ticket consumes it even when the UID does not match. An unknown, spent,
-  expired or foreign ticket is `not_found` with a null `id` and closes the
-  connection. Bridges do not occupy the 64 client slots.
+  as 22 base64url characters, opens one bridge and lasts 60 seconds. It is bound
+  to the requesting client's Unix peer UID. Every redemption attempt consumes
+  the ticket, including a UID mismatch. Remote identity and sleep-aware expiry
+  are planned in the [remote attach contract](#remote-attach-contract).
+  An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
+  and closes the connection. Bridges do not occupy the 64 client slots.
   The owner is the LfProcess holding the Session's terminal (`lf session
   serve`), never the provider's AgentProcess beneath it. The server resolves the
   Session's current owner when it issues the ticket, without starting a provider.
@@ -574,9 +574,9 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
+This planned contract requires LOO-718's authenticated remote transport.
 Request a ticket, then redeem it on a separate connection to view a Session's
-running terminal. This contract is planned for
-[Phone access](../../../../docs/server.md#phone-access).
+running terminal.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
 owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
@@ -611,11 +611,11 @@ redeemed, attachment returns `not_found {owner_lf_process_id}`. For reconnection
 and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 
-Each ticket opens one bridge within 60 seconds of issue, including host sleep;
-expiry does not close an open bridge. Every terminal redemption attempt consumes
-the ticket. Unknown, spent, expired or identity-mismatched tickets return
-`not_found` with a null `id` and close the bridge connection. Retry with a fresh
-ticket and bridge.
+Each ticket opens one bridge and expires 60 seconds after issue, including host
+sleep; expiry does not close an open bridge. Every admitted terminal redemption
+attempt consumes the ticket, including identity and local/remote mismatches.
+Unknown, spent, expired or mismatched tickets return `not_found` with a null
+`id` and close the bridge connection. Retry with a fresh ticket and bridge.
 
 ## Subscription cost experiment
 

@@ -110,15 +110,14 @@ helper. For a mismatched build or another startup error, read the diagnosis from
 
 ## Phone access
 
-This version provides local client access. Authenticated remote access and the
-native phone client are separate work in LOO-718; local server readiness alone
-does not mean a phone can connect. Pairing a phone will grant client access to a
-host, independently of adding a Machine as an execution destination.
+Phone access requires the authenticated remote transport in LOO-718, which is
+not part of this build. Local server readiness and adding a Machine as an
+execution destination do not grant phone access.
 
 The planned [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
 lets a phone view a Session's running terminal without starting or resuming a
-provider. Request a ticket, then open a separate terminal connection from the
-same authenticated device and account.
+provider. The phone connects as the host owner's Tailscale user, requests a
+ticket, then opens a separate terminal connection from the same device and account.
 
 Local use needs no network listener. Keep the local socket private; remote
 clients require their own authenticated endpoint.

@@ -465,6 +465,16 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         store.session_steers(session, 0, 32).unwrap().items[0].evidence,
         "uncertain"
     );
+    let mut next_tool = payload.clone();
+    next_tool["tool_use_id"] = serde_json::json!("handoff-tool-next");
+    assert!(hook(next_tool).status.success());
+    let confirmed = &store.session_steers(session, 0, 32).unwrap().items[0];
+    assert_eq!(confirmed.steer.id, direction.id);
+    assert_eq!(
+        (confirmed.evidence.as_str(), confirmed.attempt),
+        ("emitted", 0),
+        "a later hook named the batch the first one printed"
+    );
     let pending = store
         .save_session_steer(session, "Fixture author", "NEXT_DIRECTION")
         .unwrap();
@@ -481,16 +491,29 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     let rejected = String::from_utf8_lossy(&rejected.stdout);
     assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
-    // Exercise the shipped OpenCode transform against the real receipt command.
+    // Exercise the shipped OpenCode plugin against the real Machine server.
     // Internal stream retries reuse one transformed value; a later callback has
     // another adapter invocation and must replace that ephemeral context copy.
+    // The plugin keeps the batches it printed in its own memory, so it names
+    // only its own: the hook's batch was confirmed by a hook above.
     let plugin = home.path().join("transform.mjs");
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
         serde_json::from_slice(&fs::read(delivery_path).unwrap()).unwrap();
-    fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}",
-        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true}),
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["server", "status"])
+        .env("LF_HOME", home.path())
+        .output()
+        .unwrap();
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let plugin_server = serde_json::json!({"socket":status["socket"],
+        "revision":loopflow::server::wire::REVISION,
+        "min_revision":loopflow::server::wire::MIN_REVISION,
+        "platform":std::env::consts::OS, "name":"lf opencode plugin", "version":"fixture"});
+    fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}\n{}",
+        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true,"server":plugin_server}),
         serde_json::to_string(delivery_path).unwrap(),
+        include_str!("../src/harness/server_connection.js"),
         include_str!("../src/harness/context_opencode.js"))).unwrap();
     let probe = home.path().join("transform-proof.mjs");
     fs::write(
@@ -498,6 +521,8 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         r#"
 import assert from 'node:assert/strict';
 import plugin from './transform.mjs';
+// The plugin's server sockets are unref'd; keep the probe alive until done.
+const alive = setInterval(() => {}, 1000);
 const hooks = {};
 await plugin.setup({session:{hook:async(name, callback) => { hooks[name] = callback; }},event:{subscribe:async function*(){}}});
 const output = {sessionID:'handoff-native',system:[],messages:[]};
@@ -509,6 +534,7 @@ const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
 await hooks.context(afterLostTransform);
 assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
 assert.equal(output.messages.length,0); // stored/native conversation remains untouched
+clearInterval(alive);
 
 "#,
     )
@@ -537,23 +563,6 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
             .unwrap()
             .evidence,
         "emitted"
-    );
-    assert_eq!(
-        page.items
-            .iter()
-            .find(|row| row.steer.id == direction.id)
-            .unwrap()
-            .attempt,
-        0
-    );
-    assert_eq!(
-        page.items
-            .iter()
-            .find(|row| row.steer.id == direction.id)
-            .unwrap()
-            .evidence,
-        "emitted",
-        "a later hook named the batch the first one printed"
     );
     store
         .save_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")

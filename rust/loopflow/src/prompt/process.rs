@@ -198,6 +198,7 @@ fn prepare_prompt(
     let launch = AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,
+        claude_model: config.claude.model.clone(),
         session_attachment: None,
         system_prompt,
         conversation_context,

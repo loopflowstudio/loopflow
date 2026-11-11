@@ -304,6 +304,7 @@ Checks (November 11, managed resume):
 
 - `--test integration session_steers::an_interactive_task_resume_with_no_machine_server_fails_naming_it` — passes; fails without `config.managed = managed` (the resume succeeds)
 - `--lib -- ops::human_session:: lf::commands::util::tests::` — 53 pass; `session_cli_tests::session_cli_uses_one_truthful_resolution_contract` — passes
+- Compress: both `-i --task` server tests share the `InteractiveTask` fixture; `--test integration session_steers::an_interactive_task` — 2 pass; clippy on the integration target clean
 - Gate: `test(session_steers::) | test(session_cli_tests::) | test(context_launch_tests::) | test(ops::human_session::)`, clippy
 
 Checks (November 11, managed by command and boundary queries):

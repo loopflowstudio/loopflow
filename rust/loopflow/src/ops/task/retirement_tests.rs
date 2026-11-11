@@ -208,7 +208,19 @@ fn retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout() {
         let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
         assert!(error.to_string().contains("Retained PR-less checkout"));
         assert_eq!(fixture.intent().phase, "closing");
-        assert!(super::owner_retiring(&fixture.store.sqlite, &owner).unwrap());
+        fixture
+            .sql()
+            .execute(
+                "UPDATE tasks SET planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1",
+                [fixture.task.id.as_str()],
+            )
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .record_owner_viewer_hold(&owner, Some(ViewerHold::Absent(0)))
+            .unwrap();
+        assert!(super::owner_task_completed(&fixture.store.sqlite, &owner).unwrap());
         fixture.assert_retained();
     });
 }

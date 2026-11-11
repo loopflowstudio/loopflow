@@ -168,10 +168,10 @@ fn ending_order_fixture() {
         let repo = store.ensure_repository("/fixture")?;
         let conn = rusqlite::Connection::open(guard.home().join("loopflow.db"))?;
         conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at)
-            VALUES(?1,?2,'END-1',1,'/fixture.task','task',1,'completed')", rusqlite::params![task.as_str(),repo.as_str()])?;
+            VALUES(?1,?2,'END-1',1,'/fixture.task','task',1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()])?;
         conn.execute("UPDATE agent_sessions SET task_id=?1 WHERE id='session'", [task.as_str()])?;
-        conn.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-            VALUES(?1,'completed','/fixture.task','task',0,'closing')", [task.as_str()])?;
+        conn.execute("UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1", [owner.as_str()])?;
+        assert!(crate::ops::task::retirement::owner_task_completed(&store, &owner)?);
         let result = super::serve(&["/bin/sleep".into(), "30".into()], true);
         assert_eq!(result.unwrap_err().to_string(), "ending candidate vetoed");
         let _ = std::fs::remove_file(super::endpoint(&owner)?);

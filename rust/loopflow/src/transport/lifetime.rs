@@ -1,8 +1,8 @@
 //! When a Session owner ends itself.
 //!
 //! Conversations stay resident until their scope closes or someone quits them.
-//! Task abandonment ends unviewed conversations even during a turn. Completed
-//! Task retirement ends eligible owners after its absence grace, once live work
+//! Task abandonment ends unviewed conversations even during a turn.
+//! Task completion ends eligible owners after its viewing grace, once live work
 //! settles. Desktop shells end through Close or Task retirement.
 //! `lf resume` and `lf process rollover` can replace an owner explicitly; unsent
 //! input is lost when replacing its provider. Ending saves the screen and
@@ -18,7 +18,7 @@ use anyhow::Result;
 
 use super::wire::Event;
 use crate::id::LfProcessId;
-use crate::ops::task::retirement::owner_retiring;
+use crate::ops::task::retirement::owner_task_completed;
 use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::ViewerHold;
 use crate::store::RecordingGap;
@@ -92,10 +92,10 @@ impl Ending {
         if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
             return Ok(None);
         }
-        if owner_retiring(&store, owner)? {
+        if owner_task_completed(&store, owner)? {
             return Ok(Some(Event::Control {
                 held: false,
-                notice: Some("Completed Task workspace retired".into()),
+                notice: Some("Task completed".into()),
             }));
         }
         Ok(None)
@@ -136,6 +136,7 @@ fn watch(
     let mut shell_failure = RecordingGap::default();
     let mut retention_failure = RecordingGap::default();
     let mut abandonment_failure = RecordingGap::default();
+    let mut completion_failure = RecordingGap::default();
     let mut retained: Option<OwnerRetention> = None;
     let mut next_poll = Instant::now() + POLL;
     let mut activity = Activity::default();
@@ -172,6 +173,10 @@ fn watch(
         {
             recorded_hold = Some(hold);
         }
+        // Stale viewing cannot authorize closure while recording is unavailable.
+        if recorded_hold != Some(hold) {
+            continue;
+        }
         // Shell purpose is fixed at creation. Running lf inside an ordinary
         // shell must keep its Close policy even when it runs nested lf work.
         match report_result(
@@ -197,10 +202,16 @@ fn watch(
                 store.owner_task_abandoned(owner),
             )
             .unwrap_or(false);
-        // Abandonment ends even live work; only completed-Task retirement
+        // Abandonment ends even live work; only completed-Task closure
         // needs a retention judgment.
         if !abandoned {
-            if !owner_retiring(store, owner).unwrap_or(false) {
+            if !report_result(
+                &mut completion_failure,
+                "Task completion",
+                owner_task_completed(store, owner),
+            )
+            .unwrap_or(false)
+            {
                 continue;
             }
             let Some(retention) = report_result(
@@ -306,29 +317,22 @@ mod tests {
     }
 
     #[test]
-    fn workspace_retirement_waits_for_final_work_and_pending_requests() {
+    fn completed_task_waits_for_final_work_and_pending_requests() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let owner = store.test_lf_process();
         let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = crate::durable::TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,'/repo.task','task',1,'completed')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
         conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
-        let intent = store
-            .reconcile_task_retirement(&task, 0, None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(intent.due_at, Some(900));
-        // Silent work remains protected past the checkout's deadline, including
+        // Silent work remains protected past the viewing deadline, including
         // a queued ending whose activity never saw another output byte.
         let candidate = Ending {
             activity: Activity::default(),
         };
-        store.reconcile_task_retirement(&task, 3600, None).unwrap();
-        store.retirement_progress(&intent, "closing", None).unwrap();
         for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
             conn.execute(
                 "UPDATE session_activity SET open_tools=?1,pending_input=?2,yielded=?3",
@@ -368,7 +372,7 @@ mod tests {
         let graph = store.test_lf_process();
         conn.execute(
             "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-            VALUES(?1,'{}','implement','{}',?2,1)",
+            VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,1)",
             rusqlite::params![task.as_str(), graph],
         )
         .unwrap();
@@ -383,15 +387,50 @@ mod tests {
             .confirm(&owner, Activity::default(), false)
             .unwrap()
             .is_some());
-        assert_eq!(
-            store.task_retirement(&task).unwrap().unwrap().due_at,
-            Some(900)
-        );
+        assert!(store.task_retirement(&task).unwrap().is_none());
+        // Another conversation's pending request holds the whole Task, including
+        // when its Session belongs through the checkout instead of a binding.
+        let other = store.test_lf_process();
+        let live = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        conn.execute(
+            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+            rusqlite::params![other, live.pid, live.started_at],
+        )
+        .unwrap();
+        store.test_session("other", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE tasks SET worktree='/repo.task',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
+        conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',interactive=1,transport_lf_process_id=?1,agent_process_id=?1 WHERE id='other'", [&other]).unwrap();
+        conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('other',?1,1,0,1,1)", [&other]).unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_none());
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=1 WHERE id='other'",
+            [],
+        )
+        .unwrap();
+        assert!(candidate
+            .confirm(&owner, Activity::default(), false)
+            .unwrap()
+            .is_some());
         // Explicit Close of a shell also respects a nested requested turn.
         store
             .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap();
         store.bind_desktop_shell("shell", &owner).unwrap();
+        conn.execute(
+            "UPDATE tasks SET worktree='/repo.task',branch='task' WHERE id=?1",
+            [task.as_str()],
+        )
+        .unwrap();
+        let intent = store
+            .reconcile_task_retirement(&task, 0, None)
+            .unwrap()
+            .unwrap();
+        store.retirement_progress(&intent, "closing", None).unwrap();
         for close in [1, 2] {
             conn.execute("UPDATE desktop_shells SET close_requested=?1", [close])
                 .unwrap();
@@ -410,12 +449,81 @@ mod tests {
     }
 
     #[test]
+    fn completed_task_closure_rechecks_scope_grace_and_store_availability() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
+            VALUES(?1,?2,'CLOSE-2',1,1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
+        let owner = store.test_lf_process();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='session'",
+            rusqlite::params![task.as_str(),owner]).unwrap();
+        let activity = Activity::default();
+        let candidate = Ending { activity };
+        assert!(candidate
+            .confirm(&owner, activity, false)
+            .unwrap()
+            .is_some());
+        for change in [
+            "UPDATE tasks SET planning_completed=0",
+            "UPDATE tasks SET planning_completed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')",
+            "UPDATE agent_sessions SET transport_lf_process_id=NULL",
+            "UPDATE agent_sessions SET primary_scope='repository'",
+            "UPDATE agent_sessions SET primary_scope='wave'",
+            "UPDATE processes SET started_at=unixepoch()",
+            "UPDATE processes SET viewer_hold='absent',viewer_hold_at=unixepoch()",
+        ] {
+            conn.execute_batch(change).unwrap();
+            assert!(
+                candidate
+                    .confirm(&owner, activity, false)
+                    .unwrap()
+                    .is_none(),
+                "{change}"
+            );
+            conn.execute_batch("UPDATE tasks SET planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z';
+                UPDATE agent_sessions SET primary_scope=NULL;
+                UPDATE processes SET started_at=1,viewer_hold=NULL,viewer_hold_at=NULL;").unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?1",
+                [&owner],
+            )
+            .unwrap();
+        }
+        conn.execute_batch("UPDATE tasks SET planning_completed_at=NULL,updated_at=unixepoch()")
+            .unwrap();
+        assert!(candidate
+            .confirm(&owner, activity, false)
+            .unwrap()
+            .is_none());
+        conn.execute_batch("UPDATE tasks SET updated_at=1").unwrap();
+        assert!(candidate
+            .confirm(&owner, activity, false)
+            .unwrap()
+            .is_some());
+        assert!(store.task_retirement(&task).unwrap().is_none());
+        // An unreadable store cannot authorize an already queued ending.
+        conn.execute_batch("DROP TABLE task_graphs").unwrap();
+        assert!(candidate.confirm(&owner, activity, false).is_err());
+    }
+
+    #[test]
     fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let owner = store.test_lf_process();
         let db = guard.home().join("loopflow.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
+        let repo = store.ensure_repository("/repo").unwrap();
+        let task = crate::durable::TaskId::new();
+        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
+            VALUES(?1,?2,'RETRY-1',1,1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='session'",
+            rusqlite::params![task.as_str(),owner]).unwrap();
         conn.execute(
             "UPDATE processes SET viewed=1 WHERE id=?1",
             [owner.as_str()],
@@ -427,7 +535,7 @@ mod tests {
         )
         .unwrap();
         let (activity, changes) = std::sync::mpsc::channel();
-        let (end, _ending) = std::sync::mpsc::channel();
+        let (end, ending) = std::sync::mpsc::channel();
         let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
@@ -440,10 +548,14 @@ mod tests {
                 viewed: false,
                 viewers: 2,
                 output: 0,
-                hold: None,
+                hold: Some(crate::store::sqlite::ViewerHold::Absent(0)),
             })
             .unwrap();
         std::thread::sleep(super::POLL * 2);
+        assert!(
+            ending.try_recv().is_err(),
+            "failed viewing writes cannot authorize closure"
+        );
         conn.execute_batch("DROP TRIGGER reject_viewer_change")
             .unwrap();
         let deadline = std::time::Instant::now() + super::POLL * 3;
@@ -456,8 +568,13 @@ mod tests {
                 .unwrap();
             std::thread::sleep(Duration::from_millis(20));
         }
+        let recovered = ending.recv_timeout(super::POLL * 2);
         drop(activity);
         policy.join().unwrap();
+        assert!(
+            recovered.is_ok(),
+            "closure retries after recording recovers"
+        );
         assert!(
             !viewed,
             "a recovered store must not retain stale viewer state"

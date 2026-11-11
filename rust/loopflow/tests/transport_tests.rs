@@ -844,6 +844,15 @@ fn conversation_open_pending_retry_waits_for_the_controlling_viewers_readiness()
 
 #[test]
 fn conversation_open_continues_closed_history_without_replaying_the_request() {
+    reopen_conversation(false);
+}
+
+#[test]
+fn completed_task_closes_a_conversation_resumed_after_checkout_retirement() {
+    reopen_conversation(true);
+}
+
+fn reopen_conversation(retired: bool) {
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/bin/sh
@@ -889,6 +898,20 @@ read -r answer < /dev/tty
             .to_string(),
     )
     .unwrap();
+    if retired {
+        let task = complete_conversation(&fixture, &first);
+        sql.execute(
+            "UPDATE tasks SET worktree=?2,branch='retired' WHERE id=?1",
+            rusqlite::params![task, fixture.repo.path().join("removed").to_str().unwrap()],
+        )
+        .unwrap();
+        sql.execute(
+            "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
+            SELECT id,planning_completed_at,worktree,branch,0,'retired' FROM tasks WHERE id=?1",
+            [&task],
+        )
+        .unwrap();
+    }
     let output = fixture
         .command(&["open", "--session", &session, "--focus", "--json"])
         .env("PATH", &path)
@@ -923,9 +946,36 @@ read -r answer < /dev/tty
         !args.iter().any(|arg| arg == "--"),
         "no new prompt: {args:?}"
     );
-    viewer.input("done\n");
-    viewer.finish();
-    fixture.ends(&owner);
+    if retired {
+        drop(viewer);
+        fixture.wait_viewed(&owner, false);
+        // Resumption keeps the Task done and the retirement finished. Advance
+        // only the new owner's absence, then let its real policy close it.
+        sql.execute(
+            "UPDATE processes SET viewer_hold_at=0 WHERE id=?1",
+            [&owner],
+        )
+        .unwrap();
+        fixture.ends(&owner);
+        let (done, phase): (bool, String) = sql.query_row(
+            "SELECT t.planning_completed,h.phase FROM tasks t JOIN task_retirements h ON h.task_id=t.id",
+            [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert!(done);
+        assert_eq!(phase, "retired");
+        assert_eq!(
+            sql.query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [&session],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            native
+        );
+    } else {
+        viewer.input("done\n");
+        viewer.finish();
+        fixture.ends(&owner);
+    }
     assert_eq!(fixture.launches(2).len(), 2);
 }
 
@@ -3046,8 +3096,8 @@ fn interactive_graph_settles_each_step_before_starting_the_next() {
     fixture.ends(&owner);
 }
 
-/// Queue the same completed-Task closure the cleanup sweep gives the owner.
-fn retire_conversation(fixture: &Fixture, owner: &str) {
+/// Complete a Task without a checkout and advance its viewing grace.
+fn complete_conversation(fixture: &Fixture, owner: &str) -> String {
     fixture.wait_viewed(owner, false);
     let sql = fixture.sql();
     let session = fixture.bound_session(owner);
@@ -3081,25 +3131,18 @@ fn retire_conversation(fixture: &Fixture, owner: &str) {
         rusqlite::params![task, session],
     )
     .unwrap();
-    sql.execute("UPDATE tasks SET planning_completed=1,planning_completed_at='completion',worktree=?2,branch='task' WHERE id=?1",
-        rusqlite::params![task,fixture.repo.path().join(&task).to_str().unwrap()]).unwrap();
+    sql.execute("UPDATE tasks SET planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [&task]).unwrap();
     // Advance the existing absence grace without waiting fifteen minutes.
     sql.execute(
         "UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1",
         [owner],
     )
     .unwrap();
-    sql.execute(
-        "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-        SELECT id,planning_completed_at,worktree,branch,0,'closing' FROM tasks WHERE id=?1
-        ON CONFLICT(task_id) DO UPDATE SET due_at=0,phase='closing'",
-        [&task],
-    )
-    .unwrap();
+    task
 }
 
 #[test]
-fn completed_task_cleanup_ends_a_conversation_with_typed_input() {
+fn completed_task_without_checkout_ends_a_conversation_with_typed_input() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", "printf ready; read -r answer"]);
     let session = fixture.bound_session(&owner);
@@ -3108,8 +3151,12 @@ fn completed_task_cleanup_ends_a_conversation_with_typed_input() {
     viewer.input("unfinished draft");
     until_out(&mut viewer, "unfinished draft");
     drop(viewer);
-    retire_conversation(&fixture, &owner);
+    let task = complete_conversation(&fixture, &owner);
     fixture.ends(&owner);
+    let (no_checkout, no_retirement): (bool, bool) = fixture.sql().query_row(
+        "SELECT worktree IS NULL,NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=tasks.id) FROM tasks WHERE id=?1",
+        [&task], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert!(no_checkout && no_retirement);
     assert!(fixture
         .last_screen(&session)
         .text()
@@ -3568,7 +3615,7 @@ while True:
         let viewer = fixture.viewer(&owner, false);
         fixture.wait_file(&format!("{name}-started"));
         drop(viewer);
-        retire_conversation(&fixture, &owner);
+        complete_conversation(&fixture, &owner);
         owners.push(owner);
     }
     std::thread::sleep(Duration::from_secs(6));
@@ -3597,7 +3644,7 @@ while True:
         );
     }
     drop(viewed);
-    retire_conversation(&fixture, &owners[1]);
+    complete_conversation(&fixture, &owners[1]);
     // A live Graph continues to hold a supervisor after its native turn yields.
     let sql = fixture.sql();
     let graphs = if background {
@@ -3608,7 +3655,7 @@ while True:
             .map(|owner| {
                 sql.query_row(
                     "INSERT INTO graph_processes(lf_process_id,graph,compiled)
-                 SELECT id,'supervised','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
+                 SELECT id,'supervised','{\"name\":\"supervised\",\"steps\":[]}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
                  RETURNING lf_process_id",
                     [owner],
                     |row| row.get::<_, String>(0),

@@ -49,10 +49,11 @@ A line typed during "Finding conversation… Opening claude terminal" in the fir
 The reply arrived in the same second, while the lock was still held. Attaching <em>while</em> the lock was held waited for the release: 26.7 s against a 25 s lock.
 Then <code>quit⏎</code> ended the provider. No process from <code>/tmp/lf-qa-823c</code> remains.</p>
 
-<h2>4. transport_tests leaves no process</h2>
+<h2>4. Initial transport_tests run: startup failure, no new fixture process</h2>
 <p><code>uv run cargo test -p loopflow --test transport_tests</code>: 109 passed, 1 failed, 8 ignored, 117.9 s. The failure,
 <code>unanswering_superseded_owner_preserves_pending_turn_and_queued_input</code>, hit the viewer's 15 s read timeout waiting for <code>EDITOR_READY</code>.
-That startup code is the same as on main (this branch renamed the test and changed its later assertions). Run alone, it passed twice (19 s, 28 s).
+At that point the startup code was the same as on main (this branch renamed the test and changed its later assertions). Run alone, it passed twice (19 s, 28 s);
+those isolated passes did not resolve the suite failure. The repair and full-suite verification are recorded below.
 <code>ps</code> filtered to lf/provider/Dev-app commands, before and after: 587 → 588 lines. These were the new PIDs, none from this checkout's <code>target/</code> or a fixture home:</p>
 <pre>41703 Wed Nov 11 03:35:43 2026     /Applications/Loopflow.app/Contents/MacOS/lf --batch --skill-input /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmplLptS6 skill im
 43506 Wed Nov 11 03:35:45 2026     codex app-server --listen unix:///var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmproHYhA/agent.sock
@@ -102,12 +103,14 @@ No retry, raised deadline or product lifetime change. The temporary launcher was
 <p><code>uv run cargo test -p loopflow --test transport_tests</code>: <b>110 passed, 8 ignored</b>, 129.20 s after the repair.
 Before/after <code>ps</code> found no new fixture processes; all 34 fixture homes observed by a descendant sampler had no remaining processes.
 The unchanged baseline passed too (117.12 s); the controlled startup delay supplies the failure reproduction.</p>
+<p>After the retirement simplification, the full suite passed again: <b>110 passed, 8 ignored</b>, 111.84 s.
+Sampling tracked 797 descendant PIDs and 94 fixture home paths; none remained. Before/after <code>ps</code> found no new fixture/build matches.</p>
 
 <h2>What works now</h2>
 <ul><li>Quiet, unviewed Task conversations with a draft keep running while the Task is open.</li>
 <li>Completing the Task ends the conversation after the viewing grace, with or without a PR. A PR-less checkout is kept.</li>
 <li>Returning shows the saved screen and the same history, with an empty editor. Input does not wait on a locked store.</li>
-<li>transport_tests leaves no process. The audit count matches <code>ps</code>.</li></ul>
+<li>The repaired transport suite passes and leaves no new fixture process. The saved audit counts need regeneration with the corrected executable selector.</li></ul>
 <h2>Not reached</h2>
 <ul><li>A return <em>before</em> cleanup cancelling it: not walked in real time (another 15 minutes). Covered by <code>retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion</code>.</li>
 <li>Desktop windows: no window was opened in this run.</li><li>Real Claude/Codex providers: the stand-in provider only.</li></ul>

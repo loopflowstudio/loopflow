@@ -348,7 +348,8 @@ writes a private Machine whose `bin/claude` stand-in echoes each line; its
 printed environment holds `LF_HOME`, the provider homes and `PATH`. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without
 Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
-schedules cleanup in a private home; call `lf task retire <task>` once a minute
-yourself (the installed `com.loopflow.cleanup` job does the same). After
-`lf task complete`, it ends the owner once fifteen minutes have passed without
-a viewer.
+schedules checkout cleanup in a private home; call `lf task retire <task>` to
+exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
+After `lf task complete`, the owner ends itself once fifteen minutes have passed
+without a viewer and live work has settled, even without a checkout or cleanup
+sweep.

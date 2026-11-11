@@ -174,7 +174,7 @@ pub(crate) fn close_allowed(
     };
     let requested = match close {
         1 => true,
-        2 => crate::ops::task::retirement::owner_retiring(store, owner)?,
+        2 => crate::ops::task::retirement::shell_retiring(store, owner)?,
         _ => false,
     };
     Ok(Some(

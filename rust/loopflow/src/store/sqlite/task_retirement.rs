@@ -209,15 +209,43 @@ impl SqliteStore {
             params![intent.task_id.as_str(),intent.completion,intent.checkout,intent.branch,phase,reason])? == 1)
     }
 
-    pub(crate) fn owner_retiring_tasks(&self, owner: &LfProcessId) -> StoreResult<Vec<TaskId>> {
+    /// Completed Tasks whose current conversations have had their viewing grace.
+    /// A never-viewed owner starts its grace at launch; resumption has no dependency
+    /// on whether the checkout's retirement was ever scheduled or finished.
+    /// Missing completion dates use the Task update, as closed-Task ordering does.
+    pub(crate) fn owner_completed_tasks(
+        &self,
+        owner: &LfProcessId,
+        now: i64,
+    ) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!("SELECT h.task_id FROM task_retirements h
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT tw.id FROM agent_sessions s
+             JOIN tasks tw ON ({}) JOIN processes p ON p.id=s.transport_lf_process_id
+             WHERE p.id=?1 AND s.completed_at IS NULL AND s.interactive=1
+               AND tw.planning_completed=1 AND tw.abandoned_at IS NULL
+               AND (CASE WHEN tw.planning_completed_at IS NULL THEN tw.updated_at
+                    ELSE unixepoch(tw.planning_completed_at) END)+?3<=?2
+               AND COALESCE(p.viewer_hold_at,p.started_at)+?3<=?2
+               AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
+                   WHERE tg.task_id=tw.id AND g.completed_at IS NULL)",
+            super::task_work::session_membership("s")
+        ))?;
+        let tasks = query
+            .query_map(params![owner, now, WORKSPACE_GRACE], |r| {
+                Ok(TaskId::from_raw(r.get::<_, String>(0)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(tasks)
+    }
+
+    pub(crate) fn shell_retiring_tasks(&self, owner: &LfProcessId) -> StoreResult<Vec<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare("SELECT h.task_id FROM task_retirements h
             WHERE h.phase='closing'
                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
                     WHERE tg.task_id=h.task_id AND g.completed_at IS NULL)
-                AND (
-                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.transport_lf_process_id=?1)
-                OR EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
+                AND EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1)")?;
         let tasks = query
             .query_map([owner], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
             .collect::<rusqlite::Result<_>>()?;

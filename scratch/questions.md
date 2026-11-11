@@ -26,3 +26,11 @@ LOO-829 (`task_c118380f31f14d07ba28669499efa395`) removes the ignored
 `session.end_detached_after` parser after LOO-823 ships; Linear sync was confirmed
 2026-11-11. The `processes.native_input` column remains
 until a staged contract migration can remove it; runtime no longer uses it.
+
+2026-11-11 implementation assumption: a resumed owner that has never had a viewer
+uses its existing Process launch time for the fifteen-minute grace; Task completion
+is also a lower bound. No new timer record is needed. This matches returning to a
+closed Task without making a finished checkout retirement exempt new execution.
+For a completed Task lacking a completion date, its existing update time supplies
+the lower bound, matching closed-Task ordering; malformed dates cannot authorize
+closure.

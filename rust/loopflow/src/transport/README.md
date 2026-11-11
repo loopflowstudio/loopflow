@@ -71,7 +71,8 @@ cursor position. Returning to the shell must not home the cursor or overwrite
 the command's output.
 
 Conversations stay running while their scope is open. Completed Tasks end their
-conversations through retirement; abandonment ends unviewed Task conversations,
+conversations after the viewing grace, with or without a checkout; abandonment
+ends unviewed Task conversations,
 even during a turn. Wave, repository and bare conversations run until their
 agent quits.
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
@@ -351,15 +352,21 @@ An owner's dated observation expires too if it crashes, so a stale Process row
 cannot retain a completed workspace indefinitely. The Machine's scheduled cleanup
 pass also reconciles viewed Tasks and uses that same absence window after owner loss.
 
-A completed, released Task keeps its checkout and Desktop shells for fifteen
-minutes total, then ends eligible unviewed agents as well. A returning
-viewer cancels that deadline and its queued automatic shell closes in the same
-write that records viewing, without waiting for a sweep; leaving again starts
-a new one. Owners recheck current Task viewing before consuming automatic closure.
-Explicit Close remains effective. Requested active work, pending requests
-and running Graphs still prevent ending execution; finishing that work does not
-restart an already-due deadline. Completion and PR landing schedule one retirement pinned
-to the completion, checkout and branch; reopen or changed placement revokes it.
+A done Task ends its eligible conversations after fifteen minutes without
+viewing, independently of checkout retirement. The grace starts no earlier than
+completion; a newly resumed, never-viewed owner starts it at launch. A returning
+viewer cancels closure; leaving again starts a new grace. Owners recheck current
+Task membership, completion and viewing before ending. Requested active work,
+pending requests and running Graphs still hold execution; their completion does
+not restart a deadline. Store failures cannot authorize closure. Returning after
+cleanup continues saved provider history without reopening the Task, and the same
+closure rule applies even after its checkout has been retired.
+
+Checkout and Desktop shell cleanup use the same fifteen-minute viewing grace.
+Renewed viewing also cancels queued automatic shell closes in the same write,
+without waiting for a sweep. Explicit Close remains effective. Completion and PR
+landing schedule one retirement pinned to the completion, checkout and branch;
+reopen or changed placement revokes it.
 Installation provisions a separate launchd/cron job running `lf task retire` once
 a minute. Each pass reads the local retirement queue, reconciles viewers, attempts
 eligible cleanup and exits. No Task owns a waiting cleanup process. Eligibility

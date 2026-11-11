@@ -1224,15 +1224,22 @@ async fn roadmap_snapshot(
     let shared = SharedTaskReads::read(store).await?;
     // The plan carries open Tasks; closed ones are paged by `lf task list --done`.
     // An exact Task lookup still finds a closed Task.
-    let mut tasks = match task {
-        Some(_) => store.list_tasks(None).await?,
-        None => store.list_open_tasks(None).await?,
-    };
-    if let Some(repo) = repo_scope {
+    let mut tasks = if let Some(repo) = repo_scope {
         let repo = crate::repository::CanonicalRepo::discover(repo)?;
-        let repository = store.sqlite.repository_id(&repo.to_string())?;
-        tasks.retain(|task| Some(&task.repository_id) == repository.as_ref());
-    }
+        match store.sqlite.repository_id(&repo.to_string())? {
+            Some(repository) => {
+                store
+                    .list_repository_tasks(&repository, task.is_some())
+                    .await?
+            }
+            None => Vec::new(),
+        }
+    } else {
+        match task {
+            Some(_) => store.list_tasks(None).await?,
+            None => store.list_open_tasks(None).await?,
+        }
+    };
     if let Some(selector) = task {
         // Identifiers may repeat across repositories. Resolve within each owner,
         // including cached repositories whose Git checkout is unavailable.
@@ -3020,6 +3027,99 @@ mod tests {
         MetricReadingDto, MetricStage, MetricUnknownCauseDto, Threshold,
     };
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn repository_roadmaps_keep_exact_closed_tasks_and_global_selection() {
+        let first = loopflow_test_support::TestRepo::new();
+        let second = loopflow_test_support::TestRepo::new();
+        let unknown = loopflow_test_support::TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("db");
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                database.clone(),
+            ))
+            .await
+            .unwrap(),
+        );
+        for repo in [&first, &second] {
+            let repository = store
+                .sqlite
+                .ensure_repository(
+                    &crate::repository::CanonicalRepo::discover(repo.path())
+                        .unwrap()
+                        .to_string(),
+                )
+                .unwrap();
+            for (label, closed, deleted) in [
+                ("DUP-1", false, false),
+                ("CLOSED-1", true, false),
+                ("DELETED-1", false, true),
+            ] {
+                let task = store
+                    .sqlite
+                    .create_task(&crate::work::task::NewTask {
+                        id: crate::durable::TaskId::new(),
+                        repository_id: repository.clone(),
+                        project_id: None,
+                        title: label.into(),
+                        description: String::new(),
+                        due_date: None,
+                    })
+                    .unwrap();
+                rusqlite::Connection::open(&database).unwrap().execute(
+                    "UPDATE tasks SET issue_identifier=?2,planning_completed=?3,planning_deleted_at=?4 WHERE id=?1",
+                    rusqlite::params![task.id.as_str(), label, closed, deleted.then_some(1)],
+                ).unwrap();
+            }
+        }
+        for (scope, selector, count, section) in [
+            (Some(first.path()), None, 1, TaskSection::Backlog),
+            (Some(first.path()), Some("DUP-1"), 1, TaskSection::Backlog),
+            (Some(second.path()), Some("DUP-1"), 1, TaskSection::Backlog),
+            (None, None, 2, TaskSection::Backlog),
+            (None, Some("DUP-1"), 2, TaskSection::Backlog),
+            (Some(first.path()), Some("CLOSED-1"), 1, TaskSection::Done),
+            (None, Some("CLOSED-1"), 2, TaskSection::Done),
+            (
+                Some(first.path()),
+                Some("DELETED-1"),
+                0,
+                TaskSection::Backlog,
+            ),
+            (Some(unknown.path()), None, 0, TaskSection::Backlog),
+        ] {
+            let snapshot = super::roadmap_snapshot(
+                &store,
+                Vec::new(),
+                false,
+                selector,
+                scope,
+                OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+            let super::Evidence::Ok { items, .. } = snapshot.tasks else {
+                panic!("Task inventory unavailable: {:?}", snapshot.tasks)
+            };
+            assert_eq!(items.len(), count, "{scope:?}, {selector:?}");
+            assert!(items.iter().all(|item| item.section == section));
+            if let Some(scope) = scope {
+                let repository = store
+                    .sqlite
+                    .repository_id(
+                        &crate::repository::CanonicalRepo::discover(scope)
+                            .unwrap()
+                            .to_string(),
+                    )
+                    .unwrap();
+                assert!(items
+                    .iter()
+                    .all(|item| Some(item.task.repository_id.as_str())
+                        == repository.as_ref().map(|id| id.as_str())));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn task_reference_names_recorded_checkout_machine_and_its_renames() {

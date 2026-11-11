@@ -94,8 +94,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = super::children::tasks_in(conn, None)?;
-    tasks.retain(|task| &task.repository_id == repository);
+    let mut tasks = super::children::tasks_in(conn, None, Some(repository))?;
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -1128,6 +1127,17 @@ mod tests {
     #[test]
     fn repository_queries_include_tasks_without_a_wave() {
         let (_dir, store, repo) = fixture();
+        let other = store.ensure_repository("/other").unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,created_at)
+             VALUES('task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?1,'FIX-2','Foreign',1)",
+                [other.as_str()],
+            )
+            .unwrap();
         store
             .conn
             .lock()
@@ -1140,6 +1150,12 @@ mod tests {
         let plan = store.view_plan(&repo, Some("task:FIX-2")).unwrap();
         assert_eq!(plan.contents.len(), 1);
         assert_eq!(plan.contents[0].title, "Idle");
+        assert!(store
+            .view_plan(&repo, None)
+            .unwrap()
+            .contents
+            .iter()
+            .all(|content| content.title != "Foreign"));
         assert!(store
             .view_plan(&repo, None)
             .unwrap()

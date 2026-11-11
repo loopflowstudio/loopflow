@@ -904,6 +904,43 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn provider_thread_lookup_keeps_newest_and_insertion_order_for_ties() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (id, thread, created) in [
+                ("older", Some("thread"), 1),
+                ("z-first", Some("thread"), 3),
+                ("a-tie", Some("thread"), 3),
+                ("late-insert", Some("thread"), 2),
+                ("other", Some("other-thread"), 4),
+                ("empty", Some(""), 5),
+                ("null", None, 6),
+            ] {
+                conn.execute(
+                    "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,provider_thread)
+                     VALUES(?1,?1,'human',?3,0,'/repo',?2)",
+                    rusqlite::params![id, thread, created],
+                ).unwrap();
+            }
+        }
+        let matches = store
+            .sessions_of_provider_threads(&[
+                "thread".into(),
+                "other-thread".into(),
+                "missing".into(),
+                "".into(),
+                "thread".into(),
+            ])
+            .unwrap();
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches["thread"], "z-first");
+        assert_eq!(matches["other-thread"], "other");
+        assert_eq!(matches[""], "empty");
+    }
+
+    #[test]
     fn native_event_preparation_stays_bounded_and_keeps_identity_checks() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

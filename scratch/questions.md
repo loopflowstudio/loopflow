@@ -37,3 +37,15 @@ Steers after kickoff, what remains and open choices: `loo-822.md`.
 
 Sync resolution: retain these Task assumptions; use `docs/dev/server-first.md`
 for the parent plan after its obsolete scratch plans were removed.
+
+- Session-list baseline, 2026-11-11: measure the existing branch without
+  implementing an optimization. Use release `lf`, warm filesystem caches,
+  the current checkout's default repository scope, and JSON for machine
+  validation. Provider transcripts remain in their normal homes, read-only
+  to the listing; the benchmark provider owns its normal transcript writes.
+
+- Session-list optimization plan, 2026-11-11: no final latency target was
+  supplied. Use 15% lower default CLI median and 25% lower served median as
+  provisional targets for the indexed-Task-lookup experiment, not a promise
+  or permission to change outputs. Keep the smaller query fixes separately
+  measurable; leave the unreproduced 75 s stall open.

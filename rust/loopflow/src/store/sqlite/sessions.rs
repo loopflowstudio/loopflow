@@ -456,7 +456,7 @@ fn observe_availability(conn: &Connection, mut now: i64) -> StoreResult<i64> {
     while crate::observe::active() {
         // Availability changes once at the next quiet deadline, not on every tick.
         let next: Option<i64> = conn.query_row(
-            "SELECT MIN(observed_at + ?1) FROM session_activity WHERE observed_at + ?1 > ?2",
+            "SELECT MIN(observed_at) + ?1 FROM session_activity WHERE observed_at > ?2 - ?1",
             rusqlite::params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
             |row| row.get(0),
         )?;
@@ -2153,6 +2153,56 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{GraphProcessSummaryState, SessionFilter};
+
+    #[test]
+    fn availability_deadlines_skip_the_boundary_and_advance_past_expired_rows() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let cache = std::sync::Arc::new(crate::observe::Cache::default());
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let quiet = crate::session::AVAILABILITY_QUIET_SECONDS;
+        // Empty activity has no next deadline (MIN returns NULL).
+        assert_eq!(
+            cache
+                .capture(|| super::observe_availability(&conn, now).unwrap())
+                .0,
+            now
+        );
+        for (id, deadline) in [
+            ("old", now - 20),
+            ("boundary", now - 10),
+            ("next", now - 5),
+            ("future", now + 3600),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+                VALUES(?1,?1,'human',1,0,'/repo')",
+                [id],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded)
+                VALUES(?1,?2,0,0,0)", params![id, deadline - quiet]).unwrap();
+        }
+        assert_eq!(
+            super::observe_availability(&conn, now - 10).unwrap(),
+            now - 10
+        );
+        // An already elapsed deadline must advance the captured reading. The
+        // exact boundary must be excluded or this loop would never advance.
+        assert_eq!(
+            cache
+                .capture(|| super::observe_availability(&conn, now - 10).unwrap())
+                .0,
+            now - 5
+        );
+        assert_eq!(
+            cache
+                .capture(|| super::observe_availability(&conn, now).unwrap())
+                .0,
+            now
+        );
+    }
 
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {

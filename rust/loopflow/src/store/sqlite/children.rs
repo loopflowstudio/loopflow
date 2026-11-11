@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, TaskState};
+use crate::durable::{Author, RepositoryId, TaskState};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
@@ -586,14 +586,29 @@ impl SqliteStore {
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        tasks_in(&conn, wave_id)
+        tasks_in(&conn, wave_id, None)
     }
 
     /// Tasks that are neither done nor abandoned: the live plan.
     pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
+        tasks_where(&conn, wave_id, None, &super::durable::task_open_sql("t"))
+    }
+
+    pub(crate) fn list_repository_tasks(
+        &self,
+        repository: &RepositoryId,
+        include_closed: bool,
+    ) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let condition = if include_closed {
+            "1".into()
+        } else {
+            super::durable::task_open_sql("t")
+        };
+        tasks_where(&conn, None, Some(repository), &condition)
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -2454,25 +2469,39 @@ pub(super) fn request_completion_in(
     Ok(Some(request))
 }
 
-pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, wave_id, "1")
+pub(super) fn tasks_in(
+    conn: &Connection,
+    wave_id: Option<&WaveId>,
+    repository: Option<&RepositoryId>,
+) -> StoreResult<Vec<Task>> {
+    tasks_where(conn, wave_id, repository, "1")
 }
 
 fn tasks_where(
     conn: &Connection,
     wave_id: Option<&WaveId>,
+    repository: Option<&RepositoryId>,
     condition: &str,
 ) -> StoreResult<Vec<Task>> {
-    let filter = match wave_id {
-        Some(_) => "p.wave_id=?1 AND ",
-        None => "",
-    };
+    let mut values = Vec::new();
+    let mut filter = String::new();
+    if let Some(wave) = wave_id {
+        values.push(wave.as_str());
+        filter.push_str("p.wave_id=?1 AND ");
+    }
+    if let Some(repository) = repository {
+        values.push(repository.as_str());
+        filter.push_str(&format!("t.repository_id=?{} AND ", values.len()));
+    }
+    // The global updated-at index breaks ties by rowid. Keep that order when
+    // a repository index supplies the rows instead.
+    let tie = if repository.is_some() { ",t.rowid" } else { "" };
     let query = format!(
-        "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"
+        "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC{tie}"
     );
     let identifiers = TaskIdentifiers::read(conn)?;
     let mut statement = conn.prepare(&query)?;
-    let rows = statement.query_map(params_from_iter(wave_id), |row| {
+    let rows = statement.query_map(params_from_iter(values), |row| {
         map_listed_task_row(&identifiers, row)
     })?;
     rows.collect::<rusqlite::Result<_>>()
@@ -2561,6 +2590,104 @@ mod local_planning_tests {
             .ensure_wave_project(store.home_dir().unwrap().to_str().unwrap(), "inbox")
             .unwrap()
             .id
+    }
+
+    #[test]
+    fn repository_task_reads_keep_visibility_history_and_global_short_ids() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let project = local_project(&store);
+        let local = local_repository(&store);
+        let other = store.ensure_repository("/other").unwrap();
+        let local_short = TaskId::from_raw("task_abcdef10000000000000000000000001");
+        let other_short = TaskId::from_raw("task_abcdef20000000000000000000000002");
+        for (repository, short) in [(&local, &local_short), (&other, &other_short)] {
+            for kind in [
+                "duplicate",
+                "closed",
+                "abandoned",
+                "deleted",
+                "unassigned",
+                "short",
+            ]
+            .iter()
+            {
+                let task = store
+                    .create_task(&NewTask {
+                        repository_id: repository.clone(),
+                        id: if *kind == "short" {
+                            short.clone()
+                        } else {
+                            TaskId::new()
+                        },
+                        project_id: (repository == &local && *kind != "unassigned")
+                            .then(|| project.clone()),
+                        title: kind.to_string(),
+                        description: String::new(),
+                        due_date: None,
+                    })
+                    .unwrap();
+                let conn = store.conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE tasks SET updated_at=?2,planning_completed=?3,abandoned_at=?4,planning_deleted_at=?5,
+                        issue_identifier=CASE WHEN ?6 THEN 'DUP-1' ELSE issue_identifier END WHERE id=?1",
+                    params![task.id.as_str(), 1, *kind == "closed", (*kind == "abandoned").then_some(1),
+                        (*kind == "deleted").then_some(1), *kind == "duplicate"],
+                ).unwrap();
+            }
+        }
+        for include_closed in [false, true] {
+            let global = if include_closed {
+                store.list_tasks(None)
+            } else {
+                store.list_open_tasks(None)
+            }
+            .unwrap();
+            for repository in [&local, &other] {
+                let expected: Vec<_> = global
+                    .iter()
+                    .filter(|task| &task.repository_id == repository)
+                    .cloned()
+                    .collect();
+                let scoped = store
+                    .list_repository_tasks(repository, include_closed)
+                    .unwrap();
+                assert_eq!(scoped, expected);
+                assert_eq!(scoped.len(), if include_closed { 5 } else { 3 });
+                assert!(scoped
+                    .iter()
+                    .any(|task| task.title == "unassigned" && task.project_id.is_none()));
+            }
+        }
+        let local_tasks = store.list_repository_tasks(&local, true).unwrap();
+        assert_eq!(
+            local_tasks
+                .iter()
+                .find(|task| task.id == local_short)
+                .unwrap()
+                .identifier,
+            "abcdef1"
+        );
+        let conn = store.conn.lock().unwrap();
+        let wave: WaveId = conn
+            .query_row(
+                "SELECT wave_id FROM projects WHERE id=?1",
+                [project.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            super::tasks_in(&conn, Some(&wave), Some(&local))
+                .unwrap()
+                .len(),
+            4
+        );
+        assert!(super::tasks_in(&conn, Some(&wave), Some(&other))
+            .unwrap()
+            .is_empty());
+        assert!(super::tasks_in(&conn, None, Some(&RepositoryId::new()))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

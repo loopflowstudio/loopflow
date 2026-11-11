@@ -396,14 +396,13 @@ build differs:
   `terminal_id`, recovery)
 - `docs/dev/server-first.md` (Staying open, managed rule, piece row)
 
-Left for implement: the "Local protocol, revision 4" heading and handshake
-examples in `server/README.md` move to 5 with the shared bump;
-`documented_commands` needs `lf holder run` in Clap (hidden) before these
-docs pass it; the owner-only paragraphs of `transport/README.md` were not
-rewritten, the new section says where held terminals differ. The holder
-protocol in the docs names its key `terminal` (the `TerminalId`) where the
-kickoff table said `pty`, and `start` carries a `request` identity per the
-explore finding on ambiguous starts.
+Since built: `lf holder run` is in Clap (hidden) and `documented_commands`
+passes. Still open: the "Local protocol, revision 4" heading and handshake
+examples in `server/README.md` (`server/wire.rs` `REVISION` is still 4). The
+owner-only paragraphs of `transport/README.md` were not rewritten; its
+"Held terminals" section says where held terminals differ. The holder
+protocol names its key `terminal` (the `TerminalId`), and `start` carries a
+`request` identity per the explore finding on ambiguous starts.
 
 ### Positions, queries and view drawing — November 10, 2026
 
@@ -591,19 +590,24 @@ Checks:
   chunk-span code flattened. `cargo test -p loopflow --lib -- transport:: holder::`:
   80 passed; `held_session_survives_server_restart` passes; clippy clean.
 
-**Not as planned, still open:**
+**Remaining, in order:**
+
+1. One lifetime and title watcher for all held terminals; today each held
+   terminal gets its own `lifetime::spawn` watcher and title worker thread.
+2. `exit-record.json`: an exit record a launcher handed to a server that
+   then stopped is lost (the terminal's end is still recorded). An end nobody
+   saw (holder gone, no `exit.json`) reaches viewers as a SIGKILL status and
+   the store as a null exit code.
+3. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).
+4. Protocol revision 5 with the shared bump; Swift decoding of a terminal
+   `bridged`; the Desktop overlay wording; slice 0 mode probe.
+
+**Not as planned, open without a slot:**
 
 - The gate test's `ps` step checks the agent's parent is `lf holder run`,
   not a whole-process-group count; ten-terminal thread/socket counts and
   `lf ps --json` holder rows are not automated.
 - No snapshot file on graceful stop; rebuild is ring replay plus nudge.
-- A held terminal still gets its own lifetime watcher and title worker
-  thread (`lifetime::spawn`), not one for all.
-- An exit record a launcher handed to a server that then stopped is lost
-  (`exit-record.json` not built); the terminal's end is still recorded.
-- An end nobody saw (holder gone, no `exit.json`) reaches viewers as a
-  SIGKILL status and the store as a null exit code.
-- A held start does not carry pane placement (`LF_TERMINAL_ID`, the TTY).
 - `require_settled_work` excuses processes under an owner; nothing is
   excused under a held terminal, so a launcher that stays beside its
   provider there may block retirement. Untested.
@@ -613,5 +617,6 @@ Checks:
   through the Session rule (Task/Wave bound) or `LF_SERVER`; no separate
   call site was needed. Desktop panes with `LF_SERVER` are held; Desktop
   itself was not run against this build.
-- Revision 5, Swift decoding of a terminal `bridged`, the Desktop overlay
-  wording, slice 0 mode probe.
+
+Gate/CI: Swift and Desktop suites; the Linux RunPod run of
+`held_session_survives_server_restart` with the user unit's `KillMode=process`.

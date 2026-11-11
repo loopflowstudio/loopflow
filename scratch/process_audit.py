@@ -249,6 +249,9 @@ def main():
         )
         note = ""
         healthy = True
+        reason = held.get(p["pid"], "")
+        shell = shells.get(p["pid"]) if r == "desktop shell" else None
+        viewers = set()
         if r in ("session serve", "desktop shell"):
             provider = [c for c in children[p["pid"]] if not lf_binary(c["command"])]
             # A viewer holds a unix socket connected to one of the owner's.
@@ -258,12 +261,10 @@ def main():
                 f"provider {'alive: ' + provider[0]['command'][:60] if provider else 'none'}; "
                 f"{len(viewers)} viewer{'s' if len(viewers) != 1 else ''} attached"
             )
-            reason = held.get(p["pid"])
             if reason:
                 note += f"; rollover: {reason}"
             # Input or a Graph holding the conversation is work in progress, not a leftover.
-            healthy = bool(viewers) or p["age"] < 86400 or "holds" in (reason or "")
-            shell = shells.get(p["pid"]) if r == "desktop shell" else None
+            healthy = bool(viewers) or p["age"] < 86400 or "holds" in reason
             if shell:
                 note = f"Task {shell['task']} is {shell['state']}; " + note
                 if shell["phase"]:
@@ -297,8 +298,9 @@ def main():
             note = "terminal gone" if p["ppid"] == 1 else ""
         rows.append({
             **p,
-            "shell": shells.get(p["pid"]) if r == "desktop shell" else None,
-            "viewed": "; 0 viewers" not in note,
+            "shell": shell,
+            "viewed": bool(viewers),
+            "reason": reason,
             "path": path,
             "kind": binary_kind(path),
             "role": r,
@@ -337,8 +339,8 @@ def advice(rows):
 
     fixtures, fixture_pids = pids(lambda x: x["kind"] == "test fixture")
     observers, observer_pids = pids(lambda x: x["role"] == "session observe-status" and not x["healthy"])
-    drafts, _ = pids(lambda x: x["role"] == "session serve" and "native input holds" in x["note"])
-    graphs, _ = pids(lambda x: x["role"] == "session serve" and "Graph holds" in x["note"])
+    drafts, _ = pids(lambda x: x["role"] == "session serve" and "native input holds" in x["reason"])
+    graphs, _ = pids(lambda x: x["role"] == "session serve" and "Graph holds" in x["reason"])
     hidden, _ = pids(lambda x: x["role"] == "desktop shell" and not x["viewed"])
     finished = [x for x in hidden if not x["healthy"]]
     demos, demo_pids = pids(lambda x: x["kind"] in ("demo", "Dev app"))

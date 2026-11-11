@@ -23,15 +23,19 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining, at demo: regenerate the report (the committed one is the 18:58
-reading, 356 processes) and compare its totals with a fresh `ps`; show the `transport_tests`
-ps diff again. Open: `scratch/questions.md` 1a-1d.
+Remaining, at demo: regenerate the report (the committed one is the 19:03
+reading: 350 processes, and a `ps` recount right after also gave 350) and
+compare its totals with a fresh `ps`; show the `transport_tests` ps diff again.
+Open: `scratch/questions.md` 1a-1d.
 
 Checks:
 - `cargo test -p loopflow --test transport_tests`, load 40-60, after dropping
   the per-test `StopOwner`/`ShellOwnerGuard` (Fixture's Drop covers them): 108
   passed, plus `--ignored ssh_shells::` 3 passed; ps diff empty. Earlier, load
   200-330: 6 then 2 `launches(..)` 30 s timeouts, each passed alone.
+- 19:02, after dropping four more cleanup-only `fixture.stop` calls:
+  `cargo test -p loopflow --test transport_tests -- first_native_launch_keeps_only_valid_desktop_terminal_placement detached_sessions_end_after_their_limit resume_takes_over_an_owner_from_another_build resume_ends_an_unanswering_superseded_owner_of_a_completed_session`:
+  4 passed; no new `/tmp/lf-7501-` process. Gate runs the whole suite.
 - Regression test fails without the owner fix, passes with it.
 - swiftc probe: EOF with `Pipe.uninherited()`, none with `Pipe()`.
 - `scripts/test_desktop.sh --skip-build --filter 'ProgramStatusTests|UninheritedPipeTests'`:
@@ -42,7 +46,6 @@ Checks:
 - `Pipe.uninherited()` covers every Desktop `Pipe()` today, but a new `Pipe()`
   reintroduces the leak silently. GhosttyKit forks panes, so the one-place
   fix is not ours. Leave the call-site form; no lint.
-- Open: which input holds an owner (`scratch/questions.md`, 1a-1d).
 
 ## Desktop shells (read 2026-11-10 18:55)
 
@@ -59,4 +62,4 @@ shells; the report lists them under `desktop shell` with Task and state from
   retirement stays `waiting` and `request_retirement` is never reached. The
   sweep itself runs (`com.loopflow.cleanup`; `Task cleanup pending` lines in
   `logs/lf.log` through 18:53). No shell-specific bug: it is the input hold in
-  `scratch/questions.md`, which now records these five Tasks. No code changed.
+  `scratch/questions.md`, which records these five Tasks.

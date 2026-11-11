@@ -1758,9 +1758,7 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
             "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
             [&session], |row| row.get(0),
         ).unwrap();
-        let owner = fixture.owner_of(&session);
         terminal.stop();
-        fixture.stop(&owner);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
 }
@@ -3021,9 +3019,6 @@ fn detached_sessions_end_after_their_limit() {
         line.contains(" --resume ") && session_of(&sql, &line) == idle,
         "reopened without history: {line}"
     );
-    for owner in [&busy_owner, &reopened] {
-        fixture.stop(owner);
-    }
 }
 
 /// A retained editor accepts corrections after both deadlines; plain submissions settle.
@@ -3964,7 +3959,6 @@ fn resume_takes_over_an_owner_from_another_build() {
     );
     viewer.kill().unwrap();
     let output = viewer.wait_with_output().unwrap();
-    fixture.stop(&current);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Moved") && stderr.contains("continuing on "),
@@ -4145,7 +4139,6 @@ fn resume_ends_an_unanswering_superseded_owner_of_a_completed_session() {
     let current = fixture.owner_of(&session);
     viewer.kill().unwrap();
     let output = viewer.wait_with_output().unwrap();
-    fixture.stop(&current);
     assert_ne!(current, previous);
     assert_eq!(launches.len(), 2, "resume launched a second replacement");
     assert!(launches[1].contains(" --resume "), "{launches:?}");

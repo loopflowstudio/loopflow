@@ -350,9 +350,18 @@ fn delegate(
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
-        let terminal = std::env::var_os(STREAM_ENV).is_some()
-            || io::stdout().is_terminal()
-            || (!batch && io::stdin().is_terminal());
+        let stream = std::env::var_os(STREAM_ENV).is_some();
+        let terminal =
+            stream || io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
+        let viewed = terminal && !batch;
+        let held = managed(viewed, task_run, preview_session.or(json_session));
+        // A bare interactive launch runs here, its agent the foreground program
+        // of the calling terminal. A headless or JSON run keeps an owner so it
+        // outlives its caller, and a framed remote viewer needs one to frame
+        // the agent's screen.
+        if !held && viewed && !stream && json_session.is_none() {
+            return Ok(false);
+        }
         let preview = if std::env::var_os(STREAM_ENV).is_some() {
             if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
                 io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -363,11 +372,7 @@ fn delegate(
         };
         let session = preview_session.map(LfSessionId::from);
         let cwd = std::env::current_dir()?;
-        let owner = if managed(
-            terminal && !batch,
-            task_run,
-            preview_session.or(json_session),
-        ) {
+        let owner = if held {
             Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
         } else {
             Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
@@ -388,8 +393,8 @@ fn delegate(
 /// server, so that it outlives every lf process that views it. A held launch
 /// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too)
 /// with a terminal viewing it, or a Desktop pane. A bare launch, one in a
-/// Task's checkout, a piped or `-b` execution and a Desktop Task shell keep an
-/// owner process of their own.
+/// Task's checkout runs in the calling terminal; a piped, `-b` or JSON
+/// execution and a Desktop Task shell keep an owner process of their own.
 #[cfg_attr(test, allow(dead_code))]
 fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
     if !viewed {

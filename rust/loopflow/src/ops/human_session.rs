@@ -1111,7 +1111,9 @@ pub(crate) async fn open(
     };
     let result = surface(store, session).await?;
     if resume {
-        if running()? {
+        // A conversation started with `lf <skill>` belongs to its terminal;
+        // this one runs a second agent on the same thread beside it.
+        if running()? && !store.sqlite.runs_in_its_terminal(&session.id)? {
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,
@@ -1203,14 +1205,18 @@ pub(crate) async fn open_without_replacing(
         crate::transport::attach_existing(owner, id, json)?;
         return Ok(record);
     }
-    // A new transport re-executes this same intent and acquires the lock again.
-    if crate::transport::current().is_none() {
+    // A held terminal re-executes this same intent and acquires the lock
+    // again; a bare conversation opens here, in this terminal.
+    let lock = if crate::transport::current().is_none() {
         drop(lock);
         if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
             return Ok(record);
         }
-        bail!("Conversation transport could not be started");
-    }
+        let lock_id = id.to_owned();
+        tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??
+    } else {
+        lock
+    };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
         return open_waiting_locked(store, session, lock)

@@ -2087,9 +2087,17 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
             "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
             [&session], |row| row.get(0),
         ).unwrap();
-        let owner = fixture.owner_of(&session);
+        // A bare launch runs in its terminal: no owner serves it.
+        let owner: Option<String> = fixture
+            .sql()
+            .query_row(
+                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
         terminal.stop();
-        fixture.stop(&owner);
+        assert_eq!(owner, None);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
 }
@@ -2750,128 +2758,6 @@ fn returned_session(output: &Output) -> Value {
         .find("{\n")
         .unwrap_or_else(|| panic!("Session JSON missing: {output:?}"));
     serde_json::from_str(text[start..].trim()).unwrap()
-}
-
-#[test]
-fn prepared_start_and_take_back_keep_one_thread_with_or_without_a_session() {
-    for existing in [false, true] {
-        let fixture = Fixture::new();
-        let path = fixture.provider(
-            r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
-read -r answer < /dev/tty
-printf '%s' "$answer" > "$HOME/answer"
-"#,
-        );
-        let prepare = |args: &[&str]| -> Value {
-            let result = fixture.command(args).env("PATH", &path).output().unwrap();
-            assert!(result.status.success(), "{result:?}");
-            serde_json::from_slice(&result.stdout).unwrap()
-        };
-        let before = existing.then(|| prepare(&["-a", "claude", "resume", "--prepare", "--json"]));
-        let mut args = vec![
-            "-a",
-            "claude",
-            "resume",
-            "--start-if-free",
-            "--prepare",
-            "--json",
-        ];
-        if let Some(before) = &before {
-            args.push(before["id"].as_str().unwrap());
-        }
-        let prepared = prepare(&args);
-        let session = prepared["id"].as_str().unwrap();
-        if let Some(before) = &before {
-            assert_eq!(before["id"], session);
-        }
-        assert!(!fixture.home.path().join("launches").exists());
-        assert!(prepared["open_argv"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("--start-if-free")));
-
-        // Execute exactly what preparation returned, through delegation and relay.
-        let mut command = fixture.prepared_command(&prepared);
-        command.env("PATH", &path);
-        let mut first = Terminal::spawn(command);
-        let launched = fixture.wait_file("launches");
-        let owner = fixture.owner_of(session);
-        fixture.wait_controlled(&owner);
-        let capture: i64 = fixture
-            .sql()
-            .query_row(
-                "SELECT current_capture FROM agent_sessions WHERE id=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .unwrap();
-
-        // This prepared Start predates the holder. It may not replay or replace it.
-        let refused = fixture
-            .prepared_command(&prepared)
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(!refused.status.success(), "{refused:?}");
-        assert!(String::from_utf8_lossy(&refused.stderr).contains("Take back"));
-        assert_eq!(fixture.wait_file("launches"), launched);
-        assert!(!fixture.home.path().join("answer").exists());
-
-        // Explicit Take back alone carries ordinary CLI resume authority.
-        let takeover = prepare(&["session", "resume", session, "--prepare", "--json"]);
-        assert!(!takeover["open_argv"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("--start-if-free")));
-        let mut next = fixture
-            .prepared_command(&takeover)
-            .env("PATH", &path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let departed = loop {
-            if let Some(status) = first.child.try_wait().unwrap() {
-                break status;
-            }
-            assert!(Instant::now() < deadline, "viewer did not depart");
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        assert!(departed.success(), "{departed:?}");
-        next.stdin
-            .take()
-            .unwrap()
-            .write_all(b"taken-back\n")
-            .unwrap();
-        let result = wait_for_viewer(next, Duration::from_secs(30));
-        assert!(result.status.success(), "{result:?}");
-        assert_eq!(fixture.wait_file("answer"), "taken-back");
-        assert_eq!(fixture.wait_file("launches"), launched);
-        assert_eq!(
-            fixture
-                .sql()
-                .query_row(
-                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
-                    [session],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap(),
-            capture
-        );
-        assert_eq!(
-            fixture
-                .sql()
-                .query_row("SELECT count(*) FROM agent_sessions", [], |r| r
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        fixture.ends(&owner);
-    }
 }
 
 #[test]
@@ -4142,8 +4028,6 @@ fn sessions_keep_serving_when_their_lf_executable_goes() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == sessions[2],
         "reopened without history: {line}"
     );
-    let reopened = fixture.owner_of(&sessions[2]);
-    assert_ne!(reopened, owners[2]);
     assert!(
         !fixture.running(&owners[2]),
         "resume left the superseded owner"
@@ -4153,7 +4037,7 @@ fn sessions_keep_serving_when_their_lf_executable_goes() {
         assert!(fixture.running(owner), "resume of another Session ended it");
     }
     terminal.stop();
-    for owner in owners[..2].iter().chain([&reopened]) {
+    for owner in &owners[..2] {
         fixture.stop(owner);
     }
     // No viewer of an untouched owner was ever told to move.
@@ -4729,181 +4613,6 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
             fixture.stop(&owner);
         }
     }
-}
-
-#[test]
-fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-if mkdir "$HOME/outer" 2>/dev/null; then
-    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" > "$HOME/caller"
-    "$LF_BIN" --interactive --agent claude : 'nested original input' < /dev/tty &
-    printf '%s\n' "$!" > "$HOME/nested-viewer"
-    wait
-else
-    stty -echo < /dev/tty
-    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/nested-launches"
-    read -r answer < /dev/tty
-    printf '%s:%s\n' "$$" "$answer" > "$HOME/nested-answer"
-fi
-"#,
-    );
-    fixture.owner(fixture.native(
-        Path::new(env!("CARGO_BIN_EXE_lf")),
-        &path,
-        "call the nested CLI",
-    ));
-    let caller = fixture.wait_file("caller");
-    let nested = fixture.wait_file("nested-launches");
-    let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();
-    let (caller_pid, caller_capture) = caller.trim().split_once(':').unwrap();
-    let (nested_pid, nested_capture) = nested.trim().split_once(':').unwrap();
-    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    let identity = |capture: &str| -> (String, String, String) {
-        sql.query_row(
-            "SELECT s.id,s.agent_process_id,s.transport_lf_process_id
-             FROM agent_sessions s JOIN session_events e ON e.session_id=s.id
-             WHERE e.kind='captured' AND e.receipt_key=?1",
-            [capture],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap()
-    };
-    let parent = identity(caller_capture);
-    let child = identity(nested_capture);
-    assert_ne!(parent.0, child.0);
-    assert_ne!(
-        parent.2, child.2,
-        "nested execution inherited its caller's owner"
-    );
-    let descendants: i64 = sql
-        .query_row(
-            "SELECT count(*) FROM processes WHERE caller_session_id=?1",
-            [&parent.0],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(descendants > 0, "nested CLI lost its caller provenance");
-    // SAFETY: both PIDs are reported by this fixture's live processes. Kill
-    // precisely the calling provider and nested viewer, never either owner.
-    unsafe {
-        assert_eq!(libc::kill(caller_pid.parse().unwrap(), libc::SIGKILL), 0);
-        assert_eq!(libc::kill(viewer, libc::SIGKILL), 0);
-    }
-    let mut attached = fixture.viewer(&child.2, true);
-    assert_eq!(identity(nested_capture), child);
-    let settled: i64 = sql.query_row(
-        "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'",
-        [&child.0], |row| row.get(0),
-    ).unwrap();
-    assert_eq!(settled, 0, "caller death settled the nested request");
-    attached.input("accepted-once\n");
-    attached.finish();
-    assert_eq!(
-        fixture.wait_file("nested-answer").trim(),
-        format!("{nested_pid}:accepted-once")
-    );
-    assert_eq!(fixture.wait_file("nested-launches"), nested);
-}
-
-#[test]
-fn codex_original_request_channel_and_turn_survive_all_viewers() {
-    let fixture = Fixture::new();
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    support::install_native_codex(&bin);
-    let path = format!("{}:/usr/bin:/bin", bin.display());
-    std::fs::write(fixture.home.path().join("wait-approval"), "").unwrap();
-    // The ordinary interactive CLI is the creator/viewer. Give it a real tty,
-    // then kill it only after the original protocol request is pending.
-    let mut master = -1;
-    let mut slave = -1;
-    // SAFETY: openpty initializes both descriptors; no optional settings are supplied.
-    assert_eq!(
-        unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        },
-        0
-    );
-    // SAFETY: each newly opened descriptor is transferred exactly once.
-    let _terminal = unsafe { std::fs::File::from_raw_fd(master) };
-    // SAFETY: the slave is a distinct, newly opened descriptor.
-    let terminal_input = unsafe { std::fs::File::from_raw_fd(slave) };
-    let mut creator = fixture
-        .command(&["-i", "--agent", "codex", ":", "Original input"])
-        .env("PATH", &path)
-        .stdin(terminal_input.try_clone().unwrap())
-        .stdout(terminal_input.try_clone().unwrap())
-        .stderr(terminal_input)
-        .spawn()
-        .unwrap();
-    let pending: Value = serde_json::from_str(&fixture.wait_file("pending-request.json")).unwrap();
-    let launched = fixture.wait_file("launched");
-    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    let session: String = sql
-        .query_row(
-            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
-            [launched.trim()],
-            |r| r.get(0),
-        )
-        .unwrap();
-    let identity: (String,i64,String) = sql.query_row("SELECT id,pid,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-    let owner: String = sql
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    creator.kill().unwrap();
-    creator.wait().unwrap();
-    let first = fixture.viewer(&owner, true);
-    drop(first);
-    let observed: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'", [&session], |r| r.get(0)).unwrap();
-    assert_eq!(observed, 0);
-    let replacement = fixture.viewer(&owner, true);
-    let retained: (String,i64,String) = sql.query_row("SELECT id,pid,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-    assert_eq!(retained, identity, "viewers transferred provider ownership");
-    drop(replacement);
-    let mut resumed = fixture
-        .command(&["resume", &session])
-        .env("PATH", &path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    resumed
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"decline\n")
-        .unwrap();
-    let outcome = resumed.wait_with_output().unwrap();
-    assert!(
-        outcome.status.success(),
-        "{}",
-        String::from_utf8_lossy(&outcome.stderr)
-    );
-    let answer: Value = serde_json::from_str(&fixture.wait_file("native-answer.json")).unwrap();
-    assert_eq!(answer["id"], pending["id"]);
-    let turns: Value = serde_json::from_str(&fixture.wait_file("native-turns.json")).unwrap();
-    assert_eq!(turns.as_array().unwrap().len(), 1, "input replayed");
-    assert_eq!(turns[0]["id"], pending["params"]["turnId"]);
-    assert_eq!(turns[0]["status"], "completed");
-    assert_eq!(
-        fixture.wait_file("native-thread"),
-        pending["params"]["threadId"].as_str().unwrap()
-    );
-    assert_eq!(fixture.wait_file("launched"), launched);
 }
 
 #[test]

@@ -665,6 +665,7 @@ fn run_native_session(
         client_opened(child.id());
     }
     let _native = native_return(&attachment);
+    let _foreground = crate::agent::ForegroundAgent::enter();
     // The process record now owns the launch identity.
     drop(launch_lock);
     let status = crate::os_process::wait_for_exit(&mut child, None, || {
@@ -899,6 +900,7 @@ fn run_opencode_native(
                 let mut child = process.spawn()?;
                 crate::transport::report_directory(&command.cwd);
                 let _native = native_return(&owner);
+                let _foreground = crate::agent::ForegroundAgent::enter();
                 let status = (|| -> Result<_> {
                     record_interactive_opened(environment)?;
                     Ok(if let Some(title) = &mut title {

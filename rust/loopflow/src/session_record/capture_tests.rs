@@ -1162,6 +1162,59 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
 
 #[test]
 #[cfg(unix)]
+fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
+    use std::os::unix::process::CommandExt;
+
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let (store, attachment, mut process, next) = attached_session(&ledger);
+    // `lf <skill>` in another terminal: an interactive agent, no Work named,
+    // no holder or owner, its lf still waiting.
+    let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",
+        [],
+    )
+    .unwrap();
+    sql.execute(
+        "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+        [&attachment.agent_process_id],
+    )
+    .unwrap();
+    let mut agent = std::process::Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let started = crate::journal::process_started_at(agent.id())
+        .unwrap()
+        .unwrap();
+    store
+        .record_agent_process_identity("conversation", &attachment, agent.id(), started)
+        .unwrap();
+
+    let beside =
+        crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
+    let first_running = agent.try_wait().unwrap().is_none();
+    let first_open: Option<i64> = sql
+        .query_row(
+            "SELECT completed_at FROM processes WHERE id=?1",
+            [&attachment.agent_process_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    agent.kill().unwrap();
+    agent.wait().unwrap();
+    process.kill().unwrap();
+    process.wait().unwrap();
+
+    assert!(first_running, "the first agent keeps running");
+    assert_eq!(first_open, None, "a running agent is not recorded as ended");
+    assert_ne!(beside.agent_process_id, attachment.agent_process_id);
+    assert_eq!(beside.lf_process_id, Some(next));
+}
+
+#[test]
+#[cfg(unix)]
 fn resume_refuses_live_agent_that_cannot_be_ended() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let (store, attachment, mut process, next) = attached_session(&ledger);

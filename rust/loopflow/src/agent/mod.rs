@@ -16,7 +16,7 @@ use std::fs;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -81,6 +81,36 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
         .lock()
         .expect("interrupt hooks lock poisoned")
         .push(Box::new(f));
+}
+
+/// Set while lf waits for an interactive agent that shares its terminal and
+/// process group. The terminal delivers Ctrl+C and hangup to the agent too, and the agent decides
+/// what they mean (Claude's Ctrl+C interrupts a turn); lf keeps waiting so it
+/// records the exit.
+static FOREGROUND_AGENT: AtomicBool = AtomicBool::new(false);
+
+/// lf waits beside a foreground agent until this drops.
+pub(crate) struct ForegroundAgent;
+
+impl ForegroundAgent {
+    pub(crate) fn enter() -> Self {
+        FOREGROUND_AGENT.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for ForegroundAgent {
+    fn drop(&mut self) {
+        FOREGROUND_AGENT.store(false, Ordering::Release);
+    }
+}
+
+/// The CLI's interrupt handler: interruption is the foreground agent's to
+/// handle while one runs, and ends lf otherwise.
+pub fn on_interrupt() {
+    if !FOREGROUND_AGENT.load(Ordering::Acquire) {
+        exit_on_interrupt();
+    }
 }
 
 /// Finish interruption while excluding the command's ordinary return path.

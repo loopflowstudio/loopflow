@@ -130,7 +130,7 @@ holder once.
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
 | `lf <skill>`, `lf graph …`, `lf -i`, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
-| anything with `-b` or a pipe | a child of that command |
+| anything with `-b`, a pipe or `--json` | its own process, as before |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations

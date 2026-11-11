@@ -1892,8 +1892,7 @@ fn run() -> anyhow::Result<()> {
             return finish_command(result);
         }
     }
-    ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
-        .expect("failed to set Ctrl+C handler");
+    ctrlc::set_handler(loopflow::agent::on_interrupt).expect("failed to set Ctrl+C handler");
 
     // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.

@@ -4,7 +4,7 @@ import Loopflow
 /// One control connection to the Machine while the app is in use, opened on
 /// first use and reopened after a loss; terminals get connections of their own.
 @MainActor
-final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSessionOpeningClient, MobileSessionListingClient {
+final class RemoteMobileClient: MobileTaskCreationClient {
     let savedMachine: SavedMachine
     private var opening: Task<MachineConnection, any Error>?
     private var live: MachineConnection?
@@ -24,13 +24,9 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         return saved
     }
 
-    func workingTasks() async throws -> [WorkViewPlan.Content] {
-        try await decode([WorkViewPlan].self, read(Self.taskQuery)).flatMap { try mobileTasks($0) }
-    }
-
     private static let taskQuery = ServedRead.viewSelect(expression: "kind:task state:open")
 
-    func observeTasks() async throws -> any MobileTaskObservation {
+    func observeTasks() async throws -> RemoteTaskObservation {
         try await RemoteTaskObservation.open(connection: connection(), query: Self.taskQuery)
     }
 
@@ -41,25 +37,18 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
         live = nil
     }
 
-    func sessions(for task: WorkViewPlan.Content, after: String?) async throws -> SessionPage {
-        guard case .string(let path) = try await read(.repoPath(id: task.work.repository)) else {
-            throw RegistryQueryError("The Machine did not return the repository path")
-        }
-        let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await decode(SessionPage.self, read(.sessionList(directory: directory, headless: false, after: after, limit: 100, task: task.work.id)))
-    }
-
-    func attach(sessionID: String) async throws -> any MobileAttachment {
+    /// Attaching takes the keyboard and fits the terminal to `size`.
+    func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
         let connection = try await connection()
         let terminal: MachineSocket
         do { terminal = try await connection.attach(session: sessionID) }
         catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
-        do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal) }
+        do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal, size: size) }
         catch { terminal.close(); throw error }
     }
 
+    /// Continue a recorded conversation whose terminal has stopped.
     func startSession(sessionID: String) async throws {
-        // The complete CLI operation returns its existing SessionRecord.
         let record = try decode(SessionRecord.self, await request(.command(.sessionStart(id: sessionID))))
         guard record.id == sessionID else {
             throw RegistryQueryError("The Machine returned a different Session")
@@ -157,7 +146,7 @@ final class RemoteMobileClient: MobileClient, MobileTaskCreationClient, MobileSe
 }
 
 @MainActor
-final class RemoteAttachment: MobileAttachment {
+final class RemoteAttachment {
     let sessionID: String
     lazy var events = AsyncStream<MobileTerminalEvent>(unfolding: { [weak self] in
         await self?.nextEvent()
@@ -184,12 +173,12 @@ final class RemoteAttachment: MobileAttachment {
     }
 
     /// `socket` is an admitted terminal connection carrying the owner protocol.
-    static func open(sessionID: String, socket connection: MachineSocket) async throws -> RemoteAttachment {
+    static func open(sessionID: String, socket connection: MachineSocket, size: TerminalGeometry) async throws -> RemoteAttachment {
         let link = RemoteAttachment(sessionID: sessionID, socket: connection)
         let timeout = connection.deadline(seconds: 5)
         defer { timeout.cancel() }
         link.decoder.expectAttachment(1)
-        try await connection.send(link.attachRequest(id: 1, control: false, size: TerminalGeometry(columns: 80, rows: 24)))
+        try await connection.send(link.attachRequest(id: 1, size: size))
         while !link.decoder.ready && !link.decoder.ended {
             link.pendingEvents.append(contentsOf: try link.decoder.receive(await connection.receiveBytes()))
         }
@@ -199,12 +188,13 @@ final class RemoteAttachment: MobileAttachment {
         return link
     }
 
-    func requestControl(size: TerminalGeometry) throws {
-        guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready for keyboard input") }
+    /// Take the keyboard and size back after another device took them.
+    func takeControl(size: TerminalGeometry) throws {
+        guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready") }
         nextRequest += 1
         decoder.expectAttachment(nextRequest)
         controlDeadline = connection.deadline(seconds: 5)
-        try enqueue(attachRequest(id: nextRequest, control: true, size: size))
+        try enqueue(attachRequest(id: nextRequest, size: size))
     }
 
     func send(_ bytes: Data) throws {
@@ -299,9 +289,9 @@ final class RemoteAttachment: MobileAttachment {
         close()
     }
 
-    private func attachRequest(id: UInt64, control: Bool, size: TerminalGeometry) throws -> Data {
+    private func attachRequest(id: UInt64, size: TerminalGeometry) throws -> Data {
         try OwnerStream.frame(tag: 0x11, body: JSONEncoder().encode(AttachRequest(
-            id: id, kind: "attach", control: control, replace: control, own: control ? "take" : nil,
+            id: id, kind: "attach", control: true, replace: true, own: "take",
             rows: size.rows, cols: size.columns, name: "Loopflow iPhone", moved: nil)))
     }
 }
@@ -311,7 +301,7 @@ private struct AttachRequest: Encodable {
     let kind: String
     let control: Bool
     let replace: Bool
-    let own: String?
+    let own: String
     let rows: Int
     let cols: Int
     let name: String?

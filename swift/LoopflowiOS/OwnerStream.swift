@@ -126,9 +126,9 @@ struct OwnerStream {
                 events.append(.control(input: inputControl, geometry: geometryControl))
             }
         case .owner(let id, _, let held):
-            guard !held || id == viewer else { throw RegistryQueryError("Session geometry belongs to another viewer") }
-            geometryControl = held
-            if ready { events.append(.control(input: inputControl, geometry: held)) }
+            // Another device taking the size is an ordinary handoff, not a fault.
+            geometryControl = held && id == viewer
+            if ready { events.append(.control(input: inputControl, geometry: geometryControl)) }
         case .control(let held):
             inputControl = held
             if ready { events.append(.control(input: held, geometry: geometryControl)) }

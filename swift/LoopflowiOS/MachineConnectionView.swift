@@ -30,8 +30,7 @@ struct MachineConnectionView: View {
     var body: some View {
         Group {
             if let savedMachine {
-                MobileTaskList(client: RemoteMobileClient(savedMachine: savedMachine), machineID: savedMachine.machineID,
-                    connectionLabel: savedMachine.endpoint.host ?? "Machine", onForget: forget,
+                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine), onForget: forget,
                     onChangeAddress: { changingAddress = true })
                     .id(savedMachine.endpoint)
             } else {
@@ -60,10 +59,8 @@ struct MachineConnectionView: View {
 
     private func forget() {
         do {
-            let forgotten = savedMachine?.machineID
             try MachineKeychain.forget()
             savedMachine = nil
-            if let forgotten { Task { try? await MobileTaskCache.application.remove(machineID: forgotten) } }
         } catch { self.error = error.localizedDescription }
     }
 }

@@ -557,8 +557,12 @@ private final class CreationClient: MobileTaskCreationClient {
     var contextFailure: String?
 
     init() async throws {
-        let tasks = try await FixtureClient().workingTasks()
-        task = try XCTUnwrap(tasks.first)
+        let url = try XCTUnwrap(Bundle(for: MobileTaskCreationTests.self).url(forResource: "task-reading", withExtension: "json"))
+        guard case .response(_, _, let result) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: url)) else {
+            throw RegistryQueryError("task-reading.json is not a response")
+        }
+        let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONEncoder().encode(result))
+        task = try XCTUnwrap(mobileTasks(plan).first)
     }
 
     func creationContext() async throws -> MobileCreationContext {

@@ -1,10 +1,26 @@
 import Foundation
 import Loopflow
 
+typealias MobileTaskReading = Result<[WorkViewPlan.Content], RegistryQueryError>
+
+/// The Tasks a Work reading shows, in the Machine's order.
+func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
+    guard plan.resolution.unavailable.isEmpty else {
+        throw RegistryQueryError(plan.resolution.unavailable.joined(separator: "; "))
+    }
+    let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
+    return try plan.projection.visible.filter { $0.work.kind == .task }.map { member in
+        guard let task = contents[member.work] else {
+            throw RegistryQueryError("The Machine returned an incomplete Task reading")
+        }
+        return task
+    }
+}
+
 /// Whole replacement readings may coalesce. Checkpoint acknowledgements are
 /// handled before coalescing, so refresh never waits on a discarded frame.
 @MainActor
-final class RemoteTaskObservation: MobileTaskObservation {
+final class RemoteTaskObservation {
     let readings: AsyncThrowingStream<MobileTaskReading, any Error>
     private let continuation: AsyncThrowingStream<MobileTaskReading, any Error>.Continuation
     private let subscription: MachineSubscription

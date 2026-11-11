@@ -95,8 +95,8 @@ Phone, shared Swift models and server protocol changes also select `ios`.
 `uv run python scripts/test_ios.py` runs that suite directly; pass
 `-only-testing:LoopflowiOSTests/OwnerStreamTests` for a focused check. It creates
 and removes its own Simulator, using an installed iOS runtime and ad-hoc signing.
-Physical-device and host-Tailscale checks remain opt-in; an offline fixture pass
-does not establish a live phone connection.
+The suite covers the protocol decoders, pairing and Task creation. Whether a
+Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or
 website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.

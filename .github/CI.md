@@ -169,8 +169,3 @@ signs and notarizes the DMG with the `APPLE_CERTIFICATE_BASE64`,
 Actions secrets (copied from Doppler `loopflow`/`prd`), and uploads `Loopflow-dmg`.
 `lf install --dev` installs the newest green run with `gh`, app included on a Mac.
 The artifacts expire after 14 days; releases stay the durable channel.
-
-Release candidates also run `cargo package --locked -p loopflow`. This compiles
-the extracted crates.io archive before tagging, so repository-only embedded
-files cannot pass on the strength of native binaries. Publication keeps the
-same locked dependencies.

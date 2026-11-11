@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn entries_match_the_shared_fixture_without_defaults() {
         let message: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dto/server/skill_entries.json"
+            "../../../../tests/fixtures/dto/server/skill_entries.json"
         ))
         .unwrap();
         let entries: Vec<Entry> = serde_json::from_value(message["result"].clone()).unwrap();

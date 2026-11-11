@@ -557,15 +557,15 @@ mod tests {
     #[test]
     fn receipts_match_the_shared_fixtures_without_defaults() {
         let published: Published = result(include_str!(
-            "../../tests/fixtures/dto/server/pr_published.json"
+            "../../../../tests/fixtures/dto/server/pr_published.json"
         ));
         assert_eq!(published.pr.as_ref().map(|pr| pr.number), Some(1813));
         let checks: Checks = result(include_str!(
-            "../../tests/fixtures/dto/server/pr_checks_report.json"
+            "../../../../tests/fixtures/dto/server/pr_checks_report.json"
         ));
         assert_eq!(checks.exit_code(), 8);
         let requested: ReviewRequested = result(include_str!(
-            "../../tests/fixtures/dto/server/pr_review_requested.json"
+            "../../../../tests/fixtures/dto/server/pr_review_requested.json"
         ));
         assert_eq!(requested.reviewers, ["alice", "org/platform"]);
         assert!(

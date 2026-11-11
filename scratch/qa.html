@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-828 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
+h2{margin-top:2em}.ok{color:#1a7f37}.bad{color:#b3261e}
+</style>
+<h1>LOO-828 QA: Session identity and child agents</h1>
+<p>Branch-built <code>target/debug/lf</code>, private <code>LF_HOME=/tmp/lf-qa-828/home</code>,
+disposable Git repo, inherited <code>LF_*</code> cleared, stdin closed. Real Claude (2.1.322) on the account's own login.</p>
+
+<h2>1. A fresh headless Claude names itself without tools <span class="ok">works</span></h2>
+<pre>$ lf -b -a claude : "Without running any tool or command, reply with exactly two lines:
+  your lf Session ID, then your Task identifier or NONE. If you cannot tell, say UNKNOWN."
+session_32e1fbf931234fe28b79eb1bd2c72423
+NONE</pre>
+<p>The ID matches <code>agent_sessions</code> and <code>lf session show</code> in the private store.</p>
+
+<h2>2. Task line in start and compact blocks; tool boundary unchanged <span class="ok">works</span></h2>
+<p>A real <code>lf task create --worktree</code> Task (<code>be9ab2 "Recover a report"</code>) and the Session row
+lf recorded when launching in its checkout. Claude itself could not start there (next section), so the hook was driven
+directly with that Session's <code>LF_PROVIDER_CONTEXT</code>:</p>
+<pre>== start
+{"hookSpecificOutput":{"additionalContext":"This Session: session_4f1e5d128ee244478cf06a082e233f5d\nThis Session's Task: be9ab2 \"Recover a report\"\nCurrent reference context, …
+== compact
+{"hookSpecificOutput":{"additionalContext":"This Session: session_4f1e5d128ee244478cf06a082e233f5d\nThis Session's Task: be9ab2 \"Recover a report\"\n…
+== tool
+{"hookSpecificOutput":{"additionalContext":"","hookEventName":"SessionStart"}}</pre>
+
+<h2>3. Continuing a finished child <span class="bad">guidance was wrong, fixed</span></h2>
+<pre>$ lf session list --interactive false --json
+[]
+$ lf -b resume session_32e1fbf931234fe28b79eb1bd2c72423 --message "…"
+Error: session_32e1… is a Run (finished); `lf resume` takes only Sessions. `lf resume` opens this checkout's Session.
+$ lf -b resume session_32e1… --fork --message "…"
+error: the argument '--fork' cannot be used with '--message &lt;MESSAGE&gt;'</pre>
+<p>The finished child only lists with <code>--history</code>, and no command continues it. <code>work</code> guidance and
+<code>docs/agent-api.md</code> told parents to find it with <code>lf session list --interactive false</code> and run
+<code>lf -b resume &lt;id&gt; --message</code>. Both now say: a finished <code>lf -b</code> child can't be resumed; start another
+whose brief carries what the first returned. Goldens regenerated; <code>golden_prompt</code> and <code>documented_commands</code> pass.</p>
+
+<h2>Could not reach</h2>
+<ul>
+<li>Real Claude in a Task checkout: <code>no eligible managed claude account … ambient credentials cannot satisfy it</code>.
+The private home has no managed account, and linking one means copying the account's rotating credentials. Section 2 covers the hook's output for that case.</li>
+<li>Codex, OpenCode and Pi naming themselves: no signed-in private homes. Left for gate.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>Headless children can't be continued at all (<code>run_refusal</code>, since #1767). Making <code>lf resume</code> accept a finished Run is a product call, not this PR.</li>
+<li>Pre-existing: with an unreadable store, <code>lf __context-block --moment start</code> exits with
+<code>Error: sqlite error: file is not a database</code> (installed lf too) instead of recording a gap, so the identity line's
+"store failure drops only the Task line" path never runs on that failure.</li>
+</ol>

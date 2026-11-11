@@ -73,10 +73,9 @@ to edit. Work that ends in its own PR is a Task: `lf task create --run`.
 
 You direct the children you start and answer for what they return; check it
 before you use it. A plain `lf -b` child gets no steers, only its brief, so the
-brief says what to do, what done looks like and where the result goes. To
-continue one after it exits, find it with `lf session list --interactive false`
-and run `lf -b resume <id> --message '<next>'`. Steer a Task with
-`lf task steer <ID>`.
+brief says what to do, what done looks like and where the result goes. A
+finished `lf -b` child can't be resumed; start another whose brief carries what
+the first returned. Steer a Task with `lf task steer <ID>`.
 
 A child does the work itself and starts no children unless its brief says to.
 

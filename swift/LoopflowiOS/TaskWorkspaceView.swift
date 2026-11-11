@@ -1,58 +1,39 @@
 import Loopflow
 import SwiftUI
 
-/// One Task on the phone. Its conversation fills the screen; the Brief and the
-/// Changes that Desktop shows beside it open over it.
+/// One Task on the phone. Its conversation fills the screen; the Changes that
+/// Desktop shows beside it open over it.
 struct TaskWorkspaceView: View {
-    enum Face: String, Identifiable {
-        case brief, changes, runs
-        var id: String { rawValue }
-    }
-
     let client: RemoteMobileClient
     let task: WorkViewPlan.Content
     let theme: ThemeDefinition
     @Binding var draft: String
-    @State private var face: Face?
+    @State private var showsChanges = false
 
     var body: some View {
-        Group {
-            if task.primarySession == nil {
-                TaskBriefView(client: client, task: task, theme: theme)
-                    .navigationTitle(task.title)
-                    .navigationBarTitleDisplayMode(.inline)
-            } else {
-                SessionView(client: client, task: task, theme: theme, draft: $draft)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if task.primarySession != nil {
-                        Button("Brief", systemImage: "doc.text") { face = .brief }
-                    }
-                    Button("Changes", systemImage: "plusminus") { face = .changes }
-                    Button("Runs", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { face = .runs }
-                } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("Brief, Changes and Runs")
-            }
-        }
-        .sheet(item: $face) { face in
-            NavigationStack {
-                Group {
-                    switch face {
-                    case .brief: TaskBriefView(client: client, task: task, theme: theme).navigationTitle("Brief")
-                    case .changes: TaskChangesView(client: client, task: task, theme: theme).navigationTitle("Changes")
-                    case .runs: TaskRunsView(client: client, task: task, theme: theme).navigationTitle("Runs")
-                    }
-                }
+        if task.primarySession == nil {
+            TaskChangesView(client: client, task: task, theme: theme)
+                .navigationTitle(task.title)
                 .navigationBarTitleDisplayMode(.inline)
+        } else {
+            SessionView(client: client, task: task, theme: theme, draft: $draft)
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { self.face = nil } }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Changes", systemImage: "plusminus") { showsChanges = true }
+                    }
                 }
-            }
-            .tint(theme.palette.accentInk)
-            .presentationDetents([.medium, .large])
+                .sheet(isPresented: $showsChanges) {
+                    NavigationStack {
+                        TaskChangesView(client: client, task: task, theme: theme)
+                            .navigationTitle("Changes")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) { Button("Done") { showsChanges = false } }
+                            }
+                    }
+                    .tint(theme.palette.accentInk)
+                    .presentationDetents([.medium, .large])
+                }
         }
     }
 }
@@ -74,104 +55,6 @@ private struct LoadFailure: View {
         } actions: {
             Button("Try again", action: retry)
         }
-    }
-}
-
-/// What the Task is, where it stands on its Graph, its pull request and comments.
-struct TaskBriefView: View {
-    let client: RemoteMobileClient
-    let task: WorkViewPlan.Content
-    let theme: ThemeDefinition
-    @State private var status = Loaded<WorkFrame.TaskStatusReading>.loading
-
-    var body: some View {
-        ScrollView {
-            switch status {
-            case .loading: ProgressView().padding(.top, 80)
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
-            case .value(let status): brief(status)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .background(theme.palette.background)
-        .task { await load() }
-        .refreshable { await load() }
-    }
-
-    private func load() async {
-        do { status = .value(try await client.status(task: task.work.id)) } catch {
-            status = .failed(machineConnectionMessage(error))
-        }
-    }
-
-    private func brief(_ status: WorkFrame.TaskStatusReading) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let row = status.row {
-                    Text("\(row.task.identifier) · \(row.section.rawValue.capitalized)")
-                        .font(Typography.caption(13))
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-                Text(task.title).font(Typography.strong(22)).foregroundStyle(theme.palette.text)
-            }
-            if let row = status.row, !row.nextMove.reason.isEmpty {
-                fact("Next", row.nextMove.reason)
-            }
-            if let graph = status.overview?.graph {
-                fact("Graph", "\(graph.name) · \(position(graph.position))")
-            }
-            if let pull = status.row?.pr?.publication?.github {
-                Link(destination: pull.url) {
-                    Label("Pull request #\(pull.number)", systemImage: "arrow.triangle.pull")
-                        .font(Typography.strong(16))
-                        .frame(minHeight: 44)
-                }
-            }
-            if let description = status.row?.task.description, !description.isEmpty {
-                Text(prose(description)).font(Typography.body(16)).foregroundStyle(theme.palette.text)
-            }
-            if let comments = status.comments?.comments, !comments.isEmpty {
-                Divider()
-                ForEach(comments) { comment in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(author(comment.author))
-                            .font(Typography.caption(13))
-                            .foregroundStyle(theme.palette.textSecondary)
-                        Text(prose(comment.body)).font(Typography.body(15)).foregroundStyle(theme.palette.text)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .textSelection(.enabled)
-    }
-
-    private func fact(_ name: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(name).font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
-            Text(value).font(Typography.body(16)).foregroundStyle(theme.palette.text)
-        }
-    }
-
-    private func position(_ position: TaskGraph.Position) -> String {
-        switch position {
-        case .at(let step): "at \(step)"
-        case .run(let step, _, let running): running ? "running \(step)" : "stopped at \(step)"
-        }
-    }
-
-    private func author(_ author: TaskCommentAuthor) -> String {
-        switch author {
-        case .person(let name): name ?? "Someone"
-        case .integration: "Integration"
-        case .session(_, let requester): requester.map { "A Session for \($0)" } ?? "A Session"
-        }
-    }
-
-    private func prose(_ markdown: String) -> AttributedString {
-        (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(markdown)
     }
 }
 
@@ -225,58 +108,6 @@ struct TaskChangesView: View {
         let folder = (file.path as NSString).deletingLastPathComponent
         let state = file.untracked ? "new" : file.unstaged || file.staged ? "uncommitted" : "committed"
         return folder.isEmpty ? state : "\(folder) · \(state)"
-    }
-}
-
-/// Each Graph that ran for the Task, newest first, with what every step did.
-struct TaskRunsView: View {
-    let client: RemoteMobileClient
-    let task: WorkViewPlan.Content
-    let theme: ThemeDefinition
-    @State private var status = Loaded<WorkFrame.TaskStatusReading>.loading
-
-    var body: some View {
-        Group {
-            switch status {
-            case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
-            case .value(let status) where status.graphProcesses.isEmpty:
-                ContentUnavailableView("No runs yet", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-            case .value(let status):
-                List {
-                    ForEach(status.graphProcesses.sorted { $0.entry.updatedAt > $1.entry.updatedAt }, id: \.entry.id) { run in
-                        Section {
-                            ForEach(run.steps, id: \.lfProcessId) { step in
-                                HStack {
-                                    Text(step.label).font(Typography.body(15)).foregroundStyle(theme.palette.text)
-                                    Spacer()
-                                    Text(step.outcome ?? (step.completedAt == nil ? "running" : "finished"))
-                                        .font(Typography.caption(13))
-                                        .foregroundStyle(theme.palette.textSecondary)
-                                }
-                                .listRowBackground(theme.palette.background)
-                            }
-                        } header: {
-                            Text("\(run.entry.name) · \(run.entry.state.rawValue)")
-                                .font(Typography.strong(14))
-                                .foregroundStyle(theme.palette.textSecondary)
-                                .textCase(nil)
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .refreshable { await load() }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.palette.background)
-        .task { await load() }
-    }
-
-    private func load() async {
-        do { status = .value(try await client.status(task: task.work.id)) } catch {
-            status = .failed(machineConnectionMessage(error))
-        }
     }
 }
 

@@ -24,7 +24,7 @@ until that Mac opts in with `touch ~/.lf/mobile-same-device`.
 The list shows one repository at a time: tap the title to switch, or pick
 **All repositories** to see each under its name. The filter button chooses what
 to show — **Started** (Desktop's sidebar: Working, then Autonomous), **Ready for
-you**, **Working now**, **Backlog** or **Done** — in the Machine's order. Tasks
+you**, **Working now**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh. **+** opens New Task: describe the work, pick a
@@ -32,10 +32,9 @@ repository, **Create & start**.
 
 ## Task
 
-Opening a Task opens its conversation and fits the terminal to the phone. **⋯**
-opens what Desktop shows beside it: **Brief** (identifier, next move, Graph
-position, pull request, description and comments) and **Changes** (changed
-files, each opening its diff). A Task with no conversation opens on its Brief.
+Opening a Task opens its conversation and fits the terminal to the phone.
+**Changes** lists the files the Task changed; each opens its diff, and the diff
+opens the whole file. A Task with no conversation opens on its Changes.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
@@ -60,7 +59,7 @@ ever sent twice: after an uncertain send the app says so and waits.
 | `SessionLink.swift` | The phone's hold on one Session |
 | `SessionTerminal.swift`, `SessionView.swift` | Terminal, reply field and keys |
 | `TaskListView.swift` | Repository, filter, search and the Task list |
-| `TaskWorkspaceView.swift` | A Task's conversation with its Brief and Changes |
+| `TaskWorkspaceView.swift` | A Task's conversation and its Changes |
 | `MobileTaskCreation.swift`, `MobileNewTaskView.swift` | New Task |
 
 ```sh

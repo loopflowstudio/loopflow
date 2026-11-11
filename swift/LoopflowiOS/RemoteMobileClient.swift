@@ -34,10 +34,6 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         try await decode(String.self, read(.repoPath(id: id)))
     }
 
-    /// A Task's row, Graph position and comments: what Desktop's Brief shows.
-    func status(task: String) async throws -> WorkFrame.TaskStatusReading {
-        try await decode(WorkFrame.TaskStatusReading.self, read(.taskGet(directory: "/", issue: task)))
-    }
 
     /// The Machine's Waves that are still in use.
     func waves() async throws -> [MobileWave] {

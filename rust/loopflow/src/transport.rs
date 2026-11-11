@@ -411,27 +411,6 @@ fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
         .is_some_and(crate::session::WorkSource::is_managed)
 }
 
-/// The Machine server, started first by the selected installation when it is
-/// stopped, as a managed view starts it; never by this build.
-fn open_server() -> Result<crate::server::client::Connection> {
-    use crate::server::client::Connection;
-    if let Ok(server) = Connection::open() {
-        return Ok(server);
-    }
-    let setup = crate::installation::server::readiness_command()?.output()?;
-    Connection::open().with_context(|| {
-        format!(
-            "lf install server: {}",
-            String::from_utf8_lossy(&setup.stderr).trim()
-        )
-    })
-}
-
-/// A held launch found no Machine server, even after readying it; nothing started.
-#[derive(Debug, thiserror::Error)]
-#[error("Loopflow server is not running; run lf server status")]
-pub(crate) struct ServerMissing;
-
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
 /// server. `inherit` edits the caller's environment for it. With no server it
 /// fails; it never falls back to an owner process.
@@ -456,10 +435,8 @@ pub(crate) fn start_held(
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let (rows, cols) = size();
-    let mut server = open_server().map_err(|error| {
-        tracing::info!(error = %format!("{error:#}"), "held start found no Machine server");
-        ServerMissing
-    })?;
+    crate::harness::agent_process::require_server()?;
+    let mut server = crate::server::client::Connection::open()?;
     let answer = server.request(Operation::Server(ServerOperation::SessionStart {
         session: session.cloned(),
         request: uuid::Uuid::new_v4().to_string(),

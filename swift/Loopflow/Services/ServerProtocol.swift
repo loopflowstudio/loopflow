@@ -136,9 +136,14 @@ public enum ServerOperation: Encodable, Sendable {
     /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
     /// pane (`LF_TERMINAL_ID`) the child continues.
     case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
+    /// A provider hook's turn or tool boundary, answered `{steers, waiting}`.
+    /// Desktop never sends it; `lf __context-block` does.
+    case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
+                         printed: [String])
 
     private enum Keys: String, CodingKey {
         case kind, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
+        case moment, delivery, adapter, callback, gap, printed
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
@@ -164,6 +169,15 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
             try box.encode(placement, forKey: .placement)
+        case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.boundary", forKey: .kind)
+            try box.encode(moment, forKey: .moment)
+            try box.encode(delivery, forKey: .delivery)
+            try box.encode(adapter, forKey: .adapter)
+            try box.encode(callback, forKey: .callback)
+            try box.encode(gap, forKey: .gap)
+            try box.encode(printed, forKey: .printed)
         }
     }
 }

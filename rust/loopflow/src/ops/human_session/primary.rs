@@ -165,7 +165,7 @@ async fn start_in_background(
         id.clone(),
     ];
     let held = session.id.clone();
-    let started = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         crate::transport::start_held(&argv, &worktree, Some(&held), &|command| {
             let key = crate::work::wave::context::WAVE_ID_ENV;
             match &wave {
@@ -174,16 +174,8 @@ async fn start_in_background(
             };
         })
     })
-    .await?;
-    match started {
-        Ok(_) => Ok(Some(id)),
-        // The Graph runs without the conversation, as past the conversation limit.
-        Err(error) if error.is::<crate::transport::ServerMissing>() => {
-            tracing::info!(session = %id, "background Task conversation not started: no Machine server");
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
+    .await??;
+    Ok(Some(id))
 }
 
 pub(super) async fn task_conversation(

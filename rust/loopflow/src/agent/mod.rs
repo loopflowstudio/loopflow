@@ -186,6 +186,10 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
+    /// Whether a Task or Wave command named this launch's Work
+    /// (`WorkSource::is_managed`). A headless run reads this to choose its
+    /// hooks; a native terminal launch gets every hook either way.
+    pub managed: bool,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -1740,7 +1744,7 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(
-        session_environment(launch, process.context_file.as_deref())
+        session_environment(launch, process.context_file.as_deref(), true)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
     );
     if let Some(context) = launch

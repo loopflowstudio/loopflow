@@ -1,6 +1,6 @@
 # LOO-824: hold managed Sessions' PTYs beside the server
 
-Stacked on LOO-819 (#1875). The direction is `docs/dev/server-first.md`; the
+Stacked on LOO-821 (#1879), above LOO-819 (#1875). The direction is `docs/dev/server-first.md`; the
 Task brief's "Decided, do not reopen" list is not repeated here. LOO-819's
 scratch (quotes, measurements, receipts) is in git at `e65ddaed7:scratch/`.
 
@@ -795,3 +795,15 @@ passed; `session_launch_contract` 2 passed; clippy clean. Gate: `session_cli_tes
 `work_open_tests` launch the repository conversation and may now need a server.
 
 Jack Heart: "can you stack ontop of 821". Steered the run to lf sync onto jack/loo-821-managed-sessions-hooks-call-the-machine-server (plan: merge_target, 54 unique commits, 82 files).
+
+## Stack merge — November 11, 2026
+
+Merged LOO-821 at `8044329e6965b10a9977a6c4646b7d8a3f9ad529`. Both
+`session.start` and `session.boundary` share revision 5 in Rust, Swift and
+the schema. Holding and hooks read the same `WorkSource::is_managed`;
+`start_held` calls LOO-821's `require_server`. Removed `open_server`,
+`ServerMissing` and its background-conversation bypass. Repository
+conversations remain Declared. This branch's explore and QA artifacts remain;
+LOO-821's choices are retained under their own heading in `questions.md`.
+
+Check: `cargo test -p loopflow --test transport_tests resumed_session_completes_turns_after_build_replacement_and_viewer_return` — pending after sync; gate owns broader suites and static analysis.

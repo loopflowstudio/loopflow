@@ -133,6 +133,24 @@ struct ServerProtocolTests {
         #expect(try encoded(start) == value("session_start"))
     }
 
+    @Test func hookBoundarySharesTheRustServerContract() throws {
+        let boundary = ServerClientMessage.request(id: "stop", operation: .sessionBoundary(
+            moment: "stop", delivery: "/Users/maya/.lf/context-deliveries/0b9f2c1e.json",
+            adapter: .object(["session": .string("session_5e55105e000040008000000000000001"),
+                              "agent_process_id": .string("85c31c1e-850c-4821-878d-55527b6dba46"),
+                              "capability": .string("4b0e1f2a-9c3d-4e5f-8a6b-7c8d9e0f1a2b")]),
+            callback: .object(["hook_event_name": .string("Stop"), "session_id": .string("5f1c0d2e-native"),
+                               "prompt_id": .string("p-12")]),
+            gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
+            printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"]), select: nil)
+        #expect(try encoded(boundary) == value("session_boundary"))
+        guard case .response(_, _, .object(let answer)) = try message("session_boundary_answer") else {
+            Issue.record("Missing boundary answer"); return
+        }
+        #expect(answer["steers"] == .null)
+        #expect(answer["waiting"] == .bool(false))
+    }
+
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
         let request = ServerClientMessage.request(id: "view-1", operation: .read(
             .desktopViewGet(directory: "/repo", expression: "task:INF-123")), select: nil)

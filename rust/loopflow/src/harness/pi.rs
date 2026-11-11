@@ -197,6 +197,7 @@ impl PiHarness {
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
+            config.managed,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {

@@ -22,7 +22,7 @@ first, then the engineering words it borrows.
 | **Run** | One continuable agent conversation that runs headless. A Session and a Run are the same kind of conversation record. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
-| **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
+| **AgentProcess** | The provider's OS process Loopflow started for a Session. An `lf <skill>` run's is the foreground program of your terminal; a Task, Wave or repository conversation's is kept by a holder and keeps running when its views close. |
 | **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
 | **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window, and starts Task and Wave conversations in a holder. |
 | **Holder** | The process beside the server that keeps the terminals and agents of Task and Wave conversations. One per build; an install never restarts it. |

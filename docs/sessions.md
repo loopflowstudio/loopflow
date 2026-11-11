@@ -41,6 +41,7 @@ resend input.
 | running with no terminal showing it (`detached`) | reattaches; nothing restarts |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
+| started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
 | ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
 
@@ -48,9 +49,12 @@ Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
 A Task, Wave or repository conversation runs until its Task is done or
-abandoned or its agent exits; closing every view does not end it. Any other unviewed, settled conversation ends its
-processes after two minutes of quiet; `session.end_detached_after` changes the
-grace or disables it with `off`.
+abandoned or its agent exits; closing every view does not end it. A
+conversation started with `lf <skill>` ends with its terminal
+([Run one in your terminal](#run-one-in-your-terminal)). A conversation still
+on its own `lf session serve` process ends it after two minutes unviewed and
+settled; `session.end_detached_after` changes the grace or disables it with
+`off`.
 Returning paints its saved screen while the provider reopens its history, without
 replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
@@ -69,6 +73,35 @@ starts from that log and current instructions, and the old thread stays in
 
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
+
+## Run one in your terminal
+
+```bash
+lf implement                       # the agent runs right here, as if you had typed `claude`
+lf -a codex debug -c               # the same for Codex, with the clipboard as context
+```
+
+`lf` builds the prompt and context, starts the agent as this terminal's
+foreground program and waits for it. Nothing sits between you and the agent:
+keys, paste, resize and Ctrl+C go straight to it, and a terminal that shows
+the running program (a tab title, Rex's icon) shows the agent. When the agent
+exits, `lf` reads its transcript, records usage and completion in
+`lf session history`, and exits with the agent's status.
+
+| | |
+|---|---|
+| Processes | the agent and the `lf` waiting for it; no server, holder or `lf session serve` |
+| Closing the terminal | ends the agent, as it would plain `claude` |
+| Coming back | `lf resume <session>` continues its thread from history |
+| `lf install` meanwhile | leaves it running; the next launch uses the new build |
+| Steers | arrive when it is next started or resumed, not mid-turn |
+| Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
+
+This covers every launch that isn't a Task, Wave or repository conversation:
+`lf <skill>`, `lf graph …`, `lf -i`, bare `lf`, and the same commands typed in
+a Desktop shell. A conversation that should outlive its terminal or be open in
+several places belongs to a Task, Wave or repository; those run in a
+[holder](#keep-working-through-an-update).
 
 ## Keep working through an update
 
@@ -96,7 +129,8 @@ holder once.
 | `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
-| `lf <skill>`, `lf graph …`, `lf -i`, anything with `-b` or a pipe, even in a Task's checkout | its own process, as before |
+| `lf <skill>`, `lf graph …`, `lf -i`, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
+| anything with `-b` or a pipe | a child of that command |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations

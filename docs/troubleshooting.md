@@ -113,8 +113,9 @@ One per installed build that still has an open Task or Wave conversation.
 Each exits a minute after its last conversation ends; ending those
 conversations, not killing the holder, is how to retire one. Killing a holder
 ends every agent it holds. `lf session serve` processes belong to
-conversations opened before holders, or to runs outside a Task or Wave, and
-end with their conversation.
+conversations opened before holders and to Desktop Task shells, and end with
+their conversation. An `lf <skill>` run has none: its agent is a child of
+your terminal.
 
 ## A creation has no confirmed answer
 

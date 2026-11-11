@@ -19,6 +19,26 @@ only launches that are not Task, Wave or repository conversations. The Rex probe
 host's receipts, not as the design: Rex-specific receipt ingestion,
 host-owned exit contracts and cross-host control are out of scope.
 
+## Shipping docs (write-docs, November 11)
+
+Intended behavior for bare-direct, written in place:
+
+- `docs/sessions.md`: new "Run one in your terminal"; resume table row for a
+  bare Session live elsewhere (second agent, same thread); lifetime paragraph
+  (bare ends with its terminal; `session.end_detached_after` only for
+  conversations still on `lf session serve`); "Runs in" table rows.
+- `docs/troubleshooting.md`: `lf session serve` processes now mean
+  pre-holder conversations and Desktop Task shells only.
+- `docs/glossary.md`: AgentProcess.
+
+Open question the docs expose: with turn hooks gone, a steer to a bare
+Session (including `lf task steer`, which targets every Session on a Task,
+and so bare subagents run in its checkout) arrives only at its next start or
+resume, or at compaction through the context hook. The docs say "arrive when
+it is next started or resumed, not mid-turn". Should `lf session steer` /
+`lf task steer` say at send time that a bare target won't see it until then,
+or skip bare Sessions entirely?
+
 ## Outcome and stopping point (kickoff, Rex-framed)
 
 Determine whether Rex can own the provider's terminal while LF coordinates

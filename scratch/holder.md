@@ -618,3 +618,73 @@ query and view replies are dropped" moves to the every-view-types piece,
 where several typing views make it necessary; telling a query reply from a
 keystroke in a view's input, and what color queries return, are designed
 there. `docs/dev/server-first.md` records it under that piece.
+
+## Implementation — November 10, 2026
+
+**Built (commit 463957a85): the holder.** `rust/loopflow/src/holder.rs`,
+`holder/wire.rs`, `holder/client.rs`, `lf holder run` (hidden, dispatched in
+`main` before any store or journal). `cargo test -p loopflow --lib holder::`:
+10 passed. Differences from the plan above, now what the code does:
+
+- Requests and answers are one JSON line each; a `read` stream is frames
+  `o` out, `g` gap, `m` mode, `x` exit. `write` is raw bytes after the answer.
+- **`m` mode frames and a `restore` request are new.** The owner's
+  `NativeClient` (`transport/native.rs`) tells a provider's exit text from its
+  screen by `tcgetattr` on the PTY at each read, and restores cooked modes
+  when a client dies raw. The server has no PTY fd, so the holder samples
+  ICANON at each read, keeps the transitions by position, and frames them.
+- **`forget {terminal}` is new**: an exited terminal's ring stays for readers
+  until the server has settled its exit.
+- `read` from a position past `written`, or of an unknown terminal, is an
+  error line; the connection stays in request mode.
+- `resize` also signals the foreground group (same-size resize repaints), as
+  the owner does.
+- Holder startup hashes its executable: the debug binary took over 2 s to
+  print its ready line. `Client::ensure` waits up to 20 s.
+
+**Learned reading the owner (`transport.rs` `serve`), for the slices below:**
+
+- A viewer's stream is not PTY bytes. It also carries lf's own reports (OSC
+  title, status, directory from `output.take_reports`), native-exit
+  replacement text, settled lines and the APC events. Under PTY positions
+  those travel in a frame the viewer writes but does not count (`aside`), and
+  a `position` frame says where a snapshot or a dropped stretch leaves it.
+- A position resume cannot replay events or asides sent while the view was
+  away. The server sends the current state again (size, owner, control,
+  return, directory, title and status, child exit), as a fresh attach does
+  without the snapshot. After a server restart there is no viewer record, so
+  resume is "attach from byte N" and answers a new viewer identity.
+- A resuming view's bytes come from the holder's ring through a catch-up
+  `read` connection, not from a second ring in the server.
+- The store keys everything about a transport on the owner's LfProcess row:
+  `agent_sessions.transport_lf_process_id REFERENCES processes(id)`,
+  `processes.native_input` (input retention), viewer holds
+  (`task_retirement.rs`), `owner_retention`, `idle_retention`,
+  `owner_sessions`, `owner_task_abandoned`, `owner_retiring_tasks`,
+  `lifetime.rs`, `snapshot::leave`, `terminal_title`, `rollover.rs`: 32 SQL
+  sites. A `TerminalId` that is not an LfProcess needs a `terminals` table
+  and each of those read through it. The handoff the child reads
+  (`LF_TRANSPORT_OWNER`, `transport::current()`) carries an LfProcessId too.
+- The lifetime policy runs one watcher thread per owner (`lifetime::spawn`);
+  the registry needs one for all terminals.
+
+**Remaining, in order** (each ends compiling with its focused test):
+
+1. Lift `serve`'s loop state into a per-terminal struct with the child behind
+   `Child::Local | Child::Held`, so owners and held terminals share viewer,
+   control, ownership, native-client and settlement code. Existing
+   `transport::` tests cover it.
+2. `TerminalId`, the `terminals` table (one migration), store reads keyed by
+   owner or terminal, the child handoff carrying either.
+3. Registry event loop in the server (one thread, `poll` over holders and
+   views), `session.start`, `session.attach` by terminal, bridge hands the
+   socket to the registry. `position` and `aside` frames; resume from the ring.
+4. `transport::managed` and its callers; relay takes the server route for
+   held terminals, draws nothing while reconnecting, discards terminal input
+   while catching up.
+5. Restart: `meta.json`, `screen.ghostsnp` with position, ring replay, nudge;
+   `exit-record.json`; settlement with the directory as receipt; one policy
+   watcher.
+6. Swift `ServerProtocol`, `server_schema.json`, DTO fixtures, revision 5,
+   docs corrected to the build, `held_session_survives_server_restart`.
+7. Slice 0 mode probe (does not gate).

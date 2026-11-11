@@ -372,27 +372,45 @@ runs no async runtime and knows nothing about Sessions.
 - **Ring.** The newest 2 MiB of raw output per PTY, addressed by absolute
   byte count since the child started. The holder drains every PTY whether or
   not a server is connected, so a stopped server never blocks an agent.
-- **Exit.** When a child exits the holder writes `<terminal>/exit.json` (code
-  or signal, final byte count) before reporting it.
+- **Exit.** When a child exits the holder reads what it left on the PTY,
+  closes the PTY, and writes `<terminal>/exit.json` (code or signal, final
+  byte count) before reporting it. It keeps the ring for readers until the
+  server sends `forget`.
 
-The protocol is newline-delimited JSON requests on a Unix socket, with raw
-frames once a connection becomes a stream. It is small so that a newer server
-can speak to any older holder:
+Requests and answers are one JSON object per line on a Unix socket
+(`holder/wire.rs`). The protocol is small so that a newer server can speak to
+any older holder, and no field has a default:
 
 | Request | Answer |
 |---|---|
-| `hello {revision}` | `welcome {revision, build, pid}` or `incompatible` |
-| `list` | `[{terminal, pid, rows, cols, written, ring_start, exit}]` |
-| `start {terminal, request, argv, cwd, env, rows, cols}` | `{pid}`. `env` is complete; nothing is inherited from the holder. Repeating a `terminal` with the same `request` answers the existing child; with different content it is an error |
-| `read {terminal, from}` | The connection becomes that terminal's output: `gap {ring_start}` when `from` is older than the ring, then `out` frames, then `exit {…}` |
-| `write {terminal}` | The connection becomes that terminal's input |
-| `resize {terminal, rows, cols}` | — |
+| `hello {revision}` | `welcome {revision, build, pid}`, or `incompatible {revision}` to an older asker |
+| `list` | `terminals [{terminal, request, pid, rows, cols, written, ring_start, exit}]` |
+| `start {terminal, request, argv, cwd, env, rows, cols}` | `started {pid}`. `env` is complete; nothing is inherited from the holder. Repeating a `terminal` with the same `request` answers the existing child; with another `request` it is an error |
+| `read {terminal, from}` | `reading`, then the connection is that terminal's output as frames |
+| `write {terminal}` | `writing`, then the connection is that terminal's input as raw bytes |
+| `resize {terminal, rows, cols}` | `done`. The foreground program is signalled even when the size is unchanged |
+| `restore {terminal}` | `done`. The PTY returns to the modes it had before its child ran |
+| `forget {terminal}` | `done`. An exited terminal's ring is dropped; a running one is an error |
+
+Anything else answers `error {message}` and the connection keeps taking
+requests. A `TerminalId` names one PTY and is never reused: a `read` of a
+terminal the holder does not hold, or from a position past what that
+terminal has written, is an error and never an answer from byte 0.
+
+Output frames are `tag u8 · length u32 BE · payload`:
+
+| Tag | Payload |
+|---|---|
+| `o` | Raw PTY bytes continuing the reader's position |
+| `g` | `{ring_start}`: the ring passed the reader; the stream continues there |
+| `m` | `{raw}`: whether the PTY had line editing off when the following bytes were read. The server tells a provider's screen from its exit text by it, as an owner does with `tcgetattr` |
+| `x` | `{code, signal, at, written}`: the child's exit, last frame of the stream |
 
 There is no signal request. The server signals a child's process group itself
 (same user, pid from `list`).
 
 A dropped holder connection says nothing about its agents. The server reads
-again from its last position with backoff; a terminal ends only on an `exit`
+again from its last position with backoff; a terminal ends only on an `x`
 frame or an `exit.json`. A `start` whose answer was lost is reconciled with
 `list` before anything is retried, so one request starts one child. A
 terminal missing from `list` with no `exit.json` has an unknown outcome and is

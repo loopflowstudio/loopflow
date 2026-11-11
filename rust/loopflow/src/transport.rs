@@ -2,6 +2,7 @@
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
 mod connection;
+mod hosted;
 mod input;
 #[cfg(test)]
 mod input_retry_tests;
@@ -954,703 +955,72 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         nonblocking(reader.as_raw_fd())?;
     }
     nonblocking(input.as_raw_fd())?;
-    let mut input = Some(input);
-    let mut end_input = false;
     // The child and its capture now belong to this owner, even if acknowledgement is lost.
     let _ = writeln!(io::stdout(), "{id}");
     let _ = io::stdout().flush();
-    let mut viewers: Vec<Viewer> = Vec::new();
-    // Who may type.
-    let mut control: Option<String> = None;
-    let mut ownership = Ownership::default();
-    let mut size = (24, 80);
-    let mut pending_input = PendingInput::default();
-    let mut ending_failure = crate::store::RecordingGap::default();
-    let mut output = output::Output::new(terminal)?;
-    let mut exit: Option<(u8, Instant)> = None;
-    let mut detach = false;
-    let mut client: Option<native::NativeClient> = None;
-    let mut returning = None;
-    let mut hint_due = false;
-    let mut announced = false;
-    let mut attached = false;
     // The lifetime policy and a blocking child wait wake the descriptor loop.
     // Keep SIGCHLD available to runtimes used by the owner's background work.
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
-    let child_pid = child.id();
-    let settle_waker = waker.try_clone()?;
-    let (finished, child_exit) = mpsc::channel();
+    let mut hosted = hosted::Hosted::new(id, terminal, shell, control_key, waker.try_clone()?)?;
+    let pid = child.id();
+    let (finished, exit) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = finished.send(child.wait());
         let _ = (&waker).write_all(&[1]);
     });
-    let mut settling: Option<Settling> = None;
-    let mut observed = lifetime::Activity::default();
-    let mut output_told: Option<Instant> = None;
-    let mut exit_record: Option<Box<NativeExit>> = None;
-    let mut execution_directory_reported = false;
-    let mut planning = None;
-    let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
+    let mut child = hosted::Child::Local(hosted::Local {
+        readers,
+        input: Some(input),
+        cooked,
+        exit,
+        pid,
+        shell_jobs,
+    });
     loop {
         #[cfg(test)]
-        input_retry_tests::poll();
-        #[cfg(test)]
-        lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
-        let mut replaced = Vec::new();
-        let mut owner_change = false;
-        let mut size_change = false;
-        let mut theme_change = false;
-        let mut attaching = Vec::new();
+        hosted.before_accept(&mut child)?;
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
-            viewers.push(Viewer::new(socket));
+            hosted.admit(socket);
         }
-        // Observe every connection before admitting claims. A viewer earlier
-        // in the list must not see Busy for a controller whose EOF is ready.
-        viewers.retain_mut(|viewer| {
-            viewer.expire_heartbeat(SystemTime::now());
-            match viewer.read() {
-                Ok(()) => !viewer.connection.expired(),
-                Err(error) => survive(viewer, &error),
-            }
-        });
-        owner_change |= ownership.settle(&viewers);
-        if !viewers
-            .iter()
-            .any(|viewer| viewer.token.is_some() && viewer.token == control)
-        {
-            control = None;
-        }
-        viewers.retain_mut(|viewer| {
-            let result = (|| -> Result<()> {
-                while let Some((tag, payload)) = viewer.decoder.next()? {
-                    let request = match tag {
-                        Tag::Input => {
-                            // Stale and passive viewers cannot write.
-                            if viewer.token.is_some() && viewer.token == control && !end_input {
-                                anyhow::ensure!(
-                                    pending_input.push(&payload),
-                                    "Provider input is busy"
-                                );
-                            }
-                            continue;
-                        }
-                        Tag::Request => serde_json::from_slice::<Incoming>(&payload)?,
-                        _ => bail!("unexpected frame from viewer"),
-                    };
-                    let Incoming {
-                        id: answers,
-                        request,
-                    } = request;
-                    match request {
-                        Request::Status {
-                            key,
-                            program,
-                            state,
-                            progress,
-                        } if key == control_key => {
-                            output.report(program, state, progress);
-                        }
-                        Request::DetachViewers { key } if key == control_key => {
-                            detach = true;
-                        }
-                        Request::Directory { key, cwd } if key == control_key => {
-                            output.directory(&cwd);
-                        }
-                        Request::NativeStarted { key, exit, detach }
-                            if key == control_key && terminal =>
-                        {
-                            returning = Some(Event::Return {
-                                detach: detach.clone(),
-                            });
-                            client = Some(native::NativeClient::new(exit, detach, cooked));
-                        }
-                        Request::NativeEnded { key } if key == control_key => {
-                            viewer.ending = Some(answers);
-                        }
-                        Request::InputHint { key, hint } if key == control_key => {
-                            viewer.input_hint = Some(hint);
-                            hint_due = true;
-                        }
-                        Request::Controlled => {
-                            if viewer.attached {
-                                viewer.heartbeat_at = SystemTime::now();
-                            }
-                            viewer.reply(
-                                answers,
-                                Reply::Controlled {
-                                    held: control.is_some(),
-                                },
-                            );
-                        }
-                        Request::ExitRecord { key, pid, record } if key == control_key => {
-                            // Graph steps share this terminal, but their Graph
-                            // still owns their wait. Only our child can hand it off.
-                            if pid != child_pid {
-                                viewer.reply(answers, Reply::Busy);
-                                continue;
-                            }
-                            // The launcher kept its repository's planning in
-                            // sync while it waited; that wait is now ours.
-                            planning = crate::ops::planning_sync::PlanningSync::start_for_directory(
-                                &record.cwd,
-                            )
-                            .inspect_err(|error| {
-                                tracing::warn!(%error, "planning sync unavailable to this owner")
-                            })
-                            .ok();
-                            exit_record = Some(record);
-                            viewer.reply(answers, Reply::Accepted);
-                        }
-                        Request::DropExitRecord { key } if key == control_key => {
-                            exit_record = None;
-                            planning = None;
-                            viewer.reply(answers, Reply::Accepted);
-                        }
-                        Request::Attach {
-                            control: wants_control,
-                            replace,
-                            own,
-                            rows,
-                            cols,
-                            name,
-                            moved,
-                        } => {
-                            if wants_control
-                                && !replace
-                                && control.is_some()
-                                && viewer.token != control
-                            {
-                                viewer.reply(answers, Reply::Busy);
-                                continue;
-                            }
-                            attached = true;
-                            viewer.size = dimensions(rows, cols);
-                            viewer.name = name;
-                            if wants_control {
-                                hint_due = true;
-                                if viewer.token != control {
-                                    if let Some(token) = &control {
-                                        replaced.push((token.clone(), moved));
-                                    }
-                                }
-                                let token = uuid::Uuid::new_v4().to_string();
-                                control = Some(token.clone());
-                                viewer.token = Some(token);
-                            } else {
-                                if viewer.token.is_some() && viewer.token == control {
-                                    control = None;
-                                }
-                                viewer.token = None;
-                            }
-                            viewer.attached = true;
-                            viewer.heartbeat_at = SystemTime::now();
-                            attaching.push(viewer.id.clone());
-                            owner_change |= ownership.claim(own, viewer);
-                            viewer.reply(answers, viewer.attached_reply(ownership.id(), terminal));
-                            // Binding selects a directory for later connections;
-                            // the running provider keeps its own.
-                            if let Some(cwd) = exit_record
-                                .as_deref()
-                                .filter(|_| execution_directory_reported)
-                                .and_then(selected_directory)
-                            {
-                                output.directory(&cwd);
-                            }
-                            if let Some(cwd) = output.current_directory() {
-                                viewer.event(Event::Directory {
-                                    cwd: cwd.to_path_buf(),
-                                });
-                            }
-                        }
-                        Request::Resume(resume) => {
-                            viewer.resuming = Some((answers, resume));
-                        }
-                        Request::EndInput
-                            if !terminal && viewer.token.is_some() && viewer.token == control =>
-                        {
-                            end_input = true;
-                        }
-                        Request::Resize { rows, cols } => {
-                            viewer.size = dimensions(rows, cols);
-                            size_change |= ownership.held_by(viewer);
-                        }
-                        Request::Own { mode } if viewer.attached => {
-                            owner_change |= ownership.claim(Some(mode), viewer);
-                        }
-                        Request::Theme { theme } if viewer.attached => {
-                            viewer.theme = Some(theme);
-                            theme_change |= ownership.held_by(viewer);
-                        }
-                        Request::Leave => {
-                            viewer.leaving = true;
-                        }
-                        _ => {} // stale and passive viewers cannot release another claim
-                    }
-                }
-                viewer.flush()?;
-                Ok(())
-            })();
-            match result {
-                Ok(()) => !viewer.leaving,
-                Err(error) => error
-                    .downcast_ref()
-                    .is_some_and(|error| survive(viewer, error)),
-            }
-        });
-        // Release dropped connections' claims before a same-pass resume asks
-        // for them again; reconnecting restores the stream, not its old claims.
-        viewers.retain(|viewer| !viewer.connection.expired());
-        owner_change |= ownership.settle(&viewers);
-        if !viewers
-            .iter()
-            .any(|viewer| viewer.token.is_some() && viewer.token == control)
-        {
-            control = None;
-        }
-        // A resume moves its connection onto the dropped viewer's stream.
-        for index in 0..viewers.len() {
-            let Some((answers, resume)) = viewers[index].resuming.take() else {
-                continue;
-            };
-            let target = viewers.iter().position(|viewer| {
-                viewer.id != viewers[index].id
-                    && viewer.reconnect == resume.reconnect
-                    && viewer.spool.holds(resume.received)
-            });
-            let Some(target) = target else {
-                viewers[index].reply(answers, Reply::ReconnectRequired);
-                let _ = viewers[index].flush();
-                continue;
-            };
-            viewers[index].leaving = true;
-            // A resuming peer that already closed has nothing to continue on.
-            let Connection::Open(socket) = std::mem::replace(
-                &mut viewers[index].connection,
-                Connection::Dropped(Instant::now()),
-            ) else {
-                continue;
-            };
-            let viewer = &mut viewers[target];
-            viewer.size = dimensions(resume.rows, resume.cols);
-            size_change |= ownership.held_by(viewer);
-            if resume.control && control.is_none() {
-                let token = uuid::Uuid::new_v4().to_string();
-                control = Some(token.clone());
-                viewer.token = Some(token);
-                hint_due = true;
-            }
-            // Recovery can reclaim free geometry, never displace a newer viewer.
-            owner_change |= ownership.claim(resume.own.map(|_| Own::Request), viewer);
-            viewer.resume(socket, answers, resume.received, ownership.id(), terminal);
-        }
-        viewers.retain(|viewer| !viewer.leaving);
-        owner_change |= ownership.settle(&viewers);
-        let owner = viewers.iter().find(|viewer| ownership.held_by(viewer));
-        let new_size = owner
-            .filter(|_| owner_change || size_change)
-            .map(|viewer| viewer.size);
-        let theme = owner
-            .filter(|_| owner_change || theme_change || !attaching.is_empty())
-            .and_then(|viewer| viewer.theme.clone());
-        if let Some((rows, cols)) = new_size {
-            size = (rows, cols);
-            if terminal {
-                let fd = input
-                    .as_ref()
-                    .expect("terminal input stays open")
-                    .as_raw_fd();
-                resize(fd, rows, cols)?;
-                output.resize(rows, cols)?;
-                // Resizing to the same dimensions sends no signal. Ask the actual
-                // foreground program to repaint too.
-                // SAFETY: the descriptor is our PTY; only its current foreground
-                // group receives the nonterminating signal.
-                unsafe {
-                    let foreground = libc::tcgetpgrp(fd);
-                    if foreground > 1 {
-                        libc::kill(-foreground, libc::SIGWINCH);
-                    }
-                }
-            }
-        }
-        for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
-            // Fresh streams and ownership changes share the same appearance.
-            let fresh = attaching.contains(&viewer.id);
-            if fresh {
-                // Select the new owner's dimensions before painting its first
-                // screen, without waiting for a provider redraw.
-                if let Some(snapshot) = output.snapshot()? {
-                    viewer.stream(Tag::Snapshot, &snapshot)?;
-                }
-                for (stream, bytes) in output.tail() {
-                    viewer.stream(Tag::stream(stream), bytes)?;
-                }
-            }
-            if new_size.is_some() || fresh {
-                viewer.event(Event::Resize {
-                    rows: size.0,
-                    cols: size.1,
-                });
-            }
-            if owner_change || theme_change || fresh {
-                if let Some(theme) = &theme {
-                    viewer.event(Event::Theme {
-                        theme: theme.clone(),
-                    });
-                }
-            }
-            if owner_change || fresh {
-                let event = ownership.event(viewer);
-                viewer.event(event);
-            }
-            if fresh {
-                if let Some(client) = &client {
-                    viewer.event(Event::Return {
-                        detach: client.detach.clone(),
-                    });
-                }
-                if announced {
-                    if let Some((code, _)) = exit {
-                        viewer.event(Event::ChildExited { code });
-                    }
-                }
-            }
-        }
-        // The viewer that held control learns where it went; LOO-618's viewer
-        // leaves on that, a shared viewer may stay.
-        for (token, notice) in replaced {
-            for viewer in viewers
-                .iter_mut()
-                .filter(|viewer| viewer.token.as_ref() == Some(&token))
-            {
-                viewer.token = None;
-                viewer.event(Event::Control {
-                    held: false,
-                    notice: notice.clone(),
-                });
-            }
-        }
-        if let Some(event) = returning.take() {
-            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
-                viewer.event(event.clone());
-            }
-        }
-        // The controls reach the one controlling viewer when it attaches or
-        // when the execution registers them, whichever comes later.
-        if std::mem::take(&mut hint_due) {
-            let hint = viewers.iter().rev().find_map(|v| v.input_hint.clone());
-            if let Some(hint) = hint {
-                for viewer in viewers
-                    .iter_mut()
-                    .filter(|v| v.attached && v.token.is_some() && v.token == control)
-                {
-                    viewer.event(Event::Hint { text: hint.clone() });
-                }
-            }
-        }
+        // What woke this pass is judged within it.
         drain(&wake);
-        let detached = !viewers
-            .iter()
-            .any(|v| v.token.is_some() && v.token == control);
-        if detached {
-            control = None;
-        }
-        if let Some(name) = title.as_mut().and_then(|title| title.tick()) {
-            output.title(&name);
-        }
-        if let Some(input) = input.as_mut() {
-            // Typing at an idle shell prompt is not an agent draft: retain only
-            // input that work running inside the shell could receive.
-            let record = terminal
-                && (shell.is_none()
-                    || pending_input.is_empty()
-                    || crate::desktop::shells::holds_input(&id));
-            pending_input.forward(input, &id, record);
-        }
-        if end_input && pending_input.is_empty() {
-            input.take();
-        }
-        let mut drained = Vec::new();
-        for (stream, reader) in &mut readers {
-            let mut bytes = [0; 16384];
-            // Bounded work per stream keeps control responsive under continuous output.
-            for _ in 0..16 {
-                let n = match reader.read(&mut bytes) {
-                    Ok(0) => {
-                        drained.push(*stream);
-                        break;
-                    }
-                    Ok(n) => n,
-                    Err(e) if e.raw_os_error() == Some(libc::EIO) => {
-                        drained.push(*stream);
-                        break;
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) => return Err(e.into()),
-                };
-                observed.output += 1;
-                // An exec handoff announces before exec. The provider's first
-                // output establishes that it reached its configured directory.
-                if !execution_directory_reported {
-                    if let Some(record) = &exit_record {
-                        let connected = crate::journal::process_ledger()
-                            .and_then(|store| {
-                                store.agent_process(&record.attachment.agent_process_id)
-                            })
-                            .ok()
-                            .flatten()
-                            .is_some_and(|process| {
-                                process.pid.is_some() && process.completed_at.is_none()
-                            });
-                        if connected {
-                            output.directory(&record.cwd);
-                            execution_directory_reported = true;
-                        }
-                    }
-                }
-                let ready = match client.as_mut().filter(|_| terminal) {
-                    Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
-                    None => bytes[..n].to_vec(),
-                };
-                deliver(
-                    &mut output,
-                    &mut viewers,
-                    &mut pending_input,
-                    *stream,
-                    &ready,
-                    detached,
-                );
-                if output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE) {
-                    output_told = Some(Instant::now());
-                    let _ = activity.send(observed);
-                }
+        if let hosted::Pass::Ended(code, settling) = hosted.pass(&mut child)? {
+            group.disarm();
+            let _ = std::fs::remove_file(path);
+            // Records still being written finish before this process exits.
+            if let Some(settling) = settling {
+                settling.linger();
             }
-        }
-        readers.retain(|(stream, _)| !drained.contains(stream));
-        // After the reads: a provider that prints once and waits wakes nothing further.
-        publish_reports(&mut output, &mut viewers);
-        place_events(&output, &mut viewers, announced);
-        // Output written before the execution detached reaches its viewers first.
-        if detach {
-            control = None;
-            end_viewers(&mut viewers, Event::Detached);
-            // The execution's own control connections outlive its viewers.
-            viewers.retain(|v| !v.attached);
-            detach = false;
-        }
-        if let Some(held) = client.as_mut().map(native::NativeClient::expire) {
-            deliver(
-                &mut output,
-                &mut viewers,
-                &mut pending_input,
-                1,
-                &held,
-                detached,
-            );
-        }
-        // The child wait reports once. A returning launcher announces its
-        // client's end; an exec'd launcher leaves that announcement to our wait.
-        let status = child_exit.try_recv().ok().transpose()?;
-        if viewers.iter().any(|viewer| viewer.ending.is_some())
-            || (status.is_some() && exit_record.is_some())
-        {
-            pending_input.native_ended(&id);
-            if let Some(ended) = client.take() {
-                finish_client(
-                    ended,
-                    &mut readers,
-                    &mut output,
-                    &mut viewers,
-                    &mut pending_input,
-                    detached,
-                );
-            }
-            for viewer in viewers.iter_mut() {
-                let Some(answers) = viewer.ending.take() else {
-                    continue;
-                };
-                viewer.reply(answers, Reply::NativeEnded);
-                let _ = viewer.flush();
-            }
-        }
-        if let Some(status) = status {
-            if let Some(jobs) = &shell_jobs {
-                jobs.terminate()?;
-                crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
-            }
-            if let Some(record) = exit_record.take() {
-                settling = Some(Settling::spawn(record, status, settle_waker.try_clone()?));
+            return if code == 0 {
+                Ok(())
             } else {
-                // A launch that died before reporting its client's end.
-                if let Some(held) = client.take().map(native::NativeClient::release) {
-                    deliver(
-                        &mut output,
-                        &mut viewers,
-                        &mut pending_input,
-                        1,
-                        &held,
-                        detached,
-                    );
-                }
-                exit = Some((provider_exit_code(status), Instant::now()));
-            }
+                Err(crate::process::CommandExit(code).into())
+            };
         }
-        let delivered = settling.as_mut().and_then(|settling| {
-            let settled = settling.poll()?;
-            Some((settled, settling.process.clone()))
-        });
-        if let Some((settled, process)) = delivered {
-            for line in &settled.lines {
-                deliver(
-                    &mut output,
-                    &mut viewers,
-                    &mut pending_input,
-                    1,
-                    format!("\r\n{line}\r\n").as_bytes(),
-                    detached,
-                );
-            }
-            output.report(
-                format!("{process}/step"),
-                crate::program_status::State::Clear,
-                None,
-            );
-            output.report(
-                process,
-                match settled.code {
-                    0 => crate::program_status::State::Done,
-                    130 => crate::program_status::State::Idle,
-                    _ => crate::program_status::State::Error,
-                },
-                None,
-            );
-            planning = None;
-            exit = Some((settled.code, Instant::now()));
-        }
-        if let Some((code, at)) = exit {
-            if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
-                end_viewers(&mut viewers, Event::ChildExited { code });
-                announced = true;
-            }
-            // Once viewers have received the final output, release execution
-            // locks with the owner. Only never-viewed starts need a replay window.
-            if announced
-                && (at.elapsed() > Duration::from_secs(2)
-                    || (attached && viewers.iter().all(|viewer| viewer.output.is_empty())))
-            {
-                group.disarm();
-                let _ = std::fs::remove_file(path);
-                release_viewer_hold(&id, observed.hold);
-                snapshot::leave(&id, &output);
-                // Records still being written finish before this process exits.
-                if let Some(settling) = settling.take() {
-                    settling.linger();
-                }
-                return if code == 0 {
-                    Ok(())
-                } else {
-                    Err(crate::process::CommandExit(code).into())
-                };
-            }
-        }
-        // Ready output and viewer changes precede the final ending judgment.
-        // A throttled/unconsumed activity report also invalidates the candidate.
-        let viewed = observed.view(viewers.iter().any(|v| v.live()));
-        if observed.hold(viewer_hold(
-            &viewers,
-            observed.hold,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )) | viewed
-        {
-            let _ = activity.send(observed);
-        }
-        #[cfg(test)]
-        lifetime_tests::before_judgment();
-        if let Ok(ending) = ending.try_recv() {
-            let event = lifetime::report_result(
-                &mut ending_failure,
-                "Session ending",
-                ending.confirm(&id, observed, pending_input.holds_owner()),
-            )
-            .flatten();
-            if let Some(event) = event {
-                if let Some(jobs) = &shell_jobs {
-                    jobs.terminate()?;
-                    crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
-                }
-                end_viewers(&mut viewers, event);
-                release_viewer_hold(&id, observed.hold);
-                snapshot::leave(&id, &output);
-                crate::platform::kill_process(std::process::id());
-            }
-            // Flush even throttled activity so the applicable quiet interval
-            // starts again and a settled owner can eventually end.
-            if ending.activity != observed {
-                let _ = activity.send(observed);
-            }
-        }
-        #[cfg(test)]
-        lifetime_tests::after_judgment(&output, observed)?;
-        // Sleep until a descriptor has work or held output, exit announcement,
-        // input retention or disconnected-viewer grace needs another attempt.
-        let deadline = match exit {
-            Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
-            Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
-            _ => client.as_ref().and_then(native::NativeClient::expires_at),
-        };
-        let deadline = viewers
-            .iter()
-            .filter_map(|viewer| match viewer.connection {
-                Connection::Dropped(at) => Some(at + GRACE),
-                Connection::Open(_) | Connection::Draining(_) if viewer.live() => Some(
-                    Instant::now()
-                        + HEARTBEAT_TIMEOUT
-                            .saturating_sub(viewer.heartbeat_at.elapsed().unwrap_or_default()),
-                ),
-                Connection::Open(_) | Connection::Draining(_) => None,
-            })
-            .chain(deadline)
-            .chain(Some(Instant::now() + Duration::from_secs(10)))
-            .chain(pending_input.retry_at())
-            .chain(title.as_ref().map(|title| title.deadline()))
-            .chain(settling.as_ref().and_then(Settling::deadline))
-            .min();
+        // Sleep until a descriptor has work or the execution needs another attempt.
+        let mut fds = vec![
+            libc::pollfd {
+                fd: listener.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: wake.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        hosted.poll(&child, &mut fds);
         wait_for_activity(
-            &listener,
-            &wake,
-            &viewers,
-            &readers,
-            input.as_ref().filter(|_| pending_input.needs_write()),
-            deadline.map(|at| at.saturating_duration_since(Instant::now())),
+            &mut fds,
+            hosted
+                .deadline(&child)
+                .map(|at| at.saturating_duration_since(Instant::now())),
         );
     }
-}
-
-/// Drain and deliver what a finished native client still held, then its exit line.
-fn finish_client(
-    mut ended: native::NativeClient,
-    readers: &mut [(u8, File)],
-    output: &mut output::Output,
-    viewers: &mut Vec<Viewer>,
-    pending_input: &mut PendingInput,
-    detached: bool,
-) {
-    for (stream, reader) in readers.iter_mut() {
-        let mut bytes = [0; 16384];
-        for _ in 0..LIMIT / bytes.len() {
-            let Ok(n @ 1..) = reader.read(&mut bytes) else {
-                break;
-            };
-            let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
-            deliver(output, viewers, pending_input, *stream, &ready, detached);
-        }
-    }
-    let exit = ended.finish();
-    deliver(output, viewers, pending_input, 1, &exit, detached);
 }
 
 fn drain(wake: &UnixStream) {
@@ -1658,41 +1028,8 @@ fn drain(wake: &UnixStream) {
     while matches!((&*wake).read(&mut bytes), Ok(1..)) {}
 }
 
-/// Block until a viewer, the execution's output, the wake pipe or a writable
-/// input descriptor has work, or `timeout` passes.
-fn wait_for_activity(
-    listener: &UnixListener,
-    wake: &UnixStream,
-    viewers: &[Viewer],
-    readers: &[(u8, File)],
-    input: Option<&File>,
-    timeout: Option<Duration>,
-) {
-    let pollfd = |fd: RawFd, events: libc::c_short| libc::pollfd {
-        fd,
-        events,
-        revents: 0,
-    };
-    let mut fds = vec![
-        pollfd(listener.as_raw_fd(), libc::POLLIN),
-        pollfd(wake.as_raw_fd(), libc::POLLIN),
-    ];
-    for viewer in viewers {
-        let (socket, events) = match &viewer.connection {
-            Connection::Open(socket) if !viewer.output.is_empty() => {
-                (socket, libc::POLLIN | libc::POLLOUT)
-            }
-            Connection::Open(socket) | Connection::Draining(socket) => (socket, libc::POLLIN),
-            Connection::Dropped(_) => continue,
-        };
-        fds.push(pollfd(socket.as_raw_fd(), events));
-    }
-    for (_, reader) in readers {
-        fds.push(pollfd(reader.as_raw_fd(), libc::POLLIN));
-    }
-    if let Some(input) = input {
-        fds.push(pollfd(input.as_raw_fd(), libc::POLLOUT));
-    }
+/// Block until one of `fds` has work or `timeout` passes.
+fn wait_for_activity(fds: &mut [libc::pollfd], timeout: Option<Duration>) {
     let timeout = timeout.map_or(-1, |timeout| {
         // Round up so the last fraction of a millisecond does not spin.
         let millis = timeout.as_nanos().div_ceil(1_000_000);

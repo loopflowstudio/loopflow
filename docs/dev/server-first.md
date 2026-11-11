@@ -129,7 +129,7 @@ Each is one Task and one PR. The first five do not depend on each other.
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
-| Every view types; size follows the newest view | Takeover tokens, Move here | Holder |
+| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, Move here | Holder |
 | Observers become server registrations | `__codex-observe`, Task-update watchers | Hooks call the server |
 | Bare launches drop their hooks | Hook installs for bare runs | Transcript telemetry |
 | CLI cleanup: `session serve`, `session attach`, the detach key, `session.end_detached_after` | The owner's surface | Bare direct, holder |

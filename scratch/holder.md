@@ -637,15 +637,13 @@ clean.
 ## Concept review with a person — November 11, 2026
 
 Jack Heart ran `/concept-review` while run 1afadabb was on implement.
-[concept-review.html](concept-review.html). Proposals, none answered:
+[concept-review.html](concept-review.html). Proposals, with where they went:
 
-- **Cross-build talk to the server.** Built as the `held.sock` revision
-  (last Implementation section).
-- Desktop Task shells as held terminals, so the owner has no caller left
-  after LOO-820.
+- **Cross-build talk to the server.** Built as the `held.sock` revision.
+- Desktop Task shells as held terminals: LOO-830.
 - A managed launch gets the server ready itself before failing. Built.
-- Plain terminal while the server is away: title reads Reconnecting…, screen
-  untouched.
+- Plain terminal title reading Reconnecting… while the server is away:
+  "not sure"; nothing drawn, as built.
 - One place listing the conversations a killed holder took.
 - Rollover and resume-takeover have nothing to do for held terminals.
 

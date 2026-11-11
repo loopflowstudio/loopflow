@@ -21,19 +21,17 @@ Mobile admission permits
 the host's own node when the Machine opts in with `mobile-same-device`;
 ticket identity remains node/user.
 
-At November 11 10:56 UTC, GitHub still reports PR #1812 open and unmerged
-at that head, with no auto-merge. Freshly fetched main is
-`976b53db0c5affa519af66bfe9bf58ee83fba347`,
-still without `server/mobile.rs` or `server/ticket.rs`.
-The same pass's `lf task status LOO-718 --json` read succeeded: LOO-718
-remains at `feature`'s `demo` step with PR settlement not armed.
-The newer PR head does not change the missing transport dependency or the
-planned ticket changes.
+At November 11 10:59 and 11:36 UTC, GitHub reported PR #1812 open and
+unmerged at that head, with no auto-merge. Freshly fetched main was
+`976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
+`server/ticket.rs`. Both `lf task status LOO-718 --json` reads succeeded:
+LOO-718 remained at `feature`'s `demo` step with PR settlement not armed.
+The 10:59 store inspection confirmed the terminal and timing gaps above.
 
-Implementation and delivery wait for LOO-718 to land; reinspect its shared store
-and authenticated endpoints then. Landing that PR is outside this Task's scope.
-The absent remote transport prevents the authenticated connection acceptance
-checks. Desktop QA status is in `questions.md`.
+Implementation, authenticated acceptance checks and delivery wait for LOO-718
+to land; reinspect its shared store and endpoints then. Landing that PR is
+outside this Task's scope. The next Graph decision is Blocked on this external
+dependency. Desktop QA status is in `questions.md`.
 
 Earlier status reads and inspection references are in
 `1325549f96cb65e22e580d1e35095296fd43d5c0:scratch/design.md`, including the
@@ -65,17 +63,12 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-After integration, update `docs/server.md` (Phone access) and
-`rust/loopflow/src/server/README.md` (Remote attach contract): remove their
-planned/local-only wording and describe local/remote admission binding.
-Keep exact-owner selection and recovery together for both transports; keep
-the running-owner prerequisite and missing-owner error beside the remote example.
-The phone overview keeps connection steps; the server README owns protocol
-details and shared owner recovery. Desktop status and recovery controls live in
-the client guide, avoiding duplicate descriptions. The inspected
-transport speaks revision 5: update the remote example's `hello`/`welcome`
-anchor from revision 4 when integrating it.
-Keep the shared authentication requirement before the two-connection example
-so each step and retry can use it without repeating it.
+After integration, remove planned/local-only wording from `docs/server.md`
+and `rust/loopflow/src/server/README.md`; describe local/remote admission binding
+and update the remote example's revision 4 anchor to revision 5.
+Keep connection steps and Desktop controls in the client guide; protocol details
+and shared exact-owner recovery belong in the server README. Keep authentication
+before the two-connection example, with the running-owner prerequisite and
+missing-owner error beside it, so neither steps nor retries repeat the rules.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

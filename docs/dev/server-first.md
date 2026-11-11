@@ -154,9 +154,12 @@ as does a CLI `lf session list --subscribe`, which reads in its own process;
 an event makes the shared observation cache read that transcript within a
 second, a thirty-second reconcile catches a missed one, and every
 subscription reading it shares the one reading. Raw conversations are
-`claude` or `codex` processes with no `lf` or provider ancestor, paired with
-the newest transcript written in their directory since they started
-(`transcript/raw.rs`); one whose conversation an ended Session recorded lists
+`claude` or `codex` processes with no `lf` or provider ancestor
+(`transcript/raw.rs`). A Claude process is paired with the conversation its
+`sessions/<pid>.json` in Claude's home names; Claude rewrites that file on
+`/clear` and `/resume`. A process without one takes the newest transcript
+written in its directory since it started that no other live Claude process
+names. Codex has no such file, so the newest rule pairs it. One whose conversation an ended Session recorded lists
 under that Session's title. Claude's kernel process name is its version, so its
 executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).

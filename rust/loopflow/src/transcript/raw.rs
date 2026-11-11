@@ -2,12 +2,13 @@
 //! or `codex` process with no Loopflow or provider ancestor, paired with the
 //! newest transcript written in its directory since it started.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::harness::HarnessKind;
 use crate::journal::OsProcess;
 use crate::provider_account::activation::native_home;
+use crate::provider_auth::Provider;
 
 /// A transcript written this long before its process started still counts:
 /// clocks and first writes are coarse.
@@ -31,14 +32,37 @@ pub(crate) fn discover() -> Vec<RawConversation> {
             return Vec::new();
         }
     };
+    let by_pid = processes
+        .iter()
+        .map(|process| (process.pid, process))
+        .collect::<HashMap<_, _>>();
+    let owners = claude_owners(&native_home(Provider::Claude, None), &by_pid);
     let mut found = Vec::new();
-    for ((harness, cwd), started) in open(&processes) {
+    for ((harness, cwd), open) in open(&processes, &by_pid) {
         let Some(provider) = harness.provider() else {
             continue;
         };
         let home = native_home(provider, None);
+        let mut unnamed = Vec::new();
+        for (pid, started) in open {
+            let Some(id) = owners.get(&pid) else {
+                unnamed.push(started);
+                continue;
+            };
+            let transcript = super::live::claude_project(&home, &cwd).join(format!("{id}.jsonl"));
+            // Claude writes no transcript before the first message.
+            if transcript.is_file() {
+                found.push(RawConversation {
+                    harness,
+                    id: id.clone(),
+                    cwd: cwd.clone(),
+                    transcript,
+                });
+            }
+        }
+        let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
         found.extend(
-            newest(harness, &home, &cwd, &started)
+            newest(harness, &home, &cwd, &unnamed, &owned)
                 .into_iter()
                 .map(|(id, transcript)| RawConversation {
                     harness,
@@ -51,18 +75,18 @@ pub(crate) fn discover() -> Vec<RawConversation> {
     found
 }
 
-/// Start times of raw provider processes, by harness and directory.
-fn open(processes: &[OsProcess]) -> BTreeMap<(HarnessKind, PathBuf), Vec<i64>> {
-    let by_pid = processes
-        .iter()
-        .map(|process| (process.pid, process))
-        .collect::<HashMap<_, _>>();
-    let mut open = BTreeMap::<(HarnessKind, PathBuf), Vec<i64>>::new();
+/// The process ID and start time of each raw provider process, by harness and
+/// directory.
+fn open(
+    processes: &[OsProcess],
+    by_pid: &HashMap<u32, &OsProcess>,
+) -> BTreeMap<(HarnessKind, PathBuf), Vec<(u32, i64)>> {
+    let mut open = BTreeMap::<(HarnessKind, PathBuf), Vec<(u32, i64)>>::new();
     for process in processes {
         let Some(harness) = provider(process) else {
             continue;
         };
-        if process.has_exited() || launched_by_loopflow_or_provider(process, &by_pid) {
+        if process.has_exited() || launched_by_loopflow_or_provider(process, by_pid) {
             continue;
         }
         let Some(cwd) = OsProcess::cwd(process.pid) else {
@@ -70,9 +94,39 @@ fn open(processes: &[OsProcess]) -> BTreeMap<(HarnessKind, PathBuf), Vec<i64>> {
         };
         open.entry((harness, cwd))
             .or_default()
-            .push(process.started_at);
+            .push((process.pid, process.started_at));
     }
     open
+}
+
+/// The conversation each live Claude process has open, from the
+/// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
+/// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
+fn claude_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMap<u32, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Owner {
+        pid: u32,
+        session_id: String,
+        /// Milliseconds.
+        started_at: i64,
+    }
+    std::fs::read_dir(home.join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension()? != "json" {
+                return None;
+            }
+            let owner: Owner = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+            let process = by_pid.get(&owner.pid)?;
+            // A file left by an exited process names whoever reused its pid.
+            ((owner.started_at / 1000 - process.started_at).abs() <= START_SLACK)
+                .then_some((owner.pid, owner.session_id))
+        })
+        .collect()
 }
 
 /// The provider a process runs. Claude's installer links `claude` to
@@ -123,12 +177,13 @@ fn launched_by_loopflow_or_provider(
 }
 
 /// One transcript per process: the newest ones in `cwd` written since the
-/// earliest of them started.
+/// earliest of them started that no other live process has open.
 fn newest(
     harness: HarnessKind,
     home: &Path,
     cwd: &Path,
     started: &[i64],
+    owned: &HashSet<&str>,
 ) -> Vec<(String, PathBuf)> {
     let since = started.iter().min().copied().unwrap_or(0) - START_SLACK;
     let mut candidates = match harness {
@@ -138,7 +193,7 @@ fn newest(
             .map(|(id, indexed)| (id, indexed.path, indexed.modified))
             .collect(),
     };
-    candidates.retain(|(_, _, modified)| *modified >= since);
+    candidates.retain(|(id, _, modified)| *modified >= since && !owned.contains(id.as_str()));
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.2));
     candidates
         .into_iter()
@@ -261,7 +316,9 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let found = loop {
             // The stand-in may not have replaced its shell yet.
-            let found = open(&OsProcess::sample_names().unwrap());
+            let processes = OsProcess::sample_names().unwrap();
+            let by_pid = processes.iter().map(|p| (p.pid, p)).collect();
+            let found = open(&processes, &by_pid);
             if found.contains_key(&key) || std::time::Instant::now() > deadline {
                 break found;
             }
@@ -288,9 +345,43 @@ mod tests {
         old.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(10))
             .unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let found = newest(HarnessKind::Claude, home.path(), cwd, &[now]);
+        let none = HashSet::new();
+        let found = newest(HarnessKind::Claude, home.path(), cwd, &[now], &none);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, "new");
-        assert!(newest(HarnessKind::Claude, home.path(), cwd, &[now + 3600]).is_empty());
+        assert!(newest(HarnessKind::Claude, home.path(), cwd, &[now + 3600], &none).is_empty());
+        // Another live process's conversation is not this one's.
+        let owned = HashSet::from(["new"]);
+        assert!(newest(HarnessKind::Claude, home.path(), cwd, &[now], &owned).is_empty());
+    }
+
+    #[test]
+    fn a_claude_process_owns_the_conversation_its_session_file_names() {
+        let home = tempfile::tempdir().unwrap();
+        let sessions = home.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let mut live = process(7, 1, "claude");
+        live.started_at = 1_794_393_918;
+        let owner = |pid: u32, started_ms: i64, id: &str| {
+            std::fs::write(
+                sessions.join(format!("{pid}.json")),
+                serde_json::json!({"pid": pid, "sessionId": id, "startedAt": started_ms,
+                    "cwd": "/work", "status": "idle"})
+                .to_string(),
+            )
+            .unwrap();
+        };
+        owner(7, 1_794_393_918_645, "b307f698");
+        // Left by an exited process whose pid was reused, and by one not running.
+        owner(8, 1_700_000_000_000, "stale");
+        owner(9, 1_794_393_918_000, "gone");
+        std::fs::write(sessions.join("7.abc.key"), "").unwrap();
+        let mut reused = process(8, 1, "zsh");
+        reused.started_at = 1_794_393_000;
+        let by_pid = HashMap::from([(7, &live), (8, &reused)]);
+        assert_eq!(
+            claude_owners(home.path(), &by_pid),
+            HashMap::from([(7, "b307f698".to_owned())])
+        );
     }
 }

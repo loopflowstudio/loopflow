@@ -1,54 +1,71 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>LOO-822 QA</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#222}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#222}
 pre{background:#f4f4f2;padding:.7rem;overflow-x:auto;font-size:12.5px}
 h2{margin-top:2rem;border-bottom:1px solid #ddd}
 td,th{border-bottom:1px solid #eee;padding:.3rem .5rem;text-align:left;vertical-align:top}
 .ok{color:#176b2c}.bad{color:#a11}.fix{color:#8a5a00}
 </style></head><body>
-<h1>LOO-822 QA: live Session state from provider transcripts</h1>
-<p>2026-11-10. Branch-built <code>lf</code> with a private <code>LF_HOME</code> (<code>/tmp/lf-qa-822/home</code>), a fresh Git repo,
-and a real <code>claude</code> 2.1.322 (Opus 5.5) under a detached PTY whose parent is launchd, so no lf ancestor and no hooks.
-Driver: <code>scratch/qa/pty_driver.py</code>.</p>
+<h1>LOO-822 QA: live Session state and usage from provider transcripts</h1>
+<p>2026-11-11, after the five concept-review items (one <code>Turn</code>, transcript-written usage rows, <code>id</code> on the wire).
+Branch-built <code>lf</code> at <code>64ad4bf83</code> plus the fix below, private <code>LF_HOME=/tmp/lf-qa-822/home</code>, a fresh Git repo,
+real <code>claude</code> 2.1.322 on the ambient login. Raw conversations ran under a detached PTY (<code>scratch/qa/pty_driver.py</code>) with no lf ancestor.
+The 2026-11-10 pass (before the redesign) found the CLI subscription fix and the Esc / question limits. Those still hold.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>Saw</th><th></th></tr>
-<tr><td>Claude open, no message yet</td><td><code>No Sessions.</code> Claude writes no transcript before the first message.</td><td>expected</td></tr>
-<tr><td>The demo: long prompt, <code>lf session list</code></td><td><code>27b3bb41-…  active  raw claude  /private/tmp/lf-qa-822/repo  turn running 8s</code></td><td class="ok">works</td></tr>
-<tr><td>Same, after the turn</td><td><code>available raw claude … last turn ended 10s ago · 48.2k in (29.0k cached) · 2.7k out</code>. Transcript: input 2 + cache read 28,978 + cache write 19,171 = 48,151; output 2,661. Two assistant rows for one message counted once.</td><td class="ok">works</td></tr>
-<tr><td><code>lf session card &lt;provider id&gt;</code></td><td>Raw record with <code>turn.state: running</code>, <code>source: transcript</code>.</td><td class="ok">works</td></tr>
-<tr><td>Server watch: socket subscription to <code>session.list</code>, <code>desktop</code> hello</td><td>Prompt 21:35:36 → <code>running</code> frame 21:35:38; turn ended 21:35:42.7 → <code>ended</code> frame 21:35:44.</td><td class="ok">works</td></tr>
-<tr><td>CLI <code>lf session list --subscribe --json</code></td><td>Before: prompt 21:29:31, <code>running</code> frame 21:30:00, no ended frame within 4 s of the end. The CLI reads in-process (<code>lf server status</code>: <code>clients: []</code>), and that process had no watch, so only the 30 s reconcile moved it. FSEvents itself delivered (a temporary trace showed <code>Modify(Data(Content))</code> on the transcript path).<br>After the fix, with the server stopped: prompt 21:37:39 → <code>running</code> 21:37:40 → <code>ended</code> 21:37:47.</td><td class="fix">fixed</td></tr>
-<tr><td><code>AskUserQuestion</code> open on screen</td><td><code>turn running 15s</code>; <code>--available</code> empty. The transcript's last rows were the prompt and its <code>api-request</code>; the <code>tool_use</code> row (stamped 05:38:26) appeared at 05:39:21 together with its <code>tool_result</code>, after the answer.</td><td class="bad">transcript can't show it; docs corrected</td></tr>
-<tr><td>Esc a turn before any reply</td><td>Claude went idle ("Esc again to clear") and wrote nothing. <code>turn running 4m23s</code> until the next message, which then read <code>last turn ended 2s ago · 65.0k in (64.9k cached) · 54 out</code>.</td><td class="bad">transcript can't show it; docs corrected</td></tr>
-<tr><td><code>--no-raw</code></td><td><code>No Sessions.</code></td><td class="ok">works</td></tr>
-<tr><td><code>/exit</code></td><td>Leaves the list; card: <code>Session 27b3bb41-… is not recorded</code>.</td><td class="ok">works</td></tr>
-<tr><td>Bare <code>lf -a claude :</code> in a Task checkout (exit rows)</td><td><code>no eligible managed claude account</code>: the private Machine has no login.</td><td>not reached</td></tr>
+<tr><td>Raw demo: long prompt, <code>lf session list</code></td>
+<td><code>turn running 10s</code>, then <code>last turn ended 29s ago · 48.1k in (29.0k cached) · 1.5k out</code>. Transcript: 2 + 28,978 + 19,160 = 48,140; output 1,461.
+<code>turn.id</code> <code>26e08ed5…</code> is the prompt row's <code>uuid</code>; no <code>asking</code> or <code>source</code>.</td><td class="ok">works</td></tr>
+<tr><td>Tool-using turn, socket subscription to <code>session.list</code></td>
+<td><pre>02:46:53 running 265fcd46 None
+02:46:56 running 265fcd46 {input 49648, cached 48138, output 230}
+02:47:26 ended   265fcd46 {input 99804, cached 97782, output 1006}</pre>
+Usage so far arrives while the turn runs. The turn ended at 02:47:08 (transcript), so this frame was 18 s late; see below.</td><td class="ok">works</td></tr>
+<tr><td>Same, repeated</td><td>Turn ended 02:48:35; CLI showed it at 02:48:33+, socket frame at 02:48:37. Each <code>lf session list</code> took 1–4 s (debug build).</td><td class="ok">works</td></tr>
+<tr><td><code>lf session card &lt;provider id&gt;</code></td><td><code>turn: {id, state: ended, started_at, ended_at, model, usage}</code>.</td><td class="ok">works</td></tr>
+<tr><td>Bare <code>lf -a claude : "Read README.md, then reply with one word: done"</code></td>
+<td>With no accounts in the private Machine, lf took the unmanaged route on the ambient login (the 2026-11-10 pass never got this far).
+Stop hook wrote one row:<pre>usage|3a36a914…|{"final":true,"provider":"claude","usage":{"cache_read_tokens":74419,"cache_write_tokens":20750,"input_tokens":4,"model":"claude-opus-5-5","output_tokens":105,"total_input_tokens":95173}}</pre>
+After <code>/exit</code>:<pre>completed|3a36a914…|{"completed_at":1794394250,"duration_ms":6885,"errors":null,"result_id":null,"started_at":1794394244,"status":"completed","subtype":null}</pre>
+One usage row, no <code>cost_usd</code>, the completion dated at the turn's end. A second run gave the same shape.</td><td class="ok">works</td></tr>
+<tr><td>Raw <code>claude</code> and a bare lf run in the same directory</td>
+<td>Before: with the lf run live, the raw row vanished. After the lf run exited, the raw process (conversation <code>b307f698</code>/<code>30c1fc53</code>) listed as <code>7ee00c67</code>, the lf run's conversation, with its title and usage. Discovery paired each raw process with the newest transcript in its directory.<br>
+After: the raw row keeps <code>30c1fc53</code> throughout, with the lf run live and after it exits.</td><td class="fix">fixed</td></tr>
+<tr><td>Recorded thread resumed with plain <code>claude --resume c214cbb8…</code></td>
+<td>Lists raw under the Session's title from launch: <code>c214cbb8…  available raw claude  Reply with one  last turn ended 52s ago · 45.4k in</code>; then <code>turn running 2s</code>, <code>ended · 49.4k in</code>.
+Beside it, the other raw <code>claude</code> in the same directory still listed its own conversation.</td><td class="ok">works</td></tr>
+<tr><td><code>lf history show &lt;session&gt; --transcript</code></td><td>Both turns, the lf one (<code>injected:</code>) and the raw resume (<code>you:</code>), one header line each: time, end, model, usage.</td><td class="ok">works</td></tr>
+<tr><td>Server watch with two raw conversations</td><td>Prompt sent 02:58:00, <code>running</code> frame 02:58:03, <code>ended</code> 02:58:08.</td><td class="ok">works</td></tr>
+<tr><td><code>/clear</code> in a raw <code>claude</code></td><td>The row moved to the new conversation id after the next message.</td><td class="ok">works</td></tr>
+<tr><td><code>lf session resume &lt;raw provider id&gt; --prepare</code></td><td>Creates <code>session_e9f3…  unknown  claude b307f698</code>, but the raw row stays beside it under its directory title. The provider thread is recorded in the Session's capture, not <code>agent_sessions.provider_thread</code>, which the raw listing reads.</td><td class="bad">still wrong</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p><code>rust/loopflow/src/lf/commands/session.rs</code>: <code>lf session list --subscribe</code> holds <code>transcript::watch::watch</code> on the shared
-observation cache for its lifetime, as the server does. Docs (<code>docs/sessions.md</code>, <code>docs/dev/server-first.md</code>) now say the CLI
-subscription watches too, that a raw conversation lists from its first message, and that a pending question or an Esc before a reply reads as <code>turn running</code>.</p>
-<p>Checks: <code>cargo fmt</code>, <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> clean; <code>documented_commands::</code> 4 passed.</p>
+<p><code>rust/loopflow/src/transcript/raw.rs</code>: a raw Claude process is paired with the conversation named in <code>~/.claude/sessions/&lt;pid&gt;.json</code>,
+which Claude keeps per live process and rewrites on <code>/clear</code> (seen within 3 s). The file's <code>startedAt</code> must match the process start, so a reused pid names nothing.
+A process without a file falls back to the newest transcript in its directory, skipping conversations any live Claude process names. Codex is unchanged.
+<code>docs/dev/server-first.md</code> says so. Two unit tests: an owner file pairs and stale ones don't; the fallback skips owned conversations.</p>
+<p>Checks: <code>cargo fmt</code>, <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> clean; <code>cargo test -p loopflow --lib -- transcript:: ops::human_session::turns</code> 38 passed.</p>
 
 <h2>What works now</h2>
-<p>The Task's demo, on demand and watched, both through the server and from the CLI, with no hook installed. Usage matches the transcript.</p>
+<p>The Task's demo on demand and watched; usage matching the transcript, including mid-turn; a bare lf run's per-turn <code>usage</code> row at the Stop hook and <code>completed</code> at exit;
+a recorded thread resumed raw under its Session's title; several conversations in one checkout listed correctly.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>A bare <code>lf</code> run's exit-time <code>usage</code>/<code>completed</code> rows: connecting a login to the private Machine means
-<code>lf account connect --import</code> of the real Claude login, which can rotate its refresh token. Unit tests cover <code>transcript/facts.rs</code>.</li>
-<li>Codex raw conversations: no raw <code>codex</code> was started. A raw Codex from another checkout listed correctly (<code>ended</code>, 388.9k in) when listing outside a repository.</li>
-<li>Desktop windows: none mounted; the server socket stands in for Desktop's reads.</li>
+<li>Codex raw: its first-run trust prompt writes the project into the real <code>~/.codex/config.toml</code>, so it was quit at the prompt. The fix leaves Codex's path as it was.</li>
+<li>A bare Codex run's exit rows: same reason.</li>
+<li>Desktop windows: none mounted; the socket stood in for Desktop's reads.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li><code>asking</code> never fires on live Claude 2.1.322: the question's tool call is written with its answer. The state, its wire value and the
-same-run rule that lets a transcript's question outrank a running stream turn stay in the code, but nothing reaches them live. Whether to keep them is a product call.</li>
-<li>An Esc before any reply reads <code>turn running</code> indefinitely until the next message; nothing in the transcript says otherwise.</li>
+<li>Once, not reproduced: an 18 s stall. The turn ended at 02:47:08; a CLI <code>lf session list</code> started at 02:47:00 and the socket's <code>ended</code> frame both arrived at ~02:47:26. <code>logs/lf.log</code> had nothing. The next two turns showed in 2 s.</li>
+<li><code>lf session resume &lt;raw id&gt; --prepare</code> lists that conversation twice while it runs raw (row above).</li>
+<li>Esc before a reply reads <code>turn running</code> until the next message, and a pending question reads <code>turn running</code>. Unchanged since 2026-11-10. Claude's <code>sessions/&lt;pid&gt;.json</code> carries <code>status</code> (<code>idle</code>/<code>busy</code>/<code>shell</code>). Whether it reads <code>idle</code> in those two cases is unchecked; if so it could answer both. That would add a new source of turn state, which is a design call.</li>
+<li>A raw row's title is its directory even when the transcript has an <code>ai-title</code> row.</li>
 </ol>
 </body></html>

@@ -303,6 +303,16 @@ server (`lf server status` shows no client). To check what Desktop sees,
 subscribe over the server socket with a `desktop` hello and timestamp each
 `reading`; compare its frame times with the transcript rows' timestamps.
 
+A bare `lf -a claude : "<prompt>"` in that private `LF_HOME` with no accounts
+and the real `HOME` runs on the ambient Claude login, so its Stop-hook and
+exit rows can be read from the private store. Unset `REX_*` too, or the run
+records the agent's own Rex pane. Read the store with
+`sqlite3 'file:<db>?immutable=1'` once no writer is open; `-readonly` fails
+when the WAL files are gone. `~/.claude/sessions/<pid>.json` names each live
+Claude process's conversation. Run a second `claude` and an lf run in the same
+directory to check pairing. Codex's first-run trust prompt writes into the real
+`~/.codex/config.toml`; quit it unless that write is acceptable.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with

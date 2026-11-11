@@ -150,6 +150,11 @@ Task or Wave workspace, reconnect and provider switch names its Work
 store, which the rule calls bare. Code, `server-first.md` and this design
 agree; nothing to change, no open choice.
 
+Fifth pass (headless, after the scan pass): the scan change moved no action,
+concept or API; the `OR`-over-partial-indexes choice against the steer's UNION
+is an implementation choice, recorded in `questions.md`. Nothing to change, no
+open choice.
+
 LOO-824 (its concept review, Jack Heart: "managed should = held") will read
 `AgentConfig::managed` and call `require_server` instead of keeping its own
 rule; whichever branch lands second makes the switch.

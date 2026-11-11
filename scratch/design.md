@@ -1,22 +1,23 @@
 # LOO-809: remote attach tickets
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
-This checkout adds the planned contract only. Its existing local tickets bind
-to Unix peer UID, consume on every attempt, and measure expiry with `Instant`.
+This checkout adds the planned contract only.
 The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
-Inspected PR #1812 at `6ad2a0a45c9f40e6cbc60febf3879fa34953a34d`: both
+Inspected PR #1812 at `48bd007c13b7198844af56eaaf10fe3a8aac7db9`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
 Only bulk tickets have direct store coverage; terminal consume-on-attempt
 coverage is missing. Background expiry already releases abandoned bulk
 reservations.
-The server tree is unchanged from the previously inspected
-`3f1a7d434736779139695ba4c91ebf8245c4e121`.
+The ticket store, remote carrier and service are unchanged from
+`6ad2a0a45c9f40e6cbc60febf3879fa34953a34d`. Mobile admission now permits
+the host's own node when the Machine opts in with `mobile-same-device`;
+ticket identity remains node/user.
 
-At November 11 09:06 UTC, GitHub still reports PR #1812 open and unmerged
+At November 11 09:42 UTC, GitHub still reports PR #1812 open and unmerged
 at that head, with no auto-merge. Freshly fetched main is
 `6d8fad3375a81890d00965ba46ea396360f7db2a`,
 still without `server/mobile.rs` or `server/ticket.rs`.
@@ -46,11 +47,6 @@ the socket peer UID against the server's effective UID. Keep that admission
 model; local/remote separation does not require a second per-ticket UID field.
 
 ## Implementation and acceptance
-
-Read the shipping docs in `docs/server.md` (Phone access) and
-`rust/loopflow/src/server/README.md` (Remote attach contract and Terminal and
-provider recovery). The remote example includes the missing-owner failure
-between ticket issue and redemption. No product question is open.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Through authenticated client and bridge connections, test that

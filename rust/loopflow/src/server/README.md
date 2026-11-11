@@ -370,10 +370,10 @@ part of what a phone or bot client is offered.
   connection. Bridges do not occupy the 64 client slots.
   The owner is the LfProcess holding the Session's terminal (`lf session
   serve`), never the provider's AgentProcess beneath it. The server resolves the
-  Session's current owner when it issues the ticket; resolution never starts a
-  provider. A Session with no running owner is `not_found {session}`; an owner
-  whose endpoint is gone is `not_found {owner_lf_process_id}`: it ended, at
-  issue or when the ticket is presented. When the owner ends, the bridge closes.
+  Session's current owner when it issues the ticket, without starting a provider.
+  No running owner returns `not_found {session}`; a missing owner endpoint at
+  issue or redemption returns `not_found {owner_lf_process_id}`.
+  When the owner ends, the bridge closes.
   `lf session resume` and `server::client::attach` perform both ticket steps.
   Each terminal has its own connection, so readings never wait behind terminal
   bytes and a control failure never closes a bridged terminal. Follow

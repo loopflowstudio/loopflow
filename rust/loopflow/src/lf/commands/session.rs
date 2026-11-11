@@ -320,6 +320,10 @@ impl SessionFacts {
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.subscribe {
+        // This process reads the subscription itself, so it watches
+        // transcripts the way the Machine server does.
+        let observations = crate::observe::Cache::shared();
+        let _transcripts = crate::transcript::watch::watch(&observations);
         return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {

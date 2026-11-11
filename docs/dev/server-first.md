@@ -117,8 +117,11 @@ Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue.
 
 Bare and raw conversations have neither signal. They read as available from
-what the transcript shows: a question with no answer yet, or a turn that
-ended.
+what the transcript shows: a turn that ended. A question with no answer yet
+is not in it: Claude Code 2.1.322, run on November 10, 2026, wrote an
+`AskUserQuestion` call to its transcript only with its answer, 55 seconds
+after the call, and an Esc before any reply wrote nothing, leaving the
+prompt's `user` row last until the next message.
 
 Codex history reads from its rollout files; no app-server call is needed for
 turn state or usage. Rollouts under `~/.codex/sessions` read on November 10,
@@ -144,7 +147,8 @@ completion times, until the transcript shows it asked or ended, and that
 run's model and usage come from the transcript; a
 run started after the stream's last turn and never recorded is the reading on
 its own; a transcript behind the stream leaves the stream's turn. Watched, the
-server keeps one filesystem watch per provider home (`transcript/watch.rs`);
+server keeps one filesystem watch per provider home (`transcript/watch.rs`),
+as does a CLI `lf session list --subscribe`, which reads in its own process;
 an event makes the shared observation cache read that transcript within a
 second, a thirty-second reconcile catches a missed one, and every
 subscription reading it shares the one reading. Raw conversations are

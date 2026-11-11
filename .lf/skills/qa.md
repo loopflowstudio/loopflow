@@ -286,3 +286,19 @@ but its terminal stops at sign-in. Label these provider API checks; they do not
 establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
 Use different names for a headless Graph and its skill so Graph resolution does
 not treat the step as a recursive Graph call.
+
+## Raw conversations and transcript readings
+
+A plain `claude` lists as raw only with no `lf` or provider ancestor, and a
+shell this step starts has one. Run it under a PTY driver that double-forks and
+calls `setsid`, so launchd is its parent; keep the real `HOME`, since raw
+discovery reads the account's own `~/.claude/projects`, and give lf a private
+`LF_HOME`. Strip `LF_*` and `CLAUDE_CODE*` from its environment. Claude's
+folder-trust dialog in a fresh directory defaults to "No, exit": send Down,
+then Enter. It writes no transcript until the first message, so the
+conversation lists only after one.
+
+`lf <read> --subscribe` from the CLI reads in its own process, not through the
+server (`lf server status` shows no client). To check what Desktop sees,
+subscribe over the server socket with a `desktop` hello and timestamp each
+`reading`; compare its frame times with the transcript rows' timestamps.

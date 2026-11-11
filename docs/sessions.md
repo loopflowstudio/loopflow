@@ -122,9 +122,9 @@ like any other.
 A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
 `--fork` to leave it running.
 
-While it is open, it shows up in `lf session list` for its checkout under its
-provider ID, marked `raw`, with its current turn (below). Listing it creates no
-Session.
+From its first message until it closes, it shows up in `lf session list` for
+its checkout under its provider ID, marked `raw`, with its current turn
+(below). Listing it creates no Session.
 
 ```bash
 lf session list --no-raw           # only conversations lf started
@@ -152,23 +152,24 @@ Claude's under `~/.claude/projects`, Codex's rollout files under
 those directories. A conversation lf launched shows its model and tokens from
 the transcript too, and a turn lf missed recording still reads as running.
 
-With the Machine server running (`lf server run`, or Desktop), it watches each
-provider's home once for all conversations and refreshes these readings as
-transcripts grow, so `lf session list --subscribe` and Desktop update while a
-turn runs. A missed filesystem event is caught by a periodic reread.
+The Machine server (`lf server run`, or Desktop) watches each provider's home
+once for all conversations and refreshes these readings as transcripts grow,
+so Desktop updates within a second while a turn runs.
+`lf session list --subscribe` keeps the same watch while it runs. A missed
+filesystem event is caught by a periodic reread.
 
 | The transcript shows | It can't show |
 |---|---|
-| a turn running, and since when | whether that turn is waiting on a permission prompt |
-| a question Claude asked you that has no answer yet | a question Codex asked you |
-| when the last turn ended, or that it was interrupted | a turn cut off by a crash, until the provider process is gone |
-| the last turn's input, cached and output tokens, and its model | |
+| a turn running, and since when | whether that turn is waiting on a permission prompt or a question to you |
+| when the last turn ended, or that it was interrupted | a turn you stopped with Esc before Claude replied, until your next message |
+| the last turn's input, cached and output tokens, and its model | a turn cut off by a crash, until the provider process is gone |
 
-A conversation read this way is available for you when its turn ended, was
-interrupted, or reads `asked a question`; `lf session list --available` lists
-it. A turn stopped on a permission prompt still reads as `turn running`; lf
-doesn't guess otherwise. Sessions lf manages also get that state from the
-agent's own status reports.
+A conversation read this way is available for you when its turn ended or was
+interrupted; `lf session list --available` lists it. A turn stopped on a
+permission prompt or a question still reads as `turn running`: Claude Code
+writes a question to its transcript only once you answer it, and Codex never
+does. lf doesn't guess otherwise. Sessions lf manages also get that state from
+the agent's own status reports.
 
 A raw conversation open in a Task's checkout lists under that Task:
 `lf session list --task <task>` includes it.

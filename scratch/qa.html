@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-822 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f4f4f2;padding:.7rem;overflow-x:auto;font-size:12.5px}
+h2{margin-top:2rem;border-bottom:1px solid #ddd}
+td,th{border-bottom:1px solid #eee;padding:.3rem .5rem;text-align:left;vertical-align:top}
+.ok{color:#176b2c}.bad{color:#a11}.fix{color:#8a5a00}
+</style></head><body>
+<h1>LOO-822 QA: live Session state from provider transcripts</h1>
+<p>2026-11-10. Branch-built <code>lf</code> with a private <code>LF_HOME</code> (<code>/tmp/lf-qa-822/home</code>), a fresh Git repo,
+and a real <code>claude</code> 2.1.322 (Opus 5.5) under a detached PTY whose parent is launchd, so no lf ancestor and no hooks.
+Driver: <code>scratch/qa/pty_driver.py</code>.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>Saw</th><th></th></tr>
+<tr><td>Claude open, no message yet</td><td><code>No Sessions.</code> Claude writes no transcript before the first message.</td><td>expected</td></tr>
+<tr><td>The demo: long prompt, <code>lf session list</code></td><td><code>27b3bb41-…  active  raw claude  /private/tmp/lf-qa-822/repo  turn running 8s</code></td><td class="ok">works</td></tr>
+<tr><td>Same, after the turn</td><td><code>available raw claude … last turn ended 10s ago · 48.2k in (29.0k cached) · 2.7k out</code>. Transcript: input 2 + cache read 28,978 + cache write 19,171 = 48,151; output 2,661. Two assistant rows for one message counted once.</td><td class="ok">works</td></tr>
+<tr><td><code>lf session card &lt;provider id&gt;</code></td><td>Raw record with <code>turn.state: running</code>, <code>source: transcript</code>.</td><td class="ok">works</td></tr>
+<tr><td>Server watch: socket subscription to <code>session.list</code>, <code>desktop</code> hello</td><td>Prompt 21:35:36 → <code>running</code> frame 21:35:38; turn ended 21:35:42.7 → <code>ended</code> frame 21:35:44.</td><td class="ok">works</td></tr>
+<tr><td>CLI <code>lf session list --subscribe --json</code></td><td>Before: prompt 21:29:31, <code>running</code> frame 21:30:00, no ended frame within 4 s of the end. The CLI reads in-process (<code>lf server status</code>: <code>clients: []</code>), and that process had no watch, so only the 30 s reconcile moved it. FSEvents itself delivered (a temporary trace showed <code>Modify(Data(Content))</code> on the transcript path).<br>After the fix, with the server stopped: prompt 21:37:39 → <code>running</code> 21:37:40 → <code>ended</code> 21:37:47.</td><td class="fix">fixed</td></tr>
+<tr><td><code>AskUserQuestion</code> open on screen</td><td><code>turn running 15s</code>; <code>--available</code> empty. The transcript's last rows were the prompt and its <code>api-request</code>; the <code>tool_use</code> row (stamped 05:38:26) appeared at 05:39:21 together with its <code>tool_result</code>, after the answer.</td><td class="bad">transcript can't show it; docs corrected</td></tr>
+<tr><td>Esc a turn before any reply</td><td>Claude went idle ("Esc again to clear") and wrote nothing. <code>turn running 4m23s</code> until the next message, which then read <code>last turn ended 2s ago · 65.0k in (64.9k cached) · 54 out</code>.</td><td class="bad">transcript can't show it; docs corrected</td></tr>
+<tr><td><code>--no-raw</code></td><td><code>No Sessions.</code></td><td class="ok">works</td></tr>
+<tr><td><code>/exit</code></td><td>Leaves the list; card: <code>Session 27b3bb41-… is not recorded</code>.</td><td class="ok">works</td></tr>
+<tr><td>Bare <code>lf -a claude :</code> in a Task checkout (exit rows)</td><td><code>no eligible managed claude account</code>: the private Machine has no login.</td><td>not reached</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p><code>rust/loopflow/src/lf/commands/session.rs</code>: <code>lf session list --subscribe</code> holds <code>transcript::watch::watch</code> on the shared
+observation cache for its lifetime, as the server does. Docs (<code>docs/sessions.md</code>, <code>docs/dev/server-first.md</code>) now say the CLI
+subscription watches too, that a raw conversation lists from its first message, and that a pending question or an Esc before a reply reads as <code>turn running</code>.</p>
+<p>Checks: <code>cargo fmt</code>, <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> clean; <code>documented_commands::</code> 4 passed.</p>
+
+<h2>What works now</h2>
+<p>The Task's demo, on demand and watched, both through the server and from the CLI, with no hook installed. Usage matches the transcript.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>A bare <code>lf</code> run's exit-time <code>usage</code>/<code>completed</code> rows: connecting a login to the private Machine means
+<code>lf account connect --import</code> of the real Claude login, which can rotate its refresh token. Unit tests cover <code>transcript/facts.rs</code>.</li>
+<li>Codex raw conversations: no raw <code>codex</code> was started. A raw Codex from another checkout listed correctly (<code>ended</code>, 388.9k in) when listing outside a repository.</li>
+<li>Desktop windows: none mounted; the server socket stands in for Desktop's reads.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><code>asking</code> never fires on live Claude 2.1.322: the question's tool call is written with its answer. The state, its wire value and the
+same-run rule that lets a transcript's question outrank a running stream turn stay in the code, but nothing reaches them live. Whether to keep them is a product call.</li>
+<li>An Esc before any reply reads <code>turn running</code> indefinitely until the next message; nothing in the transcript says otherwise.</li>
+</ol>
+</body></html>

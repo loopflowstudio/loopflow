@@ -48,7 +48,7 @@ Looked at and left alone:
   `context_pi.mjs` ("records the tool boundary") is stale.
 
 Concept review with a person, November 11 (`scratch/concept-review.html`).
-Items 2 and 3 are unanswered.
+All three are answered below.
 
 1. Which launches need the server. Shown the two rows where the built check
    and `server-first.md`'s managed rule differ (`lf implement` typed in a Task
@@ -131,6 +131,14 @@ Seen in the plugins, not changed here:
 - OpenCode and Pi put the block into the system prompt of each request
   (`input.system.push`, `sections.loopflow`), where Claude and Codex add it
   once per start or compaction.
+
+Next implement direction (headless concept review, November 11):
+
+- `docs/dev/server-first.md` "The managed rule" lists `checkout` and no Work
+  as bare but not `inherited`, the source a child run started by a Session's
+  agent records (`ops/run.rs`). `is_managed` already calls it bare, which is
+  what "if its a subagent the agent driving can steer" asks for. Name it
+  in that paragraph and in the `is_managed` doc comment. Docs only.
 
 Remaining:
 

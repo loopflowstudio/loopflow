@@ -509,6 +509,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         findDone.setTitle("Done", for: .normal)
         findDone.accessibilityLabel = "Close Find"
         findDone.addAction(UIAction { [weak self] _ in self?.endFind() }, for: .touchUpInside)
+        findDone.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         findDone.setContentHuggingPriority(.required, for: .horizontal)
         findDone.setContentCompressionResistancePriority(.required, for: .horizontal)
         for item in [findField, findDone] {

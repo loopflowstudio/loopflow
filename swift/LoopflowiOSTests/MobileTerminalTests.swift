@@ -214,6 +214,11 @@ final class MobileTerminalTests: XCTestCase {
         controller.view.frame.size.height += 120
         controller.view.layoutIfNeeded()
         let done = try XCTUnwrap(finder.arrangedSubviews.last as? UIButton)
+        XCTAssertGreaterThanOrEqual(done.bounds.width, 44)
+        XCTAssertGreaterThanOrEqual(done.bounds.height, 44)
+        let point = done.convert(CGPoint(x: done.bounds.midX, y: done.bounds.midY), to: controller.view)
+        let target = try XCTUnwrap(controller.view.hitTest(point, with: nil))
+        XCTAssertTrue(target === done || target.isDescendant(of: done))
         done.sendActions(for: .touchUpInside)
         XCTAssertTrue(finder.isHidden)
         let latest = try XCTUnwrap(controller.view.subviews.first { $0.accessibilityIdentifier == "terminal-latest" })

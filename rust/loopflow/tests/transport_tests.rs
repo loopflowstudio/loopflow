@@ -38,33 +38,6 @@ impl Drop for Fixture {
 
 struct PausedOwner(libc::pid_t);
 
-struct StopOwner<'a>(&'a Fixture, String);
-
-impl Drop for StopOwner<'_> {
-    fn drop(&mut self) {
-        // Sessionless completed Processes can already have been collected.
-        let running = self
-            .0
-            .sql()
-            .query_row(
-                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-                [&self.1],
-                |r| r.get::<_, bool>(0),
-            )
-            .optional()
-            .unwrap()
-            .unwrap_or(false);
-        if running {
-            self.0.stop(&self.1);
-            let deadline = Instant::now() + Duration::from_secs(20);
-            while self.0.endpoint(&self.1).exists() {
-                assert!(Instant::now() < deadline, "fixture owner did not stop");
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        }
-    }
-}
-
 impl Drop for PausedOwner {
     fn drop(&mut self) {
         // SAFETY: only the fixture's paused owner is resumed, including on panic.
@@ -691,7 +664,6 @@ fn viewers_enter_the_execution_directory_and_later_ones_the_selected_directory()
     );
     let replay = String::from_utf8_lossy(&out(&items)).into_owned();
     assert!(replay.contains("selected/"), "{replay:?}");
-    fixture.stop(&owner);
 }
 
 #[test]
@@ -1263,9 +1235,6 @@ fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
     waiting.request(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
     drop(paused);
     let attached = waiting.until_reply();
-    if attached["kind"] != "attached" {
-        fixture.stop(&owner);
-    }
     assert_eq!(attached["kind"], "attached");
     waiting.accept(&attached);
     assert_ne!(waiting.token, token);
@@ -1453,51 +1422,45 @@ fn contended_input_retention_keeps_control_and_delivers_once_after_unlock() {
         "-c",
         "stty -echo; printf ready; read -r first; printf '%s' \"$first\" > \"$HOME/received\"; printf 'first:%s\\n' \"$first\"; read -r second; printf 'second:%s\\n' \"$second\"",
     ]);
-    let result = std::panic::catch_unwind(|| {
-        let mut viewer = fixture.viewer(&owner, true);
-        until_out(&mut viewer, "ready");
-        let sql = fixture.sql();
-        sql.execute_batch("BEGIN IMMEDIATE").unwrap();
-        viewer.input("retained-draft\n");
-        // Let the owner attempt retention before asking it for control status.
-        std::thread::sleep(Duration::from_millis(100));
-        viewer
-            .socket
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        viewer.request(json!({"kind":"controlled"}));
-        assert_eq!(viewer.until_reply()["held"], true);
-        let saved: Option<String> = sql
-            .query_row(
-                "SELECT native_input FROM processes WHERE id=?1",
-                [&owner],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(
-            saved.is_none(),
-            "uncommitted input reached the durable record"
-        );
-        assert!(!fixture.home.path().join("received").exists());
-        // Return while retention is still blocked. Unlocking alone must wake
-        // delivery; neither a new key nor replay of the queued request is needed.
-        drop(viewer);
-        let mut returned = fixture.viewer(&owner, true);
-        returned.request(json!({"kind":"controlled"}));
-        assert_eq!(returned.until_reply()["held"], true);
-        assert!(!fixture.home.path().join("received").exists());
-        sql.execute_batch("ROLLBACK").unwrap();
-        until_out(&mut returned, "first:retained-draft\r\n");
-        // A replay would consume the second read, so continued input proves
-        // both delivery order and that the queued request arrived only once.
-        returned.input("continued\n");
-        until_out(&mut returned, "second:continued\r\n");
-        returned.finish();
-    });
-    fixture.stop(&owner);
-    if let Err(error) = result {
-        std::panic::resume_unwind(error);
-    }
+    let mut viewer = fixture.viewer(&owner, true);
+    until_out(&mut viewer, "ready");
+    let sql = fixture.sql();
+    sql.execute_batch("BEGIN IMMEDIATE").unwrap();
+    viewer.input("retained-draft\n");
+    // Let the owner attempt retention before asking it for control status.
+    std::thread::sleep(Duration::from_millis(100));
+    viewer
+        .socket
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    viewer.request(json!({"kind":"controlled"}));
+    assert_eq!(viewer.until_reply()["held"], true);
+    let saved: Option<String> = sql
+        .query_row(
+            "SELECT native_input FROM processes WHERE id=?1",
+            [&owner],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        saved.is_none(),
+        "uncommitted input reached the durable record"
+    );
+    assert!(!fixture.home.path().join("received").exists());
+    // Return while retention is still blocked. Unlocking alone must wake
+    // delivery; neither a new key nor replay of the queued request is needed.
+    drop(viewer);
+    let mut returned = fixture.viewer(&owner, true);
+    returned.request(json!({"kind":"controlled"}));
+    assert_eq!(returned.until_reply()["held"], true);
+    assert!(!fixture.home.path().join("received").exists());
+    sql.execute_batch("ROLLBACK").unwrap();
+    until_out(&mut returned, "first:retained-draft\r\n");
+    // A replay would consume the second read, so continued input proves
+    // both delivery order and that the queued request arrived only once.
+    returned.input("continued\n");
+    until_out(&mut returned, "second:continued\r\n");
+    returned.finish();
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1710,7 +1673,6 @@ fn control_handoff_restores_the_terminal_and_prints_the_notice() {
     drop(listener);
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
-    fixture.stop(&owner);
 }
 
 fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: SilentOwner) {
@@ -2639,7 +2601,6 @@ fn resume_json_returns_after_relay_and_viewer_takeover() {
         if viewer.try_wait().unwrap().is_some() || Instant::now() >= deadline {
             let _ = viewer.kill();
             let result = viewer.wait_with_output().unwrap();
-            fixture.stop(&owner);
             panic!("viewer did not become a relay: {result:?}");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -4369,11 +4330,6 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
         .unwrap();
     assert_ne!(current, owner);
     drop(wait_for_viewer(reopened, Duration::from_secs(10)));
-    for owner in [owner, current] {
-        if fixture.running(&owner) {
-            fixture.stop(&owner);
-        }
-    }
 }
 
 #[test]
@@ -4745,7 +4701,6 @@ fn first_snapshot_uses_the_new_viewers_dimensions() {
         "/bin/sh", "-c",
         "i=1; while [ $i -le 20 ]; do printf 'line %s: abcdefghijklmnopqrstuvwxyz0123456789\\r\\n' \"$i\"; i=$((i+1)); done; printf 'ready> '; read -r answer",
     ]);
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let mut first = fixture.viewer(&owner, true);
     let mut expected = ghostty_vt::Terminal::new(80, 24).unwrap();
     for item in until_out(&mut first, "ready> ") {
@@ -5159,8 +5114,6 @@ fn viewer_input_survives_its_disconnect() {
     assert_eq!(String::from_utf8(answer).unwrap(), rounds.concat());
 }
 
-struct ShellOwnerGuard<'a>(&'a Fixture, String);
-
 #[test]
 fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
     let fixture = Fixture::new();
@@ -5191,7 +5144,6 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
         .unwrap();
     fixture.wait_file("ready");
     let shell = fixture.shell_owner("desktop-shell");
-    let _shell_guard = ShellOwnerGuard(&fixture, shell.clone());
     let mut terminal = fixture.viewer(&shell, true);
     launch.wait().unwrap();
     terminal.input("export RETAINED=still-here; sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
@@ -5200,7 +5152,6 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
     // This independent Session can be viewed passively, without controlling
     // either execution. Its viewers, rather than shell viewers, retain the Task.
     let session_owner = fixture.start(&["/bin/sleep", "60"]);
-    let _session_guard = ShellOwnerGuard(&fixture, session_owner.clone());
     let session = fixture.session(&session_owner);
     fixture
         .sql()
@@ -5331,14 +5282,6 @@ impl Fixture {
     }
 }
 
-impl Drop for ShellOwnerGuard<'_> {
-    fn drop(&mut self) {
-        if self.0.running(&self.1) {
-            self.0.stop(&self.1);
-        }
-    }
-}
-
 fn desktop_shell_bootstrap() -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../swift/LoopflowMac/GhosttyResources/share/ghostty");
@@ -5428,7 +5371,6 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "$(literal); spaced argument"
     );
     let owner = fixture.shell_owner("desktop-shell");
-    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut viewer = fixture.viewer(&owner, true);
     launch.wait().unwrap();
     viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
@@ -5565,7 +5507,6 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             .unwrap();
         fixture.wait_file("cycle-ready");
         let owner = fixture.shell_owner(&id);
-        let _stop = ShellOwnerGuard(&fixture, owner.clone());
         let mut viewer = fixture.viewer(&owner, true);
         launch.wait().unwrap();
         viewer
@@ -5635,7 +5576,6 @@ fn viewer_stream_over_pipes_preserves_terminal_input_size_and_exit() {
         "stty -echo; read -r line; stty size; printf 'received:<%s>\\n' \"$line\"; exit 7",
     ]);
     let _session = fixture.session(&owner);
-    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
         .command(&[
             "session",
@@ -5670,7 +5610,6 @@ fn viewer_stream_heartbeat_expires_only_the_silent_viewer_while_output_continues
         "-c",
         "while :; do printf 'tick\\n'; sleep 0.1; done",
     ]);
-    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut lost = fixture.viewer(&owner, true);
     let mut passive = fixture.viewer(&owner, false);
     let started = Instant::now();
@@ -5714,7 +5653,6 @@ fn viewer_stream_backpressure_releases_bridge_and_owner_keeps_draining() {
         &["/bin/sh", "-c", "read -r start; head -c 16777216 /dev/zero"],
     ));
     let _session = fixture.session(&owner);
-    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
         .command(&["session", "attach", &owner])
         .env("LF_VIEWER_STREAM", "1")
@@ -5748,7 +5686,6 @@ fn viewer_stream_waits_for_destination_resolution_before_attachment() {
         "read -r line; printf 'received:%s' \"$line\"",
     ]);
     let _session = fixture.session(&owner);
-    let _stop = ShellOwnerGuard(&fixture, owner.clone());
     let mut child = fixture
         .command(&[
             "session",
@@ -6094,7 +6031,6 @@ fn server_registration_migrates_old_job_and_respects_disabled_choice() {
     assert!(!fixture.endpoint("machine").exists());
     launchctl(&["enable", &old]);
     let owner = fixture.owner(fixture.command(&["session", "serve", "--", "/bin/cat"]));
-    let _owner = StopOwner(&fixture, owner.clone());
     let owner_pid = pid_of_process(&fixture, &owner);
     let legacy_plist = home.join("machine-service.plist");
     std::fs::write(
@@ -6161,7 +6097,6 @@ fn server_status_does_not_install_or_create_work() {
 fn terminal_bridges_leave_the_client_connections_free() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let session = loopflow::id::LfSessionId::from(fixture.session(&owner).as_str());
     let service = ServerProof::start(&fixture, false);
     // More bridges than the server admits clients: each takes a ticket on a
@@ -6196,7 +6131,6 @@ fn first_exchange(socket: &Path, line: &str) -> Value {
 fn an_attach_ticket_opens_one_bridge_from_any_connection_of_its_user() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
     let socket = fixture.endpoint("machine");
@@ -6264,7 +6198,6 @@ fn an_attach_ticket_opens_one_bridge_from_any_connection_of_its_user() {
 fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     let service = ServerProof::start(&fixture, false);
     let query = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
@@ -6329,7 +6262,6 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
 fn server_initial_connection_reports_opening_until_input_is_acknowledged() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let service = ServerProof::start(&fixture, false);
     let installer = fixture.home.path().join("installer");
     std::fs::write(
@@ -6356,7 +6288,6 @@ fn server_initial_connection_reports_opening_until_input_is_acknowledged() {
 fn status_channel_failure_keeps_relay_alive_and_never_replays_outage_input() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let owner_pid = pid_of_process(&fixture, &owner);
     let mut service = ServerProof::start(&fixture, false);
     let (command, status) = service.relay_command(&owner);
@@ -6403,7 +6334,6 @@ fn server_reconnects_a_writable_bridge_that_stops_answering() {
         "/bin/sh", "-c",
         "while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"$HOME/input\"; printf '%s\\n' \"$line\"; done",
     ]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let owner_pid = pid_of_process(&fixture, &owner);
     let service = ServerProof::start(&fixture, false);
     let endpoint = fixture.endpoint(&owner);
@@ -6475,7 +6405,6 @@ fn server_reconnects_a_writable_bridge_that_stops_answering() {
 fn server_heartbeats_keep_a_quiet_provider_attached() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/cat"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let service = ServerProof::start(&fixture, false);
     let (command, status) = service.relay_command(&owner);
     let mut relay = Terminal::stream(command);
@@ -6505,7 +6434,6 @@ fn server_reconnect_preserves_newer_viewers_input_and_geometry() {
             "/bin/sh", "-c",
             "printf 'ready-for-input\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"; if [ -t 0 ]; then stty size > \"$HOME/size\"; fi",
         ]));
-        let _cleanup = StopOwner(&fixture, owner.clone());
         let mut service = ServerProof::start(&fixture, false);
         let (command, status) = service.relay_command(&owner);
         let mut relay = if terminal {
@@ -6575,7 +6503,6 @@ fn server_move_lost_ack(terminal: bool) {
             "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
         ],
     ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let owner_pid = pid_of_process(&fixture, &owner);
     let mut service = ServerProof::start(&fixture, false);
     let (command, status) = service.relay_command(&owner);
@@ -6664,7 +6591,6 @@ fn server_move_lost_ack(terminal: bool) {
 fn server_move_here_pending_action_is_cancelled_by_pane_closure() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "read -r answer"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let mut service = ServerProof::start(&fixture, false);
     let directory = fixture.home.path().join("pane");
     std::fs::create_dir(&directory).unwrap();
@@ -6727,7 +6653,6 @@ printf '%s' "$answer" > "$HOME/answer"
 "#,
         ],
     ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let mut service = ServerProof::start(&fixture, false);
     let (command, status) = service.relay_command(&owner);
     let mut relay = Terminal::stream(command);
@@ -6758,7 +6683,6 @@ read -r answer < /dev/tty
 "#,
     );
     let owner = fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "hello"));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let first = fixture.launches(1);
     let mut service = ServerProof::start(&fixture, false);
     let (mut command, status) = service.relay_command(&owner);
@@ -6793,7 +6717,6 @@ fn server_reconnect_retries_after_exhaustion_without_sending_retry_to_provider()
             "printf 'ready\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
         ],
     ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let mut service = ServerProof::start(&fixture, false);
     let (command, status) = service.relay_command(&owner);
     let mut relay = Terminal::stream(command);
@@ -6818,7 +6741,6 @@ fn server_failed_setup_retry_only_reconnects_and_preserves_newer_claims() {
             "/bin/sh", "-c",
             "printf '%s\\n' \"$$\" >> \"$HOME/launches\"; printf 'retained-owner-screen\\n'; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
         ]));
-        let _cleanup = StopOwner(&fixture, owner.clone());
         let provider = fixture.launches(1);
         let owner_pid = pid_of_process(&fixture, &owner);
         let mut service = ServerProof::start(&fixture, false);
@@ -6948,8 +6870,7 @@ fn owned_program_does_not_inherit_the_desktop_pane_relay() {
     serve
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", fixture.home.path().join("status.json"));
-    let owner = fixture.owner(serve);
-    let _cleanup = StopOwner(&fixture, owner);
+    fixture.owner(serve);
     assert_eq!(fixture.wait_file("relay-env"), "unset unset");
 }
 
@@ -6960,7 +6881,6 @@ fn server_reconnect_cancels_when_native_pane_closes() {
         false,
         &["/bin/sh", "-c", "printf 'ready\\n'; read -r answer"],
     ));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let mut service = ServerProof::start(&fixture, false);
     let directory = fixture.home.path().join("native-pane");
     std::fs::create_dir(&directory).unwrap();
@@ -7024,7 +6944,6 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         .args(["-i", "-a", "claude", "graph", "server-proof"])
         .env("PATH", path);
     let owner = fixture.owner(command);
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let first = fixture.launches(1);
     let owner_pid = pid_of_process(&fixture, &owner);
     let first_instance = service.ready();
@@ -7105,7 +7024,6 @@ fn exact_owner_refuses_a_replacement_while_session_attach_finds_it() {
     let session = fixture.bound_session(&old);
     fixture.stop(&old);
     let current = fixture.start(&["/bin/cat"]);
-    let _cleanup = StopOwner(&fixture, current.clone());
     fixture
         .sql()
         .execute(
@@ -7158,7 +7076,6 @@ fn a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c",
         "i=0; while [ $i -lt 64 ]; do read -r line; dd if=/dev/zero bs=65536 count=1 2>/dev/null; i=$((i+1)); done"]));
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let service = ServerProof::start(&fixture, false);
     let _stalled = service.viewer(&owner);
     let mut active = service.viewer(&owner);
@@ -7194,7 +7111,6 @@ fn a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live() {
 fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
-    let _cleanup = StopOwner(&fixture, owner.clone());
     fixture.wait_file("drawn");
     let service = ServerProof::start(&fixture, false);
     let first = service.viewer(&owner);

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{desktop_shell_bootstrap, wait_hold, Fixture, ShellOwnerGuard};
+use super::{desktop_shell_bootstrap, wait_hold, Fixture};
 use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
@@ -454,7 +454,6 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         let mut pane = Pane::spawn(command);
         pane.until("remote-ready");
         let owner = fixture.destination.shell_owner(&id);
-        let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
         pane.input("export RETAINED=destination; sleep 300 & printf '%s %s\\n' $$ $! > \"$HOME/pids\"; printf 'where:%s\\n' \"$PWD\"; tty\r");
         pane.until(&format!(
             "where:{}",
@@ -605,7 +604,6 @@ fn ssh_shell_failures_never_fall_back_or_recreate_ended_execution() {
     let mut pane = Pane::spawn(command);
     pane.until("ready-to-exit");
     let owner = fixture.destination.shell_owner("exit");
-    let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
     pane.input("exit 7\r");
     assert_eq!(pane.exit().code(), Some(7));
     fixture.destination.ends(&owner);
@@ -658,7 +656,6 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
     let mut pane = Pane::spawn(fixture.source_command(&argv[1..]));
     pane.until("provider-ready");
     let owner = fixture.destination.owner_of(session);
-    let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
     fixture.destination.wait_controlled(&owner);
     pane.input("export RETAINED=original; printf '%s' $$ > \"$HOME/shell-pid\"; printf 'ready:%s\\n' \"$RETAINED\"\r");
     pane.until("ready:original");

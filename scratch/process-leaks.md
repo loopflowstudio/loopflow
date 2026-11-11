@@ -27,10 +27,10 @@ Remaining, at demo/gate: `transport_tests` with a ps diff, a fresh report,
 its totals against a fresh `ps`.
 
 Checks:
-- `cargo test -p loopflow --test transport_tests`, load ~80: 107 passed, 1 read
-  timeout (`unanswering_superseded_owner_…`, passed alone); ps diff empty for
-  `target/` and `/tmp/lf-7501-*`. Load 200-330: 6 then 2 `launches(..)` 30 s
-  timeouts, each passed alone.
+- `cargo test -p loopflow --test transport_tests`, load 40-60, after dropping
+  the per-test `StopOwner`/`ShellOwnerGuard` (Fixture's Drop covers them): 108
+  passed, plus `--ignored ssh_shells::` 3 passed; ps diff empty. Earlier, load
+  200-330: 6 then 2 `launches(..)` 30 s timeouts, each passed alone.
 - Regression test fails without the owner fix, passes with it.
 - swiftc probe: EOF with `Pipe.uninherited()`, none with `Pipe()`.
 - `scripts/test_desktop.sh --skip-build --filter 'ProgramStatusTests|UninheritedPipeTests'`:

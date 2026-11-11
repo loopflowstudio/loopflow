@@ -6,39 +6,26 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 18:54 UTC, GitHub reported PR #1812 open and unmerged at
-`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main was
-`49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs`. At 17:27 UTC, `lf task status LOO-718 --json` reported
-`feature` / `demo`; that Graph position has not been refreshed. Implementation
-and authenticated acceptance require that
-landing. Landing PR #1812 is outside this Task's scope. Reinspect its shared
-store and endpoints after it lands.
-
 At 19:35 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
-still reported `OPEN`, `mergedAt: null`, and the same head. Freshly fetched
-main was `763da5c92f2ea4327a643c055e657e8defa8bf86`; `git ls-tree` confirmed
-neither `server/mobile.rs` nor `server/ticket.rs` is present. Implementation
-remains blocked on LOO-718; no code or publication can satisfy this contract yet.
+reported `OPEN`, `mergedAt: null`, and head
+`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main was
+`763da5c92f2ea4327a643c055e657e8defa8bf86`; `git ls-tree` confirmed neither
+`server/mobile.rs` nor `server/ticket.rs` was present. Implementation and
+authenticated acceptance depend on LOO-718 landing; landing PR #1812 is outside
+this Task. Reinspect its shared store and endpoints after it lands.
 
-Reinspection of that unchanged PR head confirmed:
-both WebSocket paths authenticate with node/user identity,
+Inspection of that PR head found both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.
 Only bulk tickets have direct store coverage; background expiry already releases
 abandoned bulk reservations. `mobile-same-device` permits the host's own node
 without changing ticket identity.
 
-The 18:04 `lf task status LOO-809 --json` read returned no result before
-cancellation at 18:05; current Task service state remains unknown. No further
-Task service read was needed to confirm the missing transport at 18:54.
-The cancelled
-18:01 status refresh and earlier code comparison are recorded in
-`2840aa9e8ad04299f0a78d95f2ffbe02d31fe994:scratch/design.md`.
-
-Earlier observations and references to the PR description quote and conflicting
-19:35 UTC status report remain in
-`abd082d510a6edba67139c2658a5fa4dca5ec7b2:scratch/design.md`.
-Desktop QA remains deferred in `questions.md`.
+The last successful LOO-718 status read, at 17:27 UTC, reported `feature` / `demo`.
+The 18:04 LOO-809 status read was cancelled without a result at 18:05; its service
+state remains unknown. Earlier observations, cancelled reads and references to
+the conflicting status report remain in
+`9fbc70728eeaac9884bfa3dce86ffe20ed5123ff:scratch/design.md`.
+Desktop QA remains deferred in `questions.md`; no product choice is open.
 
 ## Delete — do not maintain
 
@@ -54,11 +41,6 @@ the socket peer UID against the server's effective UID. Keep that admission
 model; local/remote separation does not require a second per-ticket UID field.
 
 ## Implementation and acceptance
-
-`docs/server.md` retains connection controls and phone prerequisites;
-`rust/loopflow/src/server/README.md` describes attachment, remote exchange and
-recovery. Remote behavior remains labeled planned; no product choice is open.
-The write-docs pass retained both files; read them before implementation.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Test matching node/user success once, different node,
@@ -80,8 +62,10 @@ another request. Leave unrelated throttles on `Instant` and retain watch resumpt
 
 After integration, remove the planned wording and update the remote example's
 revision 4 anchor to revision 5 when the transport's protocol section arrives.
-Keep Desktop controls in `docs/server.md` and protocol details in the server
-README. Its remote example links shared terminal attachment and recovery so
-owner resolution and errors have one source, separate from remote admission.
+Keep Desktop controls and phone prerequisites in `docs/server.md`, and protocol
+details in the server README. The remote example links shared attachment and
+recovery rules so owner resolution and errors have one source. The compress
+pass retains that split and consolidates dependency history above; no runtime
+code is changed while the surviving ticket store is absent.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

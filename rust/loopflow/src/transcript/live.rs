@@ -12,9 +12,10 @@ use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::facts::{seconds, LAG};
 use super::{unix_seconds, Run};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::{CurrentConversation, SqliteStore};
+use crate::store::sqlite::{CurrentConversation, RecordedTurn, SqliteStore};
 
 /// How much of a transcript's end is read first; the window grows fourfold
 /// until it holds the turn's start…
@@ -48,6 +49,14 @@ pub struct SessionTurn {
     /// Tokens across the turn's model calls; absent while it runs.
     #[serde(deserialize_with = "Option::deserialize")]
     pub usage: Option<TurnUsage>,
+}
+
+/// A transcript's current or last run as a turn, with the provider's name for
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TranscriptRun {
+    pub id: Option<String>,
+    pub turn: SessionTurn,
 }
 
 /// `asking` is a turn stopped on a question the agent put to the person.
@@ -117,15 +126,16 @@ impl SessionTurn {
         }
     }
 
-    fn from_run(run: Run) -> Self {
-        Self {
+    fn from_run(run: Run) -> TranscriptRun {
+        let turn = Self {
             state: run.state,
             source: TurnSource::Transcript,
             started_at: run.started_at,
             usage: run.ended_at.is_some().then_some(run.usage),
             ended_at: run.ended_at,
             model: run.model,
-        }
+        };
+        TranscriptRun { id: run.id, turn }
     }
 
     /// Whether the conversation waits on a person: the agent handed back, or
@@ -157,6 +167,77 @@ impl SessionTurn {
     }
 }
 
+/// The current turn of a conversation whose last turn Loopflow recorded from
+/// the live stream as `stream`, given its transcript's last run. The stream
+/// keeps the state of a run it recorded, which takes its model and usage
+/// from the transcript; a run it never saw, after its turn, is the reading on
+/// its own; a transcript behind it leaves it as it is.
+pub(crate) fn combine(stream: &RecordedTurn, run: Option<TranscriptRun>) -> SessionTurn {
+    let mut turn = SessionTurn::from_stream(
+        stream.started_at,
+        stream.settled_at,
+        stream.status.as_deref(),
+    );
+    let Some(run) = run else {
+        return turn;
+    };
+    match Order::of(stream, &run) {
+        Order::Same => {
+            turn.model = run.turn.model;
+            turn.usage = run.turn.usage;
+            turn
+        }
+        Order::After => run.turn,
+        Order::Behind => turn,
+    }
+}
+
+/// Where a transcript's last run stands against the stream's last turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Order {
+    /// The stream recorded it: one completion can fold several runs, every
+    /// run from the stream turn's start until its completion was observed.
+    Same,
+    After,
+    Behind,
+}
+
+impl Order {
+    fn of(stream: &RecordedTurn, run: &TranscriptRun) -> Self {
+        if run.id.is_some() && run.id == stream.id {
+            return Self::Same;
+        }
+        let start = seconds(&run.turn.started_at);
+        let end = seconds(&run.turn.ended_at);
+        let before = |at: Option<i64>, from: i64| at.is_some_and(|at| at + LAG < from);
+        match (stream.settled_at, end) {
+            (None, _) => match stream.started_at {
+                Some(from) if before(start.or(end), from) => Self::Behind,
+                _ => Self::Same,
+            },
+            (Some(at), Some(end)) if end > at + LAG => Self::After,
+            (Some(at), Some(end)) => {
+                let older = match stream.started_at {
+                    Some(from) => before(start.or(Some(end)), from),
+                    None => before(Some(end), at),
+                };
+                if older {
+                    Self::Behind
+                } else {
+                    Self::Same
+                }
+            }
+            (Some(at), None) => {
+                if before(start, stream.started_at.unwrap_or(at)) {
+                    Self::Behind
+                } else {
+                    Self::After
+                }
+            }
+        }
+    }
+}
+
 fn duration(seconds: i64) -> String {
     match seconds {
         ..60 => format!("{seconds}s"),
@@ -182,15 +263,15 @@ fn rfc3339(at: i64) -> Option<String> {
         .ok()
 }
 
-/// The current or last turn of the transcript at `path`; `None` when it shows
+/// The current or last run of the transcript at `path`; `None` when it shows
 /// none or cannot be read.
-pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<SessionTurn> {
+pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<TranscriptRun> {
     let read = super::run_reader(harness)?;
     let mut limit = FIRST;
     loop {
         let (rows, whole) = tail(path, limit).ok()?;
         let turn = read(&rows).runs.pop().map(SessionTurn::from_run);
-        if whole || limit >= TAIL || turn.as_ref().is_some_and(|t| t.started_at.is_some()) {
+        if whole || limit >= TAIL || turn.as_ref().is_some_and(|t| t.turn.started_at.is_some()) {
             return turn;
         }
         limit *= 4;
@@ -308,7 +389,9 @@ mod tests {
 
     #[test]
     fn a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message() {
-        let turn = read_turn(HarnessKind::Claude, &fixture("claude_turn.jsonl")).unwrap();
+        let turn = read_turn(HarnessKind::Claude, &fixture("claude_turn.jsonl"))
+            .unwrap()
+            .turn;
         assert_eq!(
             turn,
             SessionTurn {
@@ -334,7 +417,7 @@ mod tests {
     fn a_claude_turn_waiting_on_a_tool_runs_even_with_its_last_line_half_written() {
         // Through the tool result, then half of the final answer's row.
         let file = cut("claude_turn.jsonl", 6, 120);
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
+        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:37.000Z"));
         assert_eq!((turn.ended_at, turn.usage), (None, None));
@@ -348,14 +431,16 @@ mod tests {
         text.push_str(r#"{"type":"user","userType":"external","timestamp":"2026-11-10T16:26:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#);
         text.push('\n');
         fs::write(file.path(), text).unwrap();
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
+        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Interrupted);
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:26:00.000Z"));
     }
 
     #[test]
     fn a_codex_turn_counts_the_growth_of_its_running_total() {
-        let turn = read_turn(HarnessKind::Codex, &fixture("codex_rollout.jsonl")).unwrap();
+        let turn = read_turn(HarnessKind::Codex, &fixture("codex_rollout.jsonl"))
+            .unwrap()
+            .turn;
         assert_eq!(turn.state, TurnState::Ended);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:25:09.000Z"));
@@ -373,7 +458,7 @@ mod tests {
     #[test]
     fn a_codex_turn_with_its_last_line_half_written_is_running() {
         let file = cut("codex_rollout.jsonl", 9, 40);
-        let turn = read_turn(HarnessKind::Codex, file.path()).unwrap();
+        let turn = read_turn(HarnessKind::Codex, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
         assert_eq!(turn.usage, None);

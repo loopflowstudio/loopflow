@@ -1,5 +1,6 @@
-//! Each live conversation's current turn: as Loopflow recorded it from the
-//! provider's live stream, else from the end of the provider's transcript. Raw
+//! Each live conversation's current turn: the end of the provider's
+//! transcript, combined with the turn Loopflow recorded from the provider's
+//! live stream when there is one. Raw
 //! conversations, open here but never launched by Loopflow, list beside the
 //! Sessions with only what their transcript shows.
 
@@ -39,15 +40,12 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
     let Some(conversation) = store.current_conversation(session)? else {
         return Ok(None);
     };
-    if let Some(turn) = &conversation.turn {
-        return Ok(Some(SessionTurn::from_stream(
-            turn.started_at,
-            turn.settled_at,
-            turn.status.as_deref(),
-        )));
-    }
-    Ok(crate::transcript::live::locate(store, &conversation, cwd)?
-        .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path)))
+    let run = crate::transcript::live::locate(store, &conversation, cwd)?
+        .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path));
+    Ok(match &conversation.turn {
+        Some(stream) => Some(crate::transcript::live::combine(stream, run)),
+        None => run.map(|run| run.turn),
+    })
 }
 
 /// Raw conversations open in `repo`, or anywhere when `None`.
@@ -72,7 +70,8 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
                 continue;
             }
         }
-        let turn = crate::observe::transcript_turn(conversation.harness, &conversation.transcript);
+        let turn = crate::observe::transcript_turn(conversation.harness, &conversation.transcript)
+            .map(|run| run.turn);
         // A checkout two Tasks claim lists under neither.
         let task = crate::ops::task::counted_task(store, &conversation.cwd).unwrap_or(None);
         records.push(record(

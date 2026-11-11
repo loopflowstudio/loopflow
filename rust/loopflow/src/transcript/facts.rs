@@ -23,7 +23,7 @@ use crate::store::StoreResult;
 
 /// How long after a turn's last transcript row its live completion may have
 /// been recorded.
-const LAG: i64 = 2;
+pub(super) const LAG: i64 = 2;
 
 /// Record every turn of `thread`'s transcript that `session` holds no
 /// completion for; returns how many were written. The provider must be gone.
@@ -108,7 +108,7 @@ fn completion(harness: HarnessKind, run: &Run, started: Option<i64>, ended: i64)
     detail
 }
 
-fn seconds(at: &Option<String>) -> Option<i64> {
+pub(super) fn seconds(at: &Option<String>) -> Option<i64> {
     unix_seconds(&Value::String(at.clone()?))
 }
 

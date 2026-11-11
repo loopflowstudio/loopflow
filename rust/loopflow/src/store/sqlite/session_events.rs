@@ -20,6 +20,8 @@ pub(crate) struct CurrentConversation {
 /// One turn's recorded boundaries, in Unix seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecordedTurn {
+    /// The provider's name for the turn.
+    pub id: Option<String>,
     pub started_at: Option<i64>,
     pub settled_at: Option<i64>,
     pub status: Option<String>,
@@ -191,7 +193,8 @@ impl SqliteStore {
             .optional()?;
         let turn = match latest {
             None => None,
-            Some((_, kind, at, _)) if kind == "started" => Some(RecordedTurn {
+            Some((turn, kind, at, _)) if kind == "started" => Some(RecordedTurn {
+                id: turn,
                 started_at: Some(at),
                 settled_at: None,
                 status: None,
@@ -209,6 +212,7 @@ impl SqliteStore {
                     .optional()?;
                 let payload: Value = serde_json::from_str(&payload)?;
                 Some(RecordedTurn {
+                    id: turn,
                     started_at,
                     settled_at: Some(at),
                     status: payload["status"].as_str().map(str::to_owned),

@@ -146,10 +146,11 @@ session_675c…   detached  LOO-472     CI under five          last turn ended 3
 
 This works for every conversation on the Machine: a Task's, one a bare
 `lf implement` started, and a plain `claude` or `codex` lf never launched.
-When lf recorded no turns for a conversation, it reads the end of the
-provider's own transcript at the moment you ask: Claude's under
-`~/.claude/projects`, Codex's rollout files under `~/.codex/sessions`. Nothing
-runs between questions, and lf never writes into those directories.
+lf reads the end of the provider's own transcript at the moment you ask:
+Claude's under `~/.claude/projects`, Codex's rollout files under
+`~/.codex/sessions`. Nothing runs between questions, and lf never writes into
+those directories. A conversation lf launched shows its model and tokens from
+the transcript too, and a turn lf missed recording still reads as running.
 
 With the Machine server running (`lf server run`, or Desktop), it watches each
 provider's home once for all conversations and refreshes these readings as

@@ -136,3 +136,10 @@ building). Ran the same plan directly, nice +10:
 - Swift: CI (the diff is one doc comment in `ServerProtocol.swift`)
 
 Not synced: parent #1879 has moved past this branch's copy of it (`dde32ca97`).
+
+Gate again, November 11 10:01 (at 597be99a4; only `scratch/` and
+`scripts/testing.md` prose changed since 5967faced): `scripts/test.py
+--reuse-passing --swift` with the same filter stopped at `rust-cli` on host
+pressure (`syspolicyd` 248-258%, a `manabot` training run and other checkouts'
+`rustc`); architecture and rustfmt pass, rust/website/swift unproven. The
+direct run above still covers the product code. Rust, website and Swift go to CI.

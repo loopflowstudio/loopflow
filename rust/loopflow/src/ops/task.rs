@@ -1212,6 +1212,14 @@ struct StackParent {
     pr: Option<TaskPr>,
 }
 
+impl StackParent {
+    fn branch(&self) -> &str {
+        self.pr
+            .as_ref()
+            .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
+    }
+}
+
 /// One rule for every stack: the parent is a Task with a placed branch.
 /// Reads only; [`record_stack_parent`] pushes its branch and records its PR.
 async fn select_stack_parent(
@@ -1280,29 +1288,19 @@ async fn record_stack_parent(
     requested: &str,
 ) -> OpsResult<(TaskPr, Option<String>)> {
     let parent = select_stack_parent(store, task, requested).await?;
-    let branch = parent.branch().to_string();
-    let diverged = match stack_parent_branch(main_repo, &branch)? {
-        StackParentBranch::Current => None,
-        StackParentBranch::Missing => {
-            return Err(task_error(format!(
-                "stack parent {}'s branch {branch} is neither local nor on origin",
+    let branch = parent.branch();
+    let state = stack_parent_branch(main_repo, &parent)?;
+    if state == StackParentBranch::Behind {
+        git_output(main_repo, &["push", "--set-upstream", "origin", branch]).map_err(|error| {
+            task_error(format!(
+                "failed to push stack parent {}'s branch {branch} to origin: {error}",
                 parent.task.identifier
-            )))
-        }
-        StackParentBranch::Behind => {
-            git_output(main_repo, &["push", "--set-upstream", "origin", &branch]).map_err(
-                |error| {
-                    task_error(format!(
-                        "failed to push stack parent {}'s branch {branch} to origin: {error}",
-                        parent.task.identifier
-                    ))
-                },
-            )?;
-            None
-        }
-        diverged @ StackParentBranch::Diverged { .. } => {
-            Some(diverged.describe(&parent.task.identifier, &branch))
-        }
+            ))
+        })?;
+    }
+    let diverged = match state {
+        StackParentBranch::Diverged { .. } => state.note(&parent),
+        _ => None,
     };
     if let Some(pr) = parent.pr {
         return Ok((pr, diverged));
@@ -1321,14 +1319,6 @@ async fn record_stack_parent(
     Ok((pr, diverged))
 }
 
-impl StackParent {
-    fn branch(&self) -> &str {
-        self.pr
-            .as_ref()
-            .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
-    }
-}
-
 /// How the parent's local branch relates to origin's, from refs already fetched.
 #[derive(Debug, PartialEq, Eq)]
 enum StackParentBranch {
@@ -1338,55 +1328,68 @@ enum StackParentBranch {
     Behind,
     /// Origin's branch has commits the local one lacks. Stacking never forces,
     /// so the child bases on origin's version without the local-only commits.
-    Diverged {
-        left_out: usize,
-    },
-    Missing,
+    Diverged { left_out: usize },
 }
 
 impl StackParentBranch {
-    fn describe(&self, parent: &str, branch: &str) -> String {
+    /// What stacking changes or leaves out; nothing when origin is current.
+    fn note(&self, parent: &StackParent) -> Option<String> {
+        let (identifier, branch) = (&parent.task.identifier, parent.branch());
         match self {
-            Self::Diverged { left_out } => format!(
-                "origin/{branch} has diverged, so this Task bases on it and leaves out {left_out} local {parent} commit{} not on origin",
+            Self::Current => None,
+            Self::Behind => Some(format!(
+                "stacking pushes {identifier}'s branch {branch} to origin"
+            )),
+            Self::Diverged { left_out } => Some(format!(
+                "origin/{branch} has diverged, so this Task bases on it and leaves out {left_out} local {identifier} commit{} not on origin",
                 if *left_out == 1 { "" } else { "s" }
-            ),
-            Self::Behind => format!("stacking pushes {parent}'s branch {branch} to origin"),
-            Self::Current | Self::Missing => String::new(),
+            )),
         }
     }
 }
 
-fn stack_parent_branch(main_repo: &Path, branch: &str) -> OpsResult<StackParentBranch> {
+/// Errors when the branch is neither local nor on origin.
+fn stack_parent_branch(main_repo: &Path, parent: &StackParent) -> OpsResult<StackParentBranch> {
     if !crate::git::has_origin(main_repo)? {
         return Ok(StackParentBranch::Current);
     }
+    let branch = parent.branch();
     let local = format!("refs/heads/{branch}");
     let remote = format!("refs/remotes/origin/{branch}");
-    let on_origin = ref_exists(main_repo, &remote)?;
-    if !ref_exists(main_repo, &local)? {
-        return Ok(if on_origin {
-            StackParentBranch::Current
-        } else {
-            StackParentBranch::Missing
-        });
+    match (
+        ref_exists(main_repo, &local)?,
+        ref_exists(main_repo, &remote)?,
+    ) {
+        (false, false) => {
+            return Err(task_error(format!(
+                "stack parent {}'s branch {branch} is neither local nor on origin",
+                parent.task.identifier
+            )))
+        }
+        (false, true) => return Ok(StackParentBranch::Current),
+        (true, false) => return Ok(StackParentBranch::Behind),
+        (true, true) => {}
     }
-    if !on_origin {
-        return Ok(StackParentBranch::Behind);
-    }
-    let left_out: usize = git_output(
+    // "<origin-only> <local-only>" commit counts.
+    let counts = git_output(
         main_repo,
-        &["rev-list", "--count", &format!("{remote}..{local}")],
-    )?
-    .trim()
-    .parse()
-    .map_err(task_error)?;
-    Ok(if left_out == 0 {
-        StackParentBranch::Current
-    } else if crate::git::is_ancestor(main_repo, &remote, &local)? {
-        StackParentBranch::Behind
-    } else {
-        StackParentBranch::Diverged { left_out }
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{remote}...{local}"),
+        ],
+    )?;
+    let counts: Vec<usize> = counts
+        .split_whitespace()
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(task_error)?;
+    Ok(match counts[..] {
+        [_, 0] => StackParentBranch::Current,
+        [0, _] => StackParentBranch::Behind,
+        [_, left_out] => StackParentBranch::Diverged { left_out },
+        _ => return Err(task_error(format!("unexpected rev-list counts {counts:?}"))),
     })
 }
 

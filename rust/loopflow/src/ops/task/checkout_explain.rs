@@ -159,7 +159,7 @@ async fn read_checkout(
             match super::select_stack_parent(store, &task, parent).await {
                 Ok(parent) => {
                     report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into());
-                    push_stack_effects(&repo, &parent, report)?;
+                    push_stack_effects(&repo, &parent, report);
                 }
                 Err(error) => report.impediments.push(error.to_string()),
             }
@@ -182,7 +182,7 @@ async fn read_checkout(
         });
         if let Some(parent) = options.stack_on.as_deref() {
             match super::select_stack_parent(store, &task, parent).await {
-                Ok(parent) => push_stack_effects(&repo, &parent, report)?,
+                Ok(parent) => push_stack_effects(&repo, &parent, report),
                 Err(error) => report.impediments.push(error.to_string()),
             }
         }
@@ -196,22 +196,17 @@ fn push_stack_effects(
     repo: &Path,
     parent: &super::StackParent,
     report: &mut TaskCheckoutExplanation,
-) -> anyhow::Result<()> {
-    let identifier = &parent.task.identifier;
-    let branch = parent.branch();
-    match super::stack_parent_branch(repo, branch)? {
-        super::StackParentBranch::Missing => report.impediments.push(format!(
-            "stack parent {identifier}'s branch {branch} is neither local nor on origin"
-        )),
-        super::StackParentBranch::Current => {}
-        state => report
+) {
+    match super::stack_parent_branch(repo, parent) {
+        Ok(state) => report
             .unavailable
-            .push(format!("Not run: {}", state.describe(identifier, branch))),
+            .extend(state.note(parent).map(|note| format!("Not run: {note}"))),
+        Err(error) => report.impediments.push(error.to_string()),
     }
     if parent.pr.is_none() {
         report.unavailable.push(format!(
-            "Not run: stacking records an unpublished PR for {identifier}"
+            "Not run: stacking records an unpublished PR for {}",
+            parent.task.identifier
         ));
     }
-    Ok(())
 }

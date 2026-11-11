@@ -264,15 +264,14 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
         let reason = fixture.diagnostics().0.unwrap_or_default();
         assert!(!reason.contains("still has live"), "{reason}");
         assert_eq!(fixture.intent().phase, "closing");
-        fixture
-            .sql()
-            .execute(
-                "UPDATE tasks SET planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1",
-                [fixture.task.id.as_str()],
-            )
-            .unwrap();
+        // Past the viewing grace since completion, cleanup names the terminal.
+        let later = now() + crate::store::sqlite::WORKSPACE_GRACE;
         assert_eq!(
-            super::conversation_closes(&fixture.store.sqlite, &fixture.task.id).unwrap(),
+            fixture
+                .store
+                .sqlite
+                .task_close_candidates(&fixture.task.id, later)
+                .unwrap(),
             vec![(Host::Terminal(terminal.clone()), false)]
         );
         fixture.assert_retained();

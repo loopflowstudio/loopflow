@@ -8342,6 +8342,7 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
     let home = fixture.home.path();
     let task = "task_5e55105e000040008000000000000008";
     fixture.shell_task(task);
+    fixture.sql().execute("UPDATE tasks SET issue_title='Abandoned held',issue_description='',workspace_slug='task',base_commit='head',updated_at=1 WHERE id=?1", [task]).unwrap();
     let started = service
         .connect()
         .request(loopflow::server::wire::Operation::Server(

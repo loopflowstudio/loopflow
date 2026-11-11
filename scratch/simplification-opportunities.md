@@ -10,36 +10,9 @@ outlives every lf process. An install or a server restart pauses its views and
 they continue. lf records the conversation beside it and is never what keeps
 it alive.
 
-## Opportunity 1: take LOO-823's lifetime rule before review
+## Opportunity 1: take LOO-823's lifetime rule (done)
 
-**Misalignment**: This branch builds held terminals as the exception to
-idle ending ("A held terminal has no idle ending"). LOO-823 makes that the
-rule for every conversation and deletes the native-input ledger
-(`store/sqlite/native_input.rs`, all 318 lines).
-
-**Symptom**:
-- `transport/lifetime.rs` branches on `held` (the `Transport::Terminal` match
-  near line 113, and lines 323 and 358) to skip judgments that 823 deletes
-  for everyone.
-- The new `held_terminals` table carries `native_input`, and
-  `Transport::table()` exists partly so that ledger can write to either
-  owner's table.
-- The transport README keeps both stories: `end_detached_after` for owners,
-  no ending for terminals.
-
-**Realignment**: Sync onto LOO-823 while `held_terminals.sql` is still this
-branch's draft migration, which can be edited in place until it merges.
-Drop `native_input` from the table, and drop the `held` special cases in
-lifetime, where the shared rule already gives the same answer.
-
-**Cascade**:
-- `native_input=NULL` in the exit write.
-- The terminal arm of the native-input queries.
-- Fixture inserts that name the column.
-- One lifetime paragraph in the README instead of two.
-
-Conflicts land in `lifetime.rs` either way. Taking them now removes code;
-taking them after review rewrites code that has already been reviewed.
+Built in the LOO-823 merge; see `holder.md` "Stack merges".
 
 ## Opportunity 2: one kind of execution owner
 

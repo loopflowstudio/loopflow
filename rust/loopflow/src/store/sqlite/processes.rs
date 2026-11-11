@@ -311,6 +311,21 @@ fn require_attachment_in(
     Ok(())
 }
 
+/// A headless run whose AgentProcess died without a recorded exit, or whose
+/// exit an earlier lf recorded and kept open, is history.
+pub(super) fn complete_dead_headless_run_in(
+    conn: &rusqlite::Connection,
+    agent_process: &str,
+    at: i64,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_sessions SET completed_at=?2 WHERE agent_process_id=?1
+         AND interactive=0 AND completed_at IS NULL AND moved_to_machine_id IS NULL",
+        params![agent_process, at],
+    )?;
+    Ok(())
+}
+
 pub(super) fn attach_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
@@ -1169,16 +1184,17 @@ impl SqliteStore {
             return Ok(false);
         }
         terminate()?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
             "UPDATE processes SET completed_at=?2,
                 spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
                 endpoint=NULL WHERE id=?1",
-            params![
-                expected.process.id,
-                time::OffsetDateTime::now_utc().unix_timestamp()
-            ],
+            params![expected.process.id, at],
         )?;
+        complete_dead_headless_run_in(&tx, expected.process.id.as_str(), at)?;
+        tx.commit()?;
         Ok(true)
     }
 
@@ -2821,6 +2837,41 @@ mod attachment_tests {
         assert_eq!(retained.pid, Some(4242));
         assert_eq!(retained.parent_lf_process_id, Some(a));
         assert!(retained.completed_at.is_some());
+    }
+
+    #[test]
+    fn settling_a_dead_headless_run_moves_it_to_history() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let mut completed = Vec::new();
+        for (number, id, interactive) in [(1, "run", false), (2, "conversation", true)] {
+            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET interactive=?2 WHERE id=?1",
+                    rusqlite::params![session.id, interactive],
+                )
+                .unwrap();
+            let owner = insert_process(&store, number, 1);
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &owner, true)
+                .unwrap();
+            store
+                .record_agent_process_identity(&session.id, &attachment, 4242, 123)
+                .unwrap();
+            let agent = store
+                .agent_processes()
+                .unwrap()
+                .into_iter()
+                .find(|agent| agent.process.agent_session_id.as_deref() == Some(id))
+                .unwrap();
+            assert!(store.settle_agent_process(&agent, || Ok(())).unwrap());
+            completed.push(store.session(id).unwrap().unwrap().completed_at.is_some());
+        }
+        assert_eq!(completed, [true, false]);
     }
 }
 

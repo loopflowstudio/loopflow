@@ -373,8 +373,8 @@ exit 0\n",
         task
     }
 
-    /// The `open_argv` that `args --prepare --json` returns.
-    fn prepared(&self, args: &[&str]) -> Vec<String> {
+    /// The Session id and `open_argv` that `args --prepare --json` returns.
+    fn prepared(&self, args: &[&str]) -> (String, Vec<String>) {
         let output = self.run(&[args, &["--prepare", "--json"]].concat());
         assert!(
             output.status.success(),
@@ -382,7 +382,10 @@ exit 0\n",
             String::from_utf8_lossy(&output.stderr)
         );
         let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        serde_json::from_value(record["open_argv"].clone()).unwrap()
+        (
+            record["id"].as_str().unwrap().to_string(),
+            serde_json::from_value(record["open_argv"].clone()).unwrap(),
+        )
     }
 
     fn marked(&self, name: &str) -> bool {
@@ -427,7 +430,7 @@ fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
 #[test]
 fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
-    let argv = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     assert!(
         argv.ends_with(&["--task".into(), "INF-123".into()]),
         "{argv:?}"
@@ -441,9 +444,8 @@ fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
 #[test]
 fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
-    let by_task = task.prepared(&["session", "resume", "--task", "INF-123"]);
-    let id = by_task[by_task.len() - 3].clone();
-    let argv = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
+    let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
     assert!(
         argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
         "{argv:?}"

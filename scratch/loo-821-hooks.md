@@ -143,18 +143,6 @@ resume bare: no server check, a steer waits unseen if the server is down.
 `server-first.md` says Desktop opening a Task's conversation is managed, so
 this is the rule's own gap, not a new choice.
 
-Next implement direction: a Session id and the Work it belongs to on one
-command. `SessionTarget::from_selectors` accepts `<id> --task X` (and
-`--wave`): the id selects, `--task` makes the command managed, as
-`Cli::names_work` already reads it. Desktop passes the Task (or Wave) beside
-the id from its Task workspace and from `executionLocations`. The prepare
-returns `open_argv` with the id and the selector together, so `open_through`,
-its splice and its fork exception go (a fork is `--fork` with the same
-selectors), and the terminal no longer reselects the Task from its cwd between
-prepare and open. A Session link (`openSessionLink`) names no Task and stays
-bare. Test: a Task workspace pane reopened by id with the server stopped fails
-naming it.
-
 Built (November 11): `from_selectors` lets the id win beside `--task`/`--wave`
 (Task and Wave together still fail); `SessionConnectionArgs::work_flag`
 decides managed and is appended to a prepare's `open_argv`; `open_through` is
@@ -328,9 +316,9 @@ did for `-b`. Bare `lf resume <session>` stays bare.
 
 Checks (November 11, Desktop opening a Task):
 
-- `--test integration session_steers::a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server` — passes; fails without `open_through` (the reopened argv resumes bare)
+- `--test integration session_steers::a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server` — passes; fails if the prepare drops `--task` from `open_argv` (the reopened argv resumes bare)
 - `--lib ops::human_session::` — 42 pass; `session_steers:: session_cli_tests::session_cli_uses_one_truthful_resolution_contract` — 9 pass; `documented_commands::` — 4 pass; clippy clean
-- Compress: a `--fork` prepare keeps its new Session id in `open_argv` (reselecting through `--task` would open the Task's conversation, not the fork); `a_prepared_task_resume…` — passes; clippy clean
+- Compress (id beside Work): `open_argv` gets the Work flag unconditionally, as it does the intent flag; the fixture's `prepared` returns the id; `session_steers::` — 9 pass; clippy clean
 - Gate: the same filter as below, clippy
 
 Checks (November 11, managed resume):

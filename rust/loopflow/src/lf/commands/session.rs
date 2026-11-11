@@ -785,9 +785,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     reopen(&store, directory, target, connection, *fork, false, managed).await?;
                 // The opening terminal resumes this Session by id, managed
                 // when the prepare named its Work.
-                if let (Some(flag), false) =
-                    (connection.work_flag(cli), record.open_argv.is_empty())
-                {
+                if let Some(flag) = connection.work_flag(cli) {
                     record.open_argv.extend(flag.map(str::to_string));
                 }
                 Ok(record)

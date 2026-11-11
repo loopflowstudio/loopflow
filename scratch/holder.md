@@ -2,7 +2,8 @@
 
 Stacked on LOO-821 (#1879), above LOO-819 (#1875). The direction is `docs/dev/server-first.md`; the
 Task brief's "Decided, do not reopen" list is not repeated here. LOO-819's
-scratch (quotes, measurements, receipts) is in git at `e65ddaed7:scratch/`.
+scratch (quotes, measurements, receipts) is in git at `e65ddaed7:scratch/`;
+LOO-821's (`loo-821-hooks.md`, its `questions.md`) at `8044329e6:scratch/`.
 
 ## Outcome
 
@@ -57,11 +58,11 @@ Superseded kickoff candidate A: `06532757c:scratch/holder.md`.
 | --- | --- |
 | Service manager kills the holder with the server | Probe: setsid child survives `bootout`; plist and unit already abandon children |
 | Second holder steals the socket | Kernel lock; unlink only under it; spawn is idempotent |
-| Server's launchd environment lacks the person's PATH/auth env | `start` carries the caller's complete environment; server-initiated starts (`primary.rs` under served `task.run`) use the environment the served operation already uses for Graph launches; implement confirms which |
+| Server's launchd environment lacks the person's PATH/auth env | `start` carries the caller's complete environment; served `task.run` starts use the served operation's Graph environment |
 | Output while server is down blocks the agent | Holder drains into the ring; ring loss is only scrollback |
 | Lost modes after any server restart | No snapshot; ring replay plus nudge. Modes set before the ring's start are unverified (slice 0 probe, not run) |
 | One panicking owner loop takes the server down | Each loop thread runs under `catch_unwind`; the Session stays held and the loop restarts from the ring |
-| 95 loops in one process | Today's loops idle in `poll`; threads, not processes. Measure `ps` RSS/CPU at gate against today's 95 × `session serve` (4.4 GB, 55%) |
+| 95 loops in one process | Threads idling in `poll`. Gate: `ps` RSS/CPU against 95 × `session serve` (4.4 GB, 55%) |
 
 ## Forbidden
 
@@ -602,9 +603,8 @@ clean.
 Jack Heart ran `/concept-review` while run 1afadabb was on implement.
 [concept-review.html](concept-review.html). Proposals, with where they went:
 
-- **Cross-build talk to the server.** Built as the `held.sock` revision.
-- Desktop Task shells as held terminals: LOO-830.
-- A managed launch gets the server ready itself before failing. Built.
+- Built: the `held.sock` revision; a managed launch readies the server
+  before failing. Desktop Task shells as held terminals: LOO-830.
 - Plain terminal title reading Reconnecting… while the server is away:
   "not sure"; nothing drawn, as built.
 - One place listing the conversations a killed holder took.
@@ -739,17 +739,8 @@ Built this pass:
 Tests added: `a_held_view_meeting_another_build_reopens_as_the_installed_lf`,
 `a_held_terminal_with_no_view_reports_that_it_waits`.
 
-Checks, November 11: `transport_tests -- held_ a_held session_attach_waits
-server_threads_do_not` 10 passed; `--lib -- transport:: holder:: session::`
-138 passed; `--lib -- transport::lifetime store::sqlite::program_status
-ops::human_session` 55 passed; `--lib -- transport::registry::` 10 passed
-after the last edit; `documented_commands::` 4 passed; clippy clean. Left
-for gate: Slice 0 mode probe, Swift/Desktop suites, Linux RunPod restart
-test, `session_lifecycle_tests`.
-
-Compress (November 11): `Handoff::connect` keeps one `LazyLock` gap;
-`Hosted::pass` got its doc back. `transport_tests -- a_held_view_meeting_another_build
-a_held_terminal_with_no_view a_held_conversation_has_no_idle` 3 passed; clippy clean.
+Left for gate: Slice 0 mode probe, Swift/Desktop suites, Linux RunPod
+restart test, `session_lifecycle_tests`.
 
 ## Concept review, headless — November 11, 2026 (third)
 
@@ -794,7 +785,7 @@ Checks, November 11: focused lib tests 20 passed; `transport_tests` 7
 passed; `session_launch_contract` 2 passed; clippy clean. Gate: `session_cli_tests`, `session_lifecycle_tests`,
 `work_open_tests` launch the repository conversation and may now need a server.
 
-Jack Heart: "can you stack ontop of 821". Steered the run to lf sync onto jack/loo-821-managed-sessions-hooks-call-the-machine-server (plan: merge_target, 54 unique commits, 82 files).
+Jack Heart: "can you stack ontop of 821".
 
 ## Stack merge — November 11, 2026
 
@@ -803,7 +794,7 @@ Merged LOO-821 at `8044329e6965b10a9977a6c4646b7d8a3f9ad529`. Both
 the schema. Holding and hooks read the same `WorkSource::is_managed`;
 `start_held` calls LOO-821's `require_server`. Removed `open_server`,
 `ServerMissing` and its background-conversation bypass. Repository
-conversations remain Declared. This branch's explore and QA artifacts remain;
-LOO-821's choices are retained under their own heading in `questions.md`.
-
-Check: `cargo test -p loopflow --test transport_tests resumed_session_completes_turns_after_build_replacement_and_viewer_return` — pending after sync; gate owns broader suites and static analysis.
+conversations remain Declared. LOO-821's scratch is left in git (top).
+After: clippy clean; `transport_tests` 7 passed (incl. LOO-821's
+`resumed_session_completes_turns_after_build_replacement_and_viewer_return`);
+`--lib` native_exit, agent_process, primary, moves 28 passed.

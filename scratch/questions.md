@@ -104,9 +104,9 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 - The guard's watchdog output goes to `/dev/null` rather than closed fds, so
   its `printf .` readiness byte goes nowhere; Pi sees the tool's output end
   either way.
-- Unverified: OpenCode awaits an async `context` hook. The plugin now awaits
-  the boundary before pushing system text; if OpenCode does not await, the
-  block would miss the request. Check in qa with a real OpenCode.
+- OpenCode 2.2.1 awaits the async `context` hook: in qa the block and a
+  just-written steer were in the same request as the boundary that fetched
+  them, first request included.
 - A native Pi launch with no context delivery file (`LF_CONTEXT_DELIVERY`
   unset) opens no connection and records no events; `pi-event` used to record
   them without a delivery. No production launch path found that does this.
@@ -125,3 +125,14 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   (b) No: updates ride the next `session.boundary` answer like steers, no
   process waits, and an idle agent hears of a Task change on its next turn.
   Left for the watcher's Task.
+- Open: with the server frozen (SIGSTOP), every Pi report waits the full 2 s
+  deadline, serialized. qa measured a 4 s tool step taking 8-10 s (message
+  end, tool start, tool end, each awaited); OpenCode's step took 6 s (one
+  boundary); Claude pays 2 s per hook. Left as built ("same rules as hooks").
+  Alternative: while a gap is open, report only the boundaries that can carry
+  steers (tool start) and fold the rest into the next answered one.
+- Seen in qa, not this branch's code: a comment made during a managed Pi or
+  OpenCode turn arrives twice, as a steer at the next boundary and again as an
+  `<lf:task-update>` prompt that starts a new turn when the first ends
+  (`harness/task_updates.rs`, unchanged here). Belongs with the watcher's Task
+  (LOO-826).

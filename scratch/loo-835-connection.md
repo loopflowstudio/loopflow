@@ -43,11 +43,9 @@ starts no `lf`), `server::boundary::`, `harness::pi` (lib), `lf::tests::`,
 `session_launch_contract pi_`, `documented_commands::`,
 `cargo clippy --all-targets -D warnings`.
 
-Left for demo/qa: a live managed Pi and OpenCode turn with `ps` during the turn
-(Done line), steer arrival on a real provider, server stopped mid-turn, and a
-Pi version whose local bash no longer detaches (the guard must refuse, or the
-watchdog kills Pi at the first tool end).
-Left for gate: affected suites once (`--swift` for the ServerProtocol comment).
+Left: a Pi version whose local bash no longer detaches (the guard must refuse,
+or the watchdog kills Pi at the first tool end). Only Pi 1.3.0 is installed;
+the refuse path has its unit test only.
 
 Out of scope, seen here: native Pi keeps one long-lived
 `lf __context-block --moment task-updates` child per conversation, the
@@ -79,3 +77,12 @@ PR body: does not claim the 62 / 8.3 GB figure as this Task's problem. Say
 what the branch removes (per-boundary and per-second `lf` processes on Pi and
 OpenCode) and that the measurement counted Task-update watchers, which LOO-826
 deletes. Open questions: `questions.md` (LOO-835).
+
+Concept review again, November 11 (headless, at 8cbd82d59): no change. The
+only commit since the last review is the README opening it asked for; the two
+scope questions in `questions.md` keep their reversible defaults.
+
+QA, November 11 (`scratch/qa.html`): the Done line holds with real Pi 1.3.0
+and OpenCode 2.2.1 against a scripted local model. Left for gate: affected
+suites once (`--swift` for the ServerProtocol comment). Open from qa:
+`questions.md` (frozen-server Pi slowdown, double comment delivery).

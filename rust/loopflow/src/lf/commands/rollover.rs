@@ -256,8 +256,13 @@ fn binary_version(path: &Path) -> Option<String> {
 }
 
 fn parse_version(output: &str) -> Option<String> {
-    let version = output.trim().strip_prefix("lf ")?.trim();
-    (!version.is_empty() && !version.contains(char::is_whitespace)).then(|| version.to_owned())
+    // `lf 0.15.3+1660be243 (schema work 1660be243 on v0.15.3)`: the first word.
+    let version = output
+        .trim()
+        .strip_prefix("lf ")?
+        .split_whitespace()
+        .next()?;
+    Some(version.to_owned())
 }
 
 /// `3 processes on lf-d49c57c (0.14.16); 2 on lf-270110a (0.14.15)`.
@@ -717,6 +722,11 @@ mod tests {
         assert_eq!(
             parse_version("lf 0.14.16+e9b2c2eac\n").as_deref(),
             Some("0.14.16+e9b2c2eac")
+        );
+        assert_eq!(
+            parse_version("lf 0.15.3+d8e06926b.dirty (dirty build d8e06926b on v0.15.3)\n")
+                .as_deref(),
+            Some("0.15.3+d8e06926b.dirty")
         );
         assert_eq!(parse_version("error: unexpected argument"), None);
     }

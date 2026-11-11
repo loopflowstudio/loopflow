@@ -374,3 +374,8 @@ branch `lf` otherwise. Find the private server by its store,
 Machine's real servers. Kill stand-in agents by their holder parent PID;
 holders exit about a minute after their last child. Read the private store
 through a copy once the server stops: a read-only open finds no `-shm`.
+A view continuing from a PTY position after a server restart writes
+`ESC[5n` and holds input until the terminal answers `ESC[0n` (one second at
+most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
+swap, `lf monitor rollover --dry-run` should list the old holder and its views
+as staying; `lf ps` BINARIES names each build with its version.

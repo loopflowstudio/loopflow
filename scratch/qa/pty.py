@@ -14,7 +14,8 @@ while True:
         try: data = os.read(fd, 65536)
         except OSError:
             _, st = os.waitpid(pid, 0); open(log + ".exit", "w").write(str(os.waitstatus_to_exitcode(st))); break
-        if not data: break
+        if not data:
+            _, st = os.waitpid(pid, 0); open(log + ".exit", "w").write(str(os.waitstatus_to_exitcode(st))); break
         out.write(data)
         if b"\x1b[6n" in data: os.write(fd, b"\x1b[1;1R")
     if os.path.exists(inp):

@@ -13,7 +13,7 @@ Decided in the Task conversation, November 10 (Jack Heart's words):
   unavailable or untrusted".
 
 Follow-up, same conversation: "although we should look at what bare lf
---machine does still". What the code does on this branch:
+--machine does still". What the code did then (November 10, before the bare rule):
 
 - `lf --machine M` with no command execs a bare `lf` on M over SSH
   (`lf/commands/ssh.rs::run_with_io` → `build_preamble`).

@@ -50,3 +50,10 @@ leaving `resume <id>` unheld.
 jack/loo-821-managed-sessions-hooks-call-the-machine-server`, and `lf pr
 publish` retargets #1887 to `main` each time. Base set back to LOO-821's
 branch with `gh pr edit --base`; the next publish will move it again.
+
+## Stack on LOO-823 (November 11)
+
+Shown `scratch/simplification-opportunities.md` (opportunity 1: sync onto
+LOO-823 now), Jack Heart: "yes, you can stack on 823". Then: "821 is landed"
+(PR #1879 merged 2026-11-11 19:12 UTC, 763da5c92). New stack: main ← LOO-823
+(PR #1877) ← LOO-824.

@@ -44,6 +44,8 @@ async function guardBashTools(pi, ctx) {
 }
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
+// Every launch gets the bash guard and the context block. A bare headless run
+// (`spec.managed` false) polls for no steers and reports no turn end.
 export default function (pi) {
   let turn;
   let started = false;
@@ -161,7 +163,7 @@ export default function (pi) {
     if (turn) return;
     turn = randomUUID(); events = []; tools.clear();
     report({ type: "agent_start" }, ctx);
-    if (process.env.LF_CONTEXT_DELIVERY) {
+    if (spec.managed && process.env.LF_CONTEXT_DELIVERY) {
       steering = setInterval(() => {
         try {
           const content = readContext(ctx, "tool", "PiSteer");
@@ -208,7 +210,7 @@ export default function (pi) {
     clearInterval(steering);
     report(event, ctx, { events });
     turn = undefined; events = []; tools.clear();
-    if (process.env.LF_CONTEXT_DELIVERY) {
+    if (spec.managed && process.env.LF_CONTEXT_DELIVERY) {
       try { invoke("__context-block", {}, ["--moment", "stop"]); } catch { /* Next boundary retries planning. */ }
     }
   });

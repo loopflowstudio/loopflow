@@ -43,7 +43,7 @@ agent, a child in your terminal       view --+
 | Started by | `lf <skill>`, `lf graph …`, `lf -i` in a terminal | Task and Wave commands, Desktop |
 | Holds the process | Your terminal | A holder the Machine server controls |
 | Resident `lf` processes | None beyond the launching parent | The server and its holders, shared by every Session |
-| Hooks | None | Steers and Task updates in; the provider's callback to the server out |
+| Hooks | Session start and compaction, printing the context block; no server | Those, plus steers and Task updates in and the provider's callback to the server out |
 | Views | The terminal it runs in | Any number, in Desktop or any terminal, all live |
 | Outlives its terminal | No | Yes |
 
@@ -54,8 +54,10 @@ process.
 
 `lf` compiles the prompt and context, starts the agent as a foreground child
 of the calling terminal, waits, and reads the provider's transcript when the
-child exits. It installs no hooks and needs no server. A host that shows the
-foreground program, such as Rex, shows the agent.
+child exits. It needs no server. Its only hooks print the context block at
+session start and after a compaction, from files in the checkout; it takes no
+steers and reports no turn. A host that shows the foreground program, such as
+Rex, shows the agent.
 
 Persistence, reattachment and status display belong to the terminal. Opening a
 bare Session somewhere else starts a new process in the same Session from the
@@ -115,8 +117,11 @@ Sessions:
   The server records the turn from it and answers with any steers waiting.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
-that cannot reach it logs a gap and lets the turn continue. A Task or Wave
-launch starts the server before its agent and fails when none comes up.
+that cannot reach it logs a gap and lets the turn continue. A managed launch
+starts the server before its agent and fails when none comes up. A bare
+headless run already has only its two context hooks. A bare conversation
+keeps its turn hooks while an owner process holds it, because they say when
+it can take a reply and acknowledge input; they go with the owner.
 
 ## Pieces
 
@@ -127,14 +132,13 @@ deleted when the server's emulator reads status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
-| Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs | |
-| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)) | Store opens inside turn boundaries | |
+| Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs; the turn hooks of bare conversations | |
+| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); bare headless runs keep only their two context hooks | Store opens inside turn boundaries; turn, tool and Task-update hooks for bare headless runs | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |
 | Every view types; size follows the newest view | Takeover tokens, Move here | Holder |
 | Observers become server registrations | `__codex-observe`, Task-update watchers | Hooks call the server |
-| Bare launches drop their hooks | Hook installs for bare runs | Transcript telemetry |
 | CLI cleanup: `session serve`, `session attach`, the detach key, `session.end_detached_after` | The owner's surface | Bare direct, holder |
 
 Server operations for these pieces are added under one protocol revision
@@ -143,9 +147,13 @@ one each.
 
 ## The managed rule
 
-A launch is managed when it comes through a Task or Wave command or from
-Desktop. A bare `lf` typed inside a Task's checkout stays bare and records the
-Task as its ancestry. One function answers this for every launch path.
+A launch is managed when it comes through a Task or Wave command, which is
+how Desktop opens a Task's or a Wave's conversation. A bare `lf` typed inside
+a Task's checkout stays bare and records the Task as its ancestry. One function answers this for every launch path:
+`WorkSource::is_managed`, over how the Session's Work was named. `declared`
+(`--task`, `--wave`, a step of `lf task run`, a Task or Wave conversation) and
+`bound` are managed; `checkout` and no Work at all are bare. Desktop adds no
+mark: an agent started from a Desktop shell is bare.
 
 Any `lf` run in a Task's checkout counts toward that Task: its usage and time
 roll up into the Task's cost. Design the bare path on the assumption that most

@@ -42,7 +42,11 @@ keeps passing when lf's own state is unavailable: a store that is locked, refuse
 by its reader floor, missing a column or gone; a hook that fails; a lock that
 cannot be read.
 
-Every lf invocation at a turn or tool boundary is best-effort. `__context-block`
+Every lf invocation at a turn or tool boundary is best-effort. A headless run
+no Task or Wave command named has none
+([which launches are managed](../server/README.md#turn-and-tool-boundaries)):
+it runs `__context-block` at session start and after a compaction, to print
+its context block, and asks no server. `__context-block`
 from Claude hooks, the OpenCode plugin and the Pi extension opens no store: it
 sends one `session.boundary` request to the Machine server at `machine.sock`
 with a two-second deadline, and the server records the turn, acknowledges the

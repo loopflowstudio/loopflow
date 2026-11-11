@@ -745,8 +745,25 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
         2,
         "the Task conversation and Graph both launch"
     );
+    // A Task run names the Task for its steps: the step is managed, not a
+    // bare `lf` in the checkout, so it gets the turn hooks steers arrive by.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let step: String = db
+        .query_row(
+            "SELECT work_source FROM agent_sessions WHERE skill='probe'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(step, "declared");
     for launch in launches {
         let args = launch["args"].as_array().unwrap();
+        let settings = args
+            .iter()
+            .position(|arg| arg == "--settings")
+            .map(|flag| fs::read_to_string(args[flag + 1].as_str().unwrap()).unwrap())
+            .unwrap_or_else(|| panic!("{launch}"));
+        assert!(settings.contains("\"Stop\""), "{settings}");
         assert!(
             args.windows(2).any(|pair| pair == ["--model", "opus"]),
             "{launch}"

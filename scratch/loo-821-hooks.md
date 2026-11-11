@@ -5,10 +5,33 @@ Built: the `start`, `compact`, `tool` and `stop` moments of
 Described in `server/README.md` ("Turn and tool boundaries"),
 `harness/README.md`, `docs/troubleshooting.md` and `docs/dev/server-first.md`.
 
-Built: a Task or Wave launch starts its agent only beside the Machine server
-(`harness/agent_process.rs::require_server_for_work`; words and the assumption
-taken in `questions.md`). Described in `server/README.md` and
-`docs/troubleshooting.md`.
+Built: the managed rule, `session.rs::WorkSource::is_managed` (`declared` or
+`bound`). A managed launch gets every hook, a steer capability and the launch
+check (`harness/agent_process.rs::steer_environment`, `require_server`). A
+bare headless run gets two callbacks, start and compact, no capability and no
+check: Claude and Codex through `ContextDelivery::hook_settings(managed)`,
+OpenCode and Pi through `spec.managed` in their plugin source. The launch
+config carries it as `AgentConfig::managed`, set where the command names its
+Work (`lf/commands/run.rs::PromptBuild::name_work`) and from the Session row
+on resume (`agent/session.rs::resolve_session_config`).
+
+Not built, and why: a bare interactive launch (`lf -i`, `lf implement` at a
+terminal, an agent started from a Desktop shell) keeps every hook and its
+capability, with no launch check, as before this change. Built bare first,
+then `transport_tests retained_hooks_survive_upgrade` failed, and the reason
+is not the test: while an owner process holds the conversation, the boundary
+hooks are what say it can take a reply (`record_native_turn`, `yielded`),
+acknowledge input sent to it (`acknowledge_native_input`) and start a pending
+Session move (`server/boundary.rs`). The whole `transport_tests` fixture is
+`lf session serve -- lf -i -a claude : <prompt>` with no Task. Those hooks
+can go when "Bare launches go direct" removes the owner; `native_args` and
+`steer_environment` (the `interactive` column) are where.
+
+A step of `lf task run` is now recorded `declared`, not `checkout`: the Graph
+marks its Task-run steps (`LF_GRAPH_STEP=task`, read once by
+`journal::take_graph_step`), and `ops/run.rs::resolve_execution_binding`
+names the Task for them. Before this, this Task's own `implement` step was
+`checkout` in the store, the same as `lf implement` typed in the checkout.
 
 Looked at and left alone:
 
@@ -19,22 +42,13 @@ Looked at and left alone:
   write does; `server-first.md` has that as its own open item.
 - The server rewrites the delivery file after a checkout move and the hook
   rereads it; changing that is another Task.
-
-Settled by the design (concept review, November 10):
-
-- A custom `LF_HOME` (a World, a source experiment) that launches Task work
-  gets a launchd or systemd job for that home. Task work requires its
-  Machine's server, so this is the decision's consequence, not a leak.
-- A skill run in a Task's checkout carries the Task (`work_source`
-  checkout) and so needs the server. It touches the work model; "anything that
-  doesnt touch the work model" is the Task-less run, which stays server-free.
-- Pi's `--moment pi-event` (`harness/pi.rs::native_event`) is a receipt
-  observer like `__codex-observe`, not a turn-boundary hook: it moves with
-  "Observers become server registrations" (`server-first.md`), not here.
+- Pi's bash guard (`--moment tool-group`) stays on bare launches: it does not
+  record, it joins the tool's process group to the watchdog that ends it with
+  its provider (`agent_process::guard_tool_lifeline`). The comment above it in
+  `context_pi.mjs` ("records the tool boundary") is stale.
 
 Concept review with a person, November 11 (`scratch/concept-review.html`).
-Items 2 and 3 are unanswered; the "Settled by the design" entries on the same
-subjects were written headless and are open again.
+Items 2 and 3 are unanswered.
 
 1. Which launches need the server. Shown the two rows where the built check
    and `server-first.md`'s managed rule differ (`lf implement` typed in a Task
@@ -42,19 +56,13 @@ subjects were written headless and are open again.
    "I think these are both ok", then "no i mean 1b -- i think its ok that
    these dont get hooks". 1b on the page: launches through Task and Wave
    commands and Desktop need the server; a plain `lf <skill>` in a Task
-   checkout runs without one and still counts toward the Task. Not built:
-   `require_server_for_work` still asks `session_has_work`, and the plan's one
-   managed function is unwritten. Today the start and compact hooks also print
-   the context block (`context.rs::emit_block`), so a launch with no hooks
-   needs its context in the launch prompt first; `server-first.md` has that as
-   "Bare launches drop their hooks", after transcript telemetry.
-   Told that, Jack Heart: "these should be lighter weight." and "if its a
-   subagent the agent driving can steer". Implement next: one managed
-   function (Task and Wave commands, Desktop); managed launches get hooks and
-   the server check; bare launches get neither, with the context block in
-   their launch prompt. A bare run's Session still carries its checkout's
-   Task. Lost until transcript telemetry: a bare run's turn records and its
-   context after a compaction.
+   checkout runs without one and still counts toward the Task. Told that a
+   launch with no hooks needs its context in the launch prompt, Jack Heart:
+   "these should be lighter weight." and "if its a subagent the agent driving
+   can steer". Then: "hmm i think maybe we should have the context and
+   post-compaction hooks", so context stays hook-delivered for every launch
+   and nothing moved into the launch prompt. Then: "lets make sure to think
+   about opencode and pi here too". Built as above.
 2. A stale server passes the launch check (hello) and then answers no
    boundary (QA, beside installed 0.15.2). No server and a stale server leave
    the same conversation; only one refuses. Choices: as built, refuse both, or
@@ -65,15 +73,50 @@ subjects were written headless and are open again.
    `waiting`; a steer is lost only when a hook dies between read and print).
    "arrive twice" was said when the choice was lost-until-retried or twice.
 
+Answered November 11, Jack Heart: "no. in 824 i explained that there is no
+such thing other than one you start through a shell. shells in desktop should
+be managed by the holder as well, but they should not be managed (and their
+pty holding should be more generic than the lf session one)". A Desktop
+conversation with no Task or Wave is an agent started from a Desktop shell, and
+it is bare: the rule as built stands. Holding a PTY and being managed are
+separate: LOO-824's holder holds Desktop shells too.
+
+What the bare rule costs, found while building it (see `questions.md`):
+
+- Native Pi reports its session file through `pi-event`'s `session_start`
+  (`harness/pi.rs::observe_native`); `lf resume` continues from it. Bare
+  interactive launches keep their hooks, so this still works. It is one more
+  thing the hooks carry when they go.
+- A headless Session started as a `lf task run` step before this change is
+  `checkout` in the store; a correction turn resumed on it is bare.
+
+LOO-824 (its concept review, Jack Heart: "managed should = held") will call
+`WorkSource::is_managed` and `require_server` instead of keeping its own
+rule; whichever branch lands second makes the switch.
+
+Seen in the plugins, not changed here:
+
+- A managed Pi Session polls `--moment tool` once a second while working: one
+  `lf` process and one `session.boundary` each second (the Pi probe in
+  `harness/context.rs` shows the `tool` calls).
+- A managed OpenCode Session runs `lf __context-block` on every model request.
+- `context_opencode.js` never resets `compacted`: after the first compaction
+  every request sends `--moment compact`. Read in the source, not run.
+- OpenCode and Pi put the block into the system prompt of each request
+  (`input.system.push`, `sections.loopflow`), where Claude and Codex add it
+  once per start or compaction.
+
 Remaining:
 
 - Demo with a real Claude turn in a Task Session. QA (`scratch/qa.html`) ran
   the same sequence with the branch CLI, a launchd server and a stand-in
   `claude` running the installed hooks: steer delivered and `emitted`, no hook
   holding the store, frozen and stopped server each one gap line, duplicate
-  after a lost `.printed`. A real Claude login was not available.
-- Gate: the suites under Checks marked gate, plus `harness::` (named in the
-  Task's check, not yet run on this tree).
+  after a lost `.printed`. A real Claude login was not available. That QA
+  predates the bare rule; its launch was interactive, which is unchanged.
+- Bare interactive launches drop their turn hooks with "Bare launches go
+  direct" (above).
+- Gate: the suites under Checks marked gate.
 - `limit` / `record-limit` still open the store, on a usage limit only.
 
 Choices taken (reversible):
@@ -131,6 +174,17 @@ Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 `bin/lf.rs`, and `linear_on_demand_native_hooks_share_freshness_across_processes`.
 Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
+
+Checks (November 11, on the bare rule):
+
+- `cargo test -p loopflow --lib -- harness::context:: context_block::tests::a_bare harness::agent_process:: store::sqlite::steers` — 43 pass (bare hook settings; OpenCode and headless Pi probes under node)
+- `cargo test -p loopflow --test integration -- session_steers:: documented_commands::` — 9 pass (new `a_bare_skill_in_a_task_checkout_gets_context_hooks_and_asks_no_server`; the managed ones launch with `--task`)
+- `task_graph_launch_tests::a_task_run_takes_its_waves_agent…` — pass: the step's Session is `declared` and its settings carry `Stop`
+- `cargo test -p loopflow --test transport_tests -- hook continue_session resumed_session unanswering` — 10 pass
+- `--test integration -- context_block_tests:: context_launch_tests:: global_commands:: process_ownership_tests:: session_cli_tests:: settings_launch_tests::` — 52 pass, run before interactive launches got their hooks back; gate
+- `--lib -- harness:: context_block:: lf::commands::context server::boundary process::runtime::tests ops::run:: store::sqlite::steers task_graph_launch_tests:: graph_tests::` — 342 pass, 4 fail in a 20-minute run, before the same change: two `harness::pi_tests` (pass alone and in a 93-test `harness::` run) and two that only met the lock those poisoned; gate
+- clippy — pass
+- Swift `ServerProtocolTests`, the rest of `transport_tests`, `binary(two_people)`, `world_recipes::`, `session_lifecycle_tests`, `served_reads` with a resolved `TMPDIR` — gate
 
 Checks (November 10, on the launch check, before the v0.15.3 merge, which
 changed only release files):

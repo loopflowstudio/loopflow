@@ -12,15 +12,32 @@ use crate::steer::{
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
-    /// Whether the Session belongs to a Task or a Wave.
-    pub(crate) fn session_has_work(&self, session: &str) -> StoreResult<bool> {
+    /// Whether a Task or Wave command named the Session's Work
+    /// (`WorkSource::is_managed`), and whether it is a conversation an owner
+    /// holds for a person, not a headless run.
+    pub(crate) fn session_launch(&self, session: &str) -> StoreResult<(bool, bool)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions
-             WHERE id=?1 AND (task_id IS NOT NULL OR wave_id IS NOT NULL))",
-            [session],
-            |row| row.get(0),
-        )?)
+        // A Session the store does not hold is refused where its capability
+        // is reserved, not here.
+        let (source, interactive): (Option<String>, bool) = conn
+            .query_row(
+                "SELECT CASE WHEN task_id IS NOT NULL OR wave_id IS NOT NULL
+                     THEN work_source END, interactive
+                 FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .unwrap_or((None, true));
+        let managed = source
+            .map(|source| {
+                serde_json::from_value::<crate::session::WorkSource>(source.into())
+                    .map(crate::session::WorkSource::is_managed)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?
+            .unwrap_or(false);
+        Ok((managed, interactive))
     }
 
     pub(crate) fn reserve_steer_adapter(

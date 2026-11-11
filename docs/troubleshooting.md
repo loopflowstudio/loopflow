@@ -115,6 +115,10 @@ history as one `store-gap` entry, read as unknown rather than still running.
 Nothing needs relaunching. If `lf server status` reports no server or a
 mismatched build, run `lf install`.
 
+A headless run started with plain `lf -b <skill>` or `lf graph`, by you or
+by an agent, takes no steers, even inside a Task's checkout: steer the Task's
+own conversation, or the agent that started the run.
+
 ## A Task run stops with "Loopflow server is not running"
 
 ```bash
@@ -122,12 +126,13 @@ lf install server                     # register and start the Machine's server
 lf server status
 ```
 
-Agents working on a Task or a Wave start only once the Machine server answers,
+Agents started by a Task or Wave command (`lf task run`, `--task`, `--wave`,
+a Task or Wave conversation) start only once the Machine server answers,
 because their turns and steers go through it. A launch that finds none runs
 `lf install server` itself; the message appears when that did not bring one
 up, and carries what the install said. On another Machine, run the two
-commands there: `lf --machine <machine> install server`. A skill or Graph with
-no Task runs without a server.
+commands there: `lf --machine <machine> install server`. Plain `lf`,
+`lf <skill>` and `lf graph` run without a server, in a Task's checkout too.
 
 ## A creation has no confirmed answer
 

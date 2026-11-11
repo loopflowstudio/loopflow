@@ -394,9 +394,18 @@ part of what a phone or bot client is offered.
 
 ## Turn and tool boundaries
 
-Claude hooks, the OpenCode plugin and the Pi extension run
+A launch is managed when a Task or Wave command names its Work: `lf task run`
+and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation, a
+Session bound with `lf session bind`. Every other launch is bare, including
+`lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
+checkout; that run still counts toward the Task. `WorkSource::is_managed`
+answers this for every launch path.
+
+For a managed launch, and for any conversation opened in a terminal, Claude
+and Codex hooks, the OpenCode plugin and the Pi extension run
 `lf __context-block --moment <moment>` at session start, compaction, each
-prompt, each tool and each turn end. That process opens no store. It makes one `session.boundary` request on `machine.sock` and prints
+prompt, each tool and each turn end. That process opens no
+store. It makes one `session.boundary` request on `machine.sock` and prints
 the provider's hook output:
 
 ```text
@@ -441,7 +450,7 @@ The hook renders the context block from the delivery file itself, prefixes
 `steers.text` and prints the result. Context comes from files in the checkout, so
 a hook that gets no answer still prints the block.
 
-An agent for a Task or a Wave starts only once the server answers. The launch
+A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`
 through the selected installation, as a managed view does, and asks again.
 Still nothing, and the launch fails before the agent starts:
@@ -450,8 +459,15 @@ Still nothing, and the launch fails before the agent starts:
 Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
 ```
 
-A skill or Graph with no Task or Wave, here or through `lf --machine`, asks
-nothing and runs without a server; its hooks log one gap.
+A bare launch, here or through `lf --machine`, runs without a server. A
+headless one (`-b`, a Graph step, a run an agent starts) gets two callbacks,
+session start and compaction, which print the context block from checkout
+files. They carry no steer capability, make no request and log no gap. That
+run receives no steers and reports no turn boundary; whoever started it reads
+its output. On Pi the extension still guards bash tools, which ends a tool's
+process group with its provider. A bare conversation in a terminal keeps
+every callback while an owner process holds it: they say when it can take a
+reply and acknowledge input sent to it. With no server its hooks log one gap.
 
 The hook resolves the server at its fixed path on every call; no address is
 put in the agent's environment. Connecting, `hello` and the answer share a

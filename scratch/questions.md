@@ -32,8 +32,8 @@ Follow-up, same conversation: "although we should look at what bare lf
   lingering is enabled.
 
 Clarified: "i guess what i mean is remote work with tasks should require reote
-servers". Bare `lf --machine M` stays bare: no server required, its gap
-closes when "Bare launches drop their hooks" lands. Task work on M (`lf
+servers". Bare `lf --machine M` stays bare: no server required, and since
+the bare rule its two context hooks ask no server, so it logs no gap. Task work on M (`lf
 --machine M task run`, `resume --task`) needs M's server, and today nothing on
 those paths started it either: views used the server only when `LF_SERVER`
 was set (`transport.rs` → `client::bridge`), and Graph runs never asked. So a
@@ -42,14 +42,13 @@ naming the server if it can't come up (how: the assumption below).
 
 Then: "but it seems like lf --machine X should still be able to work for a
 simple skil or graph and basically anything that doesnt touch the work model".
-Only Task launches ensure the server. `lf --machine M <skill>` and a Graph with
-no Task run with or without M's server; their hooks fail at connect (no
-socket, no two-second wait) and record one gap line.
+Only managed launches ensure the server. `lf --machine M <skill>` and a typed
+Graph run with or without M's server and ask it nothing.
 
 Assumption taken (reversible), where a Task launch starts the server: the
 launch opens a connection to the server (hello, welcome) where it reserves its hook capability
-(`harness/agent_process.rs`), only for a Session with a Task or a Wave
-(`agent_sessions.task_id` or `wave_id`). No answer: it runs
+(`harness/agent_process.rs`), only for a managed Session
+(`WorkSource::is_managed` over `agent_sessions.work_source`). No answer: it runs
 `installation::server::readiness_command` (`lf install server` through the
 selected installation, as `client::bridge` does), never `ensure` in this
 build, then fails naming the server. Fixtures that launch Task or Wave agents
@@ -59,10 +58,25 @@ itself needs, not `lf server status`: status reports not ready whenever the
 server runs another executable, which would refuse every launch from an
 upgraded or branch `lf` beside a working server
 (`resumed_session_completes_turns_after_build_replacement_and_viewer_return`
-showed it). A Session launched in a Task's
-checkout carries that Task (`work_source` checkout), so a skill run there is
-checked too.
+showed it). A Session launched by plain `lf` in a Task's checkout carries
+that Task (`work_source` checkout) and is bare: not checked.
 
 - Pi's `pi-event` callback still opens the store each turn. Settled by the
   design: it is an observer and moves with the observer Task
   (`scratch/loo-821-hooks.md`).
+
+Assumptions taken headless with the bare rule, November 11 (reversible):
+
+- Managed is read from how the Work was named, not from where the launch
+  came from. `--task` and `--wave` on any command count as a Task or Wave
+  command, so `lf --task X implement` is managed.
+- Desktop: answered, no mark ("there is no such thing other than one you
+  start through a shell", `loo-821-hooks.md`).
+- The bare list names launches "typed or run by an agent". Built for headless
+  runs only: an interactive bare launch keeps its turn hooks while an owner
+  process holds it, because reply state, input acknowledgement and Session
+  moves ride on them (`loo-821-hooks.md`, "Not built, and why"). Drop them
+  here anyway and let those Sessions read stale, or with the owner in "Bare
+  launches go direct"?
+- Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
+  migration rewrites them.

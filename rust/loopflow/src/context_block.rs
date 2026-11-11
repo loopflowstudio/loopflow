@@ -269,7 +269,11 @@ impl ContextDelivery {
         Ok(())
     }
 
-    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
+    /// The provider hooks of one launch. Every launch prints its context
+    /// block at session start and after a compaction. A managed launch
+    /// (`WorkSource::is_managed`) also reports its turn and tool boundaries
+    /// to the Machine server and watches its Task.
+    pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
@@ -277,6 +281,13 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
+        let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
+        if !managed {
+            return Ok(serde_json::json!({"SessionStart": [
+                {"matcher": "startup|resume|clear", "hooks": [context("start")]},
+                {"matcher": "compact", "hooks": [context("compact")]},
+            ]}));
+        }
         // Tool boundaries start lf only for new steering. Prompt boundaries
         // always run: they also record native turn activity.
         let steer = format!(
@@ -292,8 +303,8 @@ impl ContextDelivery {
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":10}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":10}]}],
             "SessionStart": [
-            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
-            {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
+            {"matcher": "startup|resume|clear", "hooks": [context("start"), {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
+            {"matcher": "compact", "hooks": [context("compact")]}
         ]}))
     }
 }
@@ -800,6 +811,44 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_launch_installs_only_the_two_context_hooks() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let bare = delivery.hook_settings(false).unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["SessionStart"]
+        );
+        let moments: Vec<_> = bare["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(|hook| {
+                hook["command"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit(' ')
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(moments, ["start", "compact"]);
+        // The managed set declares the same two context hooks, unchanged.
+        let managed = delivery.hook_settings(true).unwrap();
+        assert_eq!(
+            managed["SessionStart"][0]["hooks"][0],
+            bare["SessionStart"][0]["hooks"][0]
+        );
+        assert_eq!(managed["SessionStart"][1], bare["SessionStart"][1]);
+        assert!(managed.get("Stop").is_some() && managed.get("PostToolUse").is_some());
+    }
+
+    #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::journal::test_env_lock();
@@ -812,7 +861,7 @@ mod tests {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
-        let settings = delivery.hook_settings().unwrap();
+        let settings = delivery.hook_settings(true).unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();

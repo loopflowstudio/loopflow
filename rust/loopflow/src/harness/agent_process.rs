@@ -128,14 +128,13 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
-/// Task and Wave work is recorded and steered through the Machine server, so
+/// A managed launch is recorded and steered through the Machine server, so
 /// its agent starts only once that server welcomes a connection, as the hooks
-/// will need it to. Anything else runs with or without one. A stopped server
-/// is started the way a managed view starts it: by the selected installation,
-/// never by this build.
-fn require_server_for_work(store: &SqliteStore, session: &str) -> Result<()> {
+/// will need it to. A stopped server is started the way a managed view starts
+/// it: by the selected installation, never by this build.
+pub(crate) fn require_server() -> Result<()> {
     use crate::server::client::Connection;
-    if !store.session_has_work(session)? || Connection::open().is_ok() {
+    if Connection::open().is_ok() {
         return Ok(());
     }
     let setup = crate::installation::server::readiness_command()?.output()?;
@@ -153,9 +152,19 @@ fn require_server_for_work(store: &SqliteStore, session: &str) -> Result<()> {
     )
 }
 
+/// A managed Session's agent (`WorkSource::is_managed`) starts beside the
+/// Machine server and carries a steer capability, which its hooks present to
+/// that server. So does a conversation an owner holds, without the server
+/// check: its hooks say when it can take a reply and acknowledge typed input.
+/// A bare headless run carries none: its two context hooks reach no server.
 fn steer_environment(command: &mut std::process::Command, owner: &AttachmentOwner) -> Result<()> {
     let (store, session, attachment) = owner;
-    require_server_for_work(store, session)?;
+    let (managed, interactive) = store.session_launch(session)?;
+    if managed {
+        require_server()?;
+    } else if !interactive {
+        return Ok(());
+    }
     let capability = store.reserve_steer_adapter(session, attachment)?;
     command.env(
         crate::steer::PROVIDER_CONTEXT_ENV,

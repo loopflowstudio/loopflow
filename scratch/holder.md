@@ -590,23 +590,43 @@ Checks:
   chunk-span code flattened. `cargo test -p loopflow --lib -- transport:: holder::`:
   80 passed; `held_session_survives_server_restart` passes; clippy clean.
 
+- Revision 5 (Rust `REVISION`/`MIN_REVISION`, Swift `ServerProtocol`,
+  fixtures, server README); Swift `ServerMessage.bridged` decodes a
+  `ServerBridge` (owner or terminal) from both required nullable keys, with
+  `bridged_terminal.json`; Swift mirrors `session.start` so
+  `everyFixtureIsMirrored` holds. Desktop never speaks the viewer protocol
+  itself: panes run `lf session resume`, so `position`/`aside` frames reach
+  only the Rust relay. Desktop's own `session.attach` encodes a null
+  `terminal_id` and nothing reads its `bridged`.
+- `lifetime::Watcher` (one thread judging every owner a host watches) and
+  `terminal_title::TitleReader` (one Session-name reader), bundled as
+  `hosted::Watchers`; the registry owns one set for every held terminal, an
+  owner process its own. Activity is read once per 2 s poll.
+- `exit-record.json` beside a held terminal: written on hand-off, removed on
+  drop or once settled; read back on take-up; a server-down exit settles it
+  (as SIGKILL when nobody saw the end) before `end_terminal`.
+- Checks: `swift test --filter 'ServerProtocol|ServerClient'` passes after
+  rebuilding `target/debug/lf`; `cargo test -p loopflow --lib transport::`
+  73 passed (incl. `one_watcher_ends_each_quiet_owner_and_keeps_the_viewed_one`,
+  `an_exit_record_kept_while_no_server_ran_is_settled_by_the_next_one`,
+  `a_server_taking_up_a_terminal_settles_the_exit_record_kept_beside_it`,
+  both failing with the record unread); `server::` 59 passed;
+  `held_session_survives_server_restart` passes; `documented_commands::`
+  passes; clippy clean.
+
 **Remaining, in order:**
 
-1. One lifetime and title watcher for all held terminals; today each held
-   terminal gets its own `lifetime::spawn` watcher and title worker thread.
-2. `exit-record.json`: an exit record a launcher handed to a server that
-   then stopped is lost (the terminal's end is still recorded). An end nobody
-   saw (holder gone, no `exit.json`) reaches viewers as a SIGKILL status and
-   the store as a null exit code.
-3. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).
-4. Protocol revision 5 with the shared bump; Swift decoding of a terminal
-   `bridged`; the Desktop overlay wording; slice 0 mode probe.
+1. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).
+2. The Desktop overlay wording; slice 0 mode probe.
+3. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
+   of the bump answers `incompatible` until both are installed.
 
 **Not as planned, open without a slot:**
 
 - The gate test's `ps` step checks the agent's parent is `lf holder run`,
   not a whole-process-group count; ten-terminal thread/socket counts and
-  `lf ps --json` holder rows are not automated.
+  `lf ps --json` holder rows are not automated (the registry still holds
+  one socket per viewer and one per held source).
 - No snapshot file on graceful stop; rebuild is ring replay plus nudge.
 - `require_settled_work` excuses processes under an owner; nothing is
   excused under a held terminal, so a launcher that stays beside its

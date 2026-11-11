@@ -108,20 +108,20 @@ is the one sign of a turn the store never recorded. It no longer times anything.
 No new product choice. Still open, and not this PR's: the resident-limit
 default count and how suspension knows the editor is empty (`questions.md`).
 
-## Next implement: Swift README still describes the deleted rules
+## Swift README review
 
-Second headless review, 2026-11-11, against the diff at `261426a65`. Runtime,
-CLI help, `docs/` and the transport and test READMEs agree with the design.
-Two passages in `swift/README.md` do not:
+The second headless review (2026-11-11, diff at `261426a65`) found two remaining
+contradictions in `swift/README.md`: the two-minute/fifteen-minute lifecycle and
+drafts delaying cleanup. Both passages now describe completed-Task cleanup after
+fifteen minutes without a Session viewer, subject to live work settling.
 
-- Line 120: "Completed Tasks release on departure through the shared
-  two-minute/fifteen-minute lifecycle." There is one deadline now, the
-  fifteen-minute cleanup.
-- Lines 1255-1257: "Requested work, drafts and pending requests delay cleanup …;
-  eligible idle agents follow the two-minute policy." Drafts no longer delay
-  cleanup, and agents end with the checkout at that same deadline.
+`git diff --check`: passed; Swift README lifecycle wording matches the transport
+contract. Prose only, no build or test; `documented_commands::` remains with gate.
 
-Prose only; no build or test.
+2026-11-11 compress: `lf context` initially reported 3,373/12,000 tokens and
+13,902/98,304 bytes. After the prose edit, its recheck and Session rename failed:
+`/Users/jack/.lf/config.yaml: invalid graph: unknown or ineligible setting claude`.
+No Machine configuration changed; resident-limit choices remain deferred.
 
 Left alone on purpose: "an explicit end" in `transport/README.md` and the
 `transport_tests.rs` comment is the wording of the 2026-11-05 rule in Wave
@@ -173,7 +173,7 @@ The audit no longer calls an open conversation stale solely for being old and un
 - Compress follow-through: `git diff --check` passed; obsolete symbol/doc search found no remaining runtime references. Only prose and a test comment changed; no build or test rerun. `lf context`: within both targets.
 
 Gate: affected transport, retirement, native-turn/steers, rollover, config,
-CLI resolution/parser and server schema suites; Clippy.
+CLI resolution/parser, server schema and `documented_commands::` suites; Clippy.
 `cargo package --locked --allow-dirty -p loopflow` remains with gate for the
 embedded demo skill edit. Demo: process diff and regenerated audit. Full build/test results before
 this lifetime revision do not cover these deletions.

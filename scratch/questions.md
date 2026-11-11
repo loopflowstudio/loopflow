@@ -52,3 +52,16 @@ Written into the docs as assumptions; none was said by anyone.
 - A killed holder ends every agent it holds, and the docs say so. Nothing
   restarts one. Is "views say the process is gone and offer resume" the whole
   experience, or should the server say which conversations were lost?
+
+## Raised while implementing
+
+- Store names are `held_terminals` / `held_terminal_id`: `processes.terminal_id`
+  already holds Desktop pane placement. The docs say "terminal" throughout.
+- Plain CLI views and the held child's own control requests reach the
+  registry through `held.sock` directly; the `session.attach` ticket bridge
+  to a held terminal exists for clients that only speak the server protocol
+  (Desktop). `server/README.md` says every view goes through `session.attach`.
+- `bridged` and the attach ticket carry both `owner_lf_process_id` and
+  `terminal_id`, one of them null, instead of two shapes under one name.
+- A lost `session.start` holder reply answers `outcome_unknown`; the caller
+  repeats the same `request`.

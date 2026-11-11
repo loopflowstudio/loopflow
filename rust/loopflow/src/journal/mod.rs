@@ -78,6 +78,12 @@ impl TestLedgerGuard {
     }
 }
 
+/// The store this test thread is pinned to, for a worker it starts.
+#[cfg(test)]
+pub(crate) fn test_ledger_path() -> Option<PathBuf> {
+    TEST_LEDGER_DB_PATH.with(|path| path.borrow().clone())
+}
+
 /// Pin a blocking fixture worker to its owning test's store; the caller holds
 /// the environment lock. Production processes already share one admitted ledger.
 #[cfg(test)]

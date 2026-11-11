@@ -57,7 +57,7 @@ fn read_to_exit(place: &Place, terminal: &str, from: u64) -> (Vec<Frame>, Vec<u8
     let mut frames = Vec::new();
     let mut bytes = Vec::new();
     loop {
-        let frame = output.next().unwrap();
+        let frame = output.frame().unwrap();
         if let Frame::Out(out) = &frame {
             bytes.extend_from_slice(out);
         }
@@ -238,10 +238,10 @@ fn output_is_marked_with_the_line_discipline_it_was_written_under() {
         .read("t1", 7)
         .unwrap();
     assert_eq!(
-        later.next().unwrap(),
+        later.frame().unwrap(),
         Frame::Mode(super::wire::Mode { raw: true })
     );
-    assert_eq!(later.next().unwrap(), Frame::Out(b"aw".to_vec()));
+    assert_eq!(later.frame().unwrap(), Frame::Out(b"aw".to_vec()));
 }
 
 #[test]

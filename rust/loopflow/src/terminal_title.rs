@@ -406,7 +406,7 @@ pub(crate) struct OutputTitle {
 }
 
 impl OutputTitle {
-    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+    pub(crate) fn new(owner: &crate::transport::Host) -> Self {
         let owner = owner.clone();
         let path = crate::store::database_path_from_env();
         let (requests, requested) = mpsc::sync_channel(1);
@@ -455,9 +455,9 @@ impl OutputTitle {
 
 fn output_title(
     store: &SqliteStore,
-    owner: &crate::id::LfProcessId,
+    owner: &crate::transport::Host,
 ) -> anyhow::Result<Option<String>> {
-    let Some(id) = store.transport_session(owner)? else {
+    let Some(id) = store.transport_session(owner.transport())? else {
         return Ok(None);
     };
     let Some(session) = store.session(&id)? else {
@@ -634,7 +634,11 @@ mod tests {
             Some("Release notes".to_string())
         );
         assert_eq!(
-            super::output_title(&title.store, &process).unwrap(),
+            super::output_title(
+                &title.store,
+                &crate::transport::Host::Owner(process.clone())
+            )
+            .unwrap(),
             Some("Release notes".into())
         );
         title

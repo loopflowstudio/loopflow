@@ -1054,7 +1054,8 @@ pub(crate) async fn open(
     if resume {
         if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::transport::current() != Some(&owner)
+                if crate::transport::current().and_then(crate::transport::Host::owner)
+                    != Some(&owner)
                     && attaches(&store.sqlite, session, &owner)?
                 {
                     // This viewer takes control, so the conversation is now
@@ -1150,9 +1151,10 @@ pub(crate) async fn open_without_replacing(
     }
     let mut record = surface(store, &session).await?;
     let owner = store.sqlite.session_transport(id)?;
-    let attachable = owner
-        .as_ref()
-        .filter(|owner| crate::transport::current() != Some(*owner) && answering(owner));
+    let attachable = owner.as_ref().filter(|owner| {
+        crate::transport::current().and_then(crate::transport::Host::owner) != Some(*owner)
+            && answering(owner)
+    });
     let native = session
         .artifact_key
         .as_deref()

@@ -25,8 +25,8 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 
 use super::wire::Event;
+use super::Host;
 use crate::config::DetachedLimit;
-use crate::id::LfProcessId;
 use crate::ops::task::retirement::owner_retiring;
 use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::ViewerHold;
@@ -86,28 +86,32 @@ impl Ending {
     /// Recheck the serving owner's current evidence before preparing its exit.
     pub fn confirm(
         &self,
-        owner: &LfProcessId,
+        owner: &Host,
         activity: Activity,
         input_queued: bool,
     ) -> Result<Option<Event>> {
         let store = crate::journal::process_ledger()?;
-        if let Some(may_close) = crate::desktop::shells::close_allowed(&store, owner, input_queued)?
-        {
+        let shell = match owner.owner() {
+            Some(owner) => crate::desktop::shells::close_allowed(&store, owner, input_queued)?,
+            None => None,
+        };
+        let owner = &owner.transport();
+        if let Some(may_close) = shell {
             return Ok(may_close.then_some(Event::Control {
                 held: false,
                 notice: Some("Shell closed".into()),
             }));
         }
-        if !activity.viewed && !input_queued && store.owner_task_abandoned(owner)? {
+        if !activity.viewed && !input_queued && store.owner_task_abandoned(*owner)? {
             return Ok(Some(Event::Control {
                 held: false,
                 notice: Some("Task abandoned".into()),
             }));
         }
-        if !self.may_end(activity, input_queued) || store.idle_retention(owner)?.is_some() {
+        if !self.may_end(activity, input_queued) || store.idle_retention(*owner)?.is_some() {
             return Ok(None);
         }
-        if owner_retiring(&store, owner)? {
+        if owner_retiring(&store, *owner)? {
             return Ok(Some(Event::Control {
                 held: false,
                 notice: Some("Completed Task workspace retired".into()),
@@ -126,7 +130,7 @@ impl Ending {
 /// loop to confirm before ending the owner. Only a terminal owner (`terminal`)
 /// ends for want of viewers; a pipe owner is a headless Run.
 pub(super) fn spawn(
-    owner: LfProcessId,
+    owner: Host,
     terminal: bool,
     waker: UnixStream,
 ) -> (mpsc::Sender<Activity>, mpsc::Receiver<Ending>) {
@@ -171,12 +175,13 @@ impl Grace {
 }
 
 fn watch(
-    owner: &LfProcessId,
+    host: &Host,
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
     end: &mpsc::Sender<Ending>,
     mut waker: &UnixStream,
 ) {
+    let owner = host.transport();
     let mut store = None;
     let mut store_failure = RecordingGap::default();
     // None means no observation has been committed, including initial absence.
@@ -230,18 +235,17 @@ fn watch(
             grace.limit = report_result(
                 &mut repository_failure,
                 "Session repository",
-                store.lf_process(owner),
+                store.host_repository(owner),
             )
-            .flatten()
-            .map(|process| limit(process.repo.as_deref()));
+            .map(|repo| limit(repo.as_deref()));
         }
         // Shell purpose is fixed at creation. Running lf inside an ordinary
         // shell must never enroll it in the idle-agent policy.
-        match report_result(
-            &mut shell_failure,
-            "Shell close request",
-            store.shell_close_request(owner),
-        ) {
+        let shell = match host.owner() {
+            Some(owner) => store.shell_close_request(owner),
+            None => Ok(None),
+        };
+        match report_result(&mut shell_failure, "Shell close request", shell) {
             Some(Some(1 | 2)) => {
                 if end
                     .send(Ending {
@@ -352,11 +356,17 @@ mod tests {
             output: 1,
             ..Activity::default()
         };
-        assert!(candidate.confirm(&owner, active, false).unwrap().is_some());
-        assert!(candidate.confirm(&owner, active, true).unwrap().is_none());
+        assert!(candidate
+            .confirm(&super::Host::Owner(owner.clone()), active, false)
+            .unwrap()
+            .is_some());
+        assert!(candidate
+            .confirm(&super::Host::Owner(owner.clone()), active, true)
+            .unwrap()
+            .is_none());
         assert!(candidate
             .confirm(
-                &owner,
+                &super::Host::Owner(owner.clone()),
                 Activity {
                     viewed: true,
                     ..active
@@ -370,7 +380,10 @@ mod tests {
             [task.as_str()],
         )
         .unwrap();
-        assert!(candidate.confirm(&owner, active, false).unwrap().is_none());
+        assert!(candidate
+            .confirm(&super::Host::Owner(owner.clone()), active, false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -421,7 +434,11 @@ mod tests {
             )
             .unwrap();
             assert!(candidate
-                .confirm(&owner, Activity::default(), false)
+                .confirm(
+                    &super::Host::Owner(owner.clone()),
+                    Activity::default(),
+                    false
+                )
                 .unwrap()
                 .is_none());
         }
@@ -434,7 +451,11 @@ mod tests {
             .try_record_owner_input(&owner, b"unsubmitted draft")
             .unwrap());
         assert!(candidate
-            .confirm(&owner, Activity::default(), false)
+            .confirm(
+                &super::Host::Owner(owner.clone()),
+                Activity::default(),
+                false
+            )
             .unwrap()
             .is_none());
         store.clear_owner_input(&owner).unwrap();
@@ -444,7 +465,11 @@ mod tests {
         )
         .unwrap();
         assert!(candidate
-            .confirm(&owner, Activity::default(), false)
+            .confirm(
+                &super::Host::Owner(owner.clone()),
+                Activity::default(),
+                false
+            )
             .unwrap()
             .is_none());
         conn.execute(
@@ -453,11 +478,19 @@ mod tests {
         )
         .unwrap();
         assert!(candidate
-            .confirm(&owner, Activity::default(), true)
+            .confirm(
+                &super::Host::Owner(owner.clone()),
+                Activity::default(),
+                true
+            )
             .unwrap()
             .is_none());
         assert!(candidate
-            .confirm(&owner, Activity::default(), false)
+            .confirm(
+                &super::Host::Owner(owner.clone()),
+                Activity::default(),
+                false
+            )
             .unwrap()
             .is_some());
         assert_eq!(
@@ -479,10 +512,16 @@ mod tests {
             };
             conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
                 .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_none());
+            assert!(candidate
+                .confirm(&super::Host::Owner(owner.clone()), viewed, false)
+                .unwrap()
+                .is_none());
             conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
                 .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_some());
+            assert!(candidate
+                .confirm(&super::Host::Owner(owner.clone()), viewed, false)
+                .unwrap()
+                .is_some());
         }
     }
 
@@ -509,7 +548,13 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, false, &changes, &end, &waker);
+                super::watch(
+                    &super::Host::Owner(watched.clone()),
+                    false,
+                    &changes,
+                    &end,
+                    &waker,
+                );
             });
         });
         activity
@@ -590,7 +635,10 @@ mod tests {
             output: 1,
             ..Activity::default()
         };
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate
+            .confirm(&super::Host::Owner(shell.clone()), viewed, false)
+            .unwrap()
+            .is_some());
         // Seed stale intent directly: the final check must protect even if a
         // writer did not atomically cancel it. No sweep runs in this test.
         for hold in ["viewed", "absent"] {
@@ -599,10 +647,16 @@ mod tests {
                 rusqlite::params![viewer, hold],
             )
             .unwrap();
-            assert!(candidate.confirm(&shell, viewed, false).unwrap().is_none());
+            assert!(candidate
+                .confirm(&super::Host::Owner(shell.clone()), viewed, false)
+                .unwrap()
+                .is_none());
         }
         store.close_desktop_shell("shell").unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate
+            .confirm(&super::Host::Owner(shell.clone()), viewed, false)
+            .unwrap()
+            .is_some());
         // Unreadable retirement state cannot authorize automatic closure.
         conn.execute("UPDATE desktop_shells SET close_requested=2", [])
             .unwrap();
@@ -611,9 +665,14 @@ mod tests {
             [&viewer],
         )
         .unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
+        assert!(candidate
+            .confirm(&super::Host::Owner(shell.clone()), viewed, false)
+            .unwrap()
+            .is_some());
         conn.execute_batch("DROP TABLE task_retirements").unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).is_err());
+        assert!(candidate
+            .confirm(&super::Host::Owner(shell.clone()), viewed, false)
+            .is_err());
     }
 
     #[test]
@@ -646,7 +705,13 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, true, &changes, &end, &waker);
+                super::watch(
+                    &super::Host::Owner(watched.clone()),
+                    true,
+                    &changes,
+                    &end,
+                    &waker,
+                );
             });
         });
         assert!(matches!(

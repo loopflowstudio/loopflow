@@ -133,7 +133,7 @@ public enum ServerOperation: Encodable, Sendable {
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
 
-    private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id" }
+    private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id" }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
@@ -145,6 +145,8 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(owner, forKey: .ownerLfProcessID)
+            // Desktop attaches to owners; a held terminal is named by `terminal_id`.
+            try box.encodeNil(forKey: .terminalID)
         }
     }
 }

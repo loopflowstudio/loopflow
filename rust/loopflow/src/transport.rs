@@ -2,6 +2,7 @@
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
 mod connection;
+mod held;
 mod hosted;
 mod input;
 #[cfg(test)]
@@ -11,6 +12,7 @@ mod lifetime;
 mod lifetime_tests;
 mod native;
 mod output;
+pub(crate) mod registry;
 pub(crate) use output::local_directory_report;
 mod snapshot;
 mod stream;
@@ -42,6 +44,8 @@ use input::PendingInput;
 use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
+/// The held terminal a direct child runs in, in place of `OWNER_ENV`.
+const HELD_ENV: &str = "LF_TRANSPORT_HELD";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const TERMINAL_ENV: &str = "LF_TRANSPORT_TERMINAL";
@@ -145,9 +149,53 @@ impl Settling {
 const SPOOL: u64 = 1024 * 1024;
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
+/// What hosts an execution and relays it to viewers: an owner process, or a
+/// terminal a holder keeps for the Machine server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Host {
+    Owner(LfProcessId),
+    Terminal(crate::id::TerminalId),
+}
+
+impl Host {
+    /// How the store names this host.
+    pub(crate) fn transport(&self) -> crate::store::sqlite::Transport<'_> {
+        match self {
+            Self::Owner(owner) => owner.into(),
+            Self::Terminal(terminal) => terminal.into(),
+        }
+    }
+
+    /// The owner process, when a process is what hosts.
+    pub(crate) fn owner(&self) -> Option<&LfProcessId> {
+        match self {
+            Self::Owner(owner) => Some(owner),
+            Self::Terminal(_) => None,
+        }
+    }
+}
+
+impl Host {
+    /// A connection that speaks the viewer protocol with this host. An owner
+    /// listens on its own socket; held terminals share the server's entrance
+    /// and are named on the connection's first line.
+    pub(crate) fn connect(&self) -> Result<UnixStream> {
+        match self {
+            Self::Owner(owner) => Ok(UnixStream::connect(endpoint(owner)?)?),
+            Self::Terminal(terminal) => Ok(registry::connect(terminal)?),
+        }
+    }
+}
+
+impl std::fmt::Display for Host {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.transport().as_str())
+    }
+}
+
 #[derive(Debug)]
 struct Handoff {
-    owner: LfProcessId,
+    owner: Host,
     key: String,
     parent: u32,
 }
@@ -160,11 +208,19 @@ impl Handoff {
             .and_then(|p| p.parse::<u32>().ok());
         let owner = std::env::var(OWNER_ENV)
             .ok()
-            .and_then(|id| LfProcessId::parse(&id).ok());
+            .and_then(|id| LfProcessId::parse(&id).ok())
+            .map(Host::Owner)
+            .or_else(|| {
+                std::env::var(HELD_ENV)
+                    .ok()
+                    .and_then(|id| crate::id::TerminalId::parse(&id).ok())
+                    .map(Host::Terminal)
+            });
         let key = std::env::var(CONTROL_ENV).ok();
         std::env::remove_var(CONTROL_ENV);
         std::env::remove_var(PARENT_ENV);
         std::env::remove_var(OWNER_ENV);
+        std::env::remove_var(HELD_ENV);
         // SAFETY: getppid has no preconditions.
         let parent = parent.filter(|p| *p == unsafe { libc::getppid() } as u32)?;
         Some(Self {
@@ -175,8 +231,11 @@ impl Handoff {
     }
 
     fn pass(&self, command: &mut Command, parent: u32) {
+        match &self.owner {
+            Host::Owner(owner) => command.env(OWNER_ENV, owner.as_str()),
+            Host::Terminal(terminal) => command.env(HELD_ENV, terminal.as_str()),
+        };
         command
-            .env(OWNER_ENV, self.owner.as_str())
             .env(PARENT_ENV, parent.to_string())
             .env(CONTROL_ENV, &self.key);
     }
@@ -190,7 +249,7 @@ pub fn initialize() {
     }
 }
 
-pub(crate) fn current() -> Option<&'static LfProcessId> {
+pub(crate) fn current() -> Option<&'static Host> {
     HANDOFF.get().map(|handoff| &handoff.owner)
 }
 
@@ -963,7 +1022,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let mut hosted = hosted::Hosted::new(id, terminal, shell, control_key, waker.try_clone()?)?;
+    let mut hosted = hosted::Hosted::new(
+        Host::Owner(id),
+        terminal,
+        shell,
+        control_key,
+        waker.try_clone()?,
+    )?;
     let pid = child.id();
     let (finished, exit) = mpsc::channel();
     std::thread::spawn(move || {
@@ -1059,14 +1124,14 @@ fn viewer_hold(viewers: &[Viewer], previous: Option<ViewerHold>, now: i64) -> Op
 
 /// Ending execution releases its remaining viewers without restarting an
 /// absence clock that already ran while requested work finished.
-fn release_viewer_hold(owner: &LfProcessId, previous: Option<ViewerHold>) {
+fn release_viewer_hold(owner: &Host, previous: Option<ViewerHold>) {
     let hold = viewer_hold(
         &[],
         previous,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     );
     let recorded = crate::journal::process_ledger()
-        .and_then(|store| store.record_owner_viewer_hold(owner, hold));
+        .and_then(|store| store.record_owner_viewer_hold(owner.transport(), hold));
     if let Err(error) = recorded {
         tracing::warn!(%error, %owner, "cannot record Session viewer release; last observation expires");
     }
@@ -2160,7 +2225,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     let handoff = HANDOFF
         .get()
         .context("this launch has no execution owner to hand its wait to")?;
-    let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+    let mut socket = handoff.owner.connect()?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     // A delayed reply does not undo the owner's acceptance. Wait for its
     // decision or a closed connection before choosing who records the exit.
@@ -2183,7 +2248,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
 pub(crate) fn drop_exit_record() {
     let dropped = (|| -> Result<()> {
         let handoff = HANDOFF.get().context("no execution owner")?;
-        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        let mut socket = handoff.owner.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2242,7 +2307,7 @@ pub(crate) fn detach_viewers() -> Result<()> {
     let handoff = HANDOFF
         .get()
         .context("Execution has no retained transport; use Ctrl+] in an attached viewer")?;
-    let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+    let mut socket = handoff.owner.connect()?;
     send(
         &mut socket,
         Request::DetachViewers {
@@ -2265,7 +2330,7 @@ fn selected_directory(record: &NativeExit) -> Option<PathBuf> {
 pub(crate) fn report_directory(cwd: &Path) {
     let Some(handoff) = HANDOFF.get() else { return };
     let result = (|| -> Result<()> {
-        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        let mut socket = handoff.owner.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2291,7 +2356,7 @@ pub(crate) struct NativeClient {
 pub(crate) fn native_client(exit: String, detach: String) -> Option<NativeClient> {
     let handoff = HANDOFF.get()?;
     let started = (|| -> Result<UnixStream> {
-        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        let mut socket = handoff.owner.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2347,7 +2412,7 @@ pub(crate) struct InputHint {
 pub(crate) fn input_hint(hint: String) -> Option<InputHint> {
     let handoff = HANDOFF.get()?;
     let registered = (|| -> Result<UnixStream> {
-        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        let mut socket = handoff.owner.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2398,7 +2463,7 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
         if step { "/step" } else { "" }
     );
     let result = (|| -> Result<()> {
-        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        let mut socket = handoff.owner.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,

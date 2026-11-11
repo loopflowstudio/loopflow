@@ -174,7 +174,7 @@ pub(super) fn encode(tag: Tag, payload: &[u8], into: &mut impl Extend<u8>) {
     into.extend(payload.iter().copied());
 }
 
-pub(super) fn line(value: &impl Serialize) -> Vec<u8> {
+pub(crate) fn line(value: &impl Serialize) -> Vec<u8> {
     let mut bytes = serde_json::to_vec(value).expect("holder messages serialize");
     bytes.push(b'\n');
     bytes
@@ -200,7 +200,7 @@ impl Decoder {
         self.buffer.extend_from_slice(bytes);
     }
 
-    pub fn next(&mut self) -> std::io::Result<Option<Frame>> {
+    pub fn frame(&mut self) -> std::io::Result<Option<Frame>> {
         let invalid = |message| std::io::Error::new(std::io::ErrorKind::InvalidData, message);
         if self.buffer.len() < 5 {
             return Ok(None);

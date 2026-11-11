@@ -39,7 +39,12 @@ const READER_QUEUE: usize = 4 * wire::CHUNK;
 #[cfg(not(test))]
 const IDLE: Duration = Duration::from_secs(60);
 #[cfg(test)]
-const IDLE: Duration = Duration::from_secs(2);
+thread_local! {
+    /// A fixture's holder thread chooses how long it idles; two seconds suits
+    /// the tests of leaving, and is too short for a slow store beside it.
+    pub(crate) static TEST_IDLE: std::cell::Cell<Duration> =
+        const { std::cell::Cell::new(Duration::from_secs(2)) };
+}
 
 /// Where one build's holder lives.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,6 +332,9 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
         waker,
     };
     ready();
+    #[cfg(test)]
+    #[allow(non_snake_case)]
+    let IDLE = TEST_IDLE.get();
     let mut connections: Vec<Connection> = Vec::new();
     let mut idle_since = Some(Instant::now());
     loop {

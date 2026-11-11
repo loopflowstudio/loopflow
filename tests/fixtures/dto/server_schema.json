@@ -9889,10 +9889,27 @@
         },
         {
           "additionalProperties": false,
-          "description": "The answer to `attach`: the connection now speaks the owner protocol\nwith this LfProcess, and nothing more arrives from the server.",
+          "description": "The answer to `attach`: the connection now speaks the viewer protocol\nwith this owner LfProcess or this held terminal, whichever is not null,\nand nothing more arrives from the server.",
           "properties": {
             "owner_lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfProcessId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "terminal_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "const": "bridged",
@@ -9901,7 +9918,8 @@
           },
           "required": [
             "type",
-            "owner_lf_process_id"
+            "owner_lf_process_id",
+            "terminal_id"
           ],
           "type": "object"
         },
@@ -10023,7 +10041,8 @@
             {
               "kind": "session.attach",
               "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-              "session": "session_5e55105e000040008000000000000001"
+              "session": "session_5e55105e000040008000000000000001",
+              "terminal_id": null
             }
           ],
           "properties": {
@@ -10043,12 +10062,24 @@
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "terminal_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Attach only to this held terminal. Without either ID, a Session's\nheld terminal is preferred to an owner."
             }
           },
           "required": [
             "kind",
             "session",
-            "owner_lf_process_id"
+            "owner_lf_process_id",
+            "terminal_id"
           ],
           "type": "object",
           "x-result": {
@@ -10057,7 +10088,111 @@
           "x-result-example": {
             "expires_in_ms": 60000,
             "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "terminal_id": null,
             "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Start the Session's agent in this build's holder and answer\n`{terminal_id}`. `env` is the caller's whole environment; the server's\nis not used. Repeating `request` answers the terminal it started.\nThis is the only operation here that creates a process.",
+          "examples": [
+            {
+              "argv": [
+                "/usr/local/bin/lf",
+                "session",
+                "resume",
+                "session_5e55105e000040008000000000000001"
+              ],
+              "cols": 80,
+              "cwd": "/Users/me/src/app",
+              "env": [
+                [
+                  "PATH",
+                  "/usr/bin:/bin"
+                ],
+                [
+                  "HOME",
+                  "/Users/me"
+                ]
+              ],
+              "kind": "session.start",
+              "request": "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+              "rows": 24,
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "env": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "session.start",
+              "type": "string"
+            },
+            "request": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfSessionId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "session",
+            "request",
+            "argv",
+            "cwd",
+            "env",
+            "rows",
+            "cols"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          },
+          "x-result-example": {
+            "terminal_id": "3f2a1b0c-5d4e-4f6a-8b7c-9d0e1f2a3b4c"
           }
         }
       ]
@@ -10107,7 +10242,26 @@
           "type": "integer"
         },
         "owner_lf_process_id": {
-          "$ref": "#/$defs/LfProcessId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The owner the bridge reaches; null for a held terminal."
+        },
+        "terminal_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The held terminal the bridge reaches; null for an owner."
         },
         "ticket": {
           "description": "16 random bytes as 22 base64url characters; single use.",
@@ -10117,6 +10271,7 @@
       "required": [
         "ticket",
         "owner_lf_process_id",
+        "terminal_id",
         "expires_in_ms"
       ],
       "type": "object"
@@ -10734,6 +10889,19 @@
         "ready_summary",
         "open_argv",
         "terminal_ids"
+      ],
+      "type": "object"
+    },
+    "SessionStarted": {
+      "additionalProperties": false,
+      "description": "What `session.start` answers.",
+      "properties": {
+        "terminal_id": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminal_id"
       ],
       "type": "object"
     },
@@ -14435,6 +14603,9 @@
         "local_exists"
       ],
       "type": "object"
+    },
+    "TerminalId": {
+      "type": "string"
     },
     "Threshold": {
       "oneOf": [

@@ -359,6 +359,7 @@ pub fn attach(
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),
             owner_lf_process_id: owner.cloned(),
+            terminal_id: None,
         }))
         .map_err(|error| stalled(error, "issue the attach ticket"))?;
     let issued: SessionAttached = serde_json::from_value(issued.result)

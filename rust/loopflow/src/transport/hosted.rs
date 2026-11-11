@@ -14,14 +14,13 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{bail, Result};
 
 use crate::harness::native_exit::NativeExit;
-use crate::id::LfProcessId;
 
 use super::input::PendingInput;
 use super::wire::{Event, Incoming, Own, Reply, Request, Tag};
 use super::{
     deliver, dimensions, end_viewers, lifetime, native, output, place_events, provider_exit_code,
     publish_reports, release_viewer_hold, selected_directory, snapshot, survive, viewer_hold,
-    Connection, Ownership, Settling, Viewer, GRACE, HEARTBEAT_TIMEOUT, LIMIT,
+    Connection, Host, Ownership, Settling, Viewer, GRACE, HEARTBEAT_TIMEOUT, LIMIT,
     OUTPUT_ACTIVITY_PAUSE,
 };
 
@@ -38,6 +37,8 @@ pub(super) struct Chunk {
 pub(super) enum Child {
     /// A child of this process on its own PTY or pipes.
     Local(Local),
+    /// A child a holder keeps on a PTY, reached through the holder's socket.
+    Held(super::held::Source),
 }
 
 pub(super) struct Local {
@@ -62,6 +63,7 @@ impl Child {
     fn pid(&self) -> u32 {
         match self {
             Self::Local(local) => local.pid,
+            Self::Held(source) => source.pid(),
         }
     }
 
@@ -87,16 +89,21 @@ impl Child {
                 }
                 Ok(())
             }
+            Self::Held(source) => {
+                source.resize(rows, cols);
+                Ok(())
+            }
         }
     }
 
-    fn forward(&mut self, pending: &mut PendingInput, owner: &LfProcessId, record: bool) {
+    fn forward(&mut self, pending: &mut PendingInput, owner: &Host, record: bool) {
         match self {
             Self::Local(local) => {
                 if let Some(input) = local.input.as_mut() {
                     pending.forward(input, owner, record);
                 }
             }
+            Self::Held(source) => source.forward(pending, owner, record),
         }
     }
 
@@ -105,6 +112,7 @@ impl Child {
             Self::Local(local) => {
                 local.input.take();
             }
+            Self::Held(source) => source.close_input(),
         }
     }
 
@@ -143,6 +151,7 @@ impl Child {
                     .retain(|(stream, _)| !drained.contains(stream));
                 Ok(chunks)
             }
+            Self::Held(source) => Ok(source.read(passes)),
         }
     }
 
@@ -150,6 +159,7 @@ impl Child {
     fn drained(&self) -> bool {
         match self {
             Self::Local(local) => local.readers.is_empty(),
+            Self::Held(source) => source.drained(),
         }
     }
 
@@ -159,11 +169,12 @@ impl Child {
                 .readers
                 .first()
                 .is_some_and(|(_, reader)| is_raw(reader.as_raw_fd())),
+            Self::Held(source) => source.is_raw(),
         }
     }
 
     /// Return a terminal a client left raw to the modes it had before.
-    fn restore_modes(&self) {
+    fn restore_modes(&mut self) {
         match self {
             Self::Local(local) => {
                 if let (Some((_, reader)), Some(cooked)) = (local.readers.first(), &local.cooked) {
@@ -173,6 +184,7 @@ impl Child {
                     }
                 }
             }
+            Self::Held(source) => source.restore_modes(),
         }
     }
 
@@ -180,19 +192,21 @@ impl Child {
     fn exited(&mut self) -> io::Result<Option<ExitStatus>> {
         match self {
             Self::Local(local) => local.exit.try_recv().ok().transpose(),
+            Self::Held(source) => Ok(source.exited().map(|ended| ended.status())),
         }
     }
 
     /// End what the execution left running in its terminal.
-    fn end_jobs(&self, owner: &LfProcessId) -> Result<()> {
+    fn end_jobs(&self, owner: &Host) -> Result<()> {
         match self {
             Self::Local(local) => {
-                if let Some(jobs) = &local.shell_jobs {
+                if let (Some(jobs), Some(owner)) = (&local.shell_jobs, owner.owner()) {
                     jobs.terminate()?;
                     crate::journal::process_ledger()?.settle_shell_jobs(owner)?;
                 }
                 Ok(())
             }
+            Self::Held(_) => Ok(()),
         }
     }
 
@@ -201,6 +215,8 @@ impl Child {
         match self {
             // The owner process is the execution's whole lifetime.
             Self::Local(_) => crate::platform::kill_process(std::process::id()),
+            // The holder reports the exit; this host ends when it arrives.
+            Self::Held(source) => source.retire(),
         }
     }
 
@@ -219,6 +235,15 @@ impl Child {
                     fds.push(pollfd(writer.as_raw_fd(), libc::POLLOUT));
                 }
             }
+            Self::Held(source) => source.poll(input, fds),
+        }
+    }
+
+    /// When a lost connection to the execution is tried again.
+    fn retry_at(&self) -> Option<Instant> {
+        match self {
+            Self::Local(_) => None,
+            Self::Held(source) => source.retry_at(),
         }
     }
 }
@@ -232,7 +257,7 @@ pub(super) enum Pass {
 }
 
 pub(super) struct Hosted {
-    id: LfProcessId,
+    id: Host,
     terminal: bool,
     /// The Desktop Task shell this execution is.
     shell: Option<String>,
@@ -271,7 +296,7 @@ impl Hosted {
     /// Host the execution known as `id`. `waker` wakes the host's wait when
     /// the lifetime policy or a settlement has something for it.
     pub fn new(
-        id: LfProcessId,
+        id: Host,
         terminal: bool,
         shell: Option<String>,
         control_key: String,
@@ -315,11 +340,26 @@ impl Hosted {
     #[cfg(test)]
     pub fn before_accept(&mut self, child: &mut Child) -> Result<()> {
         super::input_retry_tests::poll();
-        let Child::Local(local) = child;
-        super::lifetime_tests::before_read(&self.id, &mut local.readers, &mut self.output_told)
+        let (Child::Local(local), Some(owner)) = (child, self.id.owner()) else {
+            return Ok(());
+        };
+        super::lifetime_tests::before_read(owner, &mut local.readers, &mut self.output_told)
     }
 
     /// A connection that may become a viewer or carry the execution's requests.
+    /// Take up a terminal already running at `rows` by `cols`: its screen is
+    /// built at the size its program last drew for.
+    pub fn restore_size(&mut self, rows: u16, cols: u16) -> Result<()> {
+        self.size = dimensions(rows, cols);
+        self.output.resize(self.size.0, self.size.1)?;
+        Ok(())
+    }
+
+    /// The rows and columns the execution is drawn at.
+    pub fn size(&self) -> (u16, u16) {
+        self.size
+    }
+
     pub fn admit(&mut self, socket: UnixStream) {
         self.viewers.push(Viewer::new(socket));
     }
@@ -708,7 +748,10 @@ impl Hosted {
         let record = terminal
             && (self.shell.is_none()
                 || self.pending_input.is_empty()
-                || crate::desktop::shells::holds_input(&self.id));
+                || self
+                    .id
+                    .owner()
+                    .is_none_or(crate::desktop::shells::holds_input));
         child.forward(&mut self.pending_input, &self.id, record);
         if self.end_input && self.pending_input.is_empty() {
             child.close_input();
@@ -904,7 +947,8 @@ impl Hosted {
                 self.deliver(chunk.stream, &ready, detached);
             }
         }
-        let exit = ended.finish(child.is_raw(), || child.restore_modes());
+        let raw = child.is_raw();
+        let exit = ended.finish(raw, || child.restore_modes());
         self.deliver(1, &exit, detached);
     }
 
@@ -934,6 +978,7 @@ impl Hosted {
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
             .chain(self.pending_input.retry_at())
+            .chain(child.retry_at())
             .chain(self.title.as_ref().map(|title| title.deadline()))
             .chain(self.settling.as_ref().and_then(Settling::deadline))
             .min()

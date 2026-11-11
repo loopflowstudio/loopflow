@@ -85,6 +85,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../../tests/fixtures/dto/server/account_pause.json"),
     include_str!("../../../../tests/fixtures/dto/server/account_unpause.json"),
     include_str!("../../../../tests/fixtures/dto/server/attach.json"),
+    include_str!("../../../../tests/fixtures/dto/server/session_start.json"),
     include_str!("../../../../tests/fixtures/dto/server/checkout_commit.json"),
     include_str!("../../../../tests/fixtures/dto/server/checkout_create.json"),
     include_str!("../../../../tests/fixtures/dto/server/checkout_sync.json"),
@@ -170,6 +171,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "attached",
         "session.attach",
         include_str!("../../../../tests/fixtures/dto/server/attached.json"),
+    ),
+    (
+        "session_started",
+        "session.start",
+        include_str!("../../../../tests/fixtures/dto/server/session_started.json"),
     ),
     (
         "pr_abandoned",

@@ -365,16 +365,18 @@ part of what a phone or bot client is offered.
   the caller's complete environment; the server's own is not used. `request`
   identifies the start: repeating it answers the same terminal and starts
   nothing, and a start whose holder reply was lost is reconciled against the
-  holder's inventory first. It creates a process and is the only operation
-  here that does; attaching never does.
-- `session.attach {session, terminal_id}` for a held terminal answers a ticket
-  `{ticket, terminal_id, expires_in_ms}`, and its bridge answers
-  `bridged {terminal_id}`. The bridged connection speaks the viewer protocol
-  to the server's terminal registry, with positions in PTY bytes; no private
-  socket stands behind it. A Session whose terminal has ended answers
-  `not_found` with `terminal_id` and, when one exists, `current_terminal_id`.
-  The owner form below is unchanged and serves owners only; an owner ID is
-  never a terminal ID.
+  holder's inventory first; a start that could not be reconciled answers
+  `outcome_unknown`, and repeating the same `request` settles it. It creates
+  a process and is the only operation here that does; attaching never does.
+- `session.attach {session}` prefers the Session's held terminal to an owner,
+  and `{session, terminal_id}` attaches only to that terminal. Either answers
+  a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
+  and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
+  The bridged connection speaks the viewer protocol with the server's
+  terminal registry. A terminal that has ended answers `not_found` with
+  `terminal_id` and `current_terminal_id` (null when the Session has none).
+  The owner form below serves owners only, with `terminal_id` null in its
+  ticket and its `bridged`; an owner ID is never a terminal ID.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
   `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first

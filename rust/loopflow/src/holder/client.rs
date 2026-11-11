@@ -35,9 +35,15 @@ impl Client {
     /// Connect to the holder at `place`. A refusal or a missing socket says no
     /// holder is listening there; it says nothing about agents.
     pub fn connect(place: &Place) -> io::Result<Self> {
+        Self::connect_within(place, ANSWER)
+    }
+
+    /// Connect, giving each request `answer` to be answered: an event loop
+    /// serving many terminals cannot wait long on one holder.
+    pub fn connect_within(place: &Place, answer: Duration) -> io::Result<Self> {
         let socket = UnixStream::connect(&place.socket)?;
-        socket.set_read_timeout(Some(ANSWER))?;
-        socket.set_write_timeout(Some(ANSWER))?;
+        socket.set_read_timeout(Some(answer))?;
+        socket.set_write_timeout(Some(answer))?;
         Ok(Self {
             socket: BufReader::new(socket),
         })
@@ -185,9 +191,9 @@ pub struct Output {
 impl Output {
     /// The next frame, waiting for it. End of stream without an exit frame is
     /// a lost connection, not an exit.
-    pub fn next(&mut self) -> io::Result<Frame> {
+    pub fn frame(&mut self) -> io::Result<Frame> {
         loop {
-            if let Some(frame) = self.decoder.next()? {
+            if let Some(frame) = self.decoder.frame()? {
                 return Ok(frame);
             }
             let mut bytes = [0; 16384];

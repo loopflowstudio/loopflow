@@ -19,12 +19,13 @@ use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
 use super::subscriptions::{Member, Subscriptions};
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
-    ServerOperation, SessionAttached, Status, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION,
-    REVISION, TICKET_LIFETIME,
+    ServerOperation, SessionAttached, SessionStarted, Status, Welcome, MAX_CONNECTIONS,
+    MAX_MESSAGE, MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
 use crate::engine::{Error, ErrorCode};
-use crate::id::LfProcessId;
 use crate::lf::commands::read::Read;
+use crate::transport::registry::Registry;
+use crate::transport::Host;
 
 /// How long a connection has to send its first message.
 const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -50,15 +51,15 @@ struct Tickets(Mutex<HashMap<String, Ticket>>);
 
 #[derive(Debug)]
 struct Ticket {
-    owner: LfProcessId,
+    host: Host,
     /// The user who requested it; only that user's connection may present it.
     uid: u32,
     issued: Instant,
 }
 
 impl Tickets {
-    /// Grant `uid` one bridge to `owner`, open until `TICKET_LIFETIME` passes.
-    fn issue(&self, owner: LfProcessId, uid: u32, now: Instant) -> String {
+    /// Grant `uid` one bridge to `host`, open until `TICKET_LIFETIME` passes.
+    fn issue(&self, host: Host, uid: u32, now: Instant) -> String {
         use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
         let ticket = BASE64_URL_SAFE_NO_PAD.encode(uuid::Uuid::new_v4().as_bytes());
         let mut tickets = lock(&self.0);
@@ -66,7 +67,7 @@ impl Tickets {
         tickets.insert(
             ticket.clone(),
             Ticket {
-                owner,
+                host,
                 uid,
                 issued: now,
             },
@@ -74,14 +75,14 @@ impl Tickets {
         ticket
     }
 
-    /// The owner `ticket` opens for `uid`; the ticket is spent either way.
+    /// The host `ticket` opens for `uid`; the ticket is spent either way.
     /// Unknown, spent, expired and another user's tickets are alike: there is
     /// nothing to tell a presenter who was never granted one.
-    fn redeem(&self, ticket: &str, uid: u32, now: Instant) -> Result<LfProcessId, Error> {
+    fn redeem(&self, ticket: &str, uid: u32, now: Instant) -> Result<Host, Error> {
         let granted = lock(&self.0).remove(ticket);
         match granted {
             Some(held) if held.uid == uid && now.duration_since(held.issued) < TICKET_LIFETIME => {
-                Ok(held.owner)
+                Ok(held.host)
             }
             _ => Err(Error::new(
                 ErrorCode::NotFound,
@@ -190,6 +191,15 @@ pub(super) async fn run() -> Result<()> {
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    // Held terminals keep running in their holders whether or not this server
+    // can host them; without a registry their views wait for the next server.
+    let terminals = match Registry::open(&executable_sha256) {
+        Ok(terminals) => Some(terminals),
+        Err(error) => {
+            tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
+            None
+        }
+    };
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on
@@ -215,8 +225,10 @@ pub(super) async fn run() -> Result<()> {
         let slots = slots.clone();
         let tickets = tickets.clone();
         let subscriptions = subscriptions.clone();
+        let terminals = terminals.clone();
         tokio::spawn(async move {
             let connection = Connection {
+                terminals: terminals.as_ref(),
                 instance: &instance,
                 executable_sha256: &executable_sha256,
                 clients: &clients,
@@ -274,6 +286,9 @@ struct Connection<'a> {
     slots: &'a Arc<Semaphore>,
     tickets: &'a Tickets,
     subscriptions: &'a Arc<Subscriptions>,
+    /// The held terminals this server hosts; none in a server that could not
+    /// open its registry.
+    terminals: Option<&'a Arc<Registry>>,
     uid: u32,
 }
 
@@ -307,10 +322,31 @@ impl Connection<'_> {
                 self.client(lines, hello).await
             }
             Ok(ClientMessage::Attach { ticket }) => {
-                let owner = match self.tickets.redeem(&ticket, self.uid, Instant::now()) {
-                    Ok(owner) => owner,
+                let host = match self.tickets.redeem(&ticket, self.uid, Instant::now()) {
+                    Ok(host) => host,
                     Err(refusal) => {
                         return send(&mut lines, &ServerMessage::error(None, refusal)).await
+                    }
+                };
+                let owner = match host {
+                    Host::Owner(owner) => owner,
+                    Host::Terminal(terminal) => {
+                        // The registry closes a connection that names a
+                        // terminal it no longer hosts.
+                        let mut destination =
+                            UnixStream::connect(crate::transport::registry::entrance()?).await?;
+                        destination
+                            .write_all(&crate::transport::registry::named(&terminal))
+                            .await?;
+                        send(
+                            &mut lines,
+                            &ServerMessage::Bridged {
+                                owner_lf_process_id: None,
+                                terminal_id: Some(terminal),
+                            },
+                        )
+                        .await?;
+                        return bridge(lines, destination).await;
                     }
                 };
                 let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?)
@@ -327,7 +363,8 @@ impl Connection<'_> {
                 send(
                     &mut lines,
                     &ServerMessage::Bridged {
-                        owner_lf_process_id: owner,
+                        owner_lf_process_id: Some(owner),
+                        terminal_id: None,
                     },
                 )
                 .await?;
@@ -430,6 +467,7 @@ impl Connection<'_> {
             instance.into(),
             &admitted,
             self.tickets,
+            self.terminals,
             self.uid,
             self.subscriptions,
             outgoing,
@@ -481,6 +519,7 @@ async fn session(
     instance: Arc<str>,
     admitted: &Admitted,
     tickets: &Tickets,
+    terminals: Option<&Arc<Registry>>,
     uid: u32,
     subscriptions: &Arc<Subscriptions>,
     outgoing: Outbox,
@@ -563,7 +602,51 @@ async fn session(
                         send(&mut lines, &error(Some(id), ErrorCode::Invalid, "select applies to reads")).await?;
                         continue;
                     }
-                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact }), None) => {
+                    Admission::Request(Operation::Server(ServerOperation::SessionStart { session, request, argv, cwd, env, rows, cols }), None) => {
+                        let Some(terminals) = terminals.cloned() else {
+                            send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
+                                "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
+                            ).with(serde_json::json!({ "resource": "held_terminals" })))).await?;
+                            continue;
+                        };
+                        let start = crate::transport::registry::Start { session, request, argv, cwd, env, rows, cols };
+                        // Starting a holder can take seconds; nothing else on
+                        // this connection waits on it but its own requests.
+                        let started = tokio::task::spawn_blocking(move || terminals.start(start)).await;
+                        let message = match started {
+                            Ok(Ok(terminal_id)) => ServerMessage::Response {
+                                id,
+                                trace_id: crate::id::TraceId::default(),
+                                result: serde_json::to_value(SessionStarted { terminal_id }).expect("a terminal ID serializes"),
+                            },
+                            // The child may be running: the caller repeats the
+                            // same request to learn which.
+                            Ok(Err(failure)) => ServerMessage::error(Some(id), Error::new(ErrorCode::OutcomeUnknown, format!("{failure:#}"))),
+                            Err(join) => ServerMessage::error(Some(id), Error::new(ErrorCode::OutcomeUnknown, join.to_string())),
+                        };
+                        send(&mut lines, &message).await?;
+                        continue;
+                    }
+                    Admission::Request(Operation::Server(ServerOperation::SessionAttach { session, owner_lf_process_id: exact, terminal_id }), None) => {
+                        let held = terminals.and_then(|terminals| terminals.session_terminal(&session));
+                        if exact.is_none() && (terminal_id.is_some() || held.is_some()) {
+                            let message = match (terminal_id, held) {
+                                (wanted, Some(held)) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
+                                    let ticket = tickets.issue(Host::Terminal(held.clone()), uid, Instant::now());
+                                    ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result: serde_json::to_value(SessionAttached {
+                                        ticket,
+                                        owner_lf_process_id: None,
+                                        terminal_id: Some(held),
+                                        expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                                    }).expect("a ticket serializes") }
+                                }
+                                (wanted, current) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                                    "terminal has ended; nothing was started and no input replayed",
+                                ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
+                            };
+                            send(&mut lines, &message).await?;
+                            continue;
+                        }
                         let owner = match attached_owner(session, exact).await {
                             Ok(owner) => owner,
                             Err(refusal) => {
@@ -579,10 +662,11 @@ async fn session(
                             ).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
                             continue;
                         }
-                        let ticket = tickets.issue(owner.clone(), uid, Instant::now());
+                        let ticket = tickets.issue(Host::Owner(owner.clone()), uid, Instant::now());
                         let result = serde_json::to_value(SessionAttached {
                             ticket,
-                            owner_lf_process_id: owner,
+                            owner_lf_process_id: Some(owner),
+                            terminal_id: None,
                             expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
                         }).expect("a ticket serializes");
                         send(&mut lines, &ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result }).await?;
@@ -856,8 +940,10 @@ async fn operate(
             })
             .await
         }
-        Operation::Server(ServerOperation::SessionAttach { .. }) => {
-            unreachable!("the session dispatches attachment")
+        Operation::Server(
+            ServerOperation::SessionAttach { .. } | ServerOperation::SessionStart { .. },
+        ) => {
+            unreachable!("the session dispatches attachment and starts")
         }
     }
 }
@@ -939,7 +1025,7 @@ mod tests {
     use std::sync::{Arc, LazyLock, Mutex};
     use std::time::{Duration, Instant};
 
-    use super::{Clients, Connection, Tickets};
+    use super::{Clients, Connection, Host, Tickets};
     use crate::engine::ErrorCode;
     use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
@@ -990,6 +1076,7 @@ mod tests {
                     slots: &slots,
                     tickets: &Tickets::default(),
                     subscriptions: &subscriptions,
+                    terminals: None,
                     uid: 501,
                 }
                 .serve(server)
@@ -1422,6 +1509,7 @@ mod tests {
                 slots: &slots,
                 tickets: &Tickets::default(),
                 subscriptions: &Arc::new(Subscriptions::default()),
+                terminals: None,
                 uid: 501,
             }
             .serve(server)
@@ -1859,7 +1947,7 @@ mod tests {
     #[test]
     fn a_ticket_opens_one_bridge_for_its_user_within_its_lifetime() {
         let tickets = Tickets::default();
-        let owner = LfProcessId::new();
+        let owner = Host::Owner(LfProcessId::new());
         let issued = Instant::now();
         let ticket = tickets.issue(owner.clone(), 501, issued);
         assert_eq!(ticket.len(), 22, "16 bytes as base64url: {ticket}");

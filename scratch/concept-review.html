@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open a task's conversation</title>
+<style>
+:root{color-scheme:light dark;font:17px/1.55 system-ui,sans-serif}body{max-width:760px;margin:48px auto;padding:0 24px}h1{font-size:2rem;line-height:1.15}h2{font-size:1.1rem;margin-top:2rem}small{opacity:.7}code{font-size:.9em}table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{text-align:left;vertical-align:top;padding:12px 8px;border-bottom:1px solid #8886}blockquote{margin:1.5rem 0;padding-left:1rem;border-left:3px solid #888}a{color:light-dark(#185bc4,#9dc4ff)}@media(max-width:540px){body{margin:24px auto;padding:0 16px}td,th{padding:10px 4px;font-size:.9rem}}
+</style>
+<header><small>Task: none · Concept review · 2026-11-10<br>Sources: docs/workspaces.md; open/workspace.rs; open/workspace/layout.rs; task_view.rs</small></header>
+<h1>One conversation, three ways to reach it</h1>
+<p><strong>Stated direction:</strong> a direct CLI invocation opens here; an agent invocation opens a sibling tab; Desktop focuses the conversation. <strong>Latest proposal:</strong> terminal opening reports an existing view and requires <code>--focus</code> to switch to it.</p>
+<blockquote>The biggest mismatch: opening a Task can succeed by creating a status pane while leaving its conversation unopened.</blockquote>
+<table><thead><tr><th>Action</th><th>Existing behavior</th><th>Proposed behavior</th></tr></thead><tbody>
+<tr><td>Open a Task from the CLI</td><td>Fresh workspace; conversation rules may substitute Task &amp; workflow.</td><td>Attach its primary conversation in this terminal.</td></tr>
+<tr><td>Ask an agent to open a Task</td><td>Workspace rules can suppress its conversation pane.</td><td>Open a sibling conversation tab.</td></tr>
+<tr><td>Conversation already open</td><td>Fresh tabs or a status replacement, depending on caller and host.</td><td>Report “Already open in …; use --focus.” Leave focus unchanged.</td></tr>
+<tr><td>Explicit --focus</td><td>No such mode.</td><td>Focus its existing view; report “Not open” if none exists.</td></tr>
+<tr><td>Open in Desktop</td><td>Desktop selects Work through its own presentation path.</td><td>Focus the conversation.</td></tr>
+<tr><td>Open after its provider exited</td><td>Resume path depends on destination and selection.</td><td>Continue the Session with its history.</td></tr>
+<tr><td>Destination unavailable</td><td>Host errors; some conversation exclusions silently become status panes.</td><td>Explain the failure; retry the same opening after recovery.</td></tr>
+</tbody></table>
+<h2>Actions → concepts → APIs</h2>
+<p><code>open --task</code> → Task's primary Session → resolve or prepare that Session → present Here, Sibling or Focus. <code>open --session</code> starts from the named Session and uses the same presentation path. Neither advances the Graph.</p>
+<p><code>task view</code> → workflow and recorded work → read and subscribe. Workspace arrangements remain a separate product question; their useful panes must remain available.</p>
+<h2>Proposed usage</h2>
+<p>Flag names are proposed, not built:</p>
+<pre><code>lf open --task LOO-820 --here
+lf open --task LOO-820 --tab
+lf open --task LOO-820 --focus</code></pre>
+<p>Agent guidance: opening a workflow pane does not fulfill a request to open a conversation. Report the actual destination or failure.</p>
+<h2>Decision</h2>
+<p>1. How far should “already open” look?<br>1a. The same terminal.<br>1b. Any host on this Machine.<br>1c. Other Machines too.</p>
+<p>2. Repository/Wave opening and workspace arrangements still need a separate definition.</p>
+<p>The working proposal is in <a href="open-design.md">open-design.md</a>. These opening semantics are not implemented. The separate status-update bug is fixed in this checkout and its live-refresh regression passes; the installed app has not been replaced.</p>
+</html>

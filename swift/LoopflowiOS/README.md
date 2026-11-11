@@ -16,7 +16,8 @@ regenerate the opaque iOS asset from the repository root:
 For offline UI testing only, add `--fixture` to the launch arguments. This uses
 the native terminal renderer with a simulated editor: no shell, provider or
 Loopflow Session runs, and no commands execute. UI tests opt into it individually.
-It cannot demonstrate working with a real Session.
+Submit `history` for numbered scrollback or `permission` for a simulated question.
+This mode cannot demonstrate working with a real Session.
 **Keys** shows arrows, Tab and Escape for provider menus and cursor movement.
 The keyboard icon returns to the typing controls. Switching keys preserves the
 keyboard, terminal size and draft. Keys require input control and send nothing

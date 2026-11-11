@@ -4,6 +4,34 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testSwipeReadsScrollbackAndLatestReturnsToThePrompt() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        app.typeText("history\n")
+        app.buttons["Hide keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let latest = app.buttons["terminal-latest"]
+        XCTAssertFalse(latest.exists, "New output should initially show the prompt")
+        let viewport = app.descendants(matching: .any).matching(identifier: "terminal-viewport").firstMatch
+        viewport.swipeDown()
+        capture(app, "session-swiped-scrollback")
+        guard latest.waitForExistence(timeout: 5) else {
+            return XCTFail("Reading older output must expose Latest")
+        }
+        latest.tap()
+        XCTAssertTrue(latest.waitForNonExistence(timeout: 5))
+        capture(app, "session-scrollback-latest")
+        XCTAssertTrue(app.buttons["Show keyboard"].isHittable)
+    }
+
     func testNavigationKeysEditWithoutSubmittingOrHidingTheKeyboard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

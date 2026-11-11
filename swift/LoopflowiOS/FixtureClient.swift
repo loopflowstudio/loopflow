@@ -124,7 +124,7 @@ final class FixtureTerminal {
     private var pending: [UInt8] = []
     private var pasted = false
     private var asking = false
-    private var result = "Type a request. Try permission, then y or n."
+    private var result = "Try history for scrollback, or permission then y or n."
 
     var screen: String {
         let prompt = asking ? "Allow fixture action? [y/N] " : "> "
@@ -194,6 +194,8 @@ final class FixtureTerminal {
         } else if draft == "permission" {
             asking = true
             result = "A fixture permission question is open."
+        } else if draft == "history" {
+            result = (1...120).map { "History line \($0)" }.joined(separator: "\r\n")
         } else {
             result = "Received \(draft.count) characters."
         }

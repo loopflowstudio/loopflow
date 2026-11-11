@@ -151,6 +151,8 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     override func viewDidLoad() {
         super.viewDidLoad()
         terminal.terminalDelegate = self
+        // SwiftTerm's programmatic scroll callback does not cover touch scrolling.
+        terminal.delegate = self
         // The owner parses reports; the active renderer still answers capability
         // queries. The workspace suppresses replies from observers and snapshots.
         terminal.getTerminal().parser.oscHandlers[7501] = { [weak workspace] bytes in
@@ -450,7 +452,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     }
 
     private func updateLatestButton() {
-        let readingHistory = terminal.canScroll && terminal.scrollPosition < 1
+        let readingHistory = terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
         let aboveBottom = viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
         latestButton.isHidden = finding || !(readingHistory || aboveBottom)
     }
@@ -643,6 +645,9 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     private func showLatest() {
         terminal.scroll(toPosition: 1)
+        // A UIKit swipe can move the visible content without changing SwiftTerm's
+        // logical row. scrollTo also aligns the view when that row is unchanged.
+        terminal.scrollTo(row: terminal.getTerminal().buffer.yDisp)
         viewport.setContentOffset(CGPoint(x: viewport.contentOffset.x,
             y: max(0, viewport.contentSize.height - viewport.bounds.height)), animated: false)
         updateLatestButton()

@@ -132,14 +132,6 @@ Seen in the plugins, not changed here:
   (`input.system.push`, `sections.loopflow`), where Claude and Codex add it
   once per start or compaction.
 
-Next implement direction (headless concept review, November 11):
-
-- `docs/dev/server-first.md` "The managed rule" lists `checkout` and no Work
-  as bare but not `inherited`, the source a child run started by a Session's
-  agent records (`ops/run.rs`). `is_managed` already calls it bare, which is
-  what "if its a subagent the agent driving can steer" asks for. Name it
-  in that paragraph and in the `is_managed` doc comment. Docs only.
-
 Remaining:
 
 - Demo with a real Claude turn in a Task Session. QA (`scratch/qa.html`) ran

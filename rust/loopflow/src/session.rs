@@ -216,7 +216,8 @@ pub enum WorkSource {
 impl WorkSource {
     /// A launch is managed when a Task or Wave command named its Work (a
     /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
-    /// `lf` in a Task's checkout only counts toward the Task. What each kind
+    /// `lf` in a Task's checkout, or a child run a Session's agent started,
+    /// only counts toward the Task. What each kind
     /// gets is in `server/README.md` ("Turn and tool boundaries").
     pub(crate) fn is_managed(self) -> bool {
         matches!(self, Self::Declared | Self::Bound)

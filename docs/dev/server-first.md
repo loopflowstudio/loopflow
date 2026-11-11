@@ -152,7 +152,8 @@ how Desktop opens a Task's or a Wave's conversation. A bare `lf` typed inside
 a Task's checkout stays bare and records the Task as its ancestry. One function answers this for every launch path:
 `WorkSource::is_managed`, over how the Session's Work was named. `declared`
 (`--task`, `--wave`, a step of `lf task run`, a Task or Wave conversation) and
-`bound` are managed; `checkout` and no Work at all are bare. Desktop adds no
+`bound` are managed; `checkout`, `inherited` (a child run started by a
+Session's agent, which that agent steers) and no Work at all are bare. Desktop adds no
 mark: an agent started from a Desktop shell is bare.
 
 Any `lf` run in a Task's checkout counts toward that Task: its usage and time

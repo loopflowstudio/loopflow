@@ -762,3 +762,43 @@ Jack Heart ran `/concept-review` while run 1afadabb was on implement.
   untouched.
 - One place listing the conversations a killed holder took.
 - Rollover and resume-takeover have nothing to do for held terminals.
+
+## Concept review, headless — November 11, 2026
+
+Steers e16443ff and 135b346c (positions, queries, view drawing) are built and
+recorded above and in `docs/dev/server-first.md`. troubleshooting.md and
+sessions.md now agree that a managed launch with the server stopped starts
+nothing.
+
+**Next implement direction: a versioned `held.sock` handshake.** The brief's
+demo is an install mid-turn with views reconnecting, and its rule is that a
+newer server speaks to an older holder. After that install every
+plain-terminal relay and every launcher control client is still the old
+build, speaking `held.sock` to the new server. Read today: `Named` is
+`{terminal}`, the answer is a bare `"hosted"`/`"waiting"`/`"ended"`
+(`registry::connect`), and neither carries a revision. When a later build
+changes that answer or the viewer frames, an old relay reads the line as noise.
+That error is not an `engine::Error`, so `reconnect_held` retries forever and
+the pane freezes while the agent runs. This answer has already changed once
+on this branch.
+
+- The first exchange is fixed for good: `Named` gains `revision` (the
+  sender's viewer-protocol revision), and the answer becomes
+  `{"answer":"hosted"|"waiting"|"ended","revision":N}`. Nothing after that
+  line is promised across revisions.
+- A plain-terminal relay that reads a different revision execs `lf` from the
+  path it was started from (now the installed build) as a fresh view of the
+  same terminal. A fresh view attaches and repaints from the server's
+  emulator. It does not resume by position, so the CLI gains no position flag.
+  If exec fails, it prints one line and exits. Desktop already handles skew
+  through the server protocol's `hello`.
+- A launcher control client that gets a different revision records a
+  `RecordingGap` and carries on. The agent and its turn never wait on it.
+- Test: a fixture server answering another revision. The relay's replacement
+  view receives a snapshot frame and reads live output, and the agent's
+  ticks continue across the switch.
+
+The other proposals from the session with a person (Desktop Task shells
+held, a managed launch readying the server, listing what a killed holder
+took) are still unanswered. They are additions beyond this cut and are not
+built here.

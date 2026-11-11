@@ -36,7 +36,7 @@ Reversible choices made in kickoff; the plan is `holder.md`.
 
 Written into the docs as assumptions; none was said by anyone. All three
 (`lf task run` with the server stopped, where troubleshooting.md and
-sessions.md disagree; a CLI managed launch never readying the server; nothing
+sessions.md disagreed, now agree; a CLI managed launch never readying the server; nothing
 saying which conversations a killed holder took) are proposals in holder.md
 "Concept review with a person".
 

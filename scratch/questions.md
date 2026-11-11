@@ -13,14 +13,6 @@ following choices are proposals:
 - Treat the CPU/latency numbers in `universal-server.md` as proposed completion
   targets, not measured improvements or quoted product requirements.
 
-# LOO-823
-
-- `native input` holds 78 of ~100 resident owners for days: any byte the
-  provider never acknowledged as one exact prompt (arrow keys, Esc, an edit)
-  keeps the owner past `end_detached_after` and rollover. Left as designed
-  (`store/sqlite/native_input.rs`); whether terminal-only keys like arrows
-  should count as a draft is open.
-
 ## LOO-823 open: which input holds a detached owner
 
 Today any byte that isn't plain text or a recognized terminal reply makes the
@@ -36,3 +28,5 @@ input is cleared. 78 of ~100 resident owners on 2026-11-10 were held this way.
     ends at rollover after a fixed age; a typed draft still holds.
 1d. Keep 1a's rule and show "held by input" in `lf process list` and Desktop;
     nothing ends on its own.
+
+`native_input.rs` stays as designed until a person picks one.

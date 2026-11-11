@@ -770,14 +770,11 @@ Launch proofs use provider-written evidence and terminal receipts.
 
 ### Leaving nothing running
 
-A detached owner calls `setsid`, so it leaves the test's process group and
-outlives the test unless the fixture ends it. Every `lf` process a fixture
-causes is recorded in the fixture's private store; when the fixture drops
-(pass, failure or panic) it signals each unfinished recorded PID whose command
-line still names the fixture's home or the test build of `lf`, and waits for
-it. The provider stand-in on the owner's terminal ends on hangup.
-`loopflow_test_support::end_recorded_processes` does this; call it from the
-`Drop` of any fixture that starts owners, as `transport_tests`' `Fixture` does.
+A detached owner calls `setsid`, so it outlives the test's process group. A
+fixture that starts owners calls `loopflow_test_support::end_recorded_processes`
+from its `Drop`, as `transport_tests`' `Fixture` does; it ends what the
+fixture's store still records as running. The provider stand-in on the owner's
+terminal ends on hangup.
 
 A detached owner drops every descriptor it inherited above stderr, so a test
 that hands `lf` a pipe can wait for end of input once the viewer exits

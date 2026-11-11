@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
@@ -100,9 +101,9 @@ pub fn end_recorded_processes(home: &Path, lf: &Path) {
             unsafe { libc::kill(*pid, signal) };
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !running.is_empty() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !running.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
         running.retain(|pid| ours(*pid));
     }
     for pid in running {

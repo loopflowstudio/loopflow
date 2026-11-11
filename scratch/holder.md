@@ -748,5 +748,8 @@ drop. Malformed `lf session attach` args name the expected form.
 Open: a holder adopted by a later server and idling out leaves its row
 unfinished; `lf ps` hides it by OS identity, nothing completes it.
 
+Compress (after d695dacce): holder row writes share one `write`; rest kept.
+`transport_tests -- held_terminals_list_one_holder_process held_session_survives` 2 passed.
+
 Checks: `transport_tests -- held_ a_held` 5 passed; `--lib -- transport::
 holder::` 85 passed; `documented_commands::` passed; clippy clean.

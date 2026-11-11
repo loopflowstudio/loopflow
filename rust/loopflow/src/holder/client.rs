@@ -277,11 +277,7 @@ pub fn record(pid: u32) {
     let Ok(Some(started)) = crate::journal::process_started_at(pid) else {
         return;
     };
-    let recorded = crate::journal::process_ledger()
-        .and_then(|store| store.record_process(&holder_process(pid, started)));
-    if let Err(error) = recorded {
-        tracing::warn!(%error, pid, "holder process not recorded");
-    }
+    write(&holder_process(pid, started));
 }
 
 /// Record that the holder this server started has exited.
@@ -297,9 +293,12 @@ fn settle(pid: u32, os_started_at: i64, status: std::process::ExitStatus) {
         .into(),
     );
     process.exit_code = status.code();
-    let recorded =
-        crate::journal::process_ledger().and_then(|store| store.record_process(&process));
+    write(&process);
+}
+
+fn write(process: &crate::process::LfProcess) {
+    let recorded = crate::journal::process_ledger().and_then(|store| store.record_process(process));
     if let Err(error) = recorded {
-        tracing::warn!(%error, pid, "holder exit not recorded");
+        tracing::warn!(%error, pid = process.pid, "holder process not recorded");
     }
 }

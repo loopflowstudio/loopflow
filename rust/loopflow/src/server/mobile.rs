@@ -441,10 +441,9 @@ mod tests {
 
     #[test]
     fn configuration_round_trips_the_approved_owner() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dto/server/remote.json"
-        ))
-        .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/dto/server/remote.json"))
+                .unwrap();
         let value = value["result"]["configuration"].clone();
         let config: Configuration = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(config.port().unwrap(), 8443);

@@ -224,6 +224,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
@@ -416,6 +417,100 @@ part of what a phone or bot client is offered.
   retain input and geometry. Unavailable keeps the last screen marked stale;
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
+
+## Turn and tool boundaries
+
+A launch is managed when a Task, Wave or repository command names its Work:
+`lf task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
+repository conversation, a
+Session bound with `lf session bind`. Every other launch is bare, including
+`lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
+checkout; that run still counts toward the Task. `WorkSource::is_managed`
+answers this for every launch path.
+
+For a managed launch, and for any conversation opened in a terminal, Claude
+and Codex hooks, the OpenCode plugin and the Pi extension run
+`lf __context-block --moment <moment>` at session start, compaction, each
+prompt, each tool and each turn end. That process opens no
+store. It makes one `session.boundary` request on `machine.sock` and prints
+the provider's hook output:
+
+```text
+→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
+← {"type":"welcome",…}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"]},"select":null}
+← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"waiting":false}}
+```
+
+`moment` is `start`, `compact`, `tool` or `stop`. `delivery` is the Session's
+context delivery file, `adapter` the Session's provider context, `callback` the
+JSON the provider sent the hook, unchanged. A conversation lf did not start,
+such as a thread a Codex app-server opened, has no provider context: its hook
+sends only `stop`, with a null `adapter`, and the server only refreshes
+planning. `gap` is the hook's open recording
+gap, `{first, last}`, or null. `printed` lists the steer batches this
+conversation's hooks printed since its last answered request.
+
+Before answering, the server records what the boundary says: the native turn
+(started at a prompt, yielded at a turn end, with the open background tools and
+scheduled wakeups Claude reports), the acknowledgement of the native input, and
+a `store-gap` observation for a non-null `gap`. `steers` is the Session's
+pending steers as `{batch, text}`, the text already rendered for the provider,
+or null when none are ready. At `stop` it
+answers first and then refreshes the Session's planning and starts any pending
+Session move, so neither waits inside the turn.
+
+A steer counts as delivered once the hook says it printed it. The hook prints
+`steers.text`, appends `steers.batch` to a `.printed` file beside the delivery
+file, and its next request sends those batches as `printed`; the server marks
+them `emitted`. A batch no request has named two seconds after its answer, the
+hook's deadline, goes back to pending and is answered again, so a hook that
+gave up waiting loses nothing. A hook that printed and died before noting its
+batch has it answered again too: a steer can arrive twice, and cannot be lost.
+`waiting` is true while an earlier answer's batch is unconfirmed and younger
+than the deadline, as when two tools finish together; the hook then asks again
+at its next tool boundary.
+`lf session steers <session>` shows a batch `uncertain` between its answer and
+its confirmation.
+
+The hook renders the context block from the delivery file itself, prefixes
+`steers.text` and prints the result. Context comes from files in the checkout, so
+a hook that gets no answer still prints the block.
+
+A managed launch's agent starts only once the server answers. The launch
+opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`
+through the selected installation, as a managed view does, and asks again.
+Still nothing, and the launch fails before the agent starts:
+
+```text
+Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
+```
+
+A bare launch, here or through `lf --machine`, runs without a server. A
+headless one (`-b`, a Graph step, a run an agent starts) gets two callbacks,
+session start and compaction, which print the context block from checkout
+files. They carry no steer capability, make no request and log no gap. That
+run receives no steers and reports no turn boundary; whoever started it reads
+its output. On Pi the extension still guards bash tools, which ends a tool's
+process group with its provider. A bare conversation in a terminal keeps
+every callback while an owner process holds it: they say when it can take a
+reply and acknowledge input sent to it. With no server its hooks log one gap.
+
+The hook resolves the server at its fixed path on every call; no address is
+put in the agent's environment. Connecting, `hello` and the answer share a
+two-second deadline. A refused connection, a missing socket, a timeout,
+`incompatible`, `busy` or any `error` ends the hook the same way: it prints
+the block without steers, notes the gap once in `logs/lf.log` and exits 0.
+A server that has not yet reached this build answers `invalid {kind}` for
+`session.boundary`, which is the same gap.
+
+A store the server cannot write, or a callback whose conversation the Session
+does not select, answers `unavailable`; the hook keeps its gap open and sends
+it again with its next request.
+
+A pending Session move starts two seconds after the `stop` answer, once the
+hook has exited and the provider has ended its turn. A move that fails stays
+pending for the next `stop`.
 
 ## Events alongside readings
 

@@ -901,6 +901,8 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         ("claude", "timeout", false),
     ] {
         let home = tempfile::tempdir().unwrap();
+        let _server =
+            loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let repo = loopflow_test_support::TestRepo::new();

@@ -92,20 +92,51 @@ change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
 
-## `Loopflow server is not running`
+## A steer arrived late, or a turn is missing from history
+
+**Symptom:** the agent kept working past a steer, or `lf session history`
+shows a gap where a turn should be.
 
 ```bash
-lf server status   # why it is not answering
-lf install         # repair a build mismatch or missing registration
+lf server status                      # is the server listening, and on this build?
+grep 'recording gap' ~/.lf/logs/lf.log | tail
 ```
 
-`lf task run`, `lf resume --task` and Wave session commands start their agent
-through the server. When it is stopped they start it first, as
-`lf install server` does, and stop with this message only when it still does
-not answer. Nothing was started and nothing needs cleaning up; run the command again once
-`lf server status` reads ready. Conversations that were already open are
-still running in their holder and their views return on their own.
-`lf <skill>` and `-b` runs do not need the server.
+Hooks at each prompt, tool and turn end ask the Machine server to record the
+turn and hand over waiting steers. When the server is stopped, restarting or
+slow, the hook gives up after two seconds and the conversation continues
+without it; `logs/lf.log` has one `recording gap` line for that conversation
+until the server answers again. A steer saved while the server was down is
+still waiting and arrives at the next boundary the server answers. One the
+server sent after the hook gave up shows `uncertain` in
+`lf session steers <session>` and is sent again at the next boundary; a steer
+can arrive twice this way, and is never dropped. The missed turns show in the Session's
+history as one `store-gap` entry, read as unknown rather than still running.
+
+Nothing needs relaunching. If `lf server status` reports no server or a
+mismatched build, run `lf install`.
+
+A headless run started with plain `lf -b <skill>` or `lf graph`, by you or
+by an agent, takes no steers, even inside a Task's checkout: steer the Task's
+own conversation, or the agent that started the run.
+
+## A Task run stops with "Loopflow server is not running"
+
+```bash
+lf install server                     # register and start the Machine's server
+lf server status
+```
+
+Agents started by a Task or Wave command (`lf task run`, `--task`, `--wave`,
+a Task or Wave conversation) start only once the Machine server answers,
+including headless runs, because their turns and steers go through it. A launch that finds none runs
+`lf install server` itself; the message appears when that did not bring one
+up, and carries what the install said. On another Machine, run the two
+commands there: `lf --machine <machine> install server`. Plain `lf`,
+`lf <skill>` and `lf graph` run without a server, in a Task's checkout too.
+
+Conversations already running in a holder keep running while the server is
+away, and their views reconnect when it returns.
 
 ## Several `lf holder run` processes
 

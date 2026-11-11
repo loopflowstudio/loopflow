@@ -60,7 +60,7 @@ pub(crate) fn launch_session(
         },
         context_file,
     )?;
-    let environment = session_environment(config, context_file)?;
+    let environment = session_environment(config, context_file, true)?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -118,7 +118,7 @@ pub(crate) fn resume_session_with_env(
         },
         context_file.as_deref(),
     )?;
-    let environment = session_environment(&config, context_file.as_deref())?;
+    let environment = session_environment(&config, context_file.as_deref(), true)?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -238,8 +238,13 @@ impl SessionCommandOutcome {
         }
     }
 
+    /// Whether the launch failed: an interrupt or a mover ends it as a success.
+    pub(crate) fn failed(&self) -> bool {
+        self.moved.is_none() && !self.interrupted && !self.status.success()
+    }
+
     pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
-        if self.moved.is_some() || self.status.success() || self.interrupted {
+        if !self.failed() {
             Ok(())
         } else if resuming {
             Err(anyhow!(
@@ -605,7 +610,6 @@ fn run_native_session(
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
             client: owned.is_none(),
-            resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),
             capture: capture.map(LfProcessRuntime::hand_off),
             capture_key: environment

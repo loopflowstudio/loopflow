@@ -17,7 +17,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::program_status;
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -234,6 +234,10 @@ impl Fixture {
             unsafe { libc::geteuid() },
             &digest[..16]
         ))
+    }
+    /// The Machine server under this home, stopped when dropped.
+    fn machine_server(&self) -> MachineServer {
+        MachineServer::start(env!("CARGO_BIN_EXE_lf"), self.home.path())
     }
     #[track_caller]
     fn viewer(&self, id: &str, control: bool) -> Viewer {
@@ -2078,8 +2082,9 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
     for valid in [true, false] {
         let fixture = Fixture::new();
         let path = fixture.waiting_provider();
+        // A bare launch runs directly, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
-        command.env("PATH", path);
+        command.env("PATH", path).env("LF_SERVER", "1");
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
@@ -2107,8 +2112,9 @@ fn held_desktop_launch_links_its_session_to_the_pane() {
     let fixture = Fixture::new();
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held placement"]);
-    command.env("PATH", path).env("LF_SERVER", "1");
+    // The repository's conversation is managed, so a terminal viewing it holds it.
+    let mut command = fixture.command(&["-a", "claude", "resume"]);
+    command.env("PATH", path);
     let terminal = Terminal::spawn_with_placement(command, Some(true));
     let launch = fixture.launches(1).pop().unwrap();
     let session = session_of(&fixture.sql(), &launch);
@@ -2138,8 +2144,8 @@ fn a_held_conversation_has_no_idle_ending() {
     .unwrap();
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held idle"]);
-    command.env("PATH", path).env("LF_SERVER", "1");
+    let mut command = fixture.command(&["-a", "claude", "resume"]);
+    command.env("PATH", path);
     let view = Terminal::spawn_with_placement(command, Some(true));
     let launch = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
@@ -3289,6 +3295,8 @@ fn detached_sessions_end_after_their_limit() {
 #[test]
 fn native_drafts_remain_editable_and_acknowledged_prompts_can_end() {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 2s\n",
@@ -3395,6 +3403,8 @@ while True:
 #[test]
 fn retained_hooks_survive_upgrade() {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
@@ -3530,6 +3540,8 @@ fn unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn() {
 
 fn continue_session_after_upgrade(unanswering: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time, tty
@@ -3809,6 +3821,8 @@ fn native_background_watches_survive_until_settlement() {
 
 fn native_work_survives_until_settlement(background: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 2s\n",
@@ -7438,8 +7452,8 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut launch = fixture.command(&["-i", "-a", "claude", ":", "held pane"]);
-    launch.env("PATH", &path).env("LF_SERVER", "1");
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
@@ -7507,8 +7521,8 @@ printf 'May I?\r\n\033]7501;state=blocked:app=claude-code\033\\'
 read -r answer < /dev/tty
 "#,
     );
-    let mut launch = fixture.command(&["-i", "-a", "claude", ":", "held status"]);
-    launch.env("PATH", &path).env("LF_SERVER", "1");
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();

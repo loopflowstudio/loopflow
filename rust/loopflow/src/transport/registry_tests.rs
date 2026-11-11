@@ -311,7 +311,6 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
         attachment: attachment.clone(),
         provider: "claude".into(),
         client: false,
-        resuming: false,
         cwd: "/".into(),
         capture: None,
         capture_key: None,

@@ -74,7 +74,7 @@ const SETTLE_WAIT: Duration = Duration::from_millis(800);
 pub(crate) const SETTLE_LINGER: Duration = Duration::from_secs(20);
 
 /// The exit code a provider's status reports on its own.
-fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
+pub(crate) fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
     status
         .code()
@@ -391,17 +391,18 @@ fn delegate(
 
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
 /// server, so that it outlives every lf process that views it. A held launch
-/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too)
-/// with a terminal viewing it, or a Desktop pane. A bare launch, even in a
-/// Task's checkout, runs in the calling terminal; a piped, `-b` or JSON
-/// execution, a framed remote viewer and a Desktop Task shell keep an owner
-/// process of their own.
+/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too:
+/// Task, Wave and repository conversations) or a Task run, with a terminal
+/// viewing it, wherever it is opened. A bare interactive launch, even in a
+/// Task's checkout or a Desktop pane, runs in the calling terminal. A piped,
+/// `-b` or JSON execution, a framed remote viewer and a Desktop Task shell
+/// keep an owner process of their own.
 #[cfg_attr(test, allow(dead_code))]
 fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
     if !viewed {
         return false;
     }
-    if task_run || std::env::var_os("LF_SERVER").is_some() {
+    if task_run {
         return true;
     }
     let Some(session) = session else {
@@ -415,27 +416,6 @@ fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
         .and_then(|session| session.work_source)
         .is_some_and(crate::session::WorkSource::is_managed)
 }
-
-/// The Machine server, started first by the selected installation when it is
-/// stopped, as a managed view starts it; never by this build.
-fn open_server() -> Result<crate::server::client::Connection> {
-    use crate::server::client::Connection;
-    if let Ok(server) = Connection::open() {
-        return Ok(server);
-    }
-    let setup = crate::installation::server::readiness_command()?.output()?;
-    Connection::open().with_context(|| {
-        format!(
-            "lf install server: {}",
-            String::from_utf8_lossy(&setup.stderr).trim()
-        )
-    })
-}
-
-/// A held launch found no Machine server, even after readying it; nothing started.
-#[derive(Debug, thiserror::Error)]
-#[error("Loopflow server is not running; run lf server status")]
-pub(crate) struct ServerMissing;
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
 /// server. `inherit` edits the caller's environment for it. With no server it
@@ -461,10 +441,8 @@ pub(crate) fn start_held(
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let (rows, cols) = size();
-    let mut server = open_server().map_err(|error| {
-        tracing::info!(error = %format!("{error:#}"), "held start found no Machine server");
-        ServerMissing
-    })?;
+    crate::harness::agent_process::require_server()?;
+    let mut server = crate::server::client::Connection::open()?;
     let answer = server.request(Operation::Server(ServerOperation::SessionStart {
         session: session.cloned(),
         request: uuid::Uuid::new_v4().to_string(),

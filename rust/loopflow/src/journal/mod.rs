@@ -130,13 +130,26 @@ static READ: AtomicBool = AtomicBool::new(false);
 
 /// Set by a Graph on the step it starts, and only on that child.
 pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
+/// The mark's value on a step of a Task's own run (`lf task run`).
+pub const TASK_RUN_STEP: &str = "task";
+
+static TASK_RUN: AtomicBool = AtomicBool::new(false);
 
 /// Whether a Graph started this process as its step. Clears the mark, so the
 /// step's own children are not steps.
 pub fn take_graph_step() -> bool {
-    let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
+    let step = std::env::var_os(GRAPH_STEP_ENV);
     std::env::remove_var(GRAPH_STEP_ENV);
-    step
+    if step.as_deref() == Some(std::ffi::OsStr::new(TASK_RUN_STEP)) {
+        TASK_RUN.store(true, Ordering::Relaxed);
+    }
+    step.is_some()
+}
+
+/// Whether this process is a step of a Task's run: the run named the Task, so
+/// the step's launch is the Task command's, not a bare `lf` in its checkout.
+pub fn task_run_step() -> bool {
+    TASK_RUN.load(Ordering::Relaxed)
 }
 
 /// A command that changes no Work records no Process. Admission still

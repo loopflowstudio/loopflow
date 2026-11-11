@@ -1,5 +1,0 @@
-- Final configuration library suite: 94 passed serially. An earlier parallel run's Git-child counter captured seven calls from neighboring fixtures, then poisoned the shared environment lock; serial execution passed.
-- `cargo test -p loopflow --test two_people`: passed on final code; workflow: review survives filtering.
-- CLI bad-config regression: passed; checks file/line warnings, comments, valid neighboring settings, untouched files, and strict explicit overrides.
-- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, architecture coverage, Rust test inventory: passed.
-- Remaining: publish and land PR 1886. After a main package containing it is available, install, set personal claude.model to opus, and verify installed CLI and a real bare-Claude launch.

@@ -710,15 +710,17 @@ impl Entry {
         waker: &UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
+        let mut hosted = Hosted::new(
+            Host::Terminal(terminal.clone()),
+            true,
+            None,
+            control_key,
+            waker.try_clone()?,
+            watchers,
+        )?;
+        hosted.keep_exit_record(exit_record_file(place, terminal));
         Ok(Self {
-            hosted: Hosted::new(
-                Host::Terminal(terminal.clone()),
-                true,
-                None,
-                control_key,
-                waker.try_clone()?,
-                watchers,
-            )?,
+            hosted,
             child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
             place: place.clone(),
             nudge: None,
@@ -766,10 +768,27 @@ impl Entry {
     }
 }
 
+/// Where a held terminal keeps the exit record its launcher handed off.
+fn exit_record_file(place: &Place, terminal: &TerminalId) -> PathBuf {
+    place.terminal(terminal.as_str()).join("exit-record.json")
+}
+
 /// Record an ended terminal, then drop its ring and its directory. The
 /// directory is the receipt: it goes only once the store has the exit, so a
 /// store outage leaves it for the next attempt. Whether it is settled.
 fn settle(exit: &mut Unsettled) -> bool {
+    // An exit no server was hosting for still settles its launcher's record,
+    // once: the record goes before the terminal's end is written.
+    let file = exit_record_file(&exit.place, &exit.terminal);
+    if let Some(record) = super::hosted::read_exit_record(&file) {
+        use std::os::unix::process::ExitStatusExt;
+        // An end nobody saw reads as killed.
+        let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
+        crate::harness::native_exit::settle(&record, std::process::ExitStatus::from_raw(status));
+        if let Err(error) = std::fs::remove_file(&file) {
+            tracing::warn!(%error, file = %file.display(), "settled exit record not removed");
+        }
+    }
     let recorded = crate::journal::process_ledger()
         .and_then(|store| store.end_terminal(&exit.terminal, exit.code));
     if let Err(error) = recorded {

@@ -487,6 +487,8 @@ replaced.
 Before `start` the server writes `<terminal>/meta.json`: the Session, the
 start's `request`, and the control key the child's requests are checked
 against. That is what lets another server instance answer the same child.
+An exit record the launcher hands over is kept beside it in
+`exit-record.json` until it is settled.
 
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
@@ -507,8 +509,9 @@ terminal's directory. The directory is the receipt: it is deleted only after
 the store has the exit, so a store outage leaves it and settlement is tried
 again every two seconds. A server that starts after a child exited finds the
 exit in the holder's `list`, or in `exit.json` when the holder is gone too,
-and records it the same way. An exit record a launcher handed to a server
-that then stopped is not kept across the restart.
+and records it the same way, settling the kept `exit-record.json` first; an
+end nobody saw settles it as killed. A server that takes up a running
+terminal takes up its kept record too.
 
 ## Task shells and completed workspaces
 

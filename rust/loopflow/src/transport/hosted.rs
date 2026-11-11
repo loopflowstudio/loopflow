@@ -287,6 +287,9 @@ pub(super) struct Hosted {
     observed: lifetime::Activity,
     output_told: Option<Instant>,
     exit_record: Option<Box<NativeExit>>,
+    /// Where a held terminal keeps its handed-off exit record, so a server
+    /// that takes it up later can still settle it.
+    exit_record_file: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
     planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: Option<crate::terminal_title::OutputTitle>,
@@ -353,6 +356,7 @@ impl Hosted {
             observed: lifetime::Activity::default(),
             output_told: None,
             exit_record: None,
+            exit_record_file: None,
             execution_directory_reported: false,
             planning: None,
             title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id, &watchers.titles)),
@@ -379,6 +383,16 @@ impl Hosted {
         self.output.resize(self.size.0, self.size.1)?;
         self.replayed_through = through;
         Ok(())
+    }
+
+    /// Keep the handed-off exit record in `file`, taking up one an earlier
+    /// server kept there.
+    pub fn keep_exit_record(&mut self, file: std::path::PathBuf) {
+        if let Some(record) = read_exit_record(&file) {
+            self.planning = start_planning(&record.cwd);
+            self.exit_record = Some(record);
+        }
+        self.exit_record_file = Some(file);
     }
 
     /// The rows and columns the execution is drawn at.
@@ -430,6 +444,7 @@ impl Hosted {
                 hint_due,
                 attached,
                 exit_record,
+                exit_record_file,
                 execution_directory_reported,
                 planning,
                 ..
@@ -508,19 +523,18 @@ impl Hosted {
                                 }
                                 // The launcher kept its repository's planning in
                                 // sync while it waited; that wait is now ours.
-                                *planning =
-                                    crate::ops::planning_sync::PlanningSync::start_for_directory(
-                                        &record.cwd,
-                                    )
-                                    .inspect_err(|error| {
-                                        tracing::warn!(%error, "planning sync unavailable to this owner")
-                                    })
-                                    .ok();
+                                *planning = start_planning(&record.cwd);
+                                if let Some(file) = exit_record_file {
+                                    write_exit_record(file, &record);
+                                }
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::DropExitRecord { key } if key == *control_key => {
                                 *exit_record = None;
+                                if let Some(file) = exit_record_file {
+                                    remove_exit_record(file);
+                                }
                                 *planning = None;
                                 viewer.reply(answers, Reply::Accepted);
                             }
@@ -568,8 +582,10 @@ impl Hosted {
                                 viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
                                 owner_change |= ownership.claim(own, viewer);
-                                viewer
-                                    .reply(answers, viewer.attached_reply(ownership.id(), terminal));
+                                viewer.reply(
+                                    answers,
+                                    viewer.attached_reply(ownership.id(), terminal),
+                                );
                                 // Binding selects a directory for later connections;
                                 // the running provider keeps its own.
                                 if let Some(cwd) = exit_record
@@ -897,6 +913,10 @@ impl Hosted {
             Some((settled, settling.process.clone()))
         });
         if let Some((settled, process)) = delivered {
+            // Recorded, or past waiting for: a later server settles it no more.
+            if let Some(file) = &self.exit_record_file {
+                remove_exit_record(file);
+            }
             for line in &settled.lines {
                 self.deliver(
                     1,
@@ -1127,6 +1147,43 @@ impl Hosted {
 
 /// Paint `viewer` the retained screen; a held terminal's viewer then stands
 /// at the PTY position that screen covers.
+fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
+    crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
+        .inspect_err(|error| tracing::warn!(%error, "planning sync unavailable to this owner"))
+        .ok()
+}
+
+/// The exit record kept in `file`; none when it is absent or unreadable.
+pub(super) fn read_exit_record(file: &std::path::Path) -> Option<Box<NativeExit>> {
+    let bytes = std::fs::read(file).ok()?;
+    serde_json::from_slice(&bytes)
+        .inspect_err(
+            |error| tracing::warn!(%error, file = %file.display(), "exit record unreadable"),
+        )
+        .ok()
+}
+
+/// A record that cannot be kept is still settled by this server; only a
+/// server that stops before then loses it.
+fn write_exit_record(file: &std::path::Path, record: &NativeExit) {
+    let draft = file.with_extension("json.draft");
+    let written = serde_json::to_vec(record)
+        .map_err(io::Error::from)
+        .and_then(|bytes| std::fs::write(&draft, bytes))
+        .and_then(|()| std::fs::rename(&draft, file));
+    if let Err(error) = written {
+        tracing::warn!(%error, file = %file.display(), "exit record not kept beside its terminal");
+    }
+}
+
+fn remove_exit_record(file: &std::path::Path) {
+    if let Err(error) = std::fs::remove_file(file) {
+        if error.kind() != io::ErrorKind::NotFound {
+            tracing::warn!(%error, file = %file.display(), "exit record not removed");
+        }
+    }
+}
+
 fn paint(output: &output::Output, child: &Child, viewer: &mut Viewer) -> Result<()> {
     if let Some(snapshot) = output.snapshot()? {
         viewer.stream(Tag::Snapshot, &snapshot)?;

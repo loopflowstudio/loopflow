@@ -253,6 +253,97 @@ fn an_exit_with_no_server_running_is_settled_by_the_next_one() {
     second.close();
 }
 
+/// A launcher's handed-off exit record for a fresh Session's provider, kept
+/// beside `terminal` as the server that accepted it writes it.
+fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::SessionAttachment {
+    let store = crate::journal::process_ledger().unwrap();
+    let session = store.test_session("held", &crate::session_record::new_artifact_key());
+    let launcher = store.test_lf_process();
+    let attachment = store
+        .claim_session_attachment(&session.id, None, &launcher, true)
+        .unwrap();
+    let record = crate::harness::native_exit::NativeExit {
+        session: session.id.to_string(),
+        attachment: attachment.clone(),
+        provider: "claude".into(),
+        client: false,
+        resuming: false,
+        cwd: "/".into(),
+        capture: None,
+        capture_key: None,
+        account: None,
+        diagnostics: ("/absent.log".into(), 0),
+    };
+    std::fs::write(
+        super::exit_record_file(place, terminal),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
+    attachment
+}
+
+fn provider_ended(attachment: &crate::process::SessionAttachment) -> bool {
+    crate::journal::process_ledger()
+        .unwrap()
+        .agent_process(&attachment.agent_process_id)
+        .unwrap()
+        .is_some_and(|process| process.completed_at.is_some())
+}
+
+#[test]
+fn an_exit_record_kept_while_no_server_ran_is_settled_by_the_next_one() {
+    let _ledger = TestLedgerGuard::new();
+    let first = Registry::open(BUILD).unwrap();
+    let place = holder();
+    let terminal = first
+        .start(shell(None, "request-1", "read line; exit 4"))
+        .unwrap();
+    let attachment = kept_exit_record(&place, &terminal);
+    first.close();
+    let mut input = crate::holder::client::Client::connect(&place)
+        .unwrap()
+        .write(terminal.as_str())
+        .unwrap();
+    input.write_all(b"go\n").unwrap();
+    wait_until("the holder to see the exit", || {
+        crate::holder::recorded_exit(&place, terminal.as_str())
+            .unwrap()
+            .is_some()
+    });
+    assert!(!provider_ended(&attachment));
+
+    let second = Registry::open(BUILD).unwrap();
+    let store = crate::journal::process_ledger().unwrap();
+    wait_until("the exit to be recorded", || {
+        store.running_terminals().unwrap().is_empty()
+    });
+    assert!(provider_ended(&attachment));
+    assert!(!place.terminal(terminal.as_str()).exists());
+    second.close();
+}
+
+#[test]
+fn a_server_taking_up_a_terminal_settles_the_exit_record_kept_beside_it() {
+    let _ledger = TestLedgerGuard::new();
+    let first = Registry::open(BUILD).unwrap();
+    let place = holder();
+    let terminal = first
+        .start(shell(None, "request-1", "read line; exit 4"))
+        .unwrap();
+    let attachment = kept_exit_record(&place, &terminal);
+    first.close();
+
+    let second = Registry::open(BUILD).unwrap();
+    let mut view = View::attach(&terminal);
+    view.type_in(b"go\n");
+    let store = crate::journal::process_ledger().unwrap();
+    wait_until("the exit to be recorded", || {
+        store.running_terminals().unwrap().is_empty()
+    });
+    assert!(provider_ended(&attachment));
+    second.close();
+}
+
 /// A shell printing a counter line every 50 ms until it is killed.
 const COUNTER: &str = "i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.05; done";
 

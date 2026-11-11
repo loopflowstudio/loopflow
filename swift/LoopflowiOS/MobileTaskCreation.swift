@@ -63,6 +63,7 @@ protocol MobileTaskCreationClient {
     func creationContext() async throws -> MobileCreationContext
     func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
+    func taskPresented(_ submission: MobileTaskSubmission) async throws
 }
 
 struct MobileSavedTaskRequest: Codable, Identifiable, Equatable {
@@ -307,6 +308,7 @@ final class MobileTaskCreation: Identifiable {
                 return
             }
             _ = persist(next)
+            Task { try? await client.taskPresented(submission) }
         } catch {
             self.error = "Couldn’t update your saved request. It remains available for recovery. \(error.localizedDescription)"
         }

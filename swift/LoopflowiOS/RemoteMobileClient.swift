@@ -28,6 +28,19 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
 
+    /// Creations saved before their first send, for this Machine.
+    private lazy var journal: CreationSubmissions = {
+        let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
+        let machineID = savedMachine.machineID
+        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
+            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
+        }, send: { [self] payload in
+            let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
+            return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
+                          as: UTF8.self)
+        })
+    }()
+
     /// The Machine's typed reads and writes, as Desktop makes them.
     var query: RegistryQuery {
         RegistryQuery.served(deadline: Self.requestDeadline) { [self] in try await connection() }
@@ -70,28 +83,31 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
+    /// Saved before it is sent; a repeat asks the Machine first and resends the
+    /// same payload only when the Machine says to continue.
     func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
         try verifySubmission(submission)
         let id = submission.id.uuidString.lowercased()
-        let previous = try await decode(CreationLookup?.self, read(.creationGet(requestID: id)))
-        if let previous {
-            guard previous.requestId == id, previous.kind == "task.create", previous.run,
-                  let taskID = previous.taskId else {
-                throw RegistryQueryError("The Machine returned a different creation receipt")
-            }
-            let receipt = try previous.result.map { try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode($0)) }
-            guard receipt == nil || receipt?.task.id == taskID else {
-                throw RegistryQueryError("The creation receipt names a different Task")
-            }
-            if previous.disposition != .continue {
-                return MobileTaskOutcome(taskId: taskID,
-                    state: previous.disposition == .complete ? .started : .unknown,
-                    receipt: receipt, message: previous.disposition == .inspect ? previous.explanation : nil)
-            }
+        let record = try await journal.record(.taskCreate(directory: submission.directory, requestID: id, title: nil,
+            request: submission.request, wave: nil, graph: nil, session: nil, run: true), requestID: id)
+        guard let lookup = try await journal.reconcile(record) else {
+            throw RegistryQueryError("This request is already being sent")
         }
-        let receipt = try await query.createTask(request: submission.request, wave: nil, graph: nil,
-                                                 cwd: submission.directory, requestID: id)
-        return MobileTaskOutcome(taskId: receipt.task.id, state: .started, receipt: receipt, message: nil)
+        guard lookup.kind == "task.create", lookup.run, let taskID = lookup.taskId else {
+            throw RegistryQueryError("The Machine returned a different creation receipt")
+        }
+        let receipt = try lookup.result.map { try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode($0)) }
+        guard receipt == nil || receipt?.task.id == taskID else {
+            throw RegistryQueryError("The creation receipt names a different Task")
+        }
+        return MobileTaskOutcome(taskId: taskID,
+            state: lookup.disposition == .complete ? .started : .unknown,
+            receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
+    }
+
+    /// The created Task is on screen: its saved creation is done.
+    func taskPresented(_ submission: MobileTaskSubmission) async throws {
+        try await journal.presented(submission.id.uuidString.lowercased())
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {

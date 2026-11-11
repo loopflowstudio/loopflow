@@ -65,6 +65,8 @@ final class MobileTaskCreationTests: XCTestCase {
         opening?.presented()
         XCTAssertNil(try store.load().submission)
         XCTAssertEqual(client.requests.count, 1)
+        for _ in 0..<20 where client.presented.isEmpty { await Task.yield() }
+        XCTAssertEqual(client.presented, [original.id], "Presenting the Task retires its saved creation")
     }
 
     func testLateAndRepeatedPresentationPreserveANewerDraft() async throws {
@@ -555,6 +557,7 @@ private final class CreationClient: MobileTaskCreationClient {
     var outcome: MobileTaskOutcome?
     var repositories = [PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil)]
     var contextFailure: String?
+    var presented: [UUID] = []
 
     init() async throws {
         let url = try XCTUnwrap(Bundle(for: MobileTaskCreationTests.self).url(forResource: "task-reading", withExtension: "json"))
@@ -589,6 +592,10 @@ private final class CreationClient: MobileTaskCreationClient {
             await withCheckedContinuation { readReply = $0 }
         }
         return task
+    }
+
+    func taskPresented(_ submission: MobileTaskSubmission) async throws {
+        presented.append(submission.id)
     }
 
     func result(_ state: String) throws -> MobileTaskOutcome {

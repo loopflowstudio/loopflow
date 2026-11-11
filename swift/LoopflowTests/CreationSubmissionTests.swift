@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import SwiftUI
 import ViewInspector
-import Loopflow
+@testable import Loopflow
 @testable import LoopflowMac
 
 struct CreationSubmissionTests {
@@ -116,6 +116,24 @@ struct CreationSubmissionTests {
         #expect(await server.submissions == 1)
         #expect(try await unavailable.pending().count == 1)
     }
+    @Test func aReceiptForAnotherRequestIsRefusedAndNothingIsResent() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/creation_lookup.json")
+        let receipts = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [Any])
+        let other = String(decoding: try JSONSerialization.data(withJSONObject: receipts[0]), as: UTF8.self)
+        actor Sends { var count = 0; func add() { count += 1 } }
+        let sent = Sends()
+        let client = CreationSubmissions(directory: root, machine: { "machine" },
+            lookup: { _ in other }, send: { _ in await sent.add(); return "{}" })
+        let record = try await client.record(.taskCreate(directory: "/repo", requestID: "not-the-fixture", title: nil,
+            request: "work", wave: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
+        await #expect(throws: (any Error).self) { try await client.reconcile(record) }
+        #expect(await sent.count == 0)
+        #expect(try await client.pending().count == 1)
+    }
+
     @Test func lookupDispositionsRoundTrip() throws {
         let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/creation_lookup.json")

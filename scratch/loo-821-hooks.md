@@ -203,6 +203,7 @@ Turn-end planning refresh now has no Linear-fixture test;
 
 Checks (November 11, on the bare rule):
 
+- After merging main (#1881 moved server fixtures under `rust/loopflow/tests/`): `cargo test -p loopflow --lib server::schema` — 7 pass; Swift test paths already point at the new directory
 - `cargo test -p loopflow --lib -- harness::context:: context_block::tests::a_bare harness::agent_process:: store::sqlite::steers` — 43 pass (bare hook settings; OpenCode and headless Pi probes under node)
 - `cargo test -p loopflow --test integration -- session_steers:: documented_commands::` — 9 pass (new `a_bare_skill_in_a_task_checkout_gets_context_hooks_and_asks_no_server`; the managed ones launch with `--task`)
 - `task_graph_launch_tests::a_task_run_takes_its_waves_agent…` — pass: the step's Session is `declared` and its settings carry `Stop`

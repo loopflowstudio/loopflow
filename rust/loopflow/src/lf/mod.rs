@@ -658,8 +658,7 @@ pub enum Commands {
         cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end,
-    /// Pi's native lifecycle events and its bash tool groups.
+    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
     // Running providers retain this older Stop spelling across lf upgrades.
     #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
@@ -667,15 +666,6 @@ pub enum Commands {
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
-        /// The FIFO Pi holds open while a `tool-group` command runs
-        #[arg(
-            long,
-            required_if_eq("moment", "tool-group"),
-            requires = "provider_pid"
-        )]
-        lifeline: Option<std::path::PathBuf>,
-        #[arg(long, requires = "lifeline")]
-        provider_pid: Option<u32>,
     },
     /// Subscription a Codex conversation beside its native client. Started by the
     /// launcher, which sends the launch on stdin.

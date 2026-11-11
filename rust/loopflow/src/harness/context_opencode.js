@@ -66,9 +66,8 @@ export default {
         if (item.type !== "session.execution.succeeded" || item.data.sessionID !== owner) continue;
         // An unanswered turn end leaves planning pending until a later boundary.
         await server.boundary("stop", {});
-        server.close();
       }
     })().catch((error) => { if (!controller.signal.aborted) throw error; });
-    return async () => { controller.abort(); await watching; server.close(); };
+    return async () => { controller.abort(); await watching; };
   },
 };

@@ -134,7 +134,7 @@ deleted when the server's emulator reads status itself.
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs; the turn hooks of bare conversations | |
 | Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); bare headless runs keep only their two context hooks | Store opens inside turn boundaries; turn, tool and Task-update hooks for bare headless runs | |
-| OpenCode and Pi keep one server connection per conversation ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-keep-one-connection)) | An `lf` process per model request (OpenCode) and per second and per event (Pi) | Hooks call the server |
+| OpenCode and Pi ask the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-ask-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |

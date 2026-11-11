@@ -145,12 +145,46 @@ pub(crate) fn pi_args(
     let source = format!(
         "const spec = {};\n{}\n{}",
         json!({"native":native, "managed":managed, "executable":crate::os_process::resolve_lf_binary()?,
-            "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension")}),
+            "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
+            "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
         include_str!("server_connection.js")
     );
     let extension = save_hook(&home, "pi", "mjs", source.as_bytes())?;
     Ok(vec!["--extension".into(), extension.display().to_string()])
+}
+
+/// Pi's bash guard, which the extension runs with `/bin/sh -c` ahead of each
+/// bash command, passing the command's FIFO and Pi's PID. When the shell leads
+/// a detached group whose leader Pi started, it hands the group to the watchdog
+/// that ends it with Pi. Any other group starts nothing, and the command runs
+/// either way. No `lf` process starts.
+fn pi_bash_guard() -> String {
+    let watchdog = crate::os_process::WATCHDOG
+        .to_str()
+        .expect("the watchdog script is ASCII");
+    // No backslashes: fish keeps them special inside single quotes. Opening
+    // the FIFO read-write first keeps the read-only open from waiting: a
+    // provider that already closed its writer leaves EOF, so the watchdog ends
+    // the group at once. The watchdog holds the reader before this script
+    // exits, and its output is not the tool's, or Pi would wait on it.
+    format!(
+        r#"read -r group _ <<EOF
+$(ps -o pgid=,ppid= -p $$ 2>/dev/null)
+EOF
+read -r _ parent <<EOF
+$(ps -o pgid=,ppid= -p "${{group:-0}}" 2>/dev/null)
+EOF
+read -r provider_group _ <<EOF
+$(ps -o pgid=,ppid= -p "$2" 2>/dev/null)
+EOF
+[ "$parent" = "$2" ] && [ "$group" != "$provider_group" ] && [ -p "$1" ] || exit 0
+exec 4<>"$1" 3<"$1" 4>&-
+set -- "$group"
+(
+{watchdog}
+) <&3 >/dev/null 2>&1 3<&- &"#
+    )
 }
 
 /// What a plugin needs to open its `machine.sock` connection: the `hello` a
@@ -474,7 +508,7 @@ await close();
     }
 
     #[test]
-    fn a_managed_opencode_turn_asks_its_connection_and_renders_only_at_start_and_compaction() {
+    fn a_managed_opencode_turn_asks_the_server_and_renders_only_at_start_and_compaction() {
         let managed = opencode_turn(true);
         let renders: Vec<_> = managed
             .calls
@@ -483,9 +517,12 @@ await close();
             .collect();
         assert_eq!(renders, ["start", "compact"], "{}", managed.calls);
         assert_eq!(moments(&managed), ["start", "tool", "compact", "stop"]);
+        // One connection per boundary, each opened with a hook's hello.
         let hellos = managed.server["hellos"].as_array().unwrap();
-        assert_eq!(hellos.len(), 1, "{}", managed.server);
-        assert_eq!(hellos[0]["client"]["kind"], "plugin");
+        assert_eq!(hellos.len(), 4, "{}", managed.server);
+        assert!(hellos
+            .iter()
+            .all(|hello| hello["client"]["kind"] == "plugin"));
         // The batch the second request carried is named by the next one.
         let requests = &managed.server["requests"];
         assert_eq!(requests[1]["printed"], serde_json::json!([]));
@@ -522,8 +559,14 @@ await close();
         .unwrap();
         std::fs::write(
             package.join("index.js"),
-            "export const createBashToolDefinition = () => ({});
-export const createLocalBashOperations = () => ({});
+            "import { execFileSync } from 'node:child_process';
+export const createBashToolDefinition = () => ({});
+export const createLocalBashOperations = () => ({
+  exec: async (command) => {
+    execFileSync('/bin/sh', ['-c', command]);
+    return { exitCode: 0 };
+  },
+});
 ",
         )
         .unwrap();
@@ -534,6 +577,7 @@ export const createLocalBashOperations = () => ({});
   || operation.callback.hook_event_name === 'PiSteer'",
             &format!(
                 r#"import assert from 'node:assert/strict';
+import {{ readFileSync }} from 'node:fs';
 import extension from {extension};
 const handlers = {{}};
 const steers = [];
@@ -551,6 +595,9 @@ const ctx = {{ cwd: '/', sessionManager: {{ getSessionFile: () => '/pi/session.j
   abort() {{}}, shutdown() {{}} }};
 extension(pi);
 await fire('session_start', {{ type: 'session_start' }});
+const {{ operations }} = await fire('user_bash', {{}});
+await operations.exec('printf ran > ' + {ran}, '/', {{}});
+assert.equal(readFileSync({ran}, 'utf8'), 'ran');
 await fire('before_agent_start', {{}});
 const request = await fire('context_with_system', {{ messages: [{{ role: 'system', sections: {{}} }}] }});
 assert.equal(request.messages[0].sections.loopflow, 'BLOCK');
@@ -565,6 +612,7 @@ assert.deepEqual(steers, {steers});
 "#,
                 extension = serde_json::to_string(&args[1]).unwrap(),
                 steers = if managed { r#"[["STEER ", "steer"]]"# } else { "[]" },
+                ran = serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
             ),
         )
     }
@@ -573,7 +621,7 @@ assert.deepEqual(steers, {steers});
     fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
         let native = pi_turn(true, true);
         // One render at start, beside the conversation's Task-update watcher;
-        // no lf per event, tool or steer check.
+        // no lf per event, tool, steer check or bash command.
         let calls: Vec<_> = native
             .calls
             .lines()
@@ -624,6 +672,87 @@ assert.deepEqual(steers, {steers});
         let bare = pi_turn(false, false);
         assert_eq!(bare.calls, "__context-block --moment start\n");
         assert!(moments(&bare).is_empty(), "{}", bare.server);
+    }
+
+    /// Run `guard; <rest>` as Pi's local bash does: a shell leading its own
+    /// group, started by this process, with `provider` as Pi's PID.
+    fn guarded_tool(fifo: &std::path::Path, provider: &str, rest: &str) -> std::process::Child {
+        use std::os::unix::process::CommandExt;
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "/bin/sh -c \"$1\" lf-tool-lifeline \"$2\" {provider}\n{rest}"
+            ))
+            .arg("tool")
+            .arg(super::pi_bash_guard())
+            .arg(fifo)
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap()
+    }
+
+    fn tool_fifo(directory: &std::path::Path) -> std::path::PathBuf {
+        let fifo = directory.join("lifeline");
+        assert!(std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        fifo
+    }
+
+    #[test]
+    fn pi_bash_guard_ends_a_detached_tool_group_with_its_provider() {
+        use std::io::Read;
+        use std::os::unix::process::ExitStatusExt;
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = tool_fifo(directory.path());
+        // Pi holds the writer, read-write so opening it never waits.
+        let writer = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+        let mut tool = guarded_tool(
+            &fifo,
+            &std::process::id().to_string(),
+            "printf ran; exec sleep 30 >&-",
+        );
+        // The watchdog keeps none of the tool's output, so Pi sees it end.
+        let mut output = String::new();
+        tool.stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut output)
+            .unwrap();
+        assert_eq!(output, "ran");
+        drop(writer);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = tool.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the tool outlived its provider"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn pi_bash_guard_refuses_the_providers_own_group_and_the_command_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = tool_fifo(directory.path());
+        // No writer: a watchdog would end the group at once.
+        for provider in ["$$", "1"] {
+            let tool = guarded_tool(&fifo, provider, "sleep 0.5; printf ran");
+            let output = tool.wait_with_output().unwrap();
+            assert!(output.status.success(), "{provider}: {:?}", output.status);
+            assert_eq!(output.stdout, b"ran", "{provider}");
+        }
     }
 
     #[test]

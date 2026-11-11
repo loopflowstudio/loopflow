@@ -36,9 +36,6 @@ pub enum ContextMoment {
     /// Started by a limit hook: record the limit and move the shared login to
     /// an account with capacity.
     RecordLimit,
-    /// A Pi bash command is about to run: join its tool group to the watchdog
-    /// that ends the group with its provider.
-    ToolGroup,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave

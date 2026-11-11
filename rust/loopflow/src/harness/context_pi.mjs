@@ -24,7 +24,7 @@ async function guardBashTools(pi, ctx) {
         writer = openSync(path, constants.O_RDWR);
         // The guard joins the tool's process group to the watchdog that ends
         // it with its provider. It records nothing; the command runs either way.
-        const guard = `${quote(spec.executable)} __context-block --moment tool-group --lifeline ${quote(path)} --provider-pid ${process.pid}`;
+        const guard = `/bin/sh -c ${quote(spec.bashGuard)} lf-tool-lifeline ${quote(path)} ${process.pid}`;
         return await local.exec(`${guard}\n${command}`, cwd, options);
       } finally {
         if (writer !== undefined) closeSync(writer);
@@ -45,8 +45,8 @@ async function guardBashTools(pi, ctx) {
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
 // Every launch gets the bash guard and the context block. A managed launch
-// keeps one Machine server connection: each event it reports is a boundary
-// whose answer may carry steers. A bare headless run (`spec.managed` false)
+// asks the Machine server at each event it reports, one connection per
+// boundary; the answer may carry steers. A bare headless run (`spec.managed` false)
 // opens none, asks for no steers and reports no turn end.
 export default function (pi) {
   let turn;
@@ -119,7 +119,6 @@ export default function (pi) {
   };
   const shutdown = (ctx) => {
     stopUpdates();
-    server?.close();
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
   // Every event a native launch reports is recorded, and during a turn
@@ -208,13 +207,12 @@ export default function (pi) {
     pendingInput = Math.max(0, pendingInput - 1);
     await report(event, ctx);
   });
-  pi.on("session_shutdown", async () => { stopUpdates(); server?.close(); });
+  pi.on("session_shutdown", async () => { stopUpdates(); });
   pi.on("agent_settled", async (event, ctx) => {
     await report(event, ctx, { events });
     turn = undefined; events = []; tools.clear();
     if (!server) return;
     // An unanswered turn end leaves planning pending until a later boundary.
     await server.boundary("stop", {});
-    server.close();
   });
 }

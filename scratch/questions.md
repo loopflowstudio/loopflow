@@ -61,9 +61,8 @@ upgraded or branch `lf` beside a working server
 showed it). A Session launched by plain `lf` in a Task's checkout carries
 that Task (`work_source` checkout) and is bare: not checked.
 
-- Pi's `pi-event` callback still opens the store each turn. Settled by the
-  design: it is an observer and moves with the observer Task
-  (`scratch/loo-821-hooks.md`).
+- Pi's `pi-event` callback opened the store each turn. Gone in LOO-835:
+  native events go over the plugin's server connection.
 
 Assumptions taken headless with the bare rule, November 11 (reversible):
 
@@ -92,19 +91,19 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 
 # LOO-835
 
-- Pi's bash guard starts `lf __context-block --moment tool-group` for every
-  bash tool. The Task's done line says "start no `lf` process after launch
-  (check with `ps` during the turn)"; with the guard, a Pi turn with bash
-  calls still starts one per call. The docs leave the guard as is (it asks no
-  server). Move the lifeline join into the extension (Node joins nothing to a
-  process group by itself), or accept one `lf` per bash tool?
+- Pi's bash guard is a generated `/bin/sh` script, not an `lf` process
+  (built; `loo-835-connection.md`). A Pi still running an older extension
+  after upgrade calls the removed `--moment tool-group`: clap prints an error
+  into that tool's output and the command still runs, unguarded. Accepted as
+  upgrade skew (no compat kept); a relaunch picks up the new extension.
 - Assumed (the Task lists it open): steers are asked for at each boundary on
-  the open connection, not pushed by a subscription. Pi asks with every
+  the connection, not pushed by a subscription (a subscription would hold a slot). Pi asks with every
   event it reports, so latency is bounded by the longest tool.
-- Assumed (reversible): the plugin connection closes after each turn's `stop`
-  and reconnects at the next boundary, instead of staying open for the whole
-  conversation: the server has 64 connection slots (`MAX_CONNECTIONS`), and
-  idle conversations would otherwise hold them. Docs say so.
+- One connection per boundary, like a hook (built), not one per turn: a turn
+  held one of the 64 `MAX_CONNECTIONS` slots for minutes. Reversible.
+- The guard's watchdog output goes to `/dev/null` rather than closed fds, so
+  its `printf .` readiness byte goes nowhere; Pi sees the tool's output end
+  either way.
 - Unverified: OpenCode awaits an async `context` hook. The plugin now awaits
   the boundary before pushing system text; if OpenCode does not await, the
   block would miss the request. Check in qa with a real OpenCode.

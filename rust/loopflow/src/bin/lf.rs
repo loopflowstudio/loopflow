@@ -2836,18 +2836,6 @@ fn execute_command(
                 )
             }),
         },
-        // A tool group's stdin is the command's, not hook JSON.
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::ToolGroup,
-            lifeline,
-            provider_pid,
-            ..
-        }) => loopflow::harness::agent_process::guard_tool_lifeline(
-            lifeline
-                .as_deref()
-                .expect("clap requires --lifeline for tool-group"),
-            provider_pid.expect("clap requires --provider-pid with --lifeline"),
-        ),
         Some(Commands::ContextBlock {
             moment: ContextMoment::Limit,
             ..

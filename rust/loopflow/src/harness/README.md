@@ -66,10 +66,10 @@ as still running. Work that can outlast a hook's timeout runs beside it: Claude'
 `StopFailure` hook starts `--moment record-limit` in its own OS session and exits,
 because a kill between a token reply and the profile write would lose a rotated
 grant. The Pi extension and OpenCode plugin live inside the provider's
-process, so they send the same request over one `machine.sock` connection they
-keep through each turn instead of starting `lf` at each boundary
-([OpenCode and Pi keep one connection](../server/README.md#opencode-and-pi-keep-one-connection)).
-A connection they cannot keep, or an lf they cannot run, goes to their own log
+process, so they send the same request on a `machine.sock` connection of their
+own, one per boundary, instead of starting `lf` at each boundary
+([OpenCode and Pi ask from inside the provider](../server/README.md#opencode-and-pi-ask-from-inside-the-provider)).
+A server they cannot reach, or an lf they cannot run, goes to their own log
 (`logs/pi-extension.log`, `opencode.stderr.log` beside the capture), never to
 the conversation. The PTY
 owner delivers typed input even when it cannot record it, and holds the Session

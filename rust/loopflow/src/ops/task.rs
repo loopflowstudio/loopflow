@@ -1189,15 +1189,18 @@ async fn stack_existing_task(
     requested: &str,
 ) -> OpsResult<()> {
     fetch_task_refs(main_repo)?;
-    let parent = record_stack_parent(store, main_repo, task, requested).await?;
+    let (parent, diverged) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
     store
         .stack_task_placement(task, &parent.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} stacks on {requested} ({}). Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
-        task.identifier, parent.branch, task.worktree()?.display()
+        "Task {} stacks on {requested} ({}){}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
+        task.identifier,
+        parent.branch,
+        diverged.map(|note| format!("; {note}")).unwrap_or_default(),
+        task.worktree()?.display()
     );
     Ok(())
 }
@@ -1269,63 +1272,122 @@ async fn select_stack_parent(
 
 /// Select the parent, push its branch when origin lacks it or is behind, then
 /// return its PR record, recording an unpublished one when the parent has none.
+/// The note says what the child leaves out when origin's branch has diverged.
 async fn record_stack_parent(
     store: &SharedStore,
     main_repo: &Path,
     task: &Task,
     requested: &str,
-) -> OpsResult<TaskPr> {
+) -> OpsResult<(TaskPr, Option<String>)> {
     let parent = select_stack_parent(store, task, requested).await?;
-    let branch = parent
-        .pr
-        .as_ref()
-        .map_or(parent.task.branch.as_str(), |pr| pr.branch.as_str());
-    push_stack_parent_branch(main_repo, &parent.task.identifier, branch)?;
+    let branch = parent.branch().to_string();
+    let diverged = match stack_parent_branch(main_repo, &branch)? {
+        StackParentBranch::Current => None,
+        StackParentBranch::Missing => {
+            return Err(task_error(format!(
+                "stack parent {}'s branch {branch} is neither local nor on origin",
+                parent.task.identifier
+            )))
+        }
+        StackParentBranch::Behind => {
+            git_output(main_repo, &["push", "--set-upstream", "origin", &branch]).map_err(
+                |error| {
+                    task_error(format!(
+                        "failed to push stack parent {}'s branch {branch} to origin: {error}",
+                        parent.task.identifier
+                    ))
+                },
+            )?;
+            None
+        }
+        diverged @ StackParentBranch::Diverged { .. } => {
+            Some(diverged.describe(&parent.task.identifier, &branch))
+        }
+    };
     if let Some(pr) = parent.pr {
-        return Ok(pr);
+        return Ok((pr, diverged));
     }
     let pr = delivery::next_task_pr(store, &parent.task).await?;
     if let Err(error) = store.insert_task_pr(&pr).await {
         // Another child may have recorded the parent first; stack on that row.
-        return store
+        let active = store
             .active_task_pr(&parent.task.id)
             .await
             .map_err(task_error)?
             .filter(|active| !active.is_settled())
-            .ok_or_else(|| task_error(format!("failed to record stack parent PR: {error}")));
+            .ok_or_else(|| task_error(format!("failed to record stack parent PR: {error}")))?;
+        return Ok((active, diverged));
     }
-    Ok(pr)
+    Ok((pr, diverged))
 }
 
-/// Pushing a branch never rewrites origin: no force, and a diverged remote
-/// branch stays as it is.
-fn push_stack_parent_branch(main_repo: &Path, parent: &str, branch: &str) -> OpsResult<()> {
+impl StackParent {
+    fn branch(&self) -> &str {
+        self.pr
+            .as_ref()
+            .map_or(self.task.branch.as_str(), |pr| pr.branch.as_str())
+    }
+}
+
+/// How the parent's local branch relates to origin's, from refs already fetched.
+#[derive(Debug, PartialEq, Eq)]
+enum StackParentBranch {
+    /// Origin has every local commit, or there is no origin to push to.
+    Current,
+    /// Origin lacks the branch or is behind it; stacking pushes it.
+    Behind,
+    /// Origin's branch has commits the local one lacks. Stacking never forces,
+    /// so the child bases on origin's version without the local-only commits.
+    Diverged {
+        left_out: usize,
+    },
+    Missing,
+}
+
+impl StackParentBranch {
+    fn describe(&self, parent: &str, branch: &str) -> String {
+        match self {
+            Self::Diverged { left_out } => format!(
+                "origin/{branch} has diverged, so this Task bases on it and leaves out {left_out} local {parent} commit{} not on origin",
+                if *left_out == 1 { "" } else { "s" }
+            ),
+            Self::Behind => format!("stacking pushes {parent}'s branch {branch} to origin"),
+            Self::Current | Self::Missing => String::new(),
+        }
+    }
+}
+
+fn stack_parent_branch(main_repo: &Path, branch: &str) -> OpsResult<StackParentBranch> {
     if !crate::git::has_origin(main_repo)? {
-        return Ok(());
+        return Ok(StackParentBranch::Current);
     }
     let local = format!("refs/heads/{branch}");
     let remote = format!("refs/remotes/origin/{branch}");
     let on_origin = ref_exists(main_repo, &remote)?;
     if !ref_exists(main_repo, &local)? {
-        if on_origin {
-            return Ok(());
-        }
-        return Err(task_error(format!(
-            "stack parent {parent}'s branch {branch} is neither local nor on origin"
-        )));
+        return Ok(if on_origin {
+            StackParentBranch::Current
+        } else {
+            StackParentBranch::Missing
+        });
     }
-    if on_origin
-        && (rev_parse(main_repo, &local)? == rev_parse(main_repo, &remote)?
-            || !crate::git::is_ancestor(main_repo, &remote, &local)?)
-    {
-        return Ok(());
+    if !on_origin {
+        return Ok(StackParentBranch::Behind);
     }
-    git_output(main_repo, &["push", "--set-upstream", "origin", branch]).map_err(|error| {
-        task_error(format!(
-            "failed to push stack parent {parent}'s branch {branch} to origin: {error}"
-        ))
-    })?;
-    Ok(())
+    let left_out: usize = git_output(
+        main_repo,
+        &["rev-list", "--count", &format!("{remote}..{local}")],
+    )?
+    .trim()
+    .parse()
+    .map_err(task_error)?;
+    Ok(if left_out == 0 {
+        StackParentBranch::Current
+    } else if crate::git::is_ancestor(main_repo, &remote, &local)? {
+        StackParentBranch::Behind
+    } else {
+        StackParentBranch::Diverged { left_out }
+    })
 }
 
 #[derive(Debug)]
@@ -1436,7 +1498,13 @@ async fn prepare_task_placement(
     fetch_task_refs(main_repo)?;
     let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = match options.stack_on.as_deref() {
-        Some(requested) => Some(record_stack_parent(store, main_repo, task, requested).await?),
+        Some(requested) => {
+            let (parent, diverged) = record_stack_parent(store, main_repo, task, requested).await?;
+            if let Some(note) = diverged {
+                eprintln!("Task {} stacks on {requested}: {note}.", task.identifier);
+            }
+            Some(parent)
+        }
         None => None,
     };
     let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;

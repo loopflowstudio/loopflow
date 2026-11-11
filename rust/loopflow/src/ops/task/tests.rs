@@ -2226,6 +2226,62 @@ async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
     assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
 }
 
+#[tokio::test]
+async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("origin.txt", "work only origin has");
+    repo.stage_all();
+    repo.commit("Origin parent work");
+    let origin_tip = repo.head_sha();
+    repo.push_new_branch(&parent.task.branch);
+    git(&["reset", "--hard", "HEAD~1"]);
+    repo.create_file("local.txt", "work only this Machine has");
+    repo.stage_all();
+    repo.commit("Local parent work");
+    repo.checkout("main");
+    let child = Task {
+        id: TaskId::new(),
+        ..parent.task.clone()
+    };
+    let options = super::TaskProcessOptions {
+        name: Some("child-task".into()),
+        stack_on: Some("FIX-1".into()),
+        ..Default::default()
+    };
+
+    let prepared =
+        super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+            .await
+            .unwrap();
+    assert_eq!(prepared.plan.base_ref, origin_tip);
+    let (_, note) = super::record_stack_parent(&parent.store, repo.path(), &child, "FIX-1")
+        .await
+        .unwrap();
+    assert_eq!(
+        note.as_deref(),
+        Some(format!(
+            "origin/{} has diverged, so this Task bases on it and leaves out 1 local FIX-1 commit not on origin",
+            parent.task.branch
+        ).as_str())
+    );
+    let remote = std::process::Command::new("git")
+        .current_dir(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{}", parent.task.branch)])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), origin_tip);
+}
+
 #[test]
 fn execution_boundary_resolves_linked_git_and_control_roots() {
     let _env_lock = crate::journal::test_env_lock();

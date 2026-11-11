@@ -157,7 +157,10 @@ async fn read_checkout(
         report.unavailable.push("Checkout finalization may record CheckoutReady and clear inherited scratch for an untouched stacked PR; it has not run".into());
         if let Some(parent) = options.stack_on.as_deref() {
             match super::select_stack_parent(store, &task, parent).await {
-                Ok(_) => report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into()),
+                Ok(parent) => {
+                    report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into());
+                    push_stack_effects(&repo, &parent, report)?;
+                }
                 Err(error) => report.impediments.push(error.to_string()),
             }
         }
@@ -178,11 +181,37 @@ async fn read_checkout(
             stack_on: options.stack_on.clone(),
         });
         if let Some(parent) = options.stack_on.as_deref() {
-            if let Err(error) = super::select_stack_parent(store, &task, parent).await {
-                report.impediments.push(error.to_string());
+            match super::select_stack_parent(store, &task, parent).await {
+                Ok(parent) => push_stack_effects(&repo, &parent, report)?,
+                Err(error) => report.impediments.push(error.to_string()),
             }
         }
         report.unavailable.push("Proposed path and branch use local Git facts only; fetched refs, base commit and provider PR evidence are unavailable. No checkout or PR was allocated".into());
+    }
+    Ok(())
+}
+
+/// What stacking would change outside this Task, read from refs already fetched.
+fn push_stack_effects(
+    repo: &Path,
+    parent: &super::StackParent,
+    report: &mut TaskCheckoutExplanation,
+) -> anyhow::Result<()> {
+    let identifier = &parent.task.identifier;
+    let branch = parent.branch();
+    match super::stack_parent_branch(repo, branch)? {
+        super::StackParentBranch::Missing => report.impediments.push(format!(
+            "stack parent {identifier}'s branch {branch} is neither local nor on origin"
+        )),
+        super::StackParentBranch::Current => {}
+        state => report
+            .unavailable
+            .push(format!("Not run: {}", state.describe(identifier, branch))),
+    }
+    if parent.pr.is_none() {
+        report.unavailable.push(format!(
+            "Not run: stacking records an unpublished PR for {identifier}"
+        ));
     }
     Ok(())
 }

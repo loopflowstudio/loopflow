@@ -2947,6 +2947,53 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
             "{checkout}"
         );
     }
+    // A placed parent whose branch is local only and which has no PR record.
+    repo.create_branch("parent-proof");
+    repo.checkout("checkout-proof");
+    db.execute_batch(
+        "CREATE TEMP TABLE parent AS SELECT * FROM tasks;
+         UPDATE parent SET id='parent-task', issue_identifier='INF-124', external_issue_id='issue-parent',
+           branch='parent-proof', worktree=worktree || '.parent';
+         INSERT INTO tasks SELECT * FROM parent;
+         DROP TABLE parent;",
+    )
+    .unwrap();
+    let stacked = read(&[
+        "task",
+        "checkout",
+        "INF-123",
+        "--stack-on",
+        "INF-124",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(stacked["impediments"], serde_json::json!([]), "{stacked}");
+    let unavailable = stacked["unavailable"].to_string();
+    for effect in [
+        "pushes INF-124's branch parent-proof to origin",
+        "records an unpublished PR for INF-124",
+    ] {
+        assert!(unavailable.contains(effect), "{stacked}");
+    }
+    let parent_prs: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM task_prs WHERE task_id='parent-task'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(parent_prs, 0);
+    let pushed = std::process::Command::new("git")
+        .current_dir(repo.bare_path())
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "refs/heads/parent-proof",
+        ])
+        .status()
+        .unwrap();
+    assert!(!pushed.success());
 }
 
 #[test]

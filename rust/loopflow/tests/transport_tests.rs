@@ -27,6 +27,57 @@ struct Fixture {
     repo: TestRepo,
 }
 
+/// Owners detach from the test and outlive it unless ended here. Every lf
+/// process the fixture caused is recorded in its private store; a recorded PID
+/// is signalled only while its command line still names this fixture's home
+/// or the test build of lf, so a reused PID is never touched.
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let Ok(sql) = rusqlite::Connection::open_with_flags(
+            self.home.path().join("loopflow.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) else {
+            return;
+        };
+        let Ok(mut rows) =
+            sql.prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+        else {
+            return;
+        };
+        let pids: Vec<libc::pid_t> = rows
+            .query_map([], |r| r.get(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default();
+        let home = self.home.path().to_string_lossy().into_owned();
+        let ours = |pid: libc::pid_t| {
+            Command::new("ps")
+                .args(["-o", "command=", "-p", &pid.to_string()])
+                .output()
+                .map(|out| {
+                    let command = String::from_utf8_lossy(&out.stdout);
+                    command.contains(&home) || command.starts_with(env!("CARGO_BIN_EXE_lf"))
+                })
+                .unwrap_or(false)
+        };
+        let mut running: Vec<libc::pid_t> = pids.into_iter().filter(|pid| ours(*pid)).collect();
+        for signal in [libc::SIGCONT, libc::SIGTERM] {
+            for pid in &running {
+                // SAFETY: a live PID this fixture's store recorded, checked above.
+                unsafe { libc::kill(*pid, signal) };
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !running.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            running.retain(|pid| ours(*pid));
+        }
+        for pid in running {
+            // SAFETY: as above; it ignored SIGTERM for five seconds.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
 struct PausedOwner(libc::pid_t);
 
 struct StopOwner<'a>(&'a Fixture, String);
@@ -1792,6 +1843,35 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         fixture.stop(&owner);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
+}
+
+/// A terminal host's pipe reaches the lf it starts. The detached owner outlives
+/// that terminal and must not keep the pipe, or the host's other reader (Desktop's
+/// status observer) never sees end of input and runs for as long as the owner.
+#[test]
+fn detached_owner_keeps_no_descriptor_its_terminal_inherited() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (mut reader, writer) = std::io::pipe().unwrap();
+    let inherited = writer.as_raw_fd();
+    let mut command = fixture.command(&["-i", "-a", "claude", ":", "inherited"]);
+    command.env("PATH", path);
+    // SAFETY: fcntl is async-signal-safe; only this child inherits the writer.
+    unsafe {
+        std::os::unix::process::CommandExt::pre_exec(&mut command, move || {
+            libc::fcntl(inherited, libc::F_SETFD, 0);
+            Ok(())
+        });
+    }
+    let terminal = Terminal::spawn(command);
+    let launch = fixture.launches(1).pop().unwrap();
+    let owner = fixture.owner_of(&session_of(&fixture.sql(), &launch));
+    drop(writer);
+    terminal.stop();
+    let (done, closed) = std::sync::mpsc::channel();
+    std::thread::spawn(move || done.send(reader.read(&mut [0; 1]).unwrap()));
+    assert_eq!(closed.recv_timeout(Duration::from_secs(10)), Ok(0));
+    assert!(fixture.running(&owner), "the owner outlives its terminal");
 }
 
 #[test]

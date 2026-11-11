@@ -12,3 +12,11 @@ following choices are proposals:
   watching until measurements justify another value.
 - Treat the CPU/latency numbers in `universal-server.md` as proposed completion
   targets, not measured improvements or quoted product requirements.
+
+# LOO-823
+
+- `native input` holds 78 of ~100 resident owners for days: any byte the
+  provider never acknowledged as one exact prompt (arrow keys, Esc, an edit)
+  keeps the owner past `end_detached_after` and rollover. Left as designed
+  (`store/sqlite/native_input.rs`); whether terminal-only keys like arrows
+  should count as a draft is open.

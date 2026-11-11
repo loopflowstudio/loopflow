@@ -145,7 +145,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
             [helper, "session", "observe-status", sessionId, "--terminal", terminalId]
                 + (provider.agentProcessId.map { ["--agent-process", $0.rawValue] } ?? [])
         )
-        let pipe = Pipe()
+        let pipe = Pipe.uninherited()
         process.standardInput = pipe
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

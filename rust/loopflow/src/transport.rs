@@ -295,7 +295,9 @@ pub(crate) fn start(
     command
         .args(["session", "serve"])
         .env_remove("LF_SERVER_STATUS")
-        .env_remove(STREAM_ENV);
+        .env_remove(STREAM_ENV)
+        // It names a descriptor the owner does not inherit.
+        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
     if terminal {
         command.arg("--terminal");
     }
@@ -313,11 +315,15 @@ pub(crate) fn start(
     if let Some(terminal) = crate::session_record::current_terminal_id() {
         command.env(TERMINAL_ENV, terminal);
     }
-    // SAFETY: only an async-signal-safe syscall is used between fork and exec.
+    let descriptors = open_descriptors();
+    // SAFETY: only async-signal-safe syscalls are used between fork and exec.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            for fd in &descriptors {
+                libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
             Ok(())
         });
@@ -333,6 +339,21 @@ pub(crate) fn start(
         .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
     LfProcessId::parse(line.trim())
         .context("Owner exited before acknowledging execution; inspect transport.log")
+}
+
+/// Descriptors above stderr, such as a terminal host's pipes to its other
+/// children that this process inherited. A detached owner outlives that host, so
+/// it must not hold them: a reader waiting for the host's end to close would
+/// wait for as long as the owner runs. Marking an already close-on-exec or
+/// closed number (the listing's own) again is harmless.
+fn open_descriptors() -> Vec<RawFd> {
+    let Ok(entries) = std::fs::read_dir("/dev/fd") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|fd| *fd > libc::STDERR_FILENO)
+        .collect()
 }
 
 pub(crate) fn directory(home: &Path) -> Result<PathBuf> {

@@ -768,6 +768,32 @@ evidence.
 
 Launch proofs use provider-written evidence and terminal receipts.
 
+### Leaving nothing running
+
+A detached owner calls `setsid`, so it leaves the test's process group and
+outlives the test unless the fixture ends it. Every `lf` process a fixture
+causes is recorded in the fixture's private store; when the fixture drops
+(pass, failure or panic) it signals each unfinished recorded PID whose command
+line still names the fixture's home or the test build of `lf`, and waits for
+it. The provider stand-in on the owner's terminal ends on hangup.
+`transport_tests`' `Fixture` does this; copy it for a new fixture that starts
+owners.
+
+A detached owner drops every descriptor it inherited above stderr, so a test
+that hands `lf` a pipe can wait for end of input once the viewer exits
+(`detached_owner_keeps_no_descriptor_its_terminal_inherited`).
+
+Check a suite by its binary path, never by name:
+
+```bash
+ps -axo pid,command | grep -F "$PWD/target" | grep -v grep   # nothing from this checkout's builds after the suite exits
+ps -axo pid,command | grep -F /tmp/lf-7501- | grep -v grep   # nothing from transport_tests' fixture homes
+```
+
+Stop only what the fixture started, by the handle or PID it holds. Never
+`pkill` or `killall` by command pattern: other checkouts run the same test
+binaries.
+
 ### Reproducing races without CPU load
 
 Never generate CPU load to reproduce a race: no `yes > /dev/null &`, `stress`,

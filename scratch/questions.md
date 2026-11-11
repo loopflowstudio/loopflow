@@ -26,7 +26,7 @@ direction built from them are in `holder.md`. Options as offered:
   `--session-json` into the installed `lf`.
 - Nothing yet lists which conversations a killed holder took.
 
-## Open: holding a conversation reopened by id
+## Holding a conversation reopened by id (answered below)
 
 LOO-821 (`1217ff206`) now decides managed by the command (`Cli::names_work`,
 `AgentConfig::managed`) and deleted `WorkSource::is_managed`; its notes quote
@@ -57,3 +57,13 @@ Shown `scratch/simplification-opportunities.md` (opportunity 1: sync onto
 LOO-823 now), Jack Heart: "yes, you can stack on 823". Then: "821 is landed"
 (PR #1879 merged 2026-11-11 19:12 UTC, 763da5c92). New stack: main ← LOO-823
 (PR #1877) ← LOO-824.
+
+## Reopen by id: answered (November 11)
+
+Jack Heart: "seems fine to change how deskto opens a pane" / "But also i
+think (1a) is right, so double coverage for now". Kept: the row read in
+`transport::held` and `require_server_for`. Desktop naming the Work on reopen
+is a separate Task.
+Then: "but you can just change the desktop reopen code directly" / "i dont
+think it needs a separate task". The separate Task (LOO-846) is deleted; the
+Desktop change is in LOO-824.

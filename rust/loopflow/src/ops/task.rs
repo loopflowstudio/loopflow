@@ -1188,9 +1188,8 @@ async fn stack_existing_task(
     task: &Task,
     requested: &str,
 ) -> OpsResult<()> {
-    let parent = select_stack_parent(store, task, requested).await?;
     fetch_task_refs(main_repo)?;
-    let parent = record_stack_parent(store, main_repo, parent).await?;
+    let parent = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
     store
         .stack_task_placement(task, &parent.id)
@@ -1268,13 +1267,15 @@ async fn select_stack_parent(
     })
 }
 
-/// Push the parent's branch when origin lacks it or is behind, then return its
-/// PR record, recording an unpublished one when the parent has none.
+/// Select the parent, push its branch when origin lacks it or is behind, then
+/// return its PR record, recording an unpublished one when the parent has none.
 async fn record_stack_parent(
     store: &SharedStore,
     main_repo: &Path,
-    parent: StackParent,
+    task: &Task,
+    requested: &str,
 ) -> OpsResult<TaskPr> {
+    let parent = select_stack_parent(store, task, requested).await?;
     let branch = parent
         .pr
         .as_ref()
@@ -1283,16 +1284,7 @@ async fn record_stack_parent(
     if let Some(pr) = parent.pr {
         return Ok(pr);
     }
-    let mut pr = delivery::task_pr_for_publication(&parent.task);
-    pr.sequence = store
-        .task_prs(&parent.task.id)
-        .await
-        .map_err(task_error)?
-        .iter()
-        .map(|pr| pr.sequence)
-        .max()
-        .unwrap_or(0)
-        + 1;
+    let pr = delivery::next_task_pr(store, &parent.task).await?;
     if let Err(error) = store.insert_task_pr(&pr).await {
         // Another child may have recorded the parent first; stack on that row.
         return store
@@ -1444,10 +1436,7 @@ async fn prepare_task_placement(
     fetch_task_refs(main_repo)?;
     let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = match options.stack_on.as_deref() {
-        Some(requested) => {
-            let parent = select_stack_parent(store, task, requested).await?;
-            Some(record_stack_parent(store, main_repo, parent).await?)
-        }
+        Some(requested) => Some(record_stack_parent(store, main_repo, task, requested).await?),
         None => None,
     };
     let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;

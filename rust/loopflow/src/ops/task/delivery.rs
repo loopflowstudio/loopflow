@@ -137,6 +137,21 @@ pub(super) fn task_pr_for_publication(task: &Task) -> TaskPr {
     }
 }
 
+/// An unpublished PR record for the Task's placement, after its last one.
+pub(super) async fn next_task_pr(store: &SharedStore, task: &Task) -> OpsResult<TaskPr> {
+    let mut pr = task_pr_for_publication(task);
+    pr.sequence = store
+        .task_prs(&task.id)
+        .await
+        .map_err(task_error)?
+        .iter()
+        .map(|pr| pr.sequence)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    Ok(pr)
+}
+
 pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) -> OpsResult<bool> {
     let title = title.trim();
     let body = body.trim();
@@ -154,18 +169,10 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         let existing = store.active_task_pr(&task.id).await.map_err(task_error)?;
         let existing = existing.filter(|pr| !pr.is_settled());
         let creating = existing.is_none();
-        let mut pr = existing.unwrap_or_else(|| task_pr_for_publication(&task));
-        if creating {
-            pr.sequence = store
-                .task_prs(&task.id)
-                .await
-                .map_err(task_error)?
-                .iter()
-                .map(|pr| pr.sequence)
-                .max()
-                .unwrap_or(0)
-                + 1;
-        }
+        let mut pr = match existing {
+            Some(pr) => pr,
+            None => next_task_pr(&store, &task).await?,
+        };
         let branch = crate::git::current_branch(repo)?
             .ok_or_else(|| task_error("Task worktree is not on a branch"))?;
         if pr.branch != branch {

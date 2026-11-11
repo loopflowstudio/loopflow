@@ -143,3 +143,7 @@ Gate again, November 11 10:01 (at 597be99a4; only `scratch/` and
 pressure (`syspolicyd` 248-258%, a `manabot` training run and other checkouts'
 `rustc`); architecture and rustfmt pass, rust/website/swift unproven. The
 direct run above still covers the product code. Rust, website and Swift go to CI.
+
+Gate, November 11 10:05 (at f5f141f35, load 20 but `syspolicyd` 241-270%):
+the runner stopped at `rust-cli` a third time; architecture and rustfmt pass.
+Rust, website and Swift: CI.

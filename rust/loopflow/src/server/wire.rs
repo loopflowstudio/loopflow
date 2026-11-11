@@ -153,6 +153,9 @@ pub enum BoundaryMoment {
     Compact,
     Tool,
     Stop,
+    /// A Pi event the extension reports (`callback` is the event): the server
+    /// records the turn from it and, while a turn runs, answers steers.
+    Event,
 }
 
 /// Boundaries the hook could not record, in Unix seconds.

@@ -23,7 +23,7 @@ async function guardBashTools(pi, ctx) {
         writer = openSync(path, constants.O_RDWR);
         // The guard joins the tool's process group to the watchdog that ends
         // it with its provider. It records nothing; the command runs either way.
-        const guard = `${quote(spec.executable)} __context-block --moment tool-group --lifeline ${quote(path)} --provider-pid ${process.pid}`;
+        const guard = `/bin/sh -c ${quote(spec.bashGuard)} lf-tool-lifeline ${quote(path)} ${process.pid}`;
         return await local.exec(`${guard}\n${command}`, cwd, options);
       } finally {
         if (writer !== undefined) closeSync(writer);
@@ -43,8 +43,10 @@ async function guardBashTools(pi, ctx) {
 }
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
-// Every launch gets the bash guard and the context block. A bare headless run
-// (`spec.managed` false) polls for no steers and reports no turn end.
+// Every launch gets the bash guard and the context block. A managed launch
+// asks the Machine server at each event it reports, one connection per
+// boundary; the answer may carry steers. A bare headless run (`spec.managed` false)
+// opens none, asks for no steers and reports no turn end.
 export default function (pi) {
   let turn;
   let started = false;
@@ -53,24 +55,11 @@ export default function (pi) {
   let context = "";
   let lastProgress = 0;
   let pendingInput = 0;
-  let steering;
   const tools = new Set();
-  const invoke = (command, payload, args = []) => execFileSync(spec.executable,
-    [command, ...args], { input: JSON.stringify(payload), encoding: "utf8",
-      timeout: 30000, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] });
-  const readContext = (ctx, moment, hook) => JSON.parse(invoke("__context-block", {
-    session_id: ctx.sessionManager.getSessionFile(), hook_event_name: hook,
-    adapter_invocation_id: randomUUID(),
-  }, ["--moment", moment])).hookSpecificOutput.additionalContext;
-  const shutdown = (ctx) => {
-    clearInterval(steering);
-    ctx.abort(); process.exitCode = 1; ctx.shutdown();
-  };
-  // lf's records are best-effort: an lf the extension cannot run is a recording
-  // gap, never a failed turn or a notice in the conversation. Like Claude's
-  // hooks, it shows nothing: one line per changed failure in the extension log
-  // (lf's own process records the gap in logs/lf.log when it runs), then quiet
-  // until the next success closes it.
+  // lf's records are best-effort: an lf the extension cannot run, or a server
+  // it cannot reach, is a recording gap, never a failed turn or a notice in the
+  // conversation. Like Claude's hooks, it shows nothing: one line per changed
+  // failure in the extension log, then quiet until the next success closes it.
   let gap;
   const log = (line) => {
     try {
@@ -89,22 +78,56 @@ export default function (pi) {
     log(`recording gap closed (${gap}); lf records from here`);
     gap = undefined;
   };
-  const report = (event, ctx, extra = {}) => {
-    if (!spec.native || (!started && event.type !== "session_start")) return;
-    try {
-      invoke("__context-block", { ...event, ...extra, sessionFile: ctx.sessionManager.getSessionFile(),
-        turn, openTools: tools.size, pendingInput }, ["--moment", "pi-event"]);
-      recovered();
-    } catch (error) {
-      recordingGap("turn record", error);
+  const server = spec.managed && process.env.LF_CONTEXT_DELIVERY
+    ? machineServer(process.env.LF_CONTEXT_DELIVERY, log) : undefined;
+  // The block comes from checkout files; the boundary itself went to the server.
+  const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;
+  const readContext = async (ctx, moment) => {
+    const callback = { session_id: ctx.sessionManager.getSessionFile(), hook_event_name: "PiContext",
+      adapter_invocation_id: randomUUID() };
+    const answer = await server?.boundary(moment, callback);
+    const block = JSON.parse(execFileSync(spec.executable, ["__context-block", "--moment", moment], {
+      input: JSON.stringify(callback), encoding: "utf8", env: renderEnv,
+      timeout: 30000, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] }))
+      .hookSpecificOutput.additionalContext;
+    if (answer?.steers) server.printed(answer.steers.batch);
+    return `${news(answer)}${block}`;
+  };
+  const shutdown = (ctx) => {
+    ctx.abort(); process.exitCode = 1; ctx.shutdown();
+  };
+  // Every event a native launch reports is recorded, and during a turn
+  // answers steers; a launch Pi's RPC driver records asks only for steers.
+  // With the server not answering, only these still wait for it: Pi's identity,
+  // a tool start (where a steer lands) and the turn end. Later reports repeat
+  // the turn, open tools, pending input and assistant messages.
+  const kept = new Set(["session_start", "tool_execution_start", "agent_settled"]);
+  const report = async (event, ctx, extra = {}) => {
+    if (!server || (!started && event.type !== "session_start")) return;
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const skippable = !kept.has(event.type);
+    let answer;
+    if (spec.native) {
+      answer = await server.boundary("event", { ...event, ...extra, sessionFile,
+        turn, openTools: tools.size, pendingInput }, { skippable });
+    } else if (turn) {
+      answer = await server.boundary("tool", { session_id: sessionFile, hook_event_name: "PiSteer",
+        adapter_invocation_id: randomUUID() }, { skippable });
     }
+    const content = news(answer);
+    if (!content) return;
+    // With triggerTurn omitted, Pi queues during streaming and only stores if
+    // idle. A settlement race must never start another run.
+    pi.sendMessage({ customType: "loopflow-steer", content, display: true },
+      { deliverAs: "steer" });
+    if (answer.steers) server.printed(answer.steers.batch);
   };
   pi.on("session_start", async (event, ctx) => {
     try { await guardBashTools(pi, ctx); } catch (error) {
       shutdown(ctx);
       throw error;
     }
-    report({ type: "session_start" }, ctx);
+    await report({ type: "session_start" }, ctx);
     started = true;
   });
   pi.on("session_compact", async () => { refreshMoment = "compact"; });
@@ -116,7 +139,7 @@ export default function (pi) {
     if (refreshMoment) {
       // A refresh lf cannot serve keeps the last context and tries again next request.
       try {
-        context = readContext(ctx, refreshMoment, "PiContext");
+        context = await readContext(ctx, refreshMoment);
         refreshMoment = undefined;
         recovered();
       } catch (error) {
@@ -136,56 +159,39 @@ export default function (pi) {
     // Retries can start multiple low-level runs before agent_settled.
     if (turn) return;
     turn = randomUUID(); events = []; tools.clear();
-    report({ type: "agent_start" }, ctx);
-    if (spec.managed && process.env.LF_CONTEXT_DELIVERY) {
-      steering = setInterval(() => {
-        try {
-          const content = readContext(ctx, "tool", "PiSteer");
-          recovered();
-          if (content) {
-            // With triggerTurn omitted, Pi queues during streaming and only
-            // stores if idle. A settlement race must never start another run.
-            pi.sendMessage({ customType: "loopflow-steer", content, display: true }, { deliverAs: "steer" });
-          }
-        } catch (error) {
-          recordingGap("steering", error);
-        }
-      }, 1000);
-      steering.unref();
-    }
+    await report({ type: "agent_start" }, ctx);
   });
   pi.on("message_end", async (event, ctx) => {
     if (spec.native && event.message.role === "assistant") events.push(event);
-    report(event, ctx, { events });
+    await report(event, ctx, { events });
   });
+  // A steer saved while the model streams waits at most five seconds.
   pi.on("message_update", async (_event, ctx) => {
     if (Date.now() - lastProgress < 5000) return;
     lastProgress = Date.now();
-    report({ type: "working" }, ctx);
+    await report({ type: "working" }, ctx);
   });
   pi.on("tool_execution_start", async (event, ctx) => {
     tools.add(event.toolCallId);
-    report(event, ctx);
+    await report(event, ctx);
   });
   pi.on("tool_execution_end", async (event, ctx) => {
     tools.delete(event.toolCallId);
-    report(event, ctx);
+    await report(event, ctx);
   });
   pi.on("ui_prompt_start", async (event, ctx) => {
     pendingInput += 1;
-    report(event, ctx);
+    await report(event, ctx);
   });
   pi.on("ui_prompt_end", async (event, ctx) => {
     pendingInput = Math.max(0, pendingInput - 1);
-    report(event, ctx);
+    await report(event, ctx);
   });
-  pi.on("session_shutdown", async () => { clearInterval(steering); });
   pi.on("agent_settled", async (event, ctx) => {
-    clearInterval(steering);
-    report(event, ctx, { events });
+    await report(event, ctx, { events });
     turn = undefined; events = []; tools.clear();
-    if (spec.managed && process.env.LF_CONTEXT_DELIVERY) {
-      try { invoke("__context-block", {}, ["--moment", "stop"]); } catch { /* Next boundary retries planning. */ }
-    }
+    if (!server) return;
+    // An unanswered turn end leaves planning pending until a later boundary.
+    await server.boundary("stop", {});
   });
 }

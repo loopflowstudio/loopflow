@@ -488,9 +488,23 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
         serde_json::from_slice(&fs::read(delivery_path).unwrap()).unwrap();
-    fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}",
-        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true}),
+    // The plugin reaches the Machine server itself, as a launch's spec says.
+    let status = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["server", "status"])
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let socket =
+        serde_json::from_slice::<serde_json::Value>(&status.stdout).unwrap()["socket"].clone();
+    let server_spec = serde_json::json!({"socket":socket,"revision":loopflow::server::wire::REVISION,
+        "min_revision":loopflow::server::wire::MIN_REVISION,"platform":std::env::consts::OS,
+        "name":"lf opencode plugin","version":"test"});
+    fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}\n{}",
+        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true,"server":server_spec}),
         serde_json::to_string(delivery_path).unwrap(),
+        include_str!("../src/harness/server_connection.js"),
         include_str!("../src/harness/context_opencode.js"))).unwrap();
     let probe = home.path().join("transform-proof.mjs");
     fs::write(
@@ -498,6 +512,8 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         r#"
 import assert from 'node:assert/strict';
 import plugin from './transform.mjs';
+// The plugin's socket is unref'd, as OpenCode's process stays up on its own.
+const alive = setInterval(() => {}, 1000);
 const hooks = {};
 await plugin.setup({session:{hook:async(name, callback) => { hooks[name] = callback; }},event:{subscribe:async function*(){}}});
 const output = {sessionID:'handoff-native',system:[],messages:[]};
@@ -509,6 +525,7 @@ const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
 await hooks.context(afterLostTransform);
 assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
 assert.equal(output.messages.length,0); // stored/native conversation remains untouched
+clearInterval(alive);
 
 "#,
     )

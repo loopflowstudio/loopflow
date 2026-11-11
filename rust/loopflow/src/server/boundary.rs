@@ -72,9 +72,14 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     };
-    let thread = callback["session_id"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Provider callback names no native conversation"))?;
+    // OpenCode's turn end names no conversation: it records no turn, and
+    // still confirms, refreshes planning and applies a pending move. A Pi
+    // event names its conversation by its session file.
+    let thread = match moment {
+        BoundaryMoment::Event => callback["sessionFile"].as_str(),
+        _ => callback["session_id"].as_str(),
+    };
+    let no_thread = || anyhow!("Provider callback names no native conversation");
     let event = callback["hook_event_name"]
         .as_str()
         .unwrap_or("SessionStart");
@@ -90,6 +95,7 @@ pub(super) fn answer(
             .as_array()
             .zip(callback["session_crons"].as_array())
             .map(|(tasks, crons)| tasks.len() + crons.len());
+        let thread = thread.ok_or_else(no_thread)?;
         store.record_native_turn(adapter, thread, yielded, open_tools)?;
         if let Some(prompt_id) = callback["prompt_id"].as_str().filter(|id| !id.is_empty()) {
             let prompt = if yielded {
@@ -110,13 +116,33 @@ pub(super) fn answer(
     if let Some(inbox) = inbox {
         store.record_agent_inbox(adapter, inbox)?;
     }
+    if *moment == BoundaryMoment::Event {
+        crate::harness::pi::observe_native(store, adapter, callback)?;
+        // Pi takes a steer only while a turn runs; outside one it would be
+        // stored without starting a run, so the event answers none.
+        let running = callback["turn"].is_string() && callback["type"] != "agent_settled";
+        if !running {
+            let waiting =
+                store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+            return Ok((
+                SessionBoundaryAnswer {
+                    steers: None,
+                    update: None,
+                    waiting,
+                },
+                None,
+            ));
+        }
+    }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
         // for the next prompt, whose hook always asks.
         store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
         // Codex keeps its turns on its app-server; read them now that one
         // ended. A Claude Session records none.
-        let codex = connection.map(|(endpoint, _)| (PathBuf::from(endpoint), thread.into()));
+        let codex = connection
+            .zip(thread)
+            .map(|((endpoint, _), thread)| (PathBuf::from(endpoint), thread.into()));
         let after = AfterStop {
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
@@ -124,6 +150,7 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     }
+    let thread = thread.ok_or_else(no_thread)?;
     let (steers, waiting) =
         claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
     let update = crate::harness::task_updates::claim(store, adapter, thread).unwrap_or_else(|error| {
@@ -351,6 +378,17 @@ mod tests {
         SteerAdapter,
         std::path::PathBuf,
     ) {
+        fixture_on("native")
+    }
+
+    fn fixture_on(
+        thread: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteStore,
+        SteerAdapter,
+        std::path::PathBuf,
+    ) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
@@ -374,7 +412,7 @@ mod tests {
         store
             .with_provider_context(
                 &adapter,
-                "native",
+                thread,
                 NativeBoundary::Activate { source: "startup" },
                 || Ok(()),
             )
@@ -448,6 +486,37 @@ mod tests {
         let (answered, _) = answer(&store, &tool("second", &[steers.batch])).unwrap();
         assert_eq!((answered.steers, answered.waiting), (None, false));
         assert_eq!(evidence(), "emitted");
+    }
+
+    /// A Pi event is recorded, and answers steers only while a turn runs:
+    /// outside one, Pi would store the steer without starting a run.
+    #[test]
+    fn a_pi_event_answers_steers_only_during_a_turn() {
+        let (_home, store, adapter, delivery) = fixture_on("/pi/session.jsonl");
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let event = |callback: serde_json::Value| {
+            let mut callback = callback;
+            callback["sessionFile"] = "/pi/session.jsonl".into();
+            answer(
+                &store,
+                &boundary(BoundaryMoment::Event, &adapter, &delivery, callback),
+            )
+            .unwrap()
+        };
+        let (idle, after) =
+            event(serde_json::json!({"type":"ui_prompt_end","openTools":0,"pendingInput":0}));
+        assert_eq!(
+            (idle.steers, idle.waiting, after.is_none()),
+            (None, false, true)
+        );
+        let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
+            "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
+        assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
+            "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
+        assert_eq!((settled.steers, settled.waiting), (None, true));
     }
 
     /// A checkout that moved since launch: the server points the delivery
@@ -648,6 +717,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gaps, 1);
+    }
+
+    /// OpenCode reports a managed turn end with no callback body.
+    #[test]
+    fn a_turn_end_naming_no_conversation_still_confirms_and_leaves_work_for_after() {
+        let (_home, store, adapter, delivery) = fixture();
+        store
+            .save_session_steer("session", "Fixture author", "PRINTED_BEFORE")
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t"}),
+        );
+        let printed = answer(&store, &tool).unwrap().0.steers.unwrap().batch;
+        let mut stop = boundary(
+            BoundaryMoment::Stop,
+            &adapter,
+            &delivery,
+            serde_json::json!({}),
+        );
+        stop.printed = vec![printed];
+        let (answered, after) = answer(&store, &stop).unwrap();
+        assert_eq!(answered.steers, None);
+        assert_eq!(after.unwrap().session.as_deref(), Some("session"));
+        assert_eq!(
+            store.session_steers("session", 0, 8).unwrap().items[0].evidence,
+            "emitted"
+        );
+        let bare_tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({}),
+        );
+        assert!(answer(&store, &bare_tool).is_err());
     }
 
     #[test]

@@ -963,8 +963,8 @@ where
     )
 }
 
-/// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
-/// which keeps the pane current after the Task leaves the plan.
+/// The full Task reading used by Desktop and terminal Task views, plus the
+/// Desktop row that keeps the pane current after the Task leaves the plan.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopTaskPane {
     #[serde(flatten)]

@@ -60,6 +60,12 @@ stream with its current reading. Status I/O, including connect, is nonblocking.
 This is temporary presentation, not a viewer registry or execution authority.
 Plain CLI server relays retain their Ctrl+R/Ctrl+] interaction.
 
+Local terminals reconnect directly to the same execution owner if their socket
+closes or stops answering. Recovery never starts another provider or replays
+typing; another viewer's input and geometry claims stay with it. If the first
+reconnection fails, Ctrl+R retries and Ctrl+] closes the viewer. Initial attachment
+failures and command pipes still return their errors.
+
 Leaving a terminal relay restores keyboard and drawing modes at the current
 cursor position. Returning to the shell must not home the cursor or overwrite
 the command's output.
@@ -151,6 +157,9 @@ A local attachment waits up to five seconds for acknowledgement. Over command
 pipes it allows sixty seconds for SSH setup and destination Session resolution. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
 acknowledged, the attachment stays while the owner answers its heartbeats.
+Heartbeat intervals and timeouts use monotonic uptime, so laptop sleep does not
+expire a local connection. The detached Session retention policy still counts
+wall time.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal

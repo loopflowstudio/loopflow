@@ -5,11 +5,23 @@ This checkout documents the planned contract; implementation and authenticated
 acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
 
+Read the shipping docs in `docs/server.md` (phone prerequisites) and
+`rust/loopflow/src/server/README.md` (attach exchange, identity, expiry and
+recovery) when integrating the transport. The existing docs cover the chosen
+direction and need no further rewrite before integration.
+
 ## Transport dependency — November 11, 2026 UTC
 
-At 20:53 and 21:27 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
+At 22:06 UTC, the same PR query reported `OPEN`, `mergedAt: null`,
+`autoMergeRequest: null`, and a new head
+`2a23883cb399fc5d7de180a024cc8fac4e49fdbe`. Fetched main remained at
+`1570bef610a0a0cee0402ecc37d3a31461b213a8`, still without
+`server/mobile.rs` or `server/ticket.rs`. The dependency remains unmet;
+the code findings below describe the previously inspected head, not this new one.
+
+At 21:30 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
 reported `OPEN`, `mergedAt: null`, `autoMergeRequest: null`, and head
-`bfd4244858864279ca13450c9f5f102c5554643c`, unchanged from 20:50 UTC.
+`bfd4244858864279ca13450c9f5f102c5554643c`, unchanged from 21:27 UTC.
 Fetched main remained at
 `1570bef610a0a0cee0402ecc37d3a31461b213a8`; `git ls-tree` confirmed neither
 `server/mobile.rs` nor `server/ticket.rs` was present. Implementation and

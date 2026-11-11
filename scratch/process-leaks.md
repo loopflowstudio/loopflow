@@ -43,3 +43,21 @@ Checks:
   reintroduces the leak silently. GhosttyKit forks panes, so the one-place
   fix is not ours. Leave the call-site form; no lint.
 - Open: which input holds an owner (`scratch/questions.md`, 1a-1d).
+
+Next implement: the report's "Owners with no open Session" group hides what
+it is. Read 19:10: all nine (PIDs 8687 8933 24677 32670 55749 88963 89413
+89840 92273) are Desktop shells (`session serve --terminal -- /bin/sh -c
+# Runs only on creation…`), 26-32 h old, ppid 1, `/bin/zsh -l` alive, 0 viewers,
+rollover "keeps its lf until it exits". `lsof -p 8687` also shows fd 4 on
+`~/.lf/run/desktop/com.loopflow.mac.sock`, inherited from Desktop.
+
+- `process_audit.py`: classify a shell owner by its command line; name the
+  group "Desktop shells with no viewer"; drop "or a conversation that ended".
+  Per shell, show its Task and that Task's state.
+- The transport README ends a Desktop shell on Close or fifteen minutes after
+  its Task is completed and released; Hide and Desktop exit keep it. A shell
+  whose Task is done, abandoned or gone and that is hours old is an owner
+  lifetime bug (outcome 3): find why its close never ran, fix it with a test.
+  If every one belongs to an unfinished Task, say that in the report row and
+  add a shell row to the troubleshooting table (stopping it loses the shell's
+  jobs and environment; its saved screen stays).

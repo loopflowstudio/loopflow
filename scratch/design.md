@@ -16,10 +16,14 @@ reservations.
 The server tree is unchanged from the previously inspected
 `3f1a7d434736779139695ba4c91ebf8245c4e121`.
 
-At November 11 03:43 and 04:17 UTC, GitHub reports PR #1812 open and unmerged at
-that head, with no auto-merge. Freshly fetched main remains
-`922830b0be1c8030c18e467269c7468a1a33f8d3`, still without `server/mobile.rs`
-or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.
+At November 11 04:21 UTC, GitHub reported PR #1812 open and unmerged at
+that head, with no auto-merge; main was
+`922830b0be1c8030c18e467269c7468a1a33f8d3`.
+At 04:54 UTC, GitHub still reports that PR open and unmerged at the same head.
+Freshly fetched main is now `b18387f17430676b3435b9e48740be9586ed7625`,
+still without `server/mobile.rs` or `server/ticket.rs`.
+`lf task status LOO-718 --json` still places it at `feature`'s `demo` step,
+with PR settlement not armed.
 
 Implementation and delivery wait for LOO-718 to land; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope.

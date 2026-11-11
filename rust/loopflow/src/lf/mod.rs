@@ -1714,6 +1714,9 @@ pub struct SessionListArgs {
     /// Only conversations available for your input
     #[arg(long)]
     pub available: bool,
+    /// Leave out raw conversations: a plain `claude` or `codex` lf never launched
+    #[arg(long)]
+    pub no_raw: bool,
     /// Maximum conversations; 0 reads the complete matching inventory
     #[arg(long, default_value_t = 100)]
     pub limit: usize,

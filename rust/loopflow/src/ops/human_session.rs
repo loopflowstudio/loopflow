@@ -604,7 +604,8 @@ pub(crate) async fn list(
 /// selection by any of those leaves them out. One open in a Task's checkout
 /// counts toward that Task.
 fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
-    !filter.orphan
+    filter.raw
+        && !filter.orphan
         && !filter.blocked
         && !filter.history
         && filter.on.is_none()

@@ -338,6 +338,7 @@ pub(crate) fn list_filter(
         blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
+        raw: !args.no_raw,
         repo: if args.all {
             None
         } else {

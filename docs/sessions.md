@@ -126,6 +126,10 @@ While it is open, it shows up in `lf session list` for its checkout under its
 provider ID, marked `raw`, with its current turn (below). Listing it creates no
 Session.
 
+```bash
+lf session list --no-raw           # only conversations lf started
+```
+
 ## See what each one is doing
 
 ```bash
@@ -159,7 +163,7 @@ turn runs. A missed filesystem event is caught by a periodic reread.
 | when the last turn ended, or that it was interrupted | a turn cut off by a crash, until the provider process is gone |
 | the last turn's input, cached and output tokens, and its model | |
 
-A conversation read this way is waiting on you when its turn ended, was
+A conversation read this way is available for you when its turn ended, was
 interrupted, or reads `asked a question`; `lf session list --available` lists
 it. A turn stopped on a permission prompt still reads as `turn running`; lf
 doesn't guess otherwise. Sessions lf manages also get that state from the

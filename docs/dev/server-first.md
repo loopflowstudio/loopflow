@@ -115,16 +115,16 @@ Sessions:
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue.
 
-Bare and raw conversations have neither signal. For them "waiting on you" is
+Bare and raw conversations have neither signal. They read as available from
 what the transcript shows: a question with no answer yet, or a turn that
-ended. Not built: such a turn reads as running today.
+ended.
 
 Codex history reads from its rollout files; no app-server call is needed for
 turn state or usage. Rollouts under `~/.codex/sessions` read on November 10,
 2026 carry `event_msg` records of type `task_started`, `task_complete` (with
 `turn_id`, `started_at`, `completed_at`), `turn_aborted` and `token_count`
 (`info.last_token_usage`, `info.total_token_usage`). They carry no approval
-or input requests, so "waiting on you" stays with the status reports above.
+or input requests, so availability there stays with the status reports above.
 A Claude Code 2.1.322 transcript read the same day ends a turn with an
 `assistant` entry whose `stop_reason` is `end_turn`, usually followed by a
 `system` entry of subtype `turn_duration` (33 of 49 turns in one transcript),

@@ -968,6 +968,32 @@ async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
 }
 
 #[test]
+fn no_raw_leaves_raw_conversations_out_of_the_list() {
+    use clap::Parser;
+    let lists_raw = |argv: &[&str]| {
+        let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
+        let Some(crate::lf::Commands::Session {
+            cmd: crate::lf::SessionCommand::List(args),
+        }) = cli.command
+        else {
+            panic!("not a session list");
+        };
+        let filter =
+            crate::lf::commands::session::list_filter(&args, std::path::Path::new("/")).unwrap();
+        super::lists_raw(&filter)
+    };
+    assert!(lists_raw(&["lf", "session", "list", "--all"]));
+    assert!(lists_raw(&[
+        "lf",
+        "session",
+        "list",
+        "--all",
+        "--available"
+    ]));
+    assert!(!lists_raw(&["lf", "session", "list", "--all", "--no-raw"]));
+}
+
+#[test]
 fn only_a_consumed_first_launch_offers_try_again() {
     use super::{SessionActionKind::*, SessionState::*};
     let kinds = |state, history, occupied, consumed| -> Vec<_> {

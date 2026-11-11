@@ -223,6 +223,8 @@ pub struct SessionFilter {
     pub interactive: Option<bool>,
     /// Only conversations available for a person, chosen before paging.
     pub available: bool,
+    /// Also list raw conversations: providers lf never launched, which have no Session.
+    pub raw: bool,
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
@@ -246,6 +248,7 @@ impl Default for SessionFilter {
             search: None,
             interactive: Some(true),
             available: false,
+            raw: true,
             history: false,
             limit: 100,
             offset: 0,

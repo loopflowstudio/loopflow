@@ -710,6 +710,11 @@ Checks:
   `terminal_id: null` in `session.attach`),
   Desktop suites, the full matrix. Gate/CI.
 
+- Compress: `transport::resize_foreground` and `transport::is_raw` shared by
+  owner and holder; `start_held` answers a `TerminalId`; one registry `Entry::new`.
+  `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session
+  terminal_title`: 124 passed; the build-replacement `transport_tests` case passes.
+
 Found on the way: frames arriving with the holder's `reading` answer were
 left undecoded until more output came (fixed in `Source::read`). A test
 holder idles out in 2 s, too short beside a slow store open; fixtures set

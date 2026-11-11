@@ -69,17 +69,15 @@ async fn start(
         "resume".into(),
         session.id.as_str().to_owned(),
     ];
-    let host = crate::transport::start_held(&argv, &session.cwd, Some(&session.id), &|_| {})
+    let terminal = crate::transport::start_held(&argv, &session.cwd, Some(&session.id), &|_| {})
         .context("start its terminal")?;
-    let crate::transport::Host::Terminal(terminal) = &host else {
-        anyhow::bail!("a held start answered an owner process");
-    };
+    let host = crate::transport::Host::Terminal(terminal.clone());
     let deadline = Instant::now() + BIND_TIMEOUT;
     loop {
         if store.sqlite.session_transport(&session.id)?.as_ref() == Some(&host) {
             return Ok(ResumeOutcome::Resumed);
         }
-        if !store.sqlite.terminal_running(terminal)? {
+        if !store.sqlite.terminal_running(&terminal)? {
             return Ok(ResumeOutcome::Failed {
                 reason: format!(
                     "it stopped while resuming; `lf resume {}` shows why",

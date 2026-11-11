@@ -55,8 +55,8 @@ impl Meta {
         place.terminal(terminal.as_str()).join("meta.json")
     }
 
-    fn read(place: &Place, terminal: &str) -> Option<Self> {
-        let bytes = std::fs::read(place.terminal(terminal).join("meta.json")).ok()?;
+    fn read(place: &Place, terminal: &TerminalId) -> Option<Self> {
+        let bytes = std::fs::read(Self::path(place, terminal)).ok()?;
         serde_json::from_slice(&bytes).ok()
     }
 
@@ -272,8 +272,6 @@ impl Registry {
         }
     }
 
-    /// Start `start`'s command in this build's holder and host it. Repeating a
-    /// request answers the terminal it already started.
     /// The running terminal started for `session`.
     pub(crate) fn session_terminal(&self, session: &LfSessionId) -> Option<TerminalId> {
         self.live
@@ -284,6 +282,8 @@ impl Registry {
             .map(|(terminal, _)| terminal.clone())
     }
 
+    /// Start `start`'s command in this build's holder and host it. Repeating a
+    /// request answers the terminal it already started.
     pub(crate) fn start(&self, start: Start) -> Result<TerminalId> {
         let mut started = self.started.lock().expect("registry lock poisoned");
         if let Some(terminal) = started.get(&start.request) {
@@ -363,19 +363,14 @@ impl Registry {
                 }
             }
         };
-        let hosted = Hosted::new(
-            Host::Terminal(terminal.clone()),
-            true,
-            None,
+        let entry = Entry::new(
+            &self.place,
+            &terminal,
+            pid,
+            0,
             meta.control_key,
-            self.waker.try_clone()?,
+            &self.waker,
         )?;
-        let entry = Entry {
-            hosted,
-            child: Child::Held(Source::new(self.place.clone(), terminal.clone(), pid, 0)),
-            place: self.place.clone(),
-            nudge: None,
-        };
         self.live
             .lock()
             .expect("registry lock poisoned")
@@ -479,7 +474,7 @@ impl Registry {
         held: &Held,
         waker: &UnixStream,
     ) -> Result<Entry> {
-        let meta = Meta::read(place, terminal.as_str())
+        let meta = Meta::read(place, terminal)
             .with_context(|| format!("terminal {terminal} has no readable meta.json"))?;
         self.started
             .lock()
@@ -489,31 +484,23 @@ impl Registry {
             .lock()
             .expect("registry lock poisoned")
             .insert(terminal.clone(), meta.session.clone());
-        let mut hosted = Hosted::new(
-            Host::Terminal(terminal.clone()),
-            true,
-            None,
+        let mut entry = Entry::new(
+            place,
+            terminal,
+            held.pid,
+            held.ring_start,
             meta.control_key,
-            waker.try_clone()?,
+            waker,
         )?;
-        hosted.restore_size(held.rows, held.cols)?;
+        entry.hosted.restore_size(held.rows, held.cols)?;
         // The screen is rebuilt from the ring, then the program repaints what
         // the ring no longer holds of the visible screen.
-        Ok(Entry {
-            hosted,
-            child: Child::Held(Source::new(
-                place.clone(),
-                terminal.clone(),
-                held.pid,
-                held.ring_start,
-            )),
-            place: place.clone(),
-            nudge: Some(Nudge::Replaying {
-                until: held.written,
-                rows: held.rows,
-                cols: held.cols,
-            }),
-        })
+        entry.nudge = Some(Nudge::Replaying {
+            until: held.written,
+            rows: held.rows,
+            cols: held.cols,
+        });
+        Ok(entry)
     }
 }
 
@@ -530,11 +517,7 @@ fn holders() -> Vec<Place> {
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
             let short = name.strip_prefix("holder-")?.strip_suffix(".sock")?;
-            Some(Place {
-                socket: entry.path(),
-                lock: private.join(format!("holder-{short}.lock")),
-                state: crate::store::lf_home_dir().join("holders").join(short),
-            })
+            Place::of(short).ok()
         })
         .collect()
 }
@@ -712,6 +695,29 @@ fn run(
 }
 
 impl Entry {
+    /// Host `terminal`, whose child is `pid`, reading its output from byte `at`.
+    fn new(
+        place: &Place,
+        terminal: &TerminalId,
+        pid: u32,
+        at: u64,
+        control_key: String,
+        waker: &UnixStream,
+    ) -> Result<Self> {
+        Ok(Self {
+            hosted: Hosted::new(
+                Host::Terminal(terminal.clone()),
+                true,
+                None,
+                control_key,
+                waker.try_clone()?,
+            )?,
+            child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
+            place: place.clone(),
+            nudge: None,
+        })
+    }
+
     /// Ask a program whose screen was rebuilt from the ring to repaint: one
     /// column narrower, then back.
     fn nudge(&mut self) {

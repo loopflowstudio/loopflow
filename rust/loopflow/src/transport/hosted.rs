@@ -51,14 +51,6 @@ pub(super) struct Local {
     pub shell_jobs: Option<crate::os_process::TerminalJobs>,
 }
 
-fn is_raw(fd: RawFd) -> bool {
-    // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
-    unsafe {
-        let mut termios = std::mem::zeroed::<libc::termios>();
-        libc::tcgetattr(fd, &mut termios) == 0 && termios.c_lflag & libc::ICANON == 0
-    }
-}
-
 impl Child {
     fn pid(&self) -> u32 {
         match self {
@@ -76,18 +68,7 @@ impl Child {
                     .as_ref()
                     .expect("terminal input stays open")
                     .as_raw_fd();
-                super::resize(fd, rows, cols)?;
-                // Resizing to the same dimensions sends no signal. Ask the actual
-                // foreground program to repaint too.
-                // SAFETY: the descriptor is our PTY; only its current foreground
-                // group receives the nonterminating signal.
-                unsafe {
-                    let foreground = libc::tcgetpgrp(fd);
-                    if foreground > 1 {
-                        libc::kill(-foreground, libc::SIGWINCH);
-                    }
-                }
-                Ok(())
+                super::resize_foreground(fd, rows, cols)
             }
             Self::Held(source) => {
                 source.resize(rows, cols);
@@ -142,7 +123,7 @@ impl Child {
                         chunks.push(Chunk {
                             stream: *stream,
                             bytes: bytes[..n].to_vec(),
-                            raw: is_raw(reader.as_raw_fd()),
+                            raw: super::is_raw(reader.as_raw_fd()),
                         });
                     }
                 }
@@ -168,7 +149,7 @@ impl Child {
             Self::Local(local) => local
                 .readers
                 .first()
-                .is_some_and(|(_, reader)| is_raw(reader.as_raw_fd())),
+                .is_some_and(|(_, reader)| super::is_raw(reader.as_raw_fd())),
             Self::Held(source) => source.is_raw(),
         }
     }

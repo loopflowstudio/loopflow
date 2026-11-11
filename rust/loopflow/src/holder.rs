@@ -57,7 +57,8 @@ pub struct Place {
 }
 
 impl Place {
-    /// The place of the holder built from the executable hashing to `build`.
+    /// The place of the holder built from the executable hashing to `build`,
+    /// a SHA-256 or its first twelve digits.
     pub fn of(build: &str) -> Result<Self> {
         let short = build.get(..12).context("holder build is a SHA-256")?;
         let private = crate::transport::private_directory()?;
@@ -179,8 +180,7 @@ impl Terminal {
                     return;
                 }
                 Ok(n) => {
-                    let raw = attributes(master.as_raw_fd())
-                        .is_some_and(|termios| termios.c_lflag & libc::ICANON == 0);
+                    let raw = crate::transport::is_raw(master.as_raw_fd());
                     self.push(&bytes[..n], raw);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return,
@@ -504,18 +504,7 @@ impl Holder<'_> {
                     held.rows = rows;
                     held.cols = cols;
                     if let Some(master) = &held.master {
-                        let fd = master.as_raw_fd();
-                        let _ = crate::transport::resize(fd, rows, cols);
-                        // Resizing to the same dimensions sends no signal; ask
-                        // the foreground program to repaint either way.
-                        // SAFETY: the descriptor is this holder's PTY; only its
-                        // foreground group receives the nonterminating signal.
-                        unsafe {
-                            let foreground = libc::tcgetpgrp(fd);
-                            if foreground > 1 {
-                                libc::kill(-foreground, libc::SIGWINCH);
-                            }
-                        }
+                        let _ = crate::transport::resize_foreground(master.as_raw_fd(), rows, cols);
                     }
                     Answer::Done
                 }

@@ -173,9 +173,7 @@ impl Host {
             Self::Terminal(_) => None,
         }
     }
-}
 
-impl Host {
     /// A connection that speaks the viewer protocol with this host. An owner
     /// listens on its own socket; held terminals share the server's entrance
     /// and are named on the connection's first line.
@@ -343,7 +341,7 @@ fn delegate(
             task_run,
             preview_session.or(json_session),
         ) {
-            start_held(&argv, &cwd, session.as_ref(), &|_| {})?
+            Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
         } else {
             Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
         };
@@ -395,7 +393,7 @@ pub(crate) fn start_held(
     cwd: &Path,
     session: Option<&LfSessionId>,
     inherit: &dyn Fn(&mut Command),
-) -> Result<Host> {
+) -> Result<crate::id::TerminalId> {
     use crate::server::wire::{Operation, ServerOperation, SessionStarted};
     let mut edits = Command::new(&argv[0]);
     inherit(&mut edits);
@@ -426,7 +424,7 @@ pub(crate) fn start_held(
     }))?;
     let started: SessionStarted = serde_json::from_value(answer.result)
         .context("Loopflow server answered session.start without a terminal")?;
-    Ok(Host::Terminal(started.terminal_id))
+    Ok(started.terminal_id)
 }
 
 pub(crate) fn start(
@@ -587,6 +585,30 @@ pub(crate) fn resize(fd: RawFd, rows: u16, cols: u16) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Resize the PTY at `fd` and ask its foreground program to repaint: resizing
+/// to the same dimensions sends no signal.
+pub(crate) fn resize_foreground(fd: RawFd, rows: u16, cols: u16) -> io::Result<()> {
+    resize(fd, rows, cols)?;
+    // SAFETY: the descriptor is a PTY this process holds; only its current
+    // foreground group receives the nonterminating signal.
+    unsafe {
+        let foreground = libc::tcgetpgrp(fd);
+        if foreground > 1 {
+            libc::kill(-foreground, libc::SIGWINCH);
+        }
+    }
+    Ok(())
+}
+
+/// Whether the terminal at `fd` is raw (no line editing).
+pub(crate) fn is_raw(fd: RawFd) -> bool {
+    // SAFETY: tcgetattr writes into a live termios; the descriptor is borrowed.
+    unsafe {
+        let mut termios = std::mem::zeroed::<libc::termios>();
+        libc::tcgetattr(fd, &mut termios) == 0 && termios.c_lflag & libc::ICANON == 0
+    }
 }
 
 /// The last `SPOOL` bytes of one viewer's stream, so a resume continues from

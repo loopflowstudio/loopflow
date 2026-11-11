@@ -127,12 +127,6 @@ impl Client {
         })
     }
 
-    pub fn restore(&mut self, terminal: &str) -> Result<()> {
-        self.done(Request::Restore {
-            terminal: terminal.to_owned(),
-        })
-    }
-
     pub fn forget(&mut self, terminal: &str) -> Result<()> {
         self.done(Request::Forget {
             terminal: terminal.to_owned(),

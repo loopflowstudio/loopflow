@@ -702,3 +702,7 @@ Checks, each failing with the write removed:
 - Catch-up discard is covered by
   `transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`;
   no new test.
+
+- Compress after the `held_terminal_id` write: nothing to reduce. The held
+  terminal stays an explicit `record_process_in` argument (the store does not
+  read the transport handoff); `LfProcess` gains no field.

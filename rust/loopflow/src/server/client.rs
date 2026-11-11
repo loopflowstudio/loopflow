@@ -90,7 +90,7 @@ pub fn status() -> Result<Status> {
         }
         Ok(Some(ServerMessage::Error { code, message, .. })) => Some(format!("{code}: {message}")),
         Ok(Some(_)) => Some("Server did not answer the readiness request".into()),
-        Err(error) => Some(stalled(error, "answer the readiness request").to_string()),
+        Err(error) => Some(stalled(error, "answer the readiness request", HANDSHAKE).to_string()),
     };
     status.ready = status.error.is_none();
     Ok(status)
@@ -137,29 +137,29 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        let connection = Self::start(connect(path)?, path)?;
+        let connection = Self::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
         connection.set_read_timeout(None)?;
         Ok(connection)
     }
 
-    /// Hello and welcome within [`HANDSHAKE`], which stays set until the caller
+    /// Hello and welcome within `within`, which stays set until the caller
     /// has what it opened the connection for.
-    fn start(stream: UnixStream, path: &Path) -> Result<Self> {
-        stream.set_read_timeout(Some(HANDSHAKE))?;
+    fn start(
+        stream: UnixStream,
+        path: &Path,
+        client: ClientIdentity,
+        within: Duration,
+    ) -> Result<Self> {
+        stream.set_read_timeout(Some(within))?;
         let mut socket = Socket::new(stream)?;
         socket.send(&ClientMessage::Hello(Hello {
             revision: REVISION,
             min_revision: MIN_REVISION,
-            client: ClientIdentity {
-                kind: "cli".into(),
-                platform: std::env::consts::OS.into(),
-                name: "lf".into(),
-                version: crate::build_info::BUILD_VERSION.into(),
-            },
+            client,
         }))?;
         let answer = socket
             .receive()
-            .map_err(|error| stalled(error, "welcome the connection"))?;
+            .map_err(|error| stalled(error, "welcome the connection", within))?;
         match answer.map(accepted).transpose()? {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
@@ -366,6 +366,35 @@ impl Connection {
     }
 }
 
+fn identity(kind: &str, name: &str) -> ClientIdentity {
+    ClientIdentity {
+        kind: kind.into(),
+        platform: std::env::consts::OS.into(),
+        name: name.into(),
+        version: crate::build_info::BUILD_VERSION.into(),
+    }
+}
+
+/// A provider hook's one request: connecting, `hello` and the answer share
+/// `within`, so a stopped, restarting or slow server costs the turn at most that.
+pub fn hook_request(path: &Path, operation: Operation, within: Duration) -> Result<Response> {
+    let deadline = std::time::Instant::now() + within;
+    let stream = connect(path)?;
+    stream.set_write_timeout(Some(within))?;
+    let client = identity("hook", "lf __context-block");
+    let mut connection = Connection::start(stream, path, client, within)?;
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    anyhow::ensure!(
+        !left.is_zero(),
+        "Loopflow server did not answer within {}s",
+        within.as_secs()
+    );
+    connection.set_read_timeout(Some(left))?;
+    connection
+        .request(operation)
+        .map_err(|error| stalled(error, "answer", within))
+}
+
 /// A response or error for `id`, or an error for the whole connection.
 fn answers(message: &ServerMessage, id: &str) -> bool {
     match message {
@@ -421,13 +450,13 @@ pub fn attach(
     session: &LfSessionId,
     owner: Option<&LfProcessId>,
 ) -> Result<UnixStream> {
-    let mut connection = Connection::start(connect(path)?, path)?;
+    let mut connection = Connection::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),
             owner_lf_process_id: owner.cloned(),
         }))
-        .map_err(|error| stalled(error, "issue the attach ticket"))?;
+        .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
     let issued: SessionAttached = serde_json::from_value(issued.result)
         .context("Loopflow server answered session.attach without a ticket")?;
     drop(connection);
@@ -439,7 +468,7 @@ pub fn attach(
     })?;
     match socket
         .receive()
-        .map_err(|error| stalled(error, "open the owner bridge"))?
+        .map_err(|error| stalled(error, "open the owner bridge", HANDSHAKE))?
     {
         Some(ServerMessage::Bridged { .. }) => {}
         Some(ServerMessage::Error {
@@ -463,8 +492,8 @@ pub fn attach(
     Ok(stream)
 }
 
-/// A wait that [`HANDSHAKE`] cut short, named for the answer it waited for.
-fn stalled(error: anyhow::Error, answer: &str) -> anyhow::Error {
+/// A wait that `within` cut short, named for the answer it waited for.
+fn stalled(error: anyhow::Error, answer: &str, within: Duration) -> anyhow::Error {
     match error
         .root_cause()
         .downcast_ref::<std::io::Error>()
@@ -472,7 +501,7 @@ fn stalled(error: anyhow::Error, answer: &str) -> anyhow::Error {
     {
         Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => anyhow::anyhow!(
             "Loopflow server did not {answer} within {}s; check `lf server status`",
-            HANDSHAKE.as_secs()
+            within.as_secs()
         ),
         _ => error,
     }
@@ -563,7 +592,7 @@ fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
         );
         stream
             .read_exact(&mut byte)
-            .map_err(|error| stalled(error.into(), "admit the ticket"))?;
+            .map_err(|error| stalled(error.into(), "admit the ticket", HANDSHAKE))?;
         line.push(byte[0]);
     }
     match accepted(serde_json::from_slice(&line)?)? {
@@ -580,7 +609,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::time::Instant;
 
-    use super::{attach, Connection, HANDSHAKE};
+    use super::{attach, hook_request, Connection, HANDSHAKE};
     use crate::id::{LfProcessId, LfSessionId};
     use crate::server::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
@@ -657,6 +686,49 @@ mod tests {
             error.to_string(),
             "Loopflow server did not issue the attach ticket within 10s; check `lf server status`"
         );
+    }
+
+    fn boundary() -> crate::server::wire::Operation {
+        crate::server::wire::Operation::Server(
+            crate::server::wire::ServerOperation::SessionBoundary(
+                crate::server::wire::SessionBoundary {
+                    moment: crate::server::wire::BoundaryMoment::Tool,
+                    delivery: "/nonexistent/delivery.json".into(),
+                    adapter: None,
+                    callback: serde_json::json!({}),
+                    gap: None,
+                    printed: Vec::new(),
+                },
+            ),
+        )
+    }
+
+    #[test]
+    fn a_hook_gives_up_on_a_slow_server_within_its_one_deadline() {
+        let within = std::time::Duration::from_millis(300);
+        for welcomes in [false, true] {
+            let (_home, path) = silent_server(welcomes);
+            let started = Instant::now();
+            let error = hook_request(&path, boundary(), within).expect_err("server stalled");
+            let elapsed = started.elapsed();
+            assert!(elapsed >= within, "gave up early after {elapsed:?}");
+            assert!(elapsed < within * 3, "waited {elapsed:?}");
+            assert!(error.to_string().contains("did not"), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn a_hook_with_no_server_fails_at_once() {
+        let home = tempfile::tempdir().unwrap();
+        let started = Instant::now();
+        let error = hook_request(
+            &home.path().join("machine.sock"),
+            boundary(),
+            std::time::Duration::from_secs(2),
+        )
+        .expect_err("no server");
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(error.to_string().contains("Loopflow server unavailable"));
     }
 
     #[test]

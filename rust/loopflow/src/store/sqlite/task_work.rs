@@ -54,13 +54,16 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
+/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
+/// that cwd or one of its ancestors as its worktree, so candidates come from
+/// `idx_tasks_worktree` rather than every Task; membership then decides.
 pub(super) fn session_tasks(session: &str) -> String {
-    // Inventory asks this for every Session. Read the narrow checkout columns
-    // once, instead of revisiting full Task rows (including large briefs).
     format!(
-        "WITH task_memberships AS MATERIALIZED (
-            SELECT id,worktree,checkout_machine_id FROM tasks
-         ) SELECT tw.id FROM task_memberships tw WHERE {} ORDER BY tw.id",
+        "SELECT tw.id FROM tasks tw WHERE (tw.id={session}.task_id OR tw.worktree IN (
+         WITH RECURSIVE up(path) AS (SELECT rtrim({session}.cwd,'/')
+           UNION ALL SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT path FROM up UNION ALL SELECT path||'/' FROM up))
+         AND {} ORDER BY tw.id",
         session_membership(session)
     )
 }

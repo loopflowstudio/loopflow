@@ -18,6 +18,15 @@ queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
+After the final `lf sync`, run `lf scratch clear` and check that `scratch/`
+contains only `.gitkeep` before arming. A sync can restore notes retained during
+conflict resolution after an earlier cleanup. Check the final tree with the
+same predicate as CI:
+
+```bash
+test -d scratch && test -z "$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)"
+```
+
 The repository owns the `scratch-clear` classifier; the native CLI does not exempt
 a failing required check by name. Delivery cleanup preserves existing scratch
 content, so repositories retaining it must define their own candidate policy.

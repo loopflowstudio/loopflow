@@ -178,10 +178,12 @@ fn live_lf_processes(
         if Some(&record.id) == current.as_ref() {
             continue;
         }
-        if let (Some(pid), Some(started)) = (record.pid, record.os_started_at) {
-            if providers.contains(&(pid, started)) {
-                continue;
-            }
+        if record
+            .pid
+            .zip(record.os_started_at)
+            .is_some_and(|process| providers.contains(&process))
+        {
+            continue;
         }
         let mut live_pid = None;
         let receipt = recorded_process_receipt(store, &record);

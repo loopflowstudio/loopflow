@@ -2702,9 +2702,8 @@ fn replace_view(
     bail!("{skew} and {failure}; the agent keeps running. Run lf install, then lf session attach --terminal {terminal}")
 }
 
-/// The code a held terminal's agent exited with, when `error` is a server's
-/// answer that the terminal ended and the store recorded its exit.
-/// The code and Session provider of an agent a refused attach says exited.
+/// The code and Session provider of a held terminal's agent, when `error` is a
+/// server's answer that the terminal ended and the store recorded its exit.
 fn ended_exit(error: &anyhow::Error) -> Option<(u8, Option<String>)> {
     let data = error
         .downcast_ref::<crate::engine::Error>()?

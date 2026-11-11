@@ -2084,7 +2084,8 @@
           "type": "string"
         },
         "owner": {
-          "$ref": "#/$defs/Owner"
+          "$ref": "#/$defs/TailscaleIdentity",
+          "description": "The Machine owner's identity: their other devices are admitted."
         }
       },
       "required": [
@@ -5805,23 +5806,6 @@
         }
       ],
       "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
-    },
-    "Owner": {
-      "properties": {
-        "node": {
-          "type": "string"
-        },
-        "user": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "node",
-        "user"
-      ],
-      "type": "object"
     },
     "OwnershipKind": {
       "oneOf": [
@@ -12297,6 +12281,26 @@
         "merge_target"
       ],
       "type": "string"
+    },
+    "TailscaleIdentity": {
+      "description": "A device's Tailscale identity, as `tailscale status` and `whois` report it.",
+      "properties": {
+        "node": {
+          "description": "The device's Tailscale StableID.",
+          "type": "string"
+        },
+        "user": {
+          "description": "The Tailscale user ID that owns the device.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "user"
+      ],
+      "type": "object"
     },
     "Task": {
       "properties": {

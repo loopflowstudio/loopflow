@@ -130,13 +130,14 @@ public enum ServerClientMessage: Encodable, Sendable {
 /// Mobile access as `lf server mobile --status` reports it; Desktop reads it
 /// through that command, so no client sends `mobile.*` operations.
 public struct MachineMobileConfiguration: Codable, Sendable {
-    public struct Owner: Codable, Sendable {
+    /// A device's Tailscale identity: its StableID and the user ID that owns it.
+    public struct TailscaleIdentity: Codable, Sendable {
         public let node: String
         public let user: UInt64
     }
     public let enabled: Bool
     public let endpoint: String
-    public let owner: Owner
+    public let owner: TailscaleIdentity
 }
 
 /// What `lf server mobile --status` prints.

@@ -17,9 +17,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_rustls::{rustls, TlsAcceptor};
 
+/// A device's Tailscale identity, as `tailscale status` and `whois` report it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct Owner {
+pub struct TailscaleIdentity {
+    /// The device's Tailscale StableID.
     pub node: String,
+    /// The Tailscale user ID that owns the device.
     pub user: u64,
 }
 
@@ -27,7 +30,8 @@ pub struct Owner {
 pub struct Configuration {
     pub enabled: bool,
     pub endpoint: String,
-    pub owner: Owner,
+    /// The Machine owner's identity: their other devices are admitted.
+    pub owner: TailscaleIdentity,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -257,7 +261,7 @@ impl Host {
         })
     }
 
-    pub(super) fn identity(&self) -> Result<(Owner, Vec<IpAddr>)> {
+    pub(super) fn identity(&self) -> Result<(TailscaleIdentity, Vec<IpAddr>)> {
         let status = self.json(&["status", "--json"])?;
         let owner = owner_from_status(&status)?;
         let ips = status["Self"]["TailscaleIPs"]
@@ -286,7 +290,7 @@ impl Host {
     pub(super) fn permits(
         &self,
         peer: SocketAddr,
-        owner: &Owner,
+        owner: &TailscaleIdentity,
     ) -> Result<Option<super::ticket::Admission>> {
         let who = self.json(&["whois", "--json", "--proto=tcp", &peer.to_string()])?;
         Ok(permits_peer(&who, owner, same_device_path().exists()))
@@ -332,7 +336,7 @@ impl Host {
     }
 }
 
-fn owner_from_status(status: &Value) -> Result<Owner> {
+fn owner_from_status(status: &Value) -> Result<TailscaleIdentity> {
     anyhow::ensure!(
         status["BackendState"] == "Running",
         "Sign in to Tailscale on this Machine"
@@ -352,7 +356,7 @@ fn owner_from_status(status: &Value) -> Result<Owner> {
             .is_some_and(|s| !s.is_empty()),
         "Tailscale did not identify this Machine's owner"
     );
-    Ok(Owner {
+    Ok(TailscaleIdentity {
         node: node["ID"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -368,7 +372,11 @@ fn same_device_path() -> PathBuf {
     crate::store::lf_home_dir().join("mobile-same-device")
 }
 
-fn permits_peer(who: &Value, owner: &Owner, same_device: bool) -> Option<super::ticket::Admission> {
+fn permits_peer(
+    who: &Value,
+    owner: &TailscaleIdentity,
+    same_device: bool,
+) -> Option<super::ticket::Admission> {
     // Network identity belongs to the device, not its local OS accounts. A
     // same-host connection cannot prove which account opened it, so it is
     // refused unless this Machine opted in. Phones arrive as a distinct node.

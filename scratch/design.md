@@ -1,13 +1,9 @@
 # LOO-809: remote attach tickets
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
-This checkout currently adds documentation of the intended contract only;
-remote ticket behavior and authenticated acceptance remain unimplemented.
+This checkout documents the planned contract; implementation and authenticated
+acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
-The current `server/service.rs::Tickets` consumes local tickets before checking
-UID and expiry, with direct coverage in
-`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`; its clock is still
-`Instant`. Remote acceptance cannot run against this local-only implementation.
 
 ## Transport dependency — November 11, 2026 UTC
 
@@ -48,31 +44,26 @@ model; local/remote separation does not require a second per-ticket UID field.
 
 ## Remaining implementation and acceptance
 
-Restore terminal consume-on-attempt in the shared store without changing bulk
-redemption policy. Test matching node/user success once, different node,
-different user, and both local/remote mismatches in the shared store; every
-terminal redemption attempt consumes the ticket, including mismatches.
+Restore terminal consume-on-attempt in the shared store. Test matching node/user
+success once, replay refusal, different node, different user, and both directions
+of local/remote mismatch. Each mismatch must consume the ticket.
 
 Through authenticated control and bridge connections, test ticket issuance,
 one successful bridge, replay refusal, and consumption after an admitted
 different node or local/remote mismatch. The transport admits only the host
 owner's Tailscale user: another user's connection is rejected before WebSocket
-upgrade and cannot present a ticket. Test that rejection on both endpoints
-separately from different-user redemption in the shared store. Local UID tests
-alone cannot satisfy remote acceptance; authentication policy stays unchanged.
+upgrade and cannot present a ticket. Test that rejection on both endpoints;
+different-user redemption belongs in the shared-store test. Keep authentication
+policy unchanged.
 
 Replace ticket timing with `SystemTime`; test expiry at 60 seconds with a clock
 advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-Read the shipping docs before implementation: `docs/server.md` contains phone
-prerequisites and Desktop controls; `rust/loopflow/src/server/README.md` contains
-the ticket exchange and protocol details. Shared attachment and recovery
-rules have one source; the remote contract adds identity and sleep-aware expiry.
-Its example describes the WebSocket endpoints and links to shared semantics,
-avoiding a second description of the binary protocol and recovery behavior.
-Keep pending behavior marked planned until integration, then update the remote
-example's revision 4 anchor to revision 5 with the transport's protocol section.
+Keep the remote contract linked to shared attachment and recovery rules rather
+than repeating them. Mark it planned until integration, then update its revision
+4 anchor to the transport's revision 5 section. Keep phone prerequisites in
+`docs/server.md` consistent.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

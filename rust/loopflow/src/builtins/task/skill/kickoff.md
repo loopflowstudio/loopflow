@@ -19,7 +19,9 @@ the solution changes.
 Write down what a later agent couldn't work out again from the code, git or a
 fresh run: what people said, word for word, with the speaker's name, what a
 probe or run showed at the time, and outside facts. Never turn a reply into
-"accepted" or "approved". Cut the rest; quality per word beats volume.
+"accepted" or "approved". The active plan may also keep a few facts from docs
+and code while they explain its approach or remaining work. Remove them when
+they no longer help; quality per word beats volume.
 
 ## Keep context within budget
 
@@ -38,6 +40,14 @@ overage.
 2. **De-risk.** Find what could sink the approach and answer it: search the web,
    read docs, check APIs, run experiments. Come back with answers, not a worry
    list.
+
+   Before choosing an approach, follow the affected behavior through relevant
+   docs, implementation, callers and tests. Use indexes and targeted searches
+   to find what matters. In the plan's current architecture, keep the few facts
+   that constrain this change, with source paths and symbols. Include conflicts
+   between docs and code and unresolved questions. Prefer short findings with
+   references over excerpts or a repository survey. Check the source when a
+   decision depends on it; the plan is a map, not a replacement for reading.
 
    Start with what's already flagged: risks named in the design, the Wave's
    `GOAL.md` or `MEMORY.md`, or the chapter's KRs and metric targets. Confirm or

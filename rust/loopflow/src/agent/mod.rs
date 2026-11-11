@@ -182,6 +182,8 @@ pub struct AgentConfig {
     pub chrome: Option<bool>,
     /// Initial Codex tier; omission leaves provider configuration in charge.
     pub codex_service_tier: Option<crate::config::CodexServiceTier>,
+    /// Starting model for bare Claude selection; the authored agent stays bare for fallthrough.
+    pub claude_model: Option<String>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -247,6 +249,15 @@ impl AgentConfig {
     pub fn agent(&self) -> Result<&str, crate::error::LoadError> {
         crate::config::select_agent(self.agent.as_deref())
     }
+
+    pub(crate) fn resolved_agent(&self) -> Result<String, crate::error::LoadError> {
+        let agent = self.agent()?;
+        let (harness, model) = parse_agent(agent);
+        match (harness.as_str(), model, self.claude_model.as_deref()) {
+            ("claude", None, Some(model)) => Ok(format!("claude:{model}")),
+            _ => Ok(agent.to_owned()),
+        }
+    }
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -262,6 +273,7 @@ impl std::fmt::Debug for AgentConfig {
             )
             .field("agent", &self.agent)
             .field("codex_service_tier", &self.codex_service_tier)
+            .field("claude_model", &self.claude_model)
             .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
@@ -415,6 +427,9 @@ fn resolve_account_route_blocking(
     provider: Provider,
     launch: &AgentConfig,
 ) -> Result<Option<ProviderAccountRoute>, crate::provider_account::ProviderAccountError> {
+    let agent = launch.resolved_agent().map_err(|error| {
+        crate::provider_account::ProviderAccountError::Runtime(error.to_string())
+    })?;
     let route = match (
         launch.provider_account_id.clone(),
         launch.provider_account_authority_home.clone(),
@@ -431,10 +446,7 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
-            launch
-                .agent
-                .as_deref()
-                .and_then(|agent| parse_agent(agent).1),
+            parse_agent(&agent).1,
             launch.cwd.clone(),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
@@ -1008,7 +1020,7 @@ fn run_admitted_agent(
         }
     }
     _pin_provider_account_waiting(&mut launch, process)?;
-    let (harness, model) = parse_agent(launch.agent()?);
+    let (harness, model) = parse_agent(&launch.resolved_agent()?);
     let implicit_runtime = if process.runtime.is_none() {
         Some(_begin_process_runtime(&launch, process, &harness, model)?)
     } else {
@@ -1251,7 +1263,15 @@ fn _fallthrough_rungs(
             .then(|| crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("{harness}:{model}")))
             .into_iter()
             .flatten();
-        for rung in std::iter::once(agent.to_owned()).chain(models) {
+        let preferred = if harness == "claude" && model.is_none() {
+            launch
+                .claude_model
+                .as_ref()
+                .map(|model| format!("claude:{model}"))
+        } else {
+            None
+        };
+        for rung in std::iter::once(preferred.unwrap_or_else(|| agent.to_owned())).chain(models) {
             if !rungs.contains(&rung) {
                 rungs.push(rung);
             }
@@ -1710,7 +1730,7 @@ fn _run_agent_once(
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
-    let (harness, model) = parse_agent(launch.agent()?);
+    let (harness, model) = parse_agent(&launch.resolved_agent()?);
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
@@ -3067,5 +3087,83 @@ trust_level = "trusted"
         .unwrap()
         .args;
         assert_arg_pair(&claude, "--resume", "session-123");
+    }
+
+    #[test]
+    fn saved_claude_model_reaches_terminal_stream_and_recording() {
+        for (agent, saved, expected) in [
+            ("claude", None, None),
+            ("claude", Some("opus"), Some("opus")),
+            ("claude:fable", Some("opus"), Some("fable")),
+        ] {
+            let launch = AgentConfig {
+                agent: Some(agent.into()),
+                claude_model: saved.map(str::to_owned),
+                skip_permissions: true,
+                ..default_launch()
+            };
+            for invocation in [
+                ProviderInvocation::Terminal { session_id: None },
+                ProviderInvocation::ClaudeStream { session_id: None },
+            ] {
+                let command = build_session_command(&launch, invocation, None).unwrap();
+                let model = command
+                    .args
+                    .windows(2)
+                    .find(|pair| pair[0] == "--model")
+                    .map(|pair| pair[1].as_str());
+                assert_eq!(model, expected);
+            }
+            let request =
+                crate::session_record::AgentProcessRequest::from_prepared(&launch).unwrap();
+            assert_eq!(parse_agent(&request.agent).1.as_deref(), expected);
+        }
+        let codex = AgentConfig {
+            agent: Some("codex".into()),
+            claude_model: Some("opus".into()),
+            ..default_launch()
+        };
+        assert_eq!(codex.resolved_agent().unwrap(), "codex");
+    }
+
+    #[test]
+    fn saved_claude_model_keeps_capacity_fallthrough_without_retrying_it_twice() {
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            claude_model: Some("opus".into()),
+            fallback_agents: vec!["codex".into()],
+            ..default_launch()
+        };
+        let mut attempted = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.resolved_agent().unwrap();
+                attempted.push(agent.clone());
+                Ok(if agent == "codex" {
+                    done()
+                } else {
+                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                })
+            },
+            |_| panic!("Codex still has capacity"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempted.first().map(String::as_str), Some("claude:opus"));
+        assert_eq!(
+            attempted
+                .iter()
+                .filter(|agent| *agent == "claude:opus")
+                .count(),
+            1
+        );
+        assert!(attempted.contains(&"claude:sonnet".to_owned()));
+        assert_eq!(attempted.last().map(String::as_str), Some("codex"));
     }
 }

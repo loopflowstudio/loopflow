@@ -418,12 +418,15 @@ fn your_own_value_wins_for_you_until_you_unset_it() {
 }
 
 #[test]
-fn a_wave_file_rejects_repository_settings() {
+fn a_wave_file_skips_repository_settings_with_a_warning() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/skills/probe.md", "Probe.");
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
-    repo.create_file(".lf/wave/infra/config.yaml", "release:\n  targets: {}\n");
+    repo.create_file(
+        ".lf/wave/infra/config.yaml",
+        "agent: codex\nrelease:\n  targets: {}\n",
+    );
     repo.stage_all();
     repo.commit("Misplace a repository setting");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -434,15 +437,23 @@ fn a_wave_file_rejects_repository_settings() {
     let output = lf(
         repo.path(),
         home.path(),
-        &["-b", "--wave", "infra", "skill", "probe"],
+        &[
+            "--wave", "infra", "config", "settings", "--skill", "probe", "--json",
+        ],
     );
-    assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("release does not apply at Repository/Wave"),
+        output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("config.yaml:2: skipping release: setting does not apply here"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let settings: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(settings[0]["settings"]["agent"]["value"], "codex");
 }
 
 #[test]

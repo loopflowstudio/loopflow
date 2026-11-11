@@ -21,17 +21,30 @@ Mobile admission permits
 the host's own node when the Machine opts in with `mobile-same-device`;
 ticket identity remains node/user.
 
-At November 11 10:59 and 11:36 UTC, GitHub reported PR #1812 open and
+At November 11 11:39 UTC, GitHub reported PR #1812 open and
 unmerged at that head, with no auto-merge. Freshly fetched main was
 `976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
-`server/ticket.rs`. Both `lf task status LOO-718 --json` reads succeeded:
+`server/ticket.rs`. `lf task status LOO-718 --json` succeeded:
 LOO-718 remained at `feature`'s `demo` step with PR settlement not armed.
-The 10:59 store inspection confirmed the terminal and timing gaps above.
+Reinspection of the same PR head confirmed the terminal and timing gaps above.
+The concurrent `lf task status LOO-809 --json` read produced no output before
+it was stopped; this pass did not verify LOO-809's live Graph status.
 
 Implementation, authenticated acceptance checks and delivery wait for LOO-718
 to land; reinspect its shared store and endpoints then. Landing that PR is
-outside this Task's scope. The next Graph decision is Blocked on this external
-dependency. Desktop QA status is in `questions.md`.
+outside this Task's scope. Desktop QA status is in `questions.md`.
+
+At November 11 12:15 UTC, GitHub still reported PR #1812 open, unmerged and
+without auto-merge, now at `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
+Fetched main remained `976b53db0c5affa519af66bfe9bf58ee83fba347`, without
+`server/mobile.rs` or `server/ticket.rs`. Since the inspected head above, only
+`server/events.rs` changed within the server; the ticket store, service and
+authentication paths are unchanged. Reinspection confirmed that foreign
+terminal attempts remain unconsumed and ticket expiry still uses `Instant`.
+`lf task status LOO-718 --json` again reported `feature` at `demo`, with PR
+settlement not armed. The LOO-809 status read produced no output before being
+terminated; this pass did not verify its live Graph status.
+Implementation remains blocked on the transport landing; no code or tests changed.
 
 Earlier status reads and inspection references are in
 `1325549f96cb65e22e580d1e35095296fd43d5c0:scratch/design.md`, including the

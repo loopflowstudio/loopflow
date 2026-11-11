@@ -1,7 +1,0 @@
-PR 1886 head 52f6d5eb5b20e84bf2e15e4b610207c5bda1df2b: CI 43022124020 failed library shard 4 and integration shard 2. Three assertions still expected malformed or ineligible configuration to fail; subscribe.rs, local_planning.rs and wave_setup_tests.rs now check fallback/skip behavior. Added them to config gate guidance. The unchanged quiet-deadline test also failed CI and passed locally without edits. The base library shard passed.
-
-The waited landing was interrupted. Its automatic repair Session session_5df4833e98054796b931a6300d57ff92 was steered to stop, leave the parent edits intact and cancel its own build; its build lock is released. Use a bare landing/arm next, monitor in this conversation, and avoid launching another automatic repair into this checkout.
-
-Current check: cargo test --lib configuration_changes_reach_an_existing_subscription_without_store_writes. Next: graph_defaults_follow_task_wave_and_repository, wave_setup_tests, fmt/Clippy, commit and republish. Original config suite (94), bad-config CLI, two_people, prior launch tests and lint passed.
-
-After merge: wait for main package, lf install, then set --global claude.model opus. Personal default_agent is codex; QA and task/wave/repo sessions are claude:opus. Fable overrides are commented. LOO-832 abandoned; LOO-834 filed and unstarted. Verify effective installed settings, Graph preview and a bare-Claude probe.

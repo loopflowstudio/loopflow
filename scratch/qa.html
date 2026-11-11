@@ -1,0 +1,153 @@
+<!doctype html><meta charset=utf-8><title>LOO-823 QA</title>
+<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+pre{background:#f5f5f7;padding:.7rem;overflow-x:auto;font:12px/1.4 ui-monospace,Menlo,monospace}code{font:12px ui-monospace,Menlo,monospace}
+h2{margin-top:2.2rem}table{border-collapse:collapse}td,th{border-bottom:1px solid #e5e5ea;padding:.3rem .6rem;text-align:left;vertical-align:top}</style>
+<h1>LOO-823 QA: process leaks</h1>
+<p>2026-11-10, 19:07–20:22 PST, on the Machine the audit describes. Load average ran between 70 and 320 the whole time
+(other checkouts' builds). Branch <code>lf</code> built with <code>cargo build -p loopflow --bin lf</code>; every probe used a private
+<code>LF_HOME</code> and provider homes under <code>/tmp/lf-qa-823</code>. No process outside those was signalled.</p>
+
+<h2>1. A terminal host's pipe no longer outlives its pane</h2>
+<p><code>/tmp/lf-qa-823/host2.py</code> stands in for Desktop: it holds an inheritable pipe to a <code>/bin/cat</code> reader (as Desktop held
+each observer's stdin), opens a PTY running a real <code>lf -i -a codex : "Reply only with QA_OK"</code> with real Codex in a private
+<code>CODEX_HOME</code>, closes its own write end, then closes the pane. The reader should reach end of input while the detached owner keeps running.</p>
+<p>Branch build (<code>target/debug/lf</code>):</p><pre>host 50461 holds pipe write end fd 4; reader /bin/cat 50625 waits for end of input
+pane command: /Users/jack/src/loopflow.loo-823-find-what-leaks/target/debug/lf session attach 701ffdfd-1b36-46a6-b1bc-8896b0c7da4c
+detached owner(s) recorded in the private store:
+   52190 /Users/jack/src/loopflow.loo-823-find-what-leaks/target/debug/lf session serve --terminal -- /Users/jack/src/loopflow.loo-823-find-what-leak
+     no pipe descriptor above stderr in the owner
+reader at end of input while the pane is open: False
+pane closed
+RESULT after the pane closed: reader at end of input = True; owners still running = [52190]
+cleanup: still running after SIGTERM: []</pre>
+<p>Installed <code>lf</code> 0.15.2 (without the change), same script:</p><pre>host 63950 holds pipe write end fd 4; reader /bin/cat 64138 waits for end of input
+pane command: /Applications/Loopflow.app/Contents/MacOS/lf session attach 480dca5a-377c-4a72-b227-a550188d80b4
+detached owner(s) recorded in the private store:
+   66012 /Applications/Loopflow.app/Contents/MacOS/lf session serve --terminal -- /Applications/Loopflow.app/Contents/MacOS/lf -i -a codex : Reply on
+     inherited pipe still open in owner: 4 PIPE 0xd7f3cead3584fef7 16384 -&gt;0x4d154b91704d7562
+reader at end of input while the pane is open: False
+pane closed
+RESULT after the pane closed: reader at end of input = False; owners still running = [66012]
+cleanup: still running after SIGTERM: []</pre>
+<p>The installed owner keeps the host's fd 4 and the reader never ends; the branch owner holds no pipe above stderr and the reader ends when the pane closes.
+Both runs ended their own owner by PID; no Codex or <code>lf</code> process from either home remained.</p>
+
+<h2>2. Desktop's pipes do not reach its panes (live Dev app)</h2>
+<p>Built a private world (<code>lf-world build one-task</code>), installed this branch as <code>~/Applications/Loopflow Dev.app</code> and launched it on the
+world. Over the control socket: <code>lf desktop goto 1</code>, then <code>lf desktop run --task a7ae5b 'echo QA_PANE_$$; sleep 900'</code> (a new shell tab).
+<code>/tmp/lf-qa-823/pipes.py</code> compared the app's pipe addresses with every pane child and every live PID in the world's store:</p>
+<pre>Desktop 96839 holds 16 pipe descriptors: fds 13 14 15 16 22 23 24 25 32 33 34 35 42 43 44 45
+  22160 [pane child] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach 2abf5f07-f0a1-4476-a
+      Desktop pipes inherited above stderr: 0 
+  99129 [pane child] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach f4b8c447-320f-47f2-9
+      Desktop pipes inherited above stderr: 0 
+  99421 [pane child] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach 0acee3ae-b4bd-4134-9
+      Desktop pipes inherited above stderr: 0 
+  4885 [pane child] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach cb4d962a-a513-4a99-b
+      Desktop pipes inherited above stderr: 0 
+  99766 [recorded in store] /bin/sh /private/tmp/lf-qa-823/world/bin/claude --name a7ae5b Design transcript search --add-di
+      Desktop pipes inherited above stderr: 0 
+  99442 [recorded in store] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /Users/
+      Desktop pipes inherited above stderr: 0 
+  22436 [recorded in store] /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /bin/sh
+      Desktop pipes inherited above stderr: 0 
+RESULT Desktop pipe descriptors found in pane processes: 0</pre>
+<p>On 2026-11-10 17:30 the installed Desktop's fd 43 was held by 15 pane processes. World processes before and after quitting the Dev app
+(the owners and server stay by design; no observer stays):</p><pre>22436 22160 00:31 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /bin/sh -c # Runs only on creation inside th
+97698     1 00:58 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf server run
+99442 99129 00:56 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /Users/jack/Applications/Loopflow Dev.app/Co
+22160 96839 00:37 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach 2abf5f07-f0a1-4476-a5e5-eb917fa40483
+99129 96839 00:56 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach f4b8c447-320f-47f2-9da0-40928cee98fb --session session_d7
+99421 96839 00:56 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach 0acee3ae-b4bd-4134-9725-69beb31389dd --session e120a23ab7
+ 4885 96839 00:52 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session attach cb4d962a-a513-4a99-b5ad-305be65fe3a2 --session 7b73ca0f77</pre><pre>22436     1 00:55 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /bin/sh -c # Runs only on creation inside th
+97698     1 01:23 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf server run
+99442     1 01:22 /Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf session serve --terminal -- /Users/jack/Applications/Loopflow Dev.app/Co</pre>
+<p>Not seen: the window itself. Headless Chrome hung on a screenshot and no screen capture of the desktop was taken; the pane state comes from
+<code>lf desktop ls</code> (<code>session* (browser) shell</code> after the run). <code>lf desktop capture -p shell --task a7ae5b</code> answered
+"The addressed pane is not a terminal", so the tab's text was not read.</p>
+
+<h2>3. <code>transport_tests</code> leaves no process</h2>
+<pre>test result: ok. 108 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 107.35s
+exit 0
+Tue Nov 10 19:44:46 PST 2026</pre>
+<p><code>ps</code> filtered to <code>/tmp/lf-7501-</code> and this checkout's <code>target/</code>: 42 lines before, the same 42 PIDs after (all 3–8 days old, from before the fix).
+No new <code>lf</code>, Codex, Claude or Dev-app PID from a fixture path. <code>-- --ignored ssh_shells::</code>: 3 passed in 115 s, no new process.</p>
+
+<h2>4. The audit report</h2>
+<p><code>python3 -I scratch/process_audit.py</code>, five runs. Last run:</p><pre>354 lf processes (358 when the reads finished) -&gt; /Users/jack/src/loopflow.loo-823-find-what-leaks/scratch/process-audit.html
+ 109 session observe-status [installed]
+  93 session serve [installed]
+  41 __codex-observe [installed]
+  22 __context-block [installed]
+  18 session serve [test fixture]
+  16 run (task or headless step) [installed]
+  10 viewer or command [installed]
+   9 desktop shell [installed]
+   9 session attach [installed]
+   6 session serve [demo]
+   5 __context-block [demo]
+   5 viewer or command [test fixture]
+   4 session observe-status [Dev app]
+   1 server run [demo]
+   1 server run [installed]
+   1 session attach [test fixture]
+   1 session serve [earlier install]
+   1 __context-block [earlier install]
+   1 viewer or command [earlier install]
+   1 viewer or command [demo]
+python3 -I scratch/process_audit.py &lt; /dev/null  32.81s user 15.25s system 75% cpu 1:03.48 total
+Tue Nov 10 20:21:38 PST 2026
+fresh ps count: 358</pre>
+<table><tr><th>Run</th><th>Wall time</th><th>Report</th><th>Separate <code>ps</code> recount afterwards</th></tr>
+<tr><td>19:08</td><td>31 min 37 s</td><td>350</td><td>345 at 19:40</td></tr>
+<tr><td>19:40</td><td>1 min 19 s</td><td>345</td><td>347</td></tr>
+<tr><td>20:04</td><td>12 min 30 s</td><td>342, one unanswered read</td><td>355 at 20:17</td></tr>
+<tr><td>20:17</td><td>about 3 min</td><td>356 (355 at its own second <code>ps</code>)</td><td>355</td></tr>
+<tr><td>20:20</td><td>1 min 3 s</td><td>354 (358 at its own second <code>ps</code>)</td><td>358</td></tr></table>
+<p>In the first run one <code>lf task status MTG-269 --select task.state --json</code> (installed lf) took over 13 minutes; <code>sample</code> showed it
+in <code>SqliteStore::task_work</code> stepping a <code>processes</code> query, 4% CPU, in <code>pread</code>.</p>
+
+<h2>Fixed during QA</h2>
+<ul>
+<li><b>Third-party notices were stale.</b> The branch's <code>Cargo.lock</code> change (libc for <code>loopflow-test-support</code>) left
+<code>swift/LoopflowMac/ThirdPartyNotices/inventory.json</code> behind; the Dev app install stopped with "Third-party inputs changed". Ran
+<code>uv run python scripts/third_party.py refresh</code>; <code>check</code> exits 0 and the install verified 281 files.</li>
+<li><b>The audit script waited without limit on <code>lf</code>.</b> Each <code>lf</code> read now has 120 s; the report names reads that gave no answer and does not
+call a shell stale on an unread Task state. Seen once for real (LOO-775, 20:04 run) and once forced with a 0.01 s limit.</li>
+<li><b>The report's count could not be checked against a later <code>ps</code>.</b> It now takes a second <code>ps</code> when its reads finish and prints both.</li>
+<li><b>Four Dev-app observers had two recommendations</b> ("safe to stop" and "read the demo's note first"). They are listed once now.</li>
+<li><code>~/.lf/bin/lf-&lt;hash&gt;</code> read as "other"; it is labelled "earlier install". Backticks in "Stopping one loses" render as code.</li>
+<li><code>.lf/skills/qa.md</code>: how to drive a Dev app on a private world, and the URL trap below.</li>
+</ul>
+
+<h2>What happened that should not have</h2>
+<p><code>lf desktop view 'task:a7ae5b'</code> (Dev app's <code>lf</code>, world environment) opened a <code>loopflow://</code> URL. <code>/Applications/Loopflow.app</code>
+has the same bundle ID as the Dev app (<code>com.loopflow.mac.dev</code>) and was not running; macOS started it (PID 54541). It ran with the world's
+<code>LF_HOME</code>, <code>CODEX_HOME</code> and <code>CLAUDE_CONFIG_DIR</code> (read from <code>ps eww</code>), took over the world's control socket, attached four
+viewers and started two owners for the world's Sessions. The two Session IDs are absent from <code>~/.lf/loopflow.db</code>. It was asked to quit
+59 s later through <code>NSRunningApplication.terminate()</code>; its owners (78991, 79925) were ended by PID after checking their <code>LF_HOME</code>, and the
+launchd job it registered for the world (<code>com.loopflow.server.10b21a38600c1fd2</code>) was booted out. <code>com.loopflow.server</code> and the demo server were not touched.</p>
+<p><code>~/Applications/Loopflow Dev.app</code> is now this branch's build. The four two-day-old <code>session observe-status</code> processes started from the
+previous Dev app (84618, 91400, 97595, 97597) still run; their binary was replaced on disk.</p>
+
+<h2>Works now</h2>
+<ul><li>A detached owner holds none of its launcher's descriptors; a reader on the host's pipe ends with the pane.</li>
+<li>Desktop panes and the owners they start hold none of Desktop's 16 pipes.</li>
+<li><code>transport_tests</code> (108 + 3 ignored SSH tests) leaves no process.</li>
+<li>The report finishes in about a minute on a quiet store, names unanswered reads, and its count matched a recount within 0–4 processes.</li></ul>
+
+<h2>Not reached</h2>
+<ul><li>A look at the Dev app's window (see 2).</li>
+<li>An old <code>observe-status</code> ending once every pane of its Desktop has exited: those panes belong to live conversations.</li>
+<li>Killing the test runner mid-suite. <code>Fixture</code>'s <code>Drop</code> does not run then, so owners would stay; not tried.</li></ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The input hold (<code>scratch/questions.md</code> 1a–1d) is unchanged: 75 owners and five finished Tasks' shells stay until someone clears input.</li>
+<li>113 <code>session observe-status</code> and 24 fixture processes from before the fixes still run; the report lists their PIDs. Nothing stopped them.</li>
+<li>The ignored SSH shell tests leave directories: four new <code>/tmp/lf-7501-*</code> holding only <code>screens/session_*.ghostsnp</code>, written 19:45:49–52, with no
+process behind them. 246 of 305 <code>/tmp/lf-7501-*</code> directories have that shape. An owner writes its screen after the fixture removed its home.</li>
+<li><code>lf desktop view</code> and <code>lf open</code> start whichever app macOS picks for the bundle ID, with the caller's environment; with two apps sharing one ID
+that is the wrong app.</li>
+<li>Installed <code>lf task status</code> took 13 minutes once under load (see 4).</li>
+</ol>

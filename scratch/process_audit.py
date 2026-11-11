@@ -81,14 +81,23 @@ def read_lsof():
     return tables
 
 
+# lf reads that gave no answer; the report names them, since rows built on them are unknown.
+UNANSWERED = []
+LIMIT = 120
+
+
 def lf_json(args, cwd=None):
-    out = subprocess.run(
-        ["lf", *args, "--json"], capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=cwd
-    ).stdout
+    command = ["lf", *args, "--json"]
     try:
+        out = subprocess.run(
+            command, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=cwd, timeout=LIMIT
+        ).stdout
         return json.loads(out)
+    except subprocess.TimeoutExpired:
+        UNANSWERED.append(f"{' '.join(command)} (no answer in {LIMIT} s)")
     except json.JSONDecodeError:
-        return None
+        UNANSWERED.append(f"{' '.join(command)} (no JSON)")
+    return None
 
 
 def read_shells(held):
@@ -147,6 +156,9 @@ def binary_kind(path):
         return "test fixture"
     if "/target/" in path:
         return "checkout build"
+    # An installed build kept under LF_HOME/bin for the processes still running it.
+    if re.search(r"/\.lf/bin/lf-[0-9a-f]{64}$", path):
+        return "earlier install"
     return "other"
 
 
@@ -272,7 +284,7 @@ def main():
                 for holder, why in shell["holders"]:
                     note += f"; owner {holder}: {why}"
                 # A hidden shell runs until Close, or until its finished Task is cleaned up.
-                healthy = bool(viewers) or shell["state"] not in ("done", "abandoned", "unknown")
+                healthy = bool(viewers) or shell["state"] not in ("done", "abandoned")
             elif r == "desktop shell":
                 note = "no shell receipt in the store; " + note
                 healthy = bool(viewers)
@@ -322,8 +334,10 @@ def main():
             older["note"] += "; replaced by a newer observer"
             older["healthy"] = False
 
-    write_report(now, rows)
-    print(f"{len(rows)} lf processes -> {OUT}")
+    # The lf reads take minutes on a busy Machine; say what ps shows once they are done.
+    recount = sum(1 for p in read_ps().values() if lf_binary(p["command"]))
+    write_report(now, rows, f"{recount} at {time.strftime('%H:%M')}")
+    print(f"{len(rows)} lf processes ({recount} when the reads finished) -> {OUT}")
     for (r, kind), count in sorted(Counter((x["role"], x["kind"]) for x in rows).items(), key=lambda kv: -kv[1]):
         print(f"{count:4} {r} [{kind}]")
 
@@ -343,7 +357,7 @@ def advice(rows):
     graphs, _ = pids(lambda x: x["role"] == "session serve" and "Graph holds" in x["reason"])
     hidden, _ = pids(lambda x: x["role"] == "desktop shell" and not x["viewed"])
     finished = [x for x in hidden if not x["healthy"]]
-    demos, demo_pids = pids(lambda x: x["kind"] in ("demo", "Dev app"))
+    demos, demo_pids = pids(lambda x: x["kind"] in ("demo", "Dev app") and x not in observers)
     out = ["<h2>What to do</h2><table><tr><th>Group</th><th class=num>Count</th><th>Why it is still running</th><th>Recommendation</th></tr>"]
 
     def row(name, group, why, what):
@@ -393,15 +407,20 @@ def advice(rows):
     )
     row(
         "Demo and Dev app processes", demos,
-        "A demo keeps its processes while a person's input there is unsettled.",
+        "A demo keeps its processes while a person's input there is unsettled. Its leftover observers are "
+        "counted in the row above.",
         f"Read the demo's note under its Task's <code>scratch/</code> first. PIDs: <code>{e(demo_pids)}</code>" if demos else "Nothing left.",
     )
     out.append("</table>")
     return out
 
 
-def write_report(now, rows):
+def write_report(now, rows, recount):
     e = html.escape
+
+    def code(text):
+        return re.sub(r"`([^`]+)`", r"<code>\1</code>", e(text))
+
     roles = Counter(r["role"] for r in rows)
     kinds = Counter(r["kind"] for r in rows)
     out = [
@@ -412,16 +431,22 @@ def write_report(now, rows):
         "details{margin:.4rem 0}summary{cursor:pointer;font-weight:600}h2{margin-top:2.5rem}</style>",
         f"<h1>lf processes on this Machine</h1><p>Read {e(now)} from <code>ps</code>, <code>lsof</code>, "
         "<code>lf session list --all --interactive all --limit 0 --json</code>, <code>lf process list --json</code> and <code>lf process rollover --dry-run --json</code>. "
-        f"<b>{len(rows)}</b> processes run an <code>lf</code> binary (hooks and commands start and end during the few seconds "
-        "of the read, so a recount differs by those); recount with "
+        f"<b>{len(rows)}</b> processes ran an <code>lf</code> binary at that <code>ps</code>; a second <code>ps</code> after the "
+        f"<code>lf</code> reads answered counted {e(recount)} (hooks and commands start and end meanwhile). Recount with "
         "<code>ps -axww -o command= | grep -cE '^(lf|/.*/lf(-[A-Za-z0-9]+)?)( |$)'</code>. "
         "Nothing here was stopped; stop one by PID after reading what it serves.</p>",
+        *(
+            ["<p class=stale><b>Unanswered reads:</b> " + "; ".join(f"<code>{e(c)}</code>" for c in UNANSWERED)
+             + ". Rows that depend on them show no Session, no hold reason or an unknown Task state; "
+             "that is a missing reading, not a leftover. Run the report again.</p>"]
+            if UNANSWERED else []
+        ),
         *advice(rows),
         "<h2>By role</h2><table><tr><th>Role</th><th class=num>Count</th><th class=num>Looks stale</th><th>Stopping one loses</th></tr>",
     ]
     for r, count in roles.most_common():
         stale = sum(1 for x in rows if x["role"] == r and not x["healthy"])
-        out.append(f"<tr><td><code>{e(r)}</code></td><td class=num>{count}</td><td class='num{' stale' if stale else ''}'>{stale}</td><td>{e(LOSES[r])}</td></tr>")
+        out.append(f"<tr><td><code>{e(r)}</code></td><td class=num>{count}</td><td class='num{' stale' if stale else ''}'>{stale}</td><td>{code(LOSES[r])}</td></tr>")
     out.append("</table><h2>By binary</h2><table><tr><th>Started from</th><th class=num>Count</th><th>Paths</th></tr>")
     for kind, count in kinds.most_common():
         paths = Counter(x["path"] for x in rows if x["kind"] == kind)
@@ -430,7 +455,7 @@ def write_report(now, rows):
     out.append("</table>")
     out.append(
         "<p><b>Looks stale</b> means: an owner more than a day old with no viewer attached and no input or Graph holding it; "
-        "an unviewed Desktop shell whose Task is done, abandoned or unreadable; an observer whose "
+        "an unviewed Desktop shell whose Task is done or abandoned; an observer whose "
         "Desktop client is gone or that a newer observer replaced; a hook or observer whose parent exited; "
         "an attach whose terminal is gone. An old owner with a live provider can still hold a turn, draft or "
         "pending request, so read it with <code>lf resume &lt;ID&gt;</code> before deciding.</p>"
@@ -438,7 +463,7 @@ def write_report(now, rows):
     for r, _ in roles.most_common():
         group = sorted((x for x in rows if x["role"] == r), key=lambda x: (x["healthy"], -x["age"]))
         stale = sum(1 for x in group if not x["healthy"])
-        out.append(f"<h2><code>{e(r)}</code> — {len(group)}, {stale} looking stale</h2><p>Stopping one loses: {e(LOSES[r])}</p>")
+        out.append(f"<h2><code>{e(r)}</code> — {len(group)}, {stale} looking stale</h2><p>Stopping one loses: {code(LOSES[r])}</p>")
         out.append("<table><tr><th>PID</th><th>Age</th><th>Session</th><th>State</th><th>Reading</th><th>Binary</th></tr>")
         for x in group:
             s = x["session"]

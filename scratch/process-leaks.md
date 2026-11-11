@@ -23,9 +23,9 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining, at demo: regenerate the report (the committed one is the 19:03
-reading: 350 processes, and a `ps` recount right after also gave 350) and
-compare its totals with a fresh `ps`; show the `transport_tests` ps diff again.
+Remaining, at demo: regenerate the report (the committed one is the 20:20
+reading: 354, 358 at its own second `ps`, 358 on a separate recount) and show
+the `transport_tests` ps diff again. QA walkthrough: `scratch/qa.html`.
 Open: `scratch/questions.md` 1a-1d.
 
 Checks:
@@ -40,6 +40,19 @@ Checks:
 - swiftc probe: EOF with `Pipe.uninherited()`, none with `Pipe()`.
 - `scripts/test_desktop.sh --skip-build --filter 'ProgramStatusTests|UninheritedPipeTests'`:
   15 passed (after `swift build --build-tests --package-path swift`).
+
+- QA 19:42, load 75-110: `cargo test -p loopflow --test transport_tests` 108
+  passed in 107 s; `-- --ignored ssh_shells::` 3 passed. No new process; the
+  SSH tests left four `/tmp/lf-7501-*` dirs holding only `screens/` (246 of 305
+  such dirs have that shape): an owner writes its screen after its home is gone.
+- QA: real `lf -i -a codex` from a host holding a pipe: reader reaches EOF with
+  the branch owner alive; installed 0.15.2 owner keeps fd 4. Live Dev app on an
+  `lf-world`: Desktop holds 16 pipes, 0 in pane children or owners.
+- `uv run python scripts/third_party.py check` exits 0 after `refresh` (the
+  `Cargo.lock` change had left `inventory.json` stale).
+- `lf task status MTG-269 --select task.state --json` (installed) took 13 min
+  once at load 295, in `SqliteStore::task_work`; the audit now gives each `lf`
+  read 120 s and names the ones that did not answer.
 
 ## Concept review (2026-11-10)
 

@@ -110,6 +110,29 @@ when WindowServer is unavailable.
 - `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
   release build.
 
+For a live window on private data, build a world and launch the Dev app on it:
+`target/debug/lf-world build one-task /tmp/lf-qa-<name>/world`, then
+`uv run python scripts/loopflow-dev.py run-debug --world <world>`. It installs
+`~/Applications/Loopflow Dev.app` and stays in the foreground until the app quits.
+Run the app's bundled `lf` with the world's `env.json` variables and
+`LF_DESKTOP=com.loopflow.mac.dev`; the control socket is under the world's
+`LF_HOME`, so `lf desktop state --json` reads only that app.
+
+- Drive it over the socket: `lf desktop ls`, `lf desktop goto 1`,
+  `lf desktop run --task <id> '<line>'`. Do not use `lf desktop view` or
+  `lf open` there: they open a `loopflow://` URL, and when
+  `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
+  on the world instead. It then owns the socket, and its panes run the installed
+  `lf`.
+- An install that fails with "Third-party inputs changed" means `Cargo.lock`
+  changed: `uv run python scripts/third_party.py refresh`, and commit the result.
+- To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
+  those of its children and of the PIDs in the world's `processes` table.
+- Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
+  `swift` script; both apps answer to one bundle ID. Then end the world's owners
+  by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
+  `server.plist`.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience

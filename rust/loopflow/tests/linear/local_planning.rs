@@ -3474,6 +3474,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
         ("repository", "repo-review"),
         ("wave", "wave-review"),
         ("explicit", "task-review"),
+        ("code", "default-review"),
     ] {
         repo.create_file(
             &format!(".lf/graphs/{name}.yaml"),
@@ -3528,17 +3529,20 @@ fn graph_defaults_follow_task_wave_and_repository() {
             "create",
             "--no-wave",
             "--title",
-            "Invalid default",
+            "Fallback default",
             "--json",
         ],
     )["task"]
         .clone();
     let standalone_id = standalone["id"].as_str().unwrap();
-    let refused = command(repo.path(), home.path(), &["task", "run", standalone_id])
-        .output()
-        .unwrap();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
+    let fallback = run_until_waiting(
+        repo.path(),
+        home.path(),
+        &["task", "run", standalone_id],
+        standalone_id,
+    );
+    assert_eq!(fallback["name"], "code");
+    assert_eq!(fallback["position"]["step"], "default-review");
     repo.create_file(".lf/config.yaml", "graph: repository\n");
     let explicit = lf(
         repo.path(),

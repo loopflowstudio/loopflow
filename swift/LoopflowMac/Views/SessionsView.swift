@@ -411,7 +411,7 @@ final class SessionsWorkspace {
             retainedStore.repoPath = WaveOrigin.resolve(repoPath)
             return retainedStore
         }
-        let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces)
+        let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces, work: key.reference)
         retainedStore = store
         return store
     }
@@ -699,7 +699,7 @@ final class SessionsWorkspaceRegistry {
         let record: SessionRecord
         if let existing { record = existing.record }
         else if let id = workspace.multiplexer.sessionPane?.sessionId {
-            record = try await query.prepareSession(id: id, cwd: store.repoPath, intent: intent)
+            record = try await query.prepareSession(id: id, work: key.reference, cwd: store.repoPath, intent: intent)
         } else if key.kind != .task {
             record = try await query.ensurePrimarySession(wave: key.kind == .wave ? key.id : nil, cwd: store.repoPath)
         } else {
@@ -1118,6 +1118,8 @@ final class SessionsStore {
 
     var repoPath: String
     let query: RegistryQuery
+    /// The Task or Wave whose workspace holds this store; none for a repository.
+    let work: WorkReference?
     private var executionLocations: [String: TaskLocationObservation] = [:]
 
     func executionLocation(for id: String) -> TaskLocationObservation? { executionLocations[id] }
@@ -1133,6 +1135,12 @@ final class SessionsStore {
 
     func taskSubject(for record: SessionRecord) -> WorkReference? {
         executionLocations[record.id].map { .task(id: $0.taskID) }
+    }
+
+    /// The Work a reopen names beside the Session id, so it resumes managed:
+    /// a Task-run step's Task, else this workspace's Task or Wave.
+    private func openingWork(for id: String) -> WorkReference? {
+        executionLocations[id].map { .task(id: $0.taskID) } ?? work
     }
 
     func presentationDirectory(for record: SessionRecord, checkout: String) -> String {
@@ -1157,11 +1165,13 @@ final class SessionsStore {
     init(
         repoPath: String,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        surfaces: GhosttySurfacePool = GhosttySurfacePool()
+        surfaces: GhosttySurfacePool = GhosttySurfacePool(),
+        work: WorkReference? = nil
     ) {
         self.repoPath = WaveOrigin.resolve(repoPath)
         self.query = query
         self.surfaces = surfaces
+        self.work = work
         metrics = SessionsLatencyMetrics(scope: URL(fileURLWithPath: repoPath).lastPathComponent)
     }
 
@@ -1243,7 +1253,7 @@ final class SessionsStore {
             }
             let stage = intent == .reveal ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath, intent: intent)
+            let surface = try await executionQuery.prepareSession(id: id, work: openingWork(for: id), cwd: repoPath, intent: intent)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
@@ -1332,7 +1342,7 @@ final class SessionsStore {
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
         let prepared = try await query(for: previous.record).prepareSession(
-            id: id, agent: agent, cwd: repoPath, intent: .resume)
+            id: id, work: openingWork(for: id), agent: agent, cwd: repoPath, intent: .resume)
         if let reason = prepared.action(.moveHere)?.unavailableReason {
             throw RegistryQueryError(reason)
         }

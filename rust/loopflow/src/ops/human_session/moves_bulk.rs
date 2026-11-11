@@ -5,16 +5,13 @@
 //! which `lf account use` switches, and a running Codex keeps its own until
 //! `lf --account codex=<login> resume`. Nothing here writes preferences.
 
-use std::sync::Arc;
-
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{is_running, list, new_thread, SessionRecord};
 use crate::id::LfSessionId;
 use crate::session::SessionFilter;
-use crate::store::sqlite::SqliteStore;
-use crate::store::{SharedStore, StorageConfig};
+use crate::store::SharedStore;
 
 /// The `harness[:model]` a move continues the selected Sessions on.
 pub(crate) fn parse_target(agent: Option<&str>) -> Result<String> {
@@ -146,52 +143,11 @@ async fn move_agent(
     }
 }
 
-/// At a Stop hook: when a move waits for `session`, start its applier beside
-/// the provider and return at once. The hook only peeks, through the store it
-/// opened for the turn; the applier stops the provider, so it must outlive the
-/// hook rather than run inside it.
-pub(crate) fn start_pending_move(store: &SqliteStore, session: &str) -> Result<bool> {
-    if store.pending_session_move(session)?.is_none() {
-        return Ok(false);
-    }
-    crate::os_process::detached_context_block("move")?
-        .spawn()
-        .context("start the pending Session move")?;
-    Ok(true)
-}
-
-/// The applier a Stop hook started. Once the hook has exited, so the turn has
-/// ended, the Session continues on the requested agent the way an idle
-/// Session's move does.
-pub(crate) fn apply_pending_move() -> Result<()> {
-    let adapter: crate::steer::SteerAdapter =
-        serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
-    wait_for_hook_exit();
-    let home = crate::store::lf_home_dir();
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let store = Arc::new(
-            crate::store::open_store(&StorageConfig::sqlite(home.join("loopflow.db"))).await?,
-        );
-        apply_move(&store, &adapter.session).await
-    })
-}
-
-/// The hook that started this applier is its parent until it exits; the
-/// provider ends its turn right after. The wait outlasts the hook's timeout.
-fn wait_for_hook_exit() {
-    let hook = std::os::unix::process::parent_id();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while std::os::unix::process::parent_id() == hook && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    std::thread::sleep(std::time::Duration::from_secs(1));
-}
-
-/// Continue `session` on its pending move's agent. The request is cleared only
-/// after the new input is appended, so a failed or killed apply is retried at
-/// the Session's next Stop instead of lost.
-async fn apply_move(store: &SharedStore, session: &str) -> Result<()> {
+/// Continue `session` on its pending move's agent; the server calls this once a
+/// Stop it answered has ended the turn. The request is cleared only after the
+/// new input is appended, so a failed or killed apply is retried at the
+/// Session's next Stop instead of lost.
+pub(crate) async fn apply_pending_move(store: &SharedStore, session: &str) -> Result<()> {
     let Some(agent) = store.sqlite.pending_session_move(session)? else {
         return Ok(());
     };
@@ -210,16 +166,7 @@ async fn apply_move(store: &SharedStore, session: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_move, start_pending_move};
-
-    #[test]
-    fn a_stop_with_no_pending_move_starts_nothing() {
-        let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
-                .unwrap();
-        assert!(!start_pending_move(&store, "session_idle").unwrap());
-    }
+    use super::apply_pending_move;
 
     #[test]
     fn a_failed_apply_leaves_the_move_for_the_next_stop() {
@@ -232,7 +179,7 @@ mod tests {
                 .sqlite
                 .record_session_move("session_missing", "codex")
                 .unwrap();
-            assert!(apply_move(&store, "session_missing").await.is_err());
+            assert!(apply_pending_move(&store, "session_missing").await.is_err());
             assert_eq!(
                 store
                     .sqlite

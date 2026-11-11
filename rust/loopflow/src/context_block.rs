@@ -25,7 +25,9 @@ pub enum ContextMoment {
     Start,
     Compact,
     Tool,
-    /// A turn ended: acquire Linear changes, which become steers for the next boundary.
+    /// A turn ended: the Machine server records it, then refreshes planning
+    /// (whose changes become steers for the next boundary) and applies a
+    /// pending Session move.
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
@@ -34,14 +36,6 @@ pub enum ContextMoment {
     /// Started by a limit hook: record the limit and move the shared login to
     /// an account with capacity.
     RecordLimit,
-    /// Pi's native lifecycle event on stdin: turn, usage and completion receipts.
-    PiEvent,
-    /// A Pi bash command is about to run: join its tool group to the watchdog
-    /// that ends the group with its provider.
-    ToolGroup,
-    /// Started by a Stop hook: once that hook exits, apply the Session's
-    /// pending move.
-    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -133,18 +127,21 @@ impl ContextDelivery {
         })
     }
 
-    pub(crate) fn relocate(&mut self) -> anyhow::Result<()> {
+    /// Follow a moved checkout to where the store now places the repository;
+    /// returns whether anything moved.
+    pub(crate) fn relocate(
+        &mut self,
+        store: &crate::store::sqlite::SqliteStore,
+    ) -> anyhow::Result<bool> {
         let Some((id, source)) = &self.repository else {
-            return Ok(());
+            return Ok(false);
         };
-        let store =
-            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
-            return Ok(());
+            return Ok(false);
         };
         let destination = PathBuf::from(destination);
         if *source == destination {
-            return Ok(());
+            return Ok(false);
         }
         let update = |path: &mut PathBuf| {
             if let Ok(relative) = path.strip_prefix(source) {
@@ -162,7 +159,7 @@ impl ContextDelivery {
             update(path);
         }
         self.repository = Some((id.clone(), destination));
-        Ok(())
+        Ok(true)
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
@@ -241,7 +238,24 @@ impl ContextDelivery {
     /// App-server hooks inherit the server environment, not thread shell policy,
     /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = native_delivery_path(&self.home, session);
+        self.save(&native_delivery_path(&self.home, session))
+    }
+
+    /// The delivery file at `path`; errors name the file, never its contents.
+    pub(crate) fn load(path: &Path) -> anyhow::Result<Self> {
+        let bytes = fs::read(path).map_err(|error| {
+            anyhow::anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|error| {
+            anyhow::anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// Replace the delivery file at `path` whole, so a hook never reads half of it.
+    pub(crate) fn save(&self, path: &Path) -> anyhow::Result<()> {
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -250,7 +264,11 @@ impl ContextDelivery {
         Ok(())
     }
 
-    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
+    /// The provider hooks of one launch. Every launch prints its context
+    /// block at session start and after a compaction. A managed launch
+    /// (`AgentConfig::managed`) also reports its turn and tool boundaries
+    /// to the Machine server and watches its Task.
+    pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
@@ -258,6 +276,13 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
+        let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
+        if !managed {
+            return Ok(serde_json::json!({"SessionStart": [
+                {"matcher": "startup|resume|clear", "hooks": [context("start")]},
+                {"matcher": "compact", "hooks": [context("compact")]},
+            ]}));
+        }
         // Tool boundaries start lf only for new steering. Prompt boundaries
         // always run: they also record native turn activity.
         let steer = format!(
@@ -270,11 +295,11 @@ impl ContextDelivery {
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
                 {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
             "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
-            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":10}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":10}]}],
             "SessionStart": [
-            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
-            {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
+            {"matcher": "startup|resume|clear", "hooks": [context("start"), {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
+            {"matcher": "compact", "hooks": [context("compact")]}
         ]}))
     }
 }
@@ -329,6 +354,23 @@ fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Optio
     documents.sort_by(|a, b| {
         (priority(a), a.content.len(), &a.path).cmp(&(priority(b), b.content.len(), &b.path))
     });
+}
+
+/// Named by its content: a hook that runs on every model request with the same
+/// checkout files reuses one manifest instead of writing another.
+fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError> {
+    let digest = hex::encode(Sha256::digest(manifest.as_bytes()));
+    let prompts = repo_root.join(".lf/prompts");
+    let path = prompts.join(format!("{}-context-manifest.md", &digest[..16]));
+    if path.exists() {
+        return Ok(path);
+    }
+    fs::create_dir_all(&prompts)?;
+    crate::prompt::ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
+    std::io::Write::write_all(&mut file, manifest.as_bytes())?;
+    file.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
 }
 
 fn render_block(
@@ -388,7 +430,7 @@ fn render_block(
         "files": files,
     }))
     .expect("context manifest is JSON serializable");
-    let manifest_path = write_prompt_log(repo_root, &manifest, "context-manifest", None)?;
+    let manifest_path = write_manifest(repo_root, &manifest)?;
     // A repository-relative pointer leaves room for context even with long roots.
     let pointer = manifest_path
         .strip_prefix(repo_root)
@@ -618,6 +660,38 @@ mod tests {
     }
 
     #[test]
+    fn repeated_requests_over_unchanged_files_write_one_manifest() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "the plan").unwrap();
+        let delivery = delivery(repo.path());
+        let manifests = || {
+            fs::read_dir(repo.path().join(".lf/prompts"))
+                .unwrap()
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("context-manifest")
+                })
+                .count()
+        };
+        let first = delivery.block(ContextMoment::Tool).unwrap();
+        for _ in 0..20 {
+            assert_eq!(
+                delivery.block(ContextMoment::Tool).unwrap().manifest_path,
+                first.manifest_path
+            );
+        }
+        assert_eq!(manifests(), 1);
+        fs::write(repo.path().join("scratch/plan.md"), "the new plan").unwrap();
+        delivery.block(ContextMoment::Tool).unwrap();
+        assert_eq!(manifests(), 2);
+    }
+
+    #[test]
     fn context_block_reports_unreadable_text_instead_of_claiming_a_complete_listing() {
         let repo = tempdir().unwrap();
         fs::create_dir(repo.path().join("scratch")).unwrap();
@@ -781,6 +855,36 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_launch_installs_only_the_two_context_hooks() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let bare = delivery.hook_settings(false).unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["SessionStart"]
+        );
+        let moments: Vec<_> = bare["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(|hook| {
+                hook["command"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit(' ')
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(moments, ["start", "compact"]);
+    }
+
+    #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::journal::test_env_lock();
@@ -793,7 +897,7 @@ mod tests {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
-        let settings = delivery.hook_settings().unwrap();
+        let settings = delivery.hook_settings(true).unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();

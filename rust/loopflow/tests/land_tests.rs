@@ -1972,6 +1972,9 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
             .success());
     }
     let home = tempfile::tempdir().unwrap();
+    // The repair agent works on the Task, so it starts only beside a server.
+    let _server =
+        loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let proof = home.path().join("repair-proof");
     let launches = home.path().join("repair-launches");
     let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false)

@@ -331,3 +331,5 @@ upgrade filters 22 ok, incl. `task_cleanup_ends_an_abandoned_tasks_held_terminal
 `--lib transport:: holder:: ops::human_session:: store::migrations::
 store::sqlite::sessions desktop::shells` 258 ok; clippy `--all-targets` and
 `documented_commands::` clean. Left for gate: the full affected suites.
+
+Compress (Nov 11): `cargo test -p loopflow --lib holder::` 10 passed; `cargo clippy --all-targets -D warnings` clean.

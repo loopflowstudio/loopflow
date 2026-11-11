@@ -67,7 +67,7 @@ DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8-ios1.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
 GHOSTTY_VT_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos",
@@ -214,7 +214,12 @@ def cmd_test() -> int:
 
 
 def _normalize_ghostty_library(framework: Path) -> None:
-    """Give SwiftPM the static-library basename it requires."""
+    """Give SwiftPM the static-library basename it requires, without debug info.
+
+    Ghostty strips its own Zig code in ReleaseFast; its C++ dependencies (glslang,
+    SPIRV-Cross) keep DWARF, about 80% of each slice. Apps never ship it: the linker
+    leaves DWARF out of the executable.
+    """
     manifest = framework / "Info.plist"
     info = plistlib.loads(manifest.read_bytes())
     for library in info["AvailableLibraries"]:
@@ -223,6 +228,7 @@ def _normalize_ghostty_library(framework: Path) -> None:
         name = "libghostty.a"
         if original != name:
             (directory / original).rename(directory / name)
+        subprocess.run(["xcrun", "strip", "-S", str(directory / name)], check=True)
         library["LibraryPath"] = name
         library["BinaryPath"] = name
     manifest.write_bytes(plistlib.dumps(info))
@@ -271,7 +277,7 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     result = run(
-        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false"],
+        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false", "-Di18n=false"],
         cwd=source,
         check=False,
     )
@@ -295,8 +301,8 @@ def cmd_ghostty_build() -> int:
             str(REPO_ROOT / "scripts/third_party.py"),
             "package",
             str(local_framework),
-            "--framework",
-            str(local_framework),
+            "--scope",
+            "GhosttyKit",
         ]
     )
 

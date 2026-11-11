@@ -20,8 +20,8 @@ targets:
         buildPhase: resources
     dependencies:
       - target: Loopflow
-      # `uv run python scripts/loopflow-dev.py ghostty-build` writes it.
-      - framework: .build/local/GhosttyKit.xcframework
+      # Package.swift's GhosttyKit pin; `swift package resolve` downloads it.
+      - framework: .build/artifacts/swift/GhosttyKit/GhosttyKit.xcframework
         embed: false
       - sdk: Metal.framework
       - sdk: QuartzCore.framework

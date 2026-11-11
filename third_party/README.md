@@ -10,8 +10,8 @@ uv run python scripts/third_party.py verify-archive path/to/GhosttyKit.xcframewo
 ```
 
 Open **About Loopflow → Open Source Licenses** for offline, selectable notices.
-Use Find in the notice window to locate a component. Sources and rebuild tools
-are in the app's `Contents/Resources/ThirdPartySources` directory.
+Use Find in the notice window to locate a component. MPL-2.0 source archives are
+in the app's `Contents/Resources/ThirdPartySources` directory.
 
 `manifest.json` owns the audited GhosttyKit pin, non-Cargo sources, preserved
 notices and exceptional crate license files absent from published crates.
@@ -29,25 +29,29 @@ For a dependency/artifact update:
    source URL and SHA-256, preserved full notices, glyph attributions, and any
    crate notice exceptions. `notice_provenance` records supplemental upstream
    license locations; `notices/` retains the reviewed text and its source paths.
-2. For GhosttyKit, compare both archive member lists against `pkg/libintl/build.zig`,
-   check embedded font bytes and their licenses, and audit the complete pinned
-   `SharedDeps.zig` plus transitive sources. Update the manifest pin and object
-   list. Do not overwrite an already published binary; use the existing artifact
-   publication workflow and a new artifact name when authorized.
+2. For GhosttyKit, check embedded font bytes and their licenses, and audit the
+   complete pinned `SharedDeps.zig` plus transitive sources. GhosttyKit builds
+   with `-Di18n=false`, so it carries no GNU libintl; confirm `ar t` on each
+   slice's `libghostty.a` lists no `gettext.o`. Update the manifest pin. Do not
+   overwrite an already published binary; use the existing artifact publication
+   workflow and a new artifact name when authorized.
 3. Run `refresh`, review the generated diff, and run the checks above. Changes to
    lockfiles, fonts, themes, scripts or Ghostty patches invalidate the old inventory.
 4. Package and verify an actual app/archive. Release, local app installation,
    Xcode assembly and future GhosttyKit builds invoke the same packager before
    signing/compression. Downloads are content-addressed and always checksum-checked.
 
-Packaging includes pinned dependency source archives, an exact copy of the
-framework's macOS slice for relinking, the current Loopflow source/build inputs,
-and standalone libintl archives extracted from both macOS architectures. These are carried inside
-the app/archive, without relying on an upstream source URL or a future written
-offer. [REBUILD.md](REBUILD.md) gives the recipient's modification/relink procedure.
-A failed download, stale inventory, changed object layout or missing source aborts
-packaging. `contents.json` records hashes, and final-artifact verification requires
-all inventory sources, notices, rebuild tools and both uncombined libraries.
+Packaging ships every notice, plus the source archive of each MPL-2.0
+component (z2d, option-ext), which that license requires be available to
+recipients. A crate's license comes from Cargo; a manifest component's from its
+`license` field, so a new MPL-2.0 GhosttyKit dependency needs one. Every other
+license in the inventory needs its notice only: libpng's GPL files are
+uncompiled examples, glslang's Bison output and Breakpad's configure scripts
+carry exceptions, and the GPL shell integration ships as source with its license
+text in the notices. A framework archive carries only GhosttyKit's MPL sources.
+A failed download, stale inventory or missing source aborts packaging.
+`contents.json` records hashes, and final-artifact verification requires the
+notices and those sources.
 
 Symbols Nerd Font 3.4.0 combines glyph sets. It is distributed under OFL with its
 original MIT and component attributions retained; the MIT package label does not
@@ -56,12 +60,9 @@ or Loopflow license are changed. The font's notices record upstream glyph
 remapping/scaling and reserved names; source licenses remain attached to their
 respective material. This audit is packaging evidence, not legal certification.
 
-The historical public lf3/lf7 archives are immutable and are not republished by
-this change. Current app packaging supplies the material they lack; future
-GhosttyKit archives include it before publication.
+The historical public lf3/lf7 archives are immutable and are not republished.
+They statically combine GNU libintl; archives from lf8 on are built without it.
 
-The iOS development target links GhosttyKit's `ios-arm64` and
-`ios-arm64-simulator` slices and bundles the generated `NOTICES.txt` plus the
-font notices. It carries no relink material: the iOS slices combine libintl the
-same way, and nothing packages their uncombined library or sources yet. Shared
-theme licenses remain in the Loopflow framework's resources.
+The iOS target links the same archive's `ios-arm64` and `ios-arm64-simulator`
+slices and bundles the generated `NOTICES.txt` plus the font notices. Shared theme
+licenses remain in the Loopflow framework's resources.

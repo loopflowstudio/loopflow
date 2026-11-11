@@ -61,9 +61,9 @@ would write back (keys, and its answers to a program's queries such as
 for the modes the program set, so arrows follow application-cursor mode.
 
 The framework is GhosttyKit with the iOS slices from
-[`0006-ios-external-io.patch`](../GhosttyKitPatches/README.md). The project
-links the local build at `swift/.build/local/GhosttyKit.xcframework`; the
-Simulator slice is arm64.
+[`0006-ios-external-io.patch`](../GhosttyKitPatches/README.md), the archive
+`Package.swift` pins for Desktop too; `scripts/test_ios.py` resolves it before
+generating the project. The Simulator slice is arm64.
 
 ## Files
 

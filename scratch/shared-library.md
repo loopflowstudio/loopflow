@@ -15,8 +15,8 @@ connection copy.
   candidate with diagnostics and colour readback, clipboard callbacks, one
   OSC 52 policy, `minimum-contrast = 3`. iOS (`GhosttySurface.swift`) and Mac
   (`GhosttyManager.swift`, `GhosttyThemeConfiguration.swift`) have drifted on all
-  three. Blocked on packaging: Mac pulls GhosttyKit from `bin.loopflow.studio`,
-  iOS links a local build (`swift/ios.yml`).
+  three. Both apps now link the same published lf8 archive, so nothing
+  blocks it.
 - **Split `RegistryQuery`.** Its `run` half (about 17 methods that shell out to
   `lf`, `onMachine`, `pinTaskLocation`) is Desktop-only; on the phone those
   calls throw. Moving them to `LoopflowMac` touches many Desktop call sites.
@@ -30,8 +30,6 @@ connection copy.
 
 ## Open
 
-- **GhosttyKit packaging.** One xcframework with both slices, or
-  `LoopflowTerminal` compiled into each app from source?
 - **Phone screen reads.** Should the phone's Task screen read `taskDetail` /
   `sessionCard` (`ScreenReads.swift`), or should the started list cover it and
   `ScreenReads.swift` go?

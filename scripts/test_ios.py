@@ -38,6 +38,8 @@ def _terminate(signum: int, _frame: object) -> None:
 
 def main() -> int:
     env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    # The project links the GhosttyKit archive Package.swift pins.
+    subprocess.run(["swift", "package", "resolve"], cwd=ROOT / "swift", env=env, check=True)
     subprocess.run(
         ["xcodegen", "generate", "--spec", "swift/ios.yml"], cwd=ROOT, env=env, check=True
     )

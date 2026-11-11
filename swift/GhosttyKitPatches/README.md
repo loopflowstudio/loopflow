@@ -7,8 +7,9 @@ uv run python scripts/loopflow-dev.py ghostty-build
 Requires Zig 0.16.0, `glslangValidator`, and a macOS Metal device. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
-publish the artifact. Packaging includes the audited notices, matching source,
-and standalone libintl libraries; missing material fails the build. See
+publish the artifact. It builds with `-Di18n=false`, so no GNU libintl is linked.
+Packaging includes the audited notices and matching source; missing material
+fails the build. See
 [third-party packaging](../../third_party/README.md). Packaging normalizes the upstream static archive to
 `libghostty.a` and updates its plist paths so SwiftPM links it.
 
@@ -60,10 +61,8 @@ by number, which is how the phone knows whether a reply is pasted bracketed.
 The Simulator slice is arm64 only. `zig build test -Dtest-filter='external io'`
 covers the backend's writes; `LoopflowiOSTests/SessionTerminalTests` drives a
 real surface on the Simulator: grid size, the status query reply, cursor-key
-modes, held scroll position and reset. The build writes
-`GhosttyKit-a60e9e2-lf8-ios1.xcframework.zip`; until it is published and
-`Package.swift` names it, the iOS project links `swift/.build/local/` and Desktop
-stays on the published lf7 archive, which lacks this patch.
+modes, held scroll position and reset. Both apps link the same archive:
+`swift/ios.yml` takes the copy SwiftPM resolves from `Package.swift`.
 
 ## Theme readback
 
@@ -81,12 +80,14 @@ reject changes to every managed color key and unresolved cursor colors.
 
 ## Combined artifact
 
-`Package.swift` selects `GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip`,
-combining lf7 feedback/contrast with fixed-RGB theme readback. The public download
-matches SHA-256 `19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9`.
-October 15's build passed the combined patch/parser/ABI/color getter suites,
-324 offscreen Metal cases and GLSL compilation, producing both architectures.
-The earlier lf3-theme-readback1 and lf7 artifacts remain immutable.
+`Package.swift` selects `GhosttyKit-a60e9e2-lf8.xcframework.zip` (SHA-256
+`306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99`, 38 MB): every
+patch here, with macOS, iOS and iOS Simulator slices. It builds with
+`-Di18n=false`; `0007-no-libintl-without-i18n.patch` stops upstream linking GNU
+libintl on Apple targets regardless, and nothing calls it with i18n off. Each
+slice's `libghostty.a` is stripped of debug info (`strip -S`), which the
+apps never shipped. The earlier lf3-theme-readback1, lf7 and
+lf7-theme-readback1 artifacts remain immutable; they combine libintl.
 
 ## Terminal feedback and contrast
 

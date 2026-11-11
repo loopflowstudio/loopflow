@@ -5,17 +5,12 @@ Screenshots from a Simulator run fed a recorded stream are in `ios-ghostty/`.
 
 ## Before this can merge
 
-- Publish `GhosttyKit-a60e9e2-lf8-ios1.xcframework.zip` by the workflow in
-  `swift/GhosttyKitPatches/README.md`, then point `Package.swift` and
-  `third_party/manifest.json` at it. Until then CI's
-  `scripts/test_ios.py` step has no framework to link: `swift/ios.yml` reads
-  `swift/.build/local/GhosttyKit.xcframework`, which only a local
-  `ghostty-build` writes.
-- Desktop moves to the same archive at that point. Its surface config struct
-  gained a trailing field (`io_write_cb`); Desktop builds it with
+- Run the mounted Desktop fixture against the lf8 archive (`Package.swift` now
+  pins it for both apps): `uv run python scripts/desktop_performance.py
+  verify-fixture --mounted --lf target/debug/lf`. Its surface config struct gained
+  a trailing field (`io_write_cb`); Desktop builds it with
   `ghostty_surface_config_new()`, so the field is null and the pty path is
-  unchanged. Run the mounted Desktop fixture against the new archive before
-  switching.
+  unchanged. Needs a display.
 
 ## Not checked
 
@@ -34,5 +29,8 @@ Screenshots from a Simulator run fed a recorded stream are in `ios-ghostty/`.
 | Command | Result | Later |
 |---|---|---|
 | `uv run python scripts/loopflow-dev.py ghostty-build` | passed locally | on every patch change |
-| `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests` | passed locally | CI, once the archive is published |
 | `xcodebuild … -destination 'generic/platform=iOS'` | built | CI does not build for a device |
+| `swift build --product LoopflowMac` + `swift test --filter "Ghostty\|OpenSourceLicenses"` on the pinned lf8 | built, 24 passed | gate |
+| `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests` on the pinned lf8 | passed | CI |
+| `uv run pytest python/tests/test_third_party.py python/tests/test_app_bundle.py` | 13 passed | gate |
+| `scripts/third_party.py package` into an empty directory | 5.1 MB: notices, z2d and option-ext source | release |

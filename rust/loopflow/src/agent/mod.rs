@@ -190,7 +190,7 @@ pub struct AgentConfig {
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
     /// Whether a Task or Wave command launched this (`Cli::names_work`): it
     /// needs the Machine server, and a headless run gets every hook. A native
-    /// terminal launch gets every hook either way.
+    /// terminal launch an owner holds gets every hook either way.
     pub managed: bool,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
@@ -1898,7 +1898,7 @@ fn spawn_agent_child(
 }
 
 fn run_interactive(
-    cmd: Command,
+    mut cmd: Command,
     timeout: Option<Duration>,
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
@@ -1906,13 +1906,18 @@ fn run_interactive(
     managed: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
+    let foreground = crate::os_process::foreground::hand_to(&mut cmd);
     let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, managed)?;
-    let _pid_guard = ChildPidGuard::new(child.id());
+    let pid = child.id();
+    let _pid_guard = ChildPidGuard::new(pid);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = title.as_mut() {
             title.refresh();
         }

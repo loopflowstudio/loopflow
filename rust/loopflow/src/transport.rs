@@ -188,6 +188,19 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
     HANDOFF.get().map(|handoff| &handoff.owner)
 }
 
+/// Whether a bare conversation runs as this terminal's foreground program, as
+/// `claude` or `codex` would: no owner holds it, so closing the terminal ends
+/// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
+/// launches without a terminal on stdin, which need the owner's PTY, and a
+/// Desktop surface waiting for a relay to acknowledge it.
+pub fn runs_in_terminal(batch: bool) -> bool {
+    !batch
+        && current().is_none()
+        && io::stdin().is_terminal()
+        && std::env::var_os("LF_SERVER_STATUS").is_none()
+        && std::env::var_os(STREAM_ENV).is_none()
+}
+
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current(batch: bool) -> Result<bool> {

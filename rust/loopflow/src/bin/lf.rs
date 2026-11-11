@@ -418,6 +418,32 @@ fn definition_invocation(cli: &Cli) -> anyhow::Result<Option<DefinitionInvocatio
     }))
 }
 
+/// A new conversation with an agent is never a scope's ongoing conversation,
+/// which starts through `lf resume`. Typed at a terminal, it runs there with
+/// no owner. Graphs keep the owner that holds their steps; a name that does not
+/// resolve keeps it too, and reports its error after delegation as before.
+fn bare_conversation(cli: &Cli) -> bool {
+    if !loopflow::transport::runs_in_terminal(cli.batch) {
+        return false;
+    }
+    match &cli.command {
+        None | Some(Commands::Inline { .. }) => true,
+        Some(Commands::External(_) | Commands::Skill { .. }) => {
+            let Ok(Some(invocation)) = definition_invocation(cli) else {
+                return false;
+            };
+            let Ok(repo) = loopflow::repo::working_directory() else {
+                return false;
+            };
+            matches!(
+                loopflow::definition::resolve_definition(&repo, invocation.name, invocation.kind),
+                Ok(loopflow::definition::Target::Skill(_))
+            )
+        }
+        _ => false,
+    }
+}
+
 fn resolve_cli_target(
     cli: &mut Cli,
 ) -> anyhow::Result<Option<(loopflow::definition::Target, Option<String>)>> {
@@ -2323,7 +2349,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    if execution && loopflow::transport::delegate_current(cli.batch)? {
+    if execution && !bare_conversation(&cli) && loopflow::transport::delegate_current(cli.batch)? {
         return Ok(());
     }
     // Only the operation a launcher started reports; an execution owner in

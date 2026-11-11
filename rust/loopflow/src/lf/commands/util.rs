@@ -654,6 +654,7 @@ fn run_native_session(
             }
         }
     }
+    let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
         Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.managed),
         None => {
@@ -681,7 +682,11 @@ fn run_native_session(
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
+    let pid = child.id();
     let status = crate::os_process::wait_for_exit(&mut child, None, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = &mut title {
             title.refresh();
         }

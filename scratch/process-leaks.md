@@ -245,3 +245,68 @@ Installed-build owners also could not read the proposed Process close column.
 Direct signalling removes both dependencies. The review notes and replaced
 implementation checklist remain at
 `89181c49ac:scratch/process-leaks.md`; the latest direction is quoted above.
+
+## Demo review, 2026-11-11 (after loop 3)
+
+Jack Heart, word for word, reading PR #1877:
+- "is this doing what i expect> i thought this was supposed to make it so bare lf closes right away"
+- "and task sessions were always held wehn open"
+
+As published, bare conversations "stay running until you quit their agent"
+(`docs/sessions.md`), which keeps them longer than main's two-minute idle ending.
+The earlier reading of "with bare lf, noting holds its at all" as "bare-direct
+later, existing bare owners run until quit" was wrong: nothing holds a bare
+owner, so it ends when its last viewer leaves.
+- Asked whether closing a bare terminal mid-turn ends the agent: "for a bare session, it jsut does whatever claude or codex would do"
+
+Superseded direction (replaced by "1b" below): a bare owner ends when its terminal goes, as the
+provider would, mid-turn included. Detach (Ctrl+]) of a bare conversation ends it
+per "agian, just behaves like the underlying harness woudl": bare adds no lf
+detach or lifetime of its own; keys and terminal close behave as the provider's.
+`lf resume` continues its history. Managed conversations: "if its a managed task
+session, then neither ends the session" (terminal close or detach). Wave and
+repository conversations keep the same lifetime as open Tasks. The PR body
+leads with closed Tasks ending, bare ending with its terminal, and the removed
+two-minute rule; "Task sessions held while open" is not new behavior.
+
+Bare-direct, built after "1b"/"2a": `bin/lf.rs::bare_conversation` skips
+delegation for plain `lf`, inline prompts and skill targets typed at a terminal;
+`ops/human_session.rs::opens_bare` does the same for resuming a Session with no
+primary scope. `os_process/foreground.rs` makes the provider its own group and
+the terminal's foreground (from a close-on-exec duplicate of lf's stdin), takes
+the terminal back on exit, and follows Ctrl+Z. One path for every harness
+(`util.rs` native launch, `agent::run_interactive`). Native hooks are full only
+when an owner holds the launch. Graphs, headless runs and Desktop relay surfaces
+keep owners. Test:
+`transport_tests::bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal`.
+Only a terminal on stdin goes direct; piped or scripted launches keep the
+owner's PTY. Existing owner tests that resumed with pipes needed no change.
+`codex_original_request_channel_and_turn_survive_all_viewers` now starts under
+`session serve`; `detached_owner_keeps_no_descriptor_its_terminal_inherited`
+launches `-b`. `nested_cli_execution_survives_its_calling_provider_and_viewer`
+is deleted: a nested bare run "ends with its parent" (server-first).
+
+- `transport_tests`: 111 passed, 1 failed, 8 ignored (`/tmp/loo823-bare-transport2.log`). `completed_task_cleanup_signals_shell_owner_and_settles_jobs` failed `settled` under the full run, passed alone twice; it passed in the run before. Open race in shell cleanup, not this pass's code.
+- `context_launch_tests::` 21/21; lib `harness::context|context_block|harness::codex|os_process` 65/65; `documented_commands::` 4/4; `cargo clippy --all-targets -- -D warnings` clean on macOS. Linux `siginfo_t::si_pid()` branch compiles only in CI.
+- Not tried: Ctrl+Z under a job-control shell; Desktop opening a bare Session.
+- Compress (bare-direct): SAFETY comments per `unsafe` in `foreground.rs`, single wait loop in the bare test. `transport_tests bare_lf_runs_its_provider…` passed, clippy `--all-targets` clean; `/tmp/loo823-compress-bare.log`.
+Demo still owed: bare `lf` with Claude and with Codex in Rex shows the provider icon.
+
+Open (concept review, scratch/concept-review.html): every interactive launch
+spawns `lf session serve` via `transport::delegate`, bare included. (1) Tie a
+bare owner's life to its terminal now, or launch bare with no owner in this PR
+(server-first's "Bare launches go direct"). (2) Is "managed" a scope's ongoing
+conversation only, or any interactive Session naming a Task/Wave (e.g. a skill
+typed in a Task checkout)?
+- Jack Heart: "1b". Bare launches start no owner in this PR: the provider runs
+  as the terminal's foreground child; owner, relay, saved screen, takeover and
+  Ctrl+] go for bare; bare keeps context hooks only. Jack Heart: "2a".
+  Only a scope's ongoing conversation (Task, Wave, repository) is managed; a skill
+  typed in a Task checkout is bare.
+- Jack Heart: "does this mean we get proper claude/codex icons in rex for bare lf now".
+  Rex 0.1.0 keys the pane icon on the `tcgetpgrp` leader's invoked path and re-reads
+  when that leader's executable changes (2026-11-05 reading). Bare-direct must leave
+  the real provider as the foreground process-group leader: exec it, or start it in
+  its own process group and hand it the terminal. No argv0 or symlink naming.
+- Jack Heart: "shoudl be independent of provider too". One bare launch path for
+  every harness (Claude, Codex, Pi, OpenCode, …); no per-provider branch.

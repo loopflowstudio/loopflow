@@ -2017,6 +2017,122 @@ fn detached_owner_keeps_no_descriptor_its_terminal_inherited() {
     assert!(fixture.running(&owner), "the owner outlives its terminal");
 }
 
+/// Bare `lf` behaves as its provider would started from the shell: the
+/// provider leads the terminal's foreground group, no owner holds it, and
+/// closing the terminal ends it.
+#[test]
+fn bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal() {
+    use std::os::unix::process::CommandExt;
+    let fixture = Fixture::new();
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s %s\n' "$$" "$(ps -o tpgid= -p $$ | tr -d ' ')" > "$HOME/foreground.tmp"
+mv "$HOME/foreground.tmp" "$HOME/foreground"
+read -r answer < /dev/tty
+"#,
+    );
+    let (mut master, mut slave) = (-1, -1);
+    // SAFETY: valid output pointers; null selects default PTY settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned two independently owned descriptors.
+    let master = unsafe { std::fs::File::from_raw_fd(master) };
+    let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+    // SAFETY: flags on a descriptor this test owns. A terminal emulator's
+    // master is never inherited by the programs it runs.
+    unsafe {
+        libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
+        libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+    }
+    let mut command = fixture.command(&["-i", "-a", "claude"]);
+    command
+        .env("PATH", path)
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    // SAFETY: setsid and ioctl are async-signal-safe. The PTY becomes lf's
+    // controlling terminal, as a shell's is.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut lf = command.spawn().unwrap();
+    drop(command);
+    // The reader holds the only master descriptor; closing the terminal is
+    // that thread dropping it.
+    let screen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let written = screen.clone();
+    let (close, closing) = std::sync::mpsc::channel::<()>();
+    let reader = std::thread::spawn(move || {
+        let mut master = master;
+        let mut buffer = [0; 4096];
+        while closing.try_recv().is_err() {
+            match master.read(&mut buffer) {
+                Ok(read @ 1..) => written.lock().unwrap().extend_from_slice(&buffer[..read]),
+                _ => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let recorded = loop {
+        if let Ok(recorded) = std::fs::read_to_string(fixture.home.path().join("foreground")) {
+            break recorded;
+        }
+        assert!(
+            Instant::now() < deadline && lf.try_wait().unwrap().is_none(),
+            "the provider did not start:\n{}",
+            String::from_utf8_lossy(&screen.lock().unwrap())
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let (provider, foreground) = recorded.trim().split_once(' ').unwrap();
+    assert_eq!(
+        provider, foreground,
+        "the provider leads the foreground group"
+    );
+    let owners: i64 = fixture
+        .sql()
+        .query_row(
+            "SELECT COUNT(*) FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owners, 0, "no owner holds a bare conversation");
+    close.send(()).unwrap();
+    reader.join().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while lf.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "lf outlived its terminal");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let provider: libc::pid_t = provider.parse().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    // SAFETY: signal 0 only checks whether the stand-in still exists.
+    while unsafe { libc::kill(provider, 0) } == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the provider outlived its terminal"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
     let fixture = Fixture::new();
@@ -4361,83 +4477,6 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
 }
 
 #[test]
-fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-if mkdir "$HOME/outer" 2>/dev/null; then
-    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" > "$HOME/caller"
-    "$LF_BIN" --interactive --agent claude : 'nested original input' < /dev/tty &
-    printf '%s\n' "$!" > "$HOME/nested-viewer"
-    wait
-else
-    stty -echo < /dev/tty
-    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/nested-launches"
-    read -r answer < /dev/tty
-    printf '%s:%s\n' "$$" "$answer" > "$HOME/nested-answer"
-fi
-"#,
-    );
-    fixture.owner(fixture.native(
-        Path::new(env!("CARGO_BIN_EXE_lf")),
-        &path,
-        "call the nested CLI",
-    ));
-    let caller = fixture.wait_file("caller");
-    let nested = fixture.wait_file("nested-launches");
-    let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();
-    let (caller_pid, caller_capture) = caller.trim().split_once(':').unwrap();
-    let (nested_pid, nested_capture) = nested.trim().split_once(':').unwrap();
-    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    let identity = |capture: &str| -> (String, String, String) {
-        sql.query_row(
-            "SELECT s.id,s.agent_process_id,s.transport_lf_process_id
-             FROM agent_sessions s JOIN session_events e ON e.session_id=s.id
-             WHERE e.kind='captured' AND e.receipt_key=?1",
-            [capture],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap()
-    };
-    let parent = identity(caller_capture);
-    let child = identity(nested_capture);
-    assert_ne!(parent.0, child.0);
-    assert_ne!(
-        parent.2, child.2,
-        "nested execution inherited its caller's owner"
-    );
-    let descendants: i64 = sql
-        .query_row(
-            "SELECT count(*) FROM processes WHERE caller_session_id=?1",
-            [&parent.0],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(descendants > 0, "nested CLI lost its caller provenance");
-    // SAFETY: both PIDs are reported by this fixture's live processes. Kill
-    // precisely the calling provider and nested viewer, never either owner.
-    unsafe {
-        assert_eq!(libc::kill(caller_pid.parse().unwrap(), libc::SIGKILL), 0);
-        assert_eq!(libc::kill(viewer, libc::SIGKILL), 0);
-    }
-    let mut attached = fixture.viewer(&child.2, true);
-    assert_eq!(identity(nested_capture), child);
-    let settled: i64 = sql.query_row(
-        "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'",
-        [&child.0], |row| row.get(0),
-    ).unwrap();
-    assert_eq!(settled, 0, "caller death settled the nested request");
-    attached.input("accepted-once\n");
-    attached.finish();
-    assert_eq!(
-        fixture.wait_file("nested-answer").trim(),
-        format!("{nested_pid}:accepted-once")
-    );
-    assert_eq!(fixture.wait_file("nested-launches"), nested);
-}
-
-#[test]
 fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let fixture = Fixture::new();
     let bin = fixture.home.path().join("bin");
@@ -4445,35 +4484,20 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     support::install_native_codex(&bin);
     let path = format!("{}:/usr/bin:/bin", bin.display());
     std::fs::write(fixture.home.path().join("wait-approval"), "").unwrap();
-    // The ordinary interactive CLI is the creator/viewer. Give it a real tty,
-    // then kill it only after the original protocol request is pending.
-    let mut master = -1;
-    let mut slave = -1;
-    // SAFETY: openpty initializes both descriptors; no optional settings are supplied.
-    assert_eq!(
-        unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        },
-        0
+    // A scope's conversation, held by its owner from the start; no viewer.
+    let mut owner = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "--agent",
+            "codex",
+            ":",
+            "Original input",
+        ],
     );
-    // SAFETY: each newly opened descriptor is transferred exactly once.
-    let _terminal = unsafe { std::fs::File::from_raw_fd(master) };
-    // SAFETY: the slave is a distinct, newly opened descriptor.
-    let terminal_input = unsafe { std::fs::File::from_raw_fd(slave) };
-    let mut creator = fixture
-        .command(&["-i", "--agent", "codex", ":", "Original input"])
-        .env("PATH", &path)
-        .stdin(terminal_input.try_clone().unwrap())
-        .stdout(terminal_input.try_clone().unwrap())
-        .stderr(terminal_input)
-        .spawn()
-        .unwrap();
+    owner.env("PATH", &path);
+    let owner = fixture.owner(owner);
     let pending: Value = serde_json::from_str(&fixture.wait_file("pending-request.json")).unwrap();
     let launched = fixture.wait_file("launched");
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
@@ -4485,15 +4509,6 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
         )
         .unwrap();
     let identity: (String,i64,String) = sql.query_row("SELECT id,pid,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-    let owner: String = sql
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    creator.kill().unwrap();
-    creator.wait().unwrap();
     let first = fixture.viewer(&owner, true);
     drop(first);
     let observed: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'", [&session], |r| r.get(0)).unwrap();

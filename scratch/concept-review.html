@@ -3,68 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-823 · conversation lifetime</title>
+<title>LOO-823 concept review</title>
 <style>
-:root { color-scheme:light dark; --bg:#faf9f6; --fg:#242725; --muted:#636963; --line:#d5d9d2; --accent:#22654c; }
-@media(prefers-color-scheme:dark) { :root { --bg:#191c1a; --fg:#e5e9e3; --muted:#a8b2a7; --line:#414b40; --accent:#91d4ac; } }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,sans-serif; }
-main { max-width:48rem; margin:auto; padding:2rem 1.2rem 3rem; }
-h1 { font-size:1.7rem; line-height:1.2; margin:.6rem 0; }
-h2 { font-size:1.1rem; margin:1.6rem 0 .5rem; }
-p { margin:.6rem 0; }
-.meta, small { color:var(--muted); font-size:.85rem; }
-.lead { border-left:3px solid var(--accent); padding-left:1rem; }
-code { font: .88em ui-monospace,monospace; overflow-wrap:anywhere; }
-table { width:100%; border-collapse:collapse; font-size:.92rem; }
-th, td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--line); }
-th { font-weight:600; }
-li { margin:.5rem 0; }
-summary { cursor:pointer; }
-@media(max-width:500px) { main { padding:1.2rem .8rem 2rem; } table { font-size:.83rem; } }
+  :root { --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6a665f; --rule:#dedad2; --panel:#f2efe8; --accent:#0b6b57; --accent-bg:#e6f2ee; --warn:#a13a1e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#e8e6e1; --muted:#9a968d; --rule:#34343a; --panel:#202024; --accent:#6fd0b6; --accent-bg:#18302b; --warn:#f0906f; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1rem 5rem; }
+  h1 { font-size:1.6rem; line-height:1.2; margin:0 0 .5rem; text-wrap:balance; }
+  h2 { font-size:1.15rem; margin:2.3rem 0 .6rem; }
+  h3 { font-size:1rem; margin:1.5rem 0 .3rem; }
+  .meta { color:var(--muted); font-size:.9rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.87em; }
+  .lead { font-size:1.08rem; }
+  .proposed { border-left:3px solid var(--accent); background:var(--accent-bg); padding:.6rem 1rem; border-radius:0 6px 6px 0; margin:1rem 0; }
+  .built { border-left:3px solid var(--rule); padding:.1rem 1rem; margin:1rem 0; }
+  .proposed > :first-child, .built > :first-child { margin-top:0; }
+  .tag { color:var(--accent); font-weight:600; }
+  .bad { color:var(--warn); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.93rem; }
+  th, td { text-align:left; vertical-align:top; padding:.45rem .7rem .45rem 0; border-bottom:1px solid var(--rule); }
+  th { font-weight:600; }
+  dl.q { margin:.4rem 0 1.4rem; }
+  dl.q dt { float:left; clear:left; width:2.4rem; font-weight:600; font-family:ui-monospace,Menlo,monospace; font-size:.9rem; padding-top:.1rem; }
+  dl.q dd { margin:0 0 .45rem 2.4rem; }
 </style>
 </head>
 <body>
 <main>
-<header>
-<p class="meta">LOO-823 · concept-review · 2026-11-11 · code at <code>89181c49ac</code></p>
-<h1>Keep open conversations. Close finished work.</h1>
-<p class="lead"><strong>No decision needed in this scope.</strong> The latest direction is built. No further concept change or implement pass is needed; gate and the suite process census remain.</p>
-<details class="meta"><summary>Files reviewed</summary>
-<p><code>scratch/process-leaks.md</code>, <code>scratch/questions.md</code>, <code>scratch/qa.html</code>, <code>docs/sessions.md</code>, <code>docs/work.md</code>, <code>.lf/skills/qa.md</code>; Rust <code>ops/task/retirement.rs</code>, <code>ops/human_session.rs</code>, <code>store/sqlite/task_retirement.rs</code>, <code>transport/lifetime.rs</code>, <code>transport/README.md</code>, <code>store/migrations/owner_close_requests.sql</code>, and their focused tests.</p>
-</details>
-</header>
+<p class="meta">LOO-823 · concept review at demo review (implement run <code>a2673ed2</code> live) · 2026-11-11 · branch <code>4b7531508c</code><br>
+Built from <code>transport.rs</code> (<code>delegate</code>, <code>start</code>), <code>transport/README.md</code>, <code>docs/sessions.md</code>, <code>docs/dev/server-first.md</code>, <code>server/README.md</code>, <code>scratch/process-leaks.md</code>.</p>
 
-<h2>The biggest mismatch is removed</h2>
-<p><strong>Before:</strong> cleanup stored its judgment, seven triggers canceled it, and owners polled it. Older owners could not consume it. <strong>Built now:</strong> cleanup checks current state and signals the verified owner in that pass, through rollover’s existing termination path. No automatic close request survives the pass.</p>
+<h1>Should bare <code>lf</code> stop starting an owner process in this PR?</h1>
 
-<h2>Actions → concepts → APIs, as built</h2>
-<table>
-<thead><tr><th>Action and experience</th><th>Concept</th><th>State-changing API</th></tr></thead>
-<tbody>
-<tr><td>Leave an open Task, Wave or repository conversation; return to its running provider.</td><td>Scope keeps execution. Typed input needs no ledger.</td><td><code>record_owner_viewer_hold</code>; <code>lf resume</code></td></tr>
-<tr><td>Complete a Task. After 15 minutes unviewed and work settles, its conversations end, even without a checkout.</td><td>Task closure decides lifetime.</td><td><code>close_conversations</code> → <code>end_owner</code></td></tr>
-<tr><td>Abandon a Task. Unviewed conversations end even mid-turn; viewed conversations stay.</td><td>Abandonment cancels work.</td><td><code>save_abandon</code> → <code>close_conversations</code></td></tr>
-<tr><td>Close a shell; remove an eligible checkout after jobs settle.</td><td>A requested Close and unfinished deletion survive restart.</td><td><code>desktop_shells.close_requested</code>; <code>task_retirements</code></td></tr>
-</tbody>
-</table>
-<p><small>Bare conversations also remain until quit or explicit replacement. Resume may replace an idle owner on another build and lose its draft. Headless Runs keep their existing lifetime. There is no background conversation cap.</small></p>
+<p class="lead">Every interactive launch goes through <code>delegate</code> → <code>start</code>, which spawns <code>lf session serve</code> and relays the terminal to it. A bare <code>lf debug</code> gets the same detached owner a Task conversation gets. That owner is the only reason a bare session can outlive its terminal. To "behave like the underlying harness", the owner either has to end with the terminal or not exist.</p>
 
-<h2>Return, failure, recovery</h2>
-<p><strong>Normal:</strong> returning before cleanup keeps execution; leaving starts a new grace. Returning after closure continues saved provider history without reopening the Task. The saved screen is not a restored editor; input is never replayed.</p>
-<p><strong>Failure:</strong> a failed store read cannot authorize closure. Viewer writes retry off the input path. Failed checkout cleanup retries from its existing queue; reopening cancels that intent. An older owner may miss the notice but still receives the verified signal.</p>
-<p><strong>Counterexample retained:</strong> return between cleanup’s decision and signal, and the conversation can end in front of the viewer with “Task completed”. Resume continues history. The direct-signalling choice includes this race.</p>
+<h2>What you said</h2>
+<ul>
+  <li>"with bare lf, noting holds its at all"</li>
+  <li>"for a bare session, it jsut does whatever claude or codex would do"</li>
+  <li>"agian, just behaves like the underlying harness woudl"</li>
+  <li>"if its a managed task session, then neither ends the session"</li>
+</ul>
 
-<h2>What remains to show</h2>
-<p>The recorded private-world walkthrough reached closure, return and abandonment after the launcher repair. It used stand-in providers and manual sweeps. Gate and a fresh suite process census remain; this review ran no suites or live cleanup.</p>
-<p><strong>Deferred proposal, not built:</strong> a resident-agent limit and suspension. It does not change this PR’s lifetime rule.</p>
+<h2>One interaction, three ways</h2>
+<p>In a repository you run <code>lf debug</code>. Claude is mid-turn. You close the tab, then later run <code>lf resume &lt;session&gt;</code>.</p>
+<div class="scroll"><table>
+  <tr><th></th><th>Close tab</th><th>Ctrl+]</th><th>Resume</th></tr>
+  <tr><td>Published PR</td><td><span class="bad">Owner keeps running until Claude quits</span></td><td>lf detaches; keeps running</td><td>Reattaches live</td></tr>
+  <tr><td>A. Owner tied to its terminal <span class="tag">(the live implement run is building this)</span></td><td>Owner hangs up the provider; ends</td><td>Forwarded to Claude</td><td>Continues from history</td></tr>
+  <tr><td>B. Bare goes direct <span class="tag">(proposed)</span></td><td>Claude gets SIGHUP from the tab</td><td>Claude sees it</td><td>Continues from history</td></tr>
+</table></div>
+<p>A and B look the same to you. They differ in what exists.</p>
 
-<h2>Recorded questions</h2>
-<p>Jack Heart: <q>1b 2c</q>. These are historical answers, not pending prompts.</p>
-<ol>
-<li><strong>Who ends a done Task’s conversation?</strong> 1b: cleanup signals the verified owner in the pass that decides it. Explicit shell Close stays stored. Built.</li>
-<li><strong>What about already-running installed-build owners?</strong> 2c: end them by PID before shipping. The design has no confirming action record. This review signals no existing processes.</li>
-</ol>
+<h2>A: keep the owner, give it the terminal's lifetime</h2>
+<div class="built">
+<p>Owner and relay stay. The owner learns "if bare, end when the last viewer goes, and don't treat Ctrl+] as detach." That is a per-scope branch inside the owner's lifetime code, which has already gone through idle ending, an input ledger and close requests, and which server-first plans to delete. Bare turn hooks keep working because an owner still holds them. Small diff.</p>
+</div>
+
+<h2>B: bare runs in the terminal's foreground</h2>
+<div class="proposed">
+<p><span class="tag">Proposed, not built.</span> <code>delegate</code> starts an owner only for managed conversations. A bare launch runs the provider as the terminal's own foreground child. There is nothing to end, leak or clean up. This is the server-first piece "Bare launches go direct: no owner, agent in the terminal's foreground", pulled into this PR.</p>
+<div class="scroll"><table>
+  <tr><th></th><th>Goes away for bare</th><th>Changes</th></tr>
+  <tr><td>Process</td><td>Owner, relay, saved screen, takeover, the Ctrl+] key</td><td><code>delegate</code> branches on managed vs bare</td></tr>
+  <tr><td>Hooks</td><td>Turn hooks that report "can take a reply" (they need an owner)</td><td>Context hooks only, as bare headless runs already have</td></tr>
+  <tr><td>Desktop</td><td>Reattaching a bare pane after the app restarts</td><td>A bare pane ends with its pane, as plain Claude would</td></tr>
+  <tr><td>Status</td><td>Live working/idle for bare Sessions</td><td>From the transcript later (server-first "Transcript telemetry")</td></tr>
+</table></div>
+<p>Counterexample: a Graph started from inside bare Claude (<code>lf graph x</code>, no Task) runs its steps under that owner today. Under B, closing the tab ends them with Claude, as for any child of plain <code>claude</code>. A Task's Graph is managed and unaffected.</p>
+</div>
+
+<h2>Where "managed" stops</h2>
+<p>The line decides who gets an owner. The code has <code>PrimaryScope</code> (repository, Wave, Task) for each scope's ongoing conversation, and separately whether a Session names a Task. They disagree on <code>lf debug</code> typed inside a Task's checkout: it names the Task but isn't the Task's conversation.</p>
+
+<h2>Questions</h2>
+<h3>1. How does bare get the harness's behaviour?</h3>
+<dl class="q">
+  <dt>1a</dt><dd>A: keep the owner; it ends with its terminal and forwards Ctrl+]. Bare-direct stays a later server-first piece.</dd>
+  <dt>1b</dt><dd>B: bare launches no owner, in this PR. Implement switches to it.</dd>
+</dl>
+<h3>2. Which launches are managed (survive close and detach)?</h3>
+<dl class="q">
+  <dt>2a</dt><dd>Only a scope's ongoing conversation (Task, Wave, repository), however it is opened. A skill typed in a Task checkout is bare.</dd>
+  <dt>2b</dt><dd>Any interactive Session that names a Task or Wave, including a skill typed in a Task checkout.</dd>
+</dl>
 </main>
 </body>
 </html>

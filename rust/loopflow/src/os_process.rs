@@ -221,6 +221,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
     ))
 }
 
+pub(crate) mod foreground;
 #[cfg(test)]
 mod installation_tests;
 mod lifeline;

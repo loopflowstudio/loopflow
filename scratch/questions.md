@@ -41,3 +41,15 @@ Proposed infrastructure memory correction (read-only in this Task): replace
 `.lf/wave/infrastructure/MEMORY.md`'s "Idle owners end" two-minute rule with
 scope-based lifetime. Typed input holds nothing; resident-limit suspension is
 deferred. This proposal was carried from the earlier design, not a new Wave read.
+
+2026-11-11 bare-direct implementation assumptions (after "1b", "2a"):
+- A Desktop surface (`LF_SERVER_STATUS` or `LF_VIEWER_STREAM` set) still gets an
+  owner for a bare Session: it waits for a relay's acknowledgement and would
+  otherwise keep input paused. Desktop shells strip both, so `lf` typed in one is bare.
+- `lf resume <bare session>` while it runs in another terminal still stops that
+  provider (existing "provider client elsewhere" row); server-first says such a
+  process "is not one `lf` stops". Unchanged here.
+- Bare Codex still starts its observer beside the client; telemetry for bare
+  launches is server-first's transcript piece.
+- Graph targets (`lf code`, `lf graph …`) keep their owner; only skill targets,
+  inline prompts and plain `lf` run direct.

@@ -50,6 +50,12 @@ Looked at and left alone:
 - Pi's bash guard (`--moment tool-group`) stays on bare launches: it does not
   record, it joins the tool's process group to the watchdog that ends it with
   its provider (`agent_process::guard_tool_lifeline`).
+- A Task-run step learns it is one from `LF_GRAPH_STEP=task`, not from a
+  `--task` argument. Passing `--task` to the step would make `names_work`
+  read only flags, but `--task` also drives cwd and checkout resolution and the
+  Session's binding (`lf/commands/run.rs`, `bin/lf.rs`), which steps don't
+  take today. The Graph spawning its step is the command; the mark is its
+  argument.
 
 Concept review with a person, November 11 (`scratch/concept-review.html`).
 All three are answered below.
@@ -118,6 +124,13 @@ What the bare rule costs, found while building it (see `questions.md`):
   the session without the report. Not tried.
 - A correction turn a Graph resumes on its step is managed: it runs as a
   Task-run step, whatever the Session row says.
+
+Concept review again, November 11, headless, after managed moved to the
+command: the actions, the managed rule in `server/README.md` and
+`server-first.md`, and the code agree (`Cli::names_work` →
+`AgentConfig::managed`; no `is_managed` or `work_source` read left). Nothing
+to change, no open choice. `scratch/concept-review.html` now shows the rule as
+built.
 
 LOO-824 (its concept review, Jack Heart: "managed should = held") will read
 `AgentConfig::managed` and call `require_server` instead of keeping its own

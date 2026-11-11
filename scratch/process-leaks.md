@@ -1,7 +1,7 @@
 # LOO-823 process leaks
 
 Report: `python3 -I scratch/process_audit.py` writes `scratch/process-audit.html`
-(read-only).
+(read-only; it opens `loopflow.db` with `mode=ro` for shell receipts).
 
 Readings, 2026-11-10 ~17:30, 343 lf processes:
 
@@ -11,7 +11,7 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 - 24 from `/tmp/lf-7501-*`: `transport_tests` owners and stand-ins up to 8 days
   old; the fixture had no Drop. 297 `/tmp/lf-7501-*` dirs remain from them.
 - Owners: 78 held by `native input` (any unacknowledged byte: arrows, Esc,
-  an edit), 1 by a running Graph, 9 with no open Session; rollover's dry run
+  an edit), 1 by a running Graph, 9 Desktop shells (below); rollover's dry run
   moved 0.
 
 - `__codex-observe` (50), `__context-block` (23): all beside a live parent.
@@ -23,8 +23,8 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining, at demo: regenerate the report (the committed one is the 17:30
-reading) and compare its totals with a fresh `ps`; show the `transport_tests`
+Remaining, at demo: regenerate the report (the committed one is the 18:58
+reading, 356 processes) and compare its totals with a fresh `ps`; show the `transport_tests`
 ps diff again. Open: `scratch/questions.md` 1a-1d.
 
 Checks:
@@ -44,20 +44,19 @@ Checks:
   fix is not ours. Leave the call-site form; no lint.
 - Open: which input holds an owner (`scratch/questions.md`, 1a-1d).
 
-Next implement: the report's "Owners with no open Session" group hides what
-it is. Read 19:10: all nine (PIDs 8687 8933 24677 32670 55749 88963 89413
-89840 92273) are Desktop shells (`session serve --terminal -- /bin/sh -c
-# Runs only on creation…`), 26-32 h old, ppid 1, `/bin/zsh -l` alive, 0 viewers,
-rollover "keeps its lf until it exits". `lsof -p 8687` also shows fd 4 on
-`~/.lf/run/desktop/com.loopflow.mac.sock`, inherited from Desktop.
+## Desktop shells (read 2026-11-10 18:55)
 
-- `process_audit.py`: classify a shell owner by its command line; name the
-  group "Desktop shells with no viewer"; drop "or a conversation that ended".
-  Per shell, show its Task and that Task's state.
-- The transport README ends a Desktop shell on Close or fifteen minutes after
-  its Task is completed and released; Hide and Desktop exit keep it. A shell
-  whose Task is done, abandoned or gone and that is hours old is an owner
-  lifetime bug (outcome 3): find why its close never ran, fix it with a test.
-  If every one belongs to an unfinished Task, say that in the report row and
-  add a shell row to the troubleshooting table (stopping it loses the shell's
-  jobs and environment; its saved screen stays).
+The nine owners rollover reads as "no open Session" are unviewed Desktop
+shells; the report lists them under `desktop shell` with Task and state from
+`desktop_shells`, `task_retirements` and `lf task status`.
+
+- 8933 (LOO-434 active), 88963 (LOO-774 shipping), 92273 (MTG-269 active):
+  unfinished Tasks; a hidden shell runs until Close.
+- 32670 (LOO-775), 55749 and 89413 (LOO-776), 89840 (LOO-812), 24677
+  (MTG-252), 8687 (MTG-268): Task done, `close_requested=0`. The close path
+  never started: `retirement::advance` stops at `require_settled_work` because
+  the Task's interactive owner has `OwnerRetention::NativeInput`, so the
+  retirement stays `waiting` and `request_retirement` is never reached. The
+  sweep itself runs (`com.loopflow.cleanup`; `Task cleanup pending` lines in
+  `logs/lf.log` through 18:53). No shell-specific bug: it is the input hold in
+  `scratch/questions.md`, which now records these five Tasks. No code changed.

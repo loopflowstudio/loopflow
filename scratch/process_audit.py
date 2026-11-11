@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -80,12 +81,57 @@ def read_lsof():
     return tables
 
 
-def lf_json(args):
-    out = run(["lf", *args, "--json"])
+def lf_json(args, cwd=None):
+    out = subprocess.run(
+        ["lf", *args, "--json"], capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=cwd
+    ).stdout
     try:
         return json.loads(out)
     except json.JSONDecodeError:
         return None
+
+
+def read_shells(held):
+    """Desktop shell receipts by owner pid: Task, its state and what its cleanup waits on."""
+    home = Path(os.environ.get("LF_HOME") or Path.home() / ".lf")
+    try:
+        conn = sqlite3.connect(f"file:{home / 'loopflow.db'}?mode=ro", uri=True)
+        receipts = conn.execute(
+            "SELECT p.pid, t.id, t.issue_identifier, d.checkout, d.close_requested, r.phase, r.reason"
+            " FROM desktop_shells d JOIN processes p ON p.id=d.owner JOIN tasks t ON t.id=d.task_id"
+            " LEFT JOIN task_retirements r ON r.task_id=t.id WHERE p.completed_at IS NULL"
+        ).fetchall()
+        shells = {}
+        for pid, task, identifier, checkout, close, phase, reason in receipts:
+            # The Task's own conversations: a held one keeps the checkout and its shells.
+            owners = [
+                row[0] for row in conn.execute(
+                    "SELECT DISTINCT p.pid FROM agent_sessions s JOIN processes p ON p.id=s.transport_lf_process_id"
+                    " WHERE s.primary_scope IS NULL AND (s.task_id=?1 OR s.cwd=?2)"
+                    " AND s.completed_at IS NULL AND p.completed_at IS NULL",
+                    (task, checkout),
+                )
+            ]
+            shells[pid] = {
+                "task": identifier,
+                "checkout": checkout,
+                "close": close,
+                "phase": phase,
+                "reason": reason,
+                "holders": [(o, held[o]) for o in owners if "holds" in held.get(o, "")],
+            }
+        conn.close()
+    except sqlite3.Error:
+        return {}
+    states = {}
+    for shell in shells.values():
+        key = (shell["task"], shell["checkout"])
+        if key not in states:
+            cwd = shell["checkout"] if os.path.isdir(shell["checkout"]) else None
+            answer = lf_json(["task", "status", shell["task"], "--select", "task.state"], cwd=cwd) or {}
+            states[key] = answer.get("task", {}).get("state", "unknown")
+        shell["state"] = states[key]
+    return shells
 
 
 # ---- Classification -------------------------------------------------------
@@ -105,6 +151,9 @@ def binary_kind(path):
 
 
 def role(args):
+    # Desktop starts a shell through desktop/shells/launch.sh, whose first line this is.
+    if args.startswith("session serve") and "-- /bin/sh -c # Runs only on creation" in args:
+        return "desktop shell"
     if args.startswith("session serve"):
         return "session serve"
     if args.startswith("session attach"):
@@ -124,6 +173,7 @@ def role(args):
 
 LOSES = {
     "session serve": "The running agent and any turn in flight. `lf resume <ID>` continues from history.",
+    "desktop shell": "The shell's jobs and environment; its saved screen stays, and New Shell starts a different one.",
     "session attach": "Nothing; the conversation keeps running detached.",
     "session observe-status": "Nothing when its client is gone or it was replaced; otherwise the pane's working/waiting status until shown again.",
     "__codex-observe": "Turn and usage records for that Codex conversation; the conversation keeps going.",
@@ -147,6 +197,8 @@ def main():
         for key in ("stays", "next_step", "moved")
         for entry in rollover.get(key, [])
     }
+
+    shells = read_shells(held)
 
     by_session = {s["id"]: s for s in sessions}
     by_short = {s["id"].removeprefix("session_"): s for s in sessions}
@@ -197,7 +249,7 @@ def main():
         )
         note = ""
         healthy = True
-        if r == "session serve":
+        if r in ("session serve", "desktop shell"):
             provider = [c for c in children[p["pid"]] if not lf_binary(c["command"])]
             # A viewer holds a unix socket connected to one of the owner's.
             ends = {addr for _, typ, addr, _ in lsof.get(p["pid"], []) if typ == "unix" and addr}
@@ -211,6 +263,18 @@ def main():
                 note += f"; rollover: {reason}"
             # Input or a Graph holding the conversation is work in progress, not a leftover.
             healthy = bool(viewers) or p["age"] < 86400 or "holds" in (reason or "")
+            shell = shells.get(p["pid"]) if r == "desktop shell" else None
+            if shell:
+                note = f"Task {shell['task']} is {shell['state']}; " + note
+                if shell["phase"]:
+                    note += f"; Task cleanup {shell['phase']}" + (f": {shell['reason']}" if shell["reason"] else "")
+                for holder, why in shell["holders"]:
+                    note += f"; owner {holder}: {why}"
+                # A hidden shell runs until Close, or until its finished Task is cleaned up.
+                healthy = bool(viewers) or shell["state"] not in ("done", "abandoned", "unknown")
+            elif r == "desktop shell":
+                note = "no shell receipt in the store; " + note
+                healthy = bool(viewers)
         elif r == "session observe-status":
             stdin = [(addr, name) for fd, typ, addr, name in lsof.get(p["pid"], []) if fd == "0" and typ == "PIPE"]
             writers = set()
@@ -233,6 +297,8 @@ def main():
             note = "terminal gone" if p["ppid"] == 1 else ""
         rows.append({
             **p,
+            "shell": shells.get(p["pid"]) if r == "desktop shell" else None,
+            "viewed": "; 0 viewers" not in note,
             "path": path,
             "kind": binary_kind(path),
             "role": r,
@@ -273,8 +339,8 @@ def advice(rows):
     observers, observer_pids = pids(lambda x: x["role"] == "session observe-status" and not x["healthy"])
     drafts, _ = pids(lambda x: x["role"] == "session serve" and "native input holds" in x["note"])
     graphs, _ = pids(lambda x: x["role"] == "session serve" and "Graph holds" in x["note"])
-    empty, empty_pids = pids(lambda x: x["role"] == "session serve" and x["kind"] == "installed"
-                             and "keeps its lf until it exits" in x["note"])
+    hidden, _ = pids(lambda x: x["role"] == "desktop shell" and not x["viewed"])
+    finished = [x for x in hidden if not x["healthy"]]
     demos, demo_pids = pids(lambda x: x["kind"] in ("demo", "Dev app"))
     out = ["<h2>What to do</h2><table><tr><th>Group</th><th class=num>Count</th><th>Why it is still running</th><th>Recommendation</th></tr>"]
 
@@ -307,11 +373,21 @@ def advice(rows):
         "A Graph step runs in the conversation.",
         "Leave it; <code>lf task status</code> shows the step.",
     )
+    held_by_input = sum(1 for x in finished if x["shell"] and x["shell"]["holders"])
+    tasks = sorted({x["shell"]["task"] for x in finished if x["shell"]})
     row(
-        "Owners with no open Session", empty,
-        "Rollover reads no unfinished Session on these owners (Desktop shells, or a conversation that ended "
-        "while its owner kept serving).",
-        f"Read each with <code>lf process list</code> before deciding. PIDs: <code>{e(empty_pids)}</code>" if empty else "Nothing left.",
+        "Desktop shells with no viewer", hidden,
+        f"{len(hidden) - len(finished)} belong to unfinished Tasks: a shell tab that is hidden, or whose Desktop "
+        "quit, keeps running until Close. "
+        + (
+            f"{len(finished)} belong to finished Tasks ({e(', '.join(tasks))}), which keep their checkout and "
+            f"shells until cleanup runs; for {held_by_input} of them cleanup waits on input held in the "
+            "Task's own conversation."
+            if finished else "None belongs to a finished Task."
+        ),
+        "Close a shell from its Desktop tab. For a finished Task, <code>lf resume</code> the conversation its "
+        "row names and send or clear the input; cleanup closes the shells about fifteen minutes later. "
+        "Stopping one by PID loses its jobs and environment; its saved screen stays.",
     )
     row(
         "Demo and Dev app processes", demos,
@@ -351,7 +427,8 @@ def write_report(now, rows):
         out.append(f"<tr><td>{e(kind)}</td><td class=num>{count}</td><td>{listed}</td></tr>")
     out.append("</table>")
     out.append(
-        "<p><b>Looks stale</b> means: an owner more than a day old with no viewer attached and no input or Graph holding it; an observer whose "
+        "<p><b>Looks stale</b> means: an owner more than a day old with no viewer attached and no input or Graph holding it; "
+        "an unviewed Desktop shell whose Task is done, abandoned or unreadable; an observer whose "
         "Desktop client is gone or that a newer observer replaced; a hook or observer whose parent exited; "
         "an attach whose terminal is gone. An old owner with a live provider can still hold a turn, draft or "
         "pending request, so read it with <code>lf resume &lt;ID&gt;</code> before deciding.</p>"

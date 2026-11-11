@@ -308,6 +308,7 @@ and `lf process rollover --dry-run` name a `session serve` owner by its PID.
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
 | `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
+| `lf session serve --terminal -- /bin/sh -c …` | A Desktop shell tab, shown or hidden | The shell's jobs and environment; its saved screen stays |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
 | `lf session observe-status <ID>` | Records one "working" or "waiting on you" reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
@@ -321,6 +322,12 @@ reached the agent that lf couldn't read as a sent prompt: a typed draft, an
 edit, or only an arrow key or Esc. Stopping the owner loses a draft. Open it
 with `lf resume <ID>`, then send or clear what is there; the owner ends on
 schedule once its input is empty.
+
+A Desktop shell runs until you close its tab; hiding it or quitting Desktop
+leaves it running. A finished Task keeps its checkout and shells until cleanup,
+about fifteen minutes after you stop viewing it. Input held in the Task's own
+conversation holds that cleanup too, so clearing it there lets the shells
+close.
 
 A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from

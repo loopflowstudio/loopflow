@@ -1,1 +1,0 @@
-Keep local terminals connected across sleep and Task views complete

@@ -47,6 +47,15 @@ Checks:
   reintroduces the leak silently. GhosttyKit forks panes, so the one-place
   fix is not ours. Leave the call-site form; no lint.
 
+- 19:10 pass over `94ebffc67` and `249c21b21`: no design change. `lf process
+  rollover --dry-run` read 194 stays: 117 "keeps its lf until it exits", 76
+  "native input holds the conversation", 1 Graph. Its reasons answer "can this
+  move to the selected lf", so shells and observers all read as the first;
+  troubleshooting covers shells in its own paragraph. A "what holds this"
+  column in `lf process list` is question 1d, not this Task.
+- This Task ships under 1a (behaviour unchanged, documented). Submit clears
+  `scratch/`, so the PR body carries 1a-1d and the five held Tasks.
+
 ## Desktop shells (read 2026-11-10 18:55)
 
 The nine owners rollover reads as "no open Session" are unviewed Desktop

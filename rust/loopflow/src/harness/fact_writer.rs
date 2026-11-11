@@ -939,7 +939,7 @@ mod tests {
         assert_eq!(
             events[2].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
-                "cost_usd":null,
+                "total_cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );

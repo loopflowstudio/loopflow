@@ -17,7 +17,8 @@
 - A live completion counts for a transcript turn at exit when it carries the
   turn's id, or was observed within 2 s after a turn that began at or after
   its own turn. The live line matches by id only.
-- Claude's cost is kept on the stream's `completed` row as `cost_usd`; its
+- Claude's cost is kept on the stream's `completed` row as `total_cost_usd`
+  (the process's running total, Claude's name for it); its
   usage rows have none. Open for a person: keep it there, or leave it
   unrecorded. Pi and OpenCode usage rows carry the turn's `cost_usd` from
   their transcripts.

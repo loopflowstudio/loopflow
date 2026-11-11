@@ -573,7 +573,7 @@ impl SqliteStore {
                 session,
                 thread,
                 turn,
-                crate::session_record::native_usage_key(usage),
+                "",
                 at,
                 serde_json::to_string(usage)?
             ],
@@ -863,62 +863,23 @@ fn record_event_in(
     kind: SessionEventKind,
     payload: &Value,
 ) -> StoreResult<i64> {
-    let saved = |receipt: &str| -> StoreResult<Option<(i64, String)>> {
-        Ok(tx.query_row(
+    let existing: Option<(i64, String)> = tx
+        .query_row(
             "SELECT seq,payload FROM session_events
-             WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=?5",
-            params![session,thread,turn,kind.as_str(),receipt],
-            |row| Ok((row.get(0)?,row.get(1)?)),
-        ).optional()?)
-    };
-    let mut receipt = if kind == SessionEventKind::Usage {
-        crate::session_record::native_usage_key(payload)
-    } else {
-        String::new()
-    };
-    let mut existing = saved(&receipt)?;
-    if kind == SessionEventKind::Usage {
-        // The next turn's baseline reads this turn's usage from before it
-        // started; a receipt arriving later keeps its own row after that start.
-        if let Some((seq, _)) = &existing {
-            let next: Option<i64> = tx.query_row(
-                "SELECT max(seq) FROM session_events WHERE session_id=?1 AND provider_thread=?2
-                 AND provider_turn!=?3 AND kind='started' AND seq>?4",
-                params![session, thread, turn, seq],
-                |row| row.get(0),
-            )?;
-            if let Some(next) = next {
-                receipt = crate::session_record::late_usage_key(&receipt, next);
-                existing = saved(&receipt)?;
-            }
-        }
-    }
-    let mut payload = serde_json::to_string(payload)?;
+             WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=''",
+            params![session, thread, turn, kind.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let payload = serde_json::to_string(payload)?;
     if let Some((seq, saved)) = existing {
         if saved == payload {
             return Ok(seq);
         }
-        if kind != SessionEventKind::Usage {
-            return Err(StoreError::InvalidData(format!(
-                "Conflicting {} receipt for conversation {session}, turn {turn}",
-                kind.as_str()
-            )));
-        }
-        // One usage row per turn: a later receipt replaces it.
-        let merged = crate::session_record::merge_native_usage(
-            &serde_json::from_str(&saved)?,
-            &serde_json::from_str(&payload)?,
-        );
-        payload = serde_json::to_string(&merged)?;
-        tx.execute(
-            "UPDATE session_events SET payload=?2, observed_at=?3 WHERE seq=?1",
-            params![
-                seq,
-                payload,
-                time::OffsetDateTime::now_utc().unix_timestamp()
-            ],
-        )?;
-        return Ok(seq);
+        return Err(StoreError::InvalidData(format!(
+            "Conflicting {} receipt for conversation {session}, turn {turn}",
+            kind.as_str()
+        )));
     }
     tx.execute(
         INSERT_NATIVE_EVENT,
@@ -927,7 +888,7 @@ fn record_event_in(
             thread,
             turn,
             kind.as_str(),
-            receipt,
+            "",
             time::OffsetDateTime::now_utc().unix_timestamp(),
             payload
         ],
@@ -2065,15 +2026,6 @@ mod tests {
             json!({"inputTokens":input,"outputTokens":output,
             "cachedInputTokens":2,"reasoningOutputTokens":1})
         };
-        store
-            .record_session_event(
-                &session.id,
-                &"thread".into(),
-                "turn",
-                SessionEventKind::Usage,
-                &json!({"total":counts(12,3),"last":counts(12,3)}),
-            )
-            .unwrap();
         let mut replacement = session.clone();
         replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
@@ -2082,14 +2034,14 @@ mod tests {
         store
             .claim_session_attachment(&session.id, Some(&attachment), &second, true)
             .unwrap();
-        // The replacement AgentProcess observes the first one's surviving turn. The recorder never saw its usage.
+        // The replacement AgentProcess observes the first one's surviving turn.
         store
             .record_session_event(
                 &session.id,
                 &"thread".into(),
                 "turn",
                 SessionEventKind::Usage,
-                &json!({"total":counts(20,5),"last":counts(8,2)}),
+                &json!({"total":counts(20,5),"last":counts(20,5)}),
             )
             .unwrap();
         store
@@ -2101,7 +2053,7 @@ mod tests {
                 &json!({"status":"completed"}),
             )
             .unwrap();
-        // Start, one usage row for both receipts, and completion.
+        // Start, usage and completion.
         let history = store.summary_for_input(&session.id, &first_input).unwrap();
         assert_eq!(history.len(), 3);
         assert!(history.iter().all(
@@ -2182,117 +2134,26 @@ mod tests {
         assert_eq!(partial.usage.total_input_tokens, Some(10));
         assert_eq!(partial.usage.output_tokens, Some(5));
         assert!(partial.usage.gaps > 0);
-        record_captured_start(&store, &session.id, "decrease");
-        for (total, last) in [(20, 20), (40, 20), (30, 10)] {
-            store.record_session_event(&session.id,&"thread".into(),"decrease",SessionEventKind::Usage,
-                &json!({"total":{"inputTokens":total,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
-                    "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
-        }
-        let decreased = store
-            .input_history(replacement.input_key().unwrap().as_str())
-            .unwrap();
-        assert_eq!(
-            decreased.usage.total_input_tokens,
-            Some(50),
-            "retain 40 observed tokens plus the separate 10-token partial turn"
-        );
-        // The turn keeps one row; the regression survives as an evidence gap.
-        assert!(decreased.evidence_gaps > partial.evidence_gaps);
-        store
-            .record_session_event(
-                &session.id,
-                &"thread".into(),
-                "decrease",
-                SessionEventKind::Completed,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
-        record_captured_start(&store, &session.id, "next");
-        // Reconnect missed one request: 60 lifetime minus the retained 40 peak,
-        // not merely this final request's 10 tokens or the regressed 30 baseline.
-        store.record_session_event(&session.id,&"thread".into(),"next",SessionEventKind::Usage,
-            &json!({"total":{"inputTokens":60,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
-                "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
-        assert_eq!(
-            store
-                .input_history(replacement.input_key().unwrap().as_str())
-                .unwrap()
-                .usage
-                .total_input_tokens,
-            Some(70)
-        );
     }
 
     #[test]
-    fn native_usage_keeps_one_row_per_turn_until_the_next_turn_starts() {
+    fn a_second_usage_receipt_for_a_turn_conflicts() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let usage = |turn: &str, total: u64| {
-            let counts = json!({"inputTokens":total,"outputTokens":0});
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Usage,
-                    &json!({"total":counts,"last":counts}),
-                )
-                .unwrap();
-        };
-        record_captured_start(&store, "conversation", "a");
-        usage("a", 10);
-        usage("a", 20);
-        record_captured_start(&store, "conversation", "b");
-        // Late receipts for "a" stay after "b" began, where they arrived.
-        usage("a", 30);
-        usage("a", 40);
-        let keys: Vec<String> = store
-            .conn
-            .lock()
-            .unwrap()
-            .prepare("SELECT receipt_key FROM session_events WHERE kind='usage' ORDER BY seq")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(keys.len(), 2);
-        assert_eq!(keys[0], "");
-        assert!(keys[1].starts_with(":after:"));
-    }
-
-    #[test]
-    fn a_later_usage_receipt_replaces_its_row_in_place() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
-        record_captured_start(&store, "conversation", "a");
         let usage = |total: u64| {
             let counts = json!({"inputTokens":total,"outputTokens":0});
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    "a",
-                    SessionEventKind::Usage,
-                    &json!({"total":counts,"last":counts}),
-                )
-                .unwrap()
-        };
-        let first = usage(10);
-        assert_eq!(usage(20), first);
-        let payload: String = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM session_events WHERE seq=?1",
-                [first],
-                |row| row.get(0),
+            store.record_session_event(
+                "conversation",
+                &"thread".into(),
+                "a",
+                SessionEventKind::Usage,
+                &json!({"total":counts,"last":counts}),
             )
-            .unwrap();
-        assert!(payload.contains("20"));
+        };
+        let first = usage(10).unwrap();
+        assert_eq!(usage(10).unwrap(), first);
+        assert!(usage(20).is_err());
     }
 
     #[test]

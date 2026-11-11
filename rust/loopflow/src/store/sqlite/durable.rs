@@ -1762,14 +1762,14 @@ mod durable_store_tests {
                 .unwrap(),
             bound
         );
-        // A late cumulative observation belongs to the old turn, never the new bind.
+        // A late observation belongs to the old turn, never the new bind.
         store
             .record_session_event(
                 "orphan",
                 &"thread".into(),
                 "active",
-                crate::session::SessionEventKind::Usage,
-                &serde_json::json!({"input": 30}),
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status": "completed"}),
             )
             .unwrap();
         // Attribution freezes when the attached LfProcess sends the request.

@@ -105,9 +105,10 @@ impl ClaudeDecoder {
                         "result_id": value["uuid"],
                         "errors": value["errors"],
                         "subtype": value["subtype"],
-                        // The process's running cost: the transcript, which
-                        // writes the turn's usage row, gives none.
-                        "cost_usd": value["total_cost_usd"],
+                        // The process's running cost under Claude's name, so
+                        // no reader sums it as one turn's: the transcript,
+                        // which writes the turn's usage row, gives none.
+                        "total_cost_usd": value["total_cost_usd"],
                     }),
                 }
                 .into(),
@@ -1000,7 +1001,7 @@ mod tests {
             .collect();
         let facts: Vec<_> = decoded.iter().filter_map(Decoded::fact).collect();
         let cost = facts.iter().find_map(|fact| match fact {
-            ProviderFact::TurnCompleted { detail, .. } => Some(detail["cost_usd"].clone()),
+            ProviderFact::TurnCompleted { detail, .. } => Some(detail["total_cost_usd"].clone()),
             _ => None,
         });
         assert_eq!(cost, Some(json!(0.25)));
@@ -1462,7 +1463,7 @@ mod tests {
                 ProviderFact::TurnCompleted {
                     turn: Some(turn("request")),
                     status: Lifecycle::Completed,
-                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success","cost_usd":null})
+                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success","total_cost_usd":null})
                 },
             ]
         );

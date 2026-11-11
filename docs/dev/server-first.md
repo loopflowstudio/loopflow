@@ -200,8 +200,10 @@ Codex usage rows carry no `cost_usd`: tokens come first, input, cache read,
 cache write and output kept apart, and dollar accounting is later work. Pi
 and OpenCode report each model call's cost, so their rows carry the turn's
 sum as `cost_usd`. The live `result`'s
-`total_cost_usd` is kept on Claude's stream-written `completed` row as
-`cost_usd`, the process's running total. Not written: anything for a raw
+`total_cost_usd`, the process's running total, is kept under that name on
+Claude's stream-written `completed` row, so no reader sums it as one turn's
+cost. A turn has one `usage` row; a second, different receipt for it is a
+conflict. Not written: anything for a raw
 conversation, which is listed but not tracked. What each transcript carried
 on November 10 and 11, 2026 (Claude Code 2.1.322, Codex 0.167.0, Pi's
 session format 3, OpenCode 2.2.1):

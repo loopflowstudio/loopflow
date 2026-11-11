@@ -5603,7 +5603,6 @@ fn local_terminal_reconnects_without_replaying_input_or_taking_newer_claims() {
             "/bin/sh", "-c",
             "stty -echo; printf '%s\\n' $$ >> \"$HOME/launches\"; printf 'ready-for-input\\n'; while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"$HOME/input\"; printf '%s\\n' \"$line\"; done",
         ]));
-        let _cleanup = StopOwner(&fixture, owner.clone());
         let owner_pid = pid_of_process(&fixture, &owner);
         let endpoint = fixture.endpoint(&owner);
         let retained = endpoint.with_extension("retained");

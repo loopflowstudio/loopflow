@@ -25,39 +25,37 @@ func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
 }
 
 /// Whole replacement readings may coalesce. Checkpoint acknowledgements are
-/// handled before coalescing, so refresh never waits on a discarded frame.
+/// handled before coalescing, so refresh never waits on a discarded frame. A
+/// lost connection resumes the same reading on the next one.
 @MainActor
 final class RemoteTaskObservation {
     let readings: AsyncThrowingStream<MobileTaskReading, any Error>
     private let continuation: AsyncThrowingStream<MobileTaskReading, any Error>.Continuation
-    private let subscription: MachineSubscription
+    private let watch: ServerWatch<RawJSON>
     private var reader: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
     private var refreshing: (id: UInt64, continuation: CheckedContinuation<Void, any Error>)?
     private var closed = false
 
-    private init(subscription: MachineSubscription) {
-        self.subscription = subscription
+    init(query: ServedRead, connect: @escaping @Sendable () async throws -> ServerLink) {
+        watch = ServerLink.subscribe(query, connect: connect) { update -> RawJSON? in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        }
         (readings, continuation) = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(1))
-    }
-
-    static func open(connection: MachineConnection, query: ServedRead) async throws -> RemoteTaskObservation {
-        let subscription = try await connection.subscribe(query)
-        let observation = RemoteTaskObservation(subscription: subscription)
-        observation.reader = Task { [weak observation] in
+        reader = Task { [weak self, watch] in
             do {
-                for try await frame in subscription.readings {
-                    guard let observation, !observation.closed else { return }
+                for try await frame in watch.updates {
+                    guard let self, !self.closed else { return }
                     // A reading is tens to hundreds of kilobytes; decoding it here would
                     // stall a scroll for each one.
                     let reading = try await Task.detached { try Self.decode(frame: frame) }.value
-                    guard !observation.closed else { return }
-                    observation.receive(reading)
+                    guard !self.closed else { return }
+                    self.receive(reading)
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
-            } catch { observation?.close(error: error) }
+            } catch { self?.close(error: error) }
         }
-        return observation
     }
 
     func refresh() async throws {
@@ -66,17 +64,14 @@ final class RemoteTaskObservation {
         nextCheckpoint += 1
         let checkpoint = nextCheckpoint
         let timeout = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            do { try await Task.sleep(for: RemoteMobileClient.requestDeadline) } catch { return }
             self?.close(error: RegistryQueryError("The Machine did not respond in time"))
         }
         defer { timeout.cancel() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 refreshing = (checkpoint, continuation)
-                Task {
-                    do { try await subscription.checkpoint(checkpoint) }
-                    catch { close(error: error) }
-                }
+                watch.checkpoint(checkpoint)
             }
         } onCancel: {
             Task { @MainActor [weak self] in self?.close() }
@@ -88,7 +83,7 @@ final class RemoteTaskObservation {
     private func close(error: any Error) {
         guard !closed else { return }
         closed = true
-        subscription.cancel()
+        watch.cancel()
         reader?.cancel()
         continuation.finish(throwing: error)
         refreshing?.continuation.resume(throwing: error)
@@ -103,13 +98,13 @@ final class RemoteTaskObservation {
         }
     }
 
-    nonisolated static func decode(frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
+    nonisolated static func decode(frame: RawJSON) throws -> (answers: UInt64?, reading: MobileTaskReading) {
         struct Frame: Decodable {
             let answers: UInt64?
             let unavailable: String?
             let body: [WorkViewPlan]?
         }
-        let reading = try JSONDecoder().decode(Frame.self, from: JSONEncoder().encode(frame))
+        let reading = try frame.decode(Frame.self)
         if let reason = reading.unavailable {
             return (reading.answers, .failure(RegistryQueryError(reason)))
         }

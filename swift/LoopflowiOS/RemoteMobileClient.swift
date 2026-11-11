@@ -6,15 +6,18 @@ import Loopflow
 @MainActor
 final class RemoteMobileClient: MobileTaskCreationClient {
     let savedMachine: SavedMachine
-    private var opening: Task<MachineConnection, any Error>?
-    private var live: MachineConnection?
+    private var opening: Task<ServerLink, any Error>?
+
+    /// How long a request may wait for its answer.
+    static let requestDeadline = Duration.seconds(15)
 
     init(savedMachine: SavedMachine) { self.savedMachine = savedMachine }
 
     static func connect(endpoint: URL, replacing: SavedMachine? = nil) async throws -> SavedMachine {
-        let connection = try await MachineConnection.open(endpoint: endpoint)
-        defer { connection.close() }
-        let machineID = try identity(connection.welcome)
+        let link = try await ServerLink.open(.machine(endpoint))
+        let machineID: String
+        do { machineID = try identity(link.welcome) } catch { await link.close(); throw error }
+        await link.close()
         if let replacing, replacing.machineID != machineID {
             throw RegistryQueryError("This address belongs to a different Machine. Scan the code from your original Machine’s Mobile settings.")
         }
@@ -26,8 +29,8 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
 
     /// Every repository's Tasks matching `expression`, kept current.
-    func observeTasks(expression: String) async throws -> RemoteTaskObservation {
-        try await RemoteTaskObservation.open(connection: connection(), query: .viewSelect(expression: expression))
+    func observeTasks(expression: String) -> RemoteTaskObservation {
+        RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
     }
 
     func repositoryPath(id: String) async throws -> String {
@@ -52,19 +55,14 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         try await decode(TaskDiffSnapshot.self, read(.taskDiff(issue: task, path: path, base: "parent", head: nil, draft: nil)))
     }
 
-    func suspend() {
-        opening?.cancel()
-        opening = nil
-        live?.close()
-        live = nil
-    }
+    private struct Ticket: Decodable { let ticket: String }
 
     /// Attaching takes the keyboard and fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
-        let connection = try await connection()
-        let terminal: MachineSocket
-        do { terminal = try await connection.attach(session: sessionID) }
+        let ticket: String
+        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID, owner: nil))).ticket }
         catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
+        let terminal = try await MachineSocket.terminal(endpoint: savedMachine.endpoint, ticket: ticket)
         do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal, size: size) }
         catch { terminal.close(); throw error }
     }
@@ -93,7 +91,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
                   let taskID = previous.taskId else {
                 throw RegistryQueryError("The Machine returned a different creation receipt")
             }
-            let receipt = try previous.result.map { try decode(TaskCreateReceipt.self, $0) }
+            let receipt = try previous.result.map { try JSONDecoder().decode(TaskCreateReceipt.self, from: JSONEncoder().encode($0)) }
             guard receipt == nil || receipt?.task.id == taskID else {
                 throw RegistryQueryError("The creation receipt names a different Task")
             }
@@ -134,36 +132,36 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
     /// The live control connection, opened once for concurrent callers.
-    private func connection() async throws -> MachineConnection {
-        let connection: MachineConnection
-        if let opening, let live = try? await opening.value, !live.isClosed {
-            connection = live
+    private func connection() async throws -> ServerLink {
+        let link: ServerLink
+        if let opening, let live = try? await opening.value, await !live.isClosed {
+            link = live
         } else {
-            let endpoint = savedMachine.endpoint
-            let task = Task { try await MachineConnection.open(endpoint: endpoint) }
+            let endpoint = ServerEndpoint.machine(savedMachine.endpoint)
+            let task = Task { try await ServerLink.open(endpoint) }
             opening = task
-            do { connection = try await task.value } catch {
+            do { link = try await task.value } catch {
                 if opening == task { opening = nil }
                 throw error
             }
-            if opening == task { live = connection } else { connection.close(); return try await self.connection() }
+            if opening != task { await link.close(); return try await connection() }
         }
-        guard try Self.identity(connection.welcome) == savedMachine.machineID else {
+        guard try Self.identity(link.welcome) == savedMachine.machineID else {
             throw RegistryQueryError("This address now identifies a different Machine. Forget this connection and scan its code again.")
         }
-        return connection
+        return link
     }
 
-    private func request(_ operation: ServerOperation) async throws -> JSONValue {
-        try await connection().request(operation)
+    private func request(_ operation: ServerOperation) async throws -> RawJSON {
+        try await connection().request(operation, deadline: Self.requestDeadline)
     }
 
-    private func read(_ query: ServedRead) async throws -> JSONValue {
+    private func read(_ query: ServedRead) async throws -> RawJSON {
         try await request(.read(query))
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {
-        try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
+    private func decode<T: Decodable>(_ type: T.Type, _ value: RawJSON) throws -> T {
+        try value.decode(type)
     }
 }
 
@@ -215,7 +213,7 @@ final class RemoteAttachment {
         let timeout = connection.deadline(seconds: 5)
         defer { timeout.cancel() }
         link.decoder.expectAttachment(1)
-        try await connection.send(link.attachRequest(id: 1, size: size))
+        try await connection.sendBytes(link.attachRequest(id: 1, size: size))
         while !link.decoder.ready && !link.decoder.ended {
             link.pendingEvents.append(contentsOf: try link.decoder.receive(await connection.receiveBytes()))
         }
@@ -286,7 +284,7 @@ final class RemoteAttachment {
             do {
                 for await bytes in writes {
                     guard !closed else { return }
-                    try await connection.send(bytes)
+                    try await connection.sendBytes(bytes)
                     guard !closed else { return }
                     pendingBytes -= bytes.count
                 }

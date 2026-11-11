@@ -376,8 +376,7 @@ struct ServerClientTests {
         }
         subscription.send(Data(#"{"id":1}"#.utf8))
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
-        guard case .object(let fields) = frame else { Issue.record("Missing reading body"); return }
-        #expect(fields["body"] == .string("fresh"))
+        #expect(try frame.fields()["body"]?.string == "fresh")
         await subscription.cancel()
     }
 

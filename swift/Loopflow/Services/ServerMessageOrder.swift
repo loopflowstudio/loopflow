@@ -11,7 +11,7 @@ public struct ServerMessageOrder {
     public init() {}
 
     public mutating func receive(_ line: Data) throws -> ServerMessage? {
-        let message = try JSONDecoder().decode(ServerMessage.self, from: line)
+        let message = try ServerMessage(line: line)
         if case .event(_, let sequence, _) = message {
             let expected = eventSequence.addingReportingOverflow(1)
             eventSequence = sequence
@@ -49,7 +49,7 @@ public struct ServerMessageOrder {
     /// a second ticket may defer the remaining messages again.
     public mutating func complete(_ id: String, payload: Data) throws -> (ServerMessage, [(ServerMessage, Int)])? {
         guard waiting[id] != nil else { return nil } // Canceled or disconnected.
-        let message = try JSONDecoder().decode(ServerMessage.self, from: payload)
+        let message = try ServerMessage(line: payload)
         switch message {
         case .reading, .response:
             guard message.requestID == id else {

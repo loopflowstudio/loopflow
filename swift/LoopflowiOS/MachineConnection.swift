@@ -11,7 +11,7 @@ struct SavedMachine: Codable {
 /// One WebSocket to the Machine's server. Text frames carry protocol messages;
 /// binary frames carry a terminal's bytes. All reads and writes are bounded.
 @MainActor
-final class MachineSocket {
+final class MachineSocket: ServerCarrier {
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
@@ -21,6 +21,7 @@ final class MachineSocket {
     private let socket: URLSessionWebSocketTask
     private(set) var closed = false
     private var timedOut = false
+    private var opened = false
     private var heartbeat: Task<Void, Never>?
 
     init(endpoint: URL, path: String, maximumMessage: Int) throws {
@@ -80,16 +81,21 @@ final class MachineSocket {
         }
     }
 
-    /// Sends one message. The first message on a socket waits for TLS too, so
-    /// an opening sends with no limit of its own inside the handshake's deadline.
-    func send(_ text: String, opening: Bool = false) async throws {
+    /// Sends one protocol message. The first message on a socket waits for TLS
+    /// too, so it sends with no limit of its own inside the handshake's deadline.
+    func send(_ message: Data) async throws {
         guard !closed else { throw connectionError(RegistryQueryError("Machine connection closed")) }
-        let timeout = opening ? nil : deadline(seconds: 5)
+        let timeout = opened ? deadline(seconds: 5) : nil
+        opened = true
         defer { timeout?.cancel() }
-        do { try await socket.send(.string(text)) } catch { throw connectionError(error) }
+        do { try await socket.send(.string(String(decoding: message, as: UTF8.self))) } catch { throw connectionError(error) }
     }
 
-    func send(_ bytes: Data) async throws {
+    /// The next protocol message.
+    func receive() async throws -> Data? { try await receiveText() }
+
+    /// Sends terminal bytes.
+    func sendBytes(_ bytes: Data) async throws {
         guard !closed else { throw connectionError(RegistryQueryError("Machine connection closed")) }
         let timeout = deadline(seconds: 5)
         defer { timeout.cancel() }
@@ -144,275 +150,38 @@ final class MachineSocket {
     }
 }
 
-/// The control connection: hello and welcome once, then requests, subscriptions
-/// and cancels by id. One reader demultiplexes answers. Messages over the
-/// control limit travel on ticketed connections, as does a terminal's bytes.
-@MainActor
-final class MachineConnection {
-    let welcome: ServerWelcome
-    private let endpoint: URL
-    private let socket: MachineSocket
-    private var pending: [String: PendingRequest] = [:]
-    private var subscriptions: [String: MachineSubscription] = [:]
-    private var order = ServerMessageOrder()
-    private var failure: (any Error)?
-    private var reader: Task<Void, Never>?
-
-    private struct PendingRequest {
-        let continuation: CheckedContinuation<JSONValue, any Error>
-        let timeout: Task<Void, Never>
-    }
-
-    static func open(endpoint: URL) async throws -> MachineConnection {
-        let socket = try MachineSocket(endpoint: endpoint, path: ServerProtocol.machinePath, maximumMessage: ServerProtocol.maxMessage)
-        do {
-            let handshake = socket.deadline(seconds: 10)
-            defer { handshake.cancel() }
-            let hello = ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
-                kind: "mobile", platform: "ios", name: "Loopflow",
-                version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"))
-            try await socket.send(try line(.hello(hello)), opening: true)
-            switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
-            case .welcome(let welcome): return MachineConnection(endpoint: endpoint, socket: socket, welcome: welcome)
-            case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
-            default: throw RegistryQueryError("The Machine did not welcome the connection")
-            }
-        } catch { socket.close(); throw error }
-    }
-
-    private init(endpoint: URL, socket: MachineSocket, welcome: ServerWelcome) {
-        self.endpoint = endpoint
-        self.socket = socket
-        self.welcome = welcome
-        socket.keepAlive()
-        reader = Task { [weak self] in
-            do {
-                while let self, !Task.isCancelled { try self.dispatch(try await socket.receiveText()) }
-            } catch { self?.fail(error) }
-        }
-    }
-
-    var isClosed: Bool { failure != nil }
-
-    func close() { fail(RegistryQueryError("Machine connection closed")) }
-
-    /// How long a request may wait for its answer.
-    static let requestSeconds = 15
-
-    /// One request and its answer. A timeout or cancellation sends `cancel` and
-    /// releases the wait; a dispatched command still completes.
-    func request(_ operation: ServerOperation) async throws -> JSONValue {
-        let id = UUID().uuidString
-        let line = try Self.line(.request(id: id, operation: operation, select: nil))
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if let failure { continuation.resume(throwing: failure); return }
-                let timeout = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(Self.requestSeconds)) } catch { return }
-                    self?.forget(id, throwing: RegistryQueryError("The Machine did not respond in time"))
-                }
-                pending[id] = PendingRequest(continuation: continuation, timeout: timeout)
-                Task { [weak self] in
-                    do {
-                        if line.utf8.count <= ServerProtocol.maxMessage { try await self?.socket.send(line) }
-                        else { try await self?.upload(line) }
-                    } catch { self?.forget(id, throwing: error) }
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in self?.forget(id, throwing: CancellationError()) }
-        }
-    }
-
-    /// A live subscription; its readings arrive until `cancel` or the server ends it.
-    func subscribe(_ query: ServedRead) async throws -> MachineSubscription {
-        let subscription = MachineSubscription(connection: self)
-        subscriptions[subscription.id] = subscription
-        do {
-            try await socket.send(try Self.line(.subscribe(id: subscription.id, operation: query, select: nil, resume: nil)))
-        } catch {
-            subscriptions.removeValue(forKey: subscription.id)
-            throw error
-        }
-        return subscription
-    }
-
-    fileprivate func checkpoint(_ id: String, _ checkpoint: UInt64) async throws {
-        if let failure { throw failure }
-        try await socket.send(try Self.line(.checkpoint(id: id, checkpoint: checkpoint)))
-    }
-
-    fileprivate func unsubscribe(_ id: String) {
-        order.discard(id)
-        guard subscriptions.removeValue(forKey: id) != nil, failure == nil else { return }
-        Task { try? await socket.send(try Self.line(.cancel(id: id))) }
-    }
-
-    /// Resolve the Session’s current owner and open its unchanged terminal protocol.
-    func attach(session: String) async throws -> MachineSocket {
-        guard case .string(let ticket) = try await request(.sessionAttach(session: session, owner: nil))["ticket"] else {
-            throw RegistryQueryError("The Machine did not attach the Session")
-        }
-        return try await Self.redeem(endpoint: endpoint, ticket: ticket, terminal: true)
-    }
-
-    /// A ticketed connection, admitted. The caller owns it from here.
-    private static func redeem(endpoint: URL, ticket: String, terminal: Bool = false) async throws -> MachineSocket {
+extension MachineSocket {
+    /// A Session's terminal: present `ticket`, read `bridged`; the socket then
+    /// carries the owner protocol unchanged.
+    static func terminal(endpoint: URL, ticket: String) async throws -> MachineSocket {
         let socket = try MachineSocket(endpoint: endpoint, path: ServerProtocol.ticketPath, maximumMessage: ServerProtocol.maxBulk)
         do {
             let handshake = socket.deadline(seconds: 10)
             defer { handshake.cancel() }
-            try await socket.send(try line(.attach(ticket: ticket)), opening: true)
-            switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
-            case .admitted where !terminal: return socket
-            case .bridged where terminal: return socket
+            try await socket.send(try JSONEncoder().encode(ServerClientMessage.attach(ticket: ticket)))
+            switch try ServerMessage(line: try await socket.receiveText()) {
+            case .bridged: return socket
             case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
-            default: throw RegistryQueryError("The Machine did not admit the ticket")
+            default: throw RegistryQueryError("The Machine did not attach the Session")
             }
         } catch { socket.close(); throw error }
     }
-
-    /// One request too large for the control connection; its answer still
-    /// arrives here under the request's id.
-    private func upload(_ line: String) async throws {
-        guard case .string(let ticket) = try await request(.requestUpload(bytes: line.utf8.count))["ticket"] else {
-            throw RegistryQueryError("The Machine issued no upload ticket")
-        }
-        let bulk = try await Self.redeem(endpoint: endpoint, ticket: ticket)
-        defer { bulk.close() }
-        let timeout = bulk.deadline(seconds: 60)
-        defer { timeout.cancel() }
-        try await bulk.send(line)
-    }
-
-    /// Fetch a spilled message off the reader, so other readings never wait behind it.
-    private func fetch(_ id: String, ticket: String) {
-        let endpoint = endpoint
-        Task { [weak self] in
-            do {
-                let bulk = try await Self.redeem(endpoint: endpoint, ticket: ticket)
-                defer { bulk.close() }
-                let timeout = bulk.deadline(seconds: 60)
-                defer { timeout.cancel() }
-                let message = try await bulk.receiveText()
-                guard let self, let (answer, queued) = try order.complete(id, payload: message) else { return }
-                try deliver(answer)
-                for (message, size) in queued {
-                    if let next = try order.resume(message, bytes: size) { try deliver(next) }
-                }
-            } catch { self?.forget(id, throwing: error) }
-        }
-    }
-
-    private func dispatch(_ line: Data) throws {
-        guard failure == nil else { return }
-        do {
-            if let message = try order.receive(line) { try deliver(message) }
-        } catch is ServerEventSequenceGap {
-            // Mobile currently consumes complete readings, never occurrence events.
-        }
-    }
-
-    private func deliver(_ message: ServerMessage) throws {
-        switch message {
-        case .response(let id, _, let result):
-            if let waiting = pending.removeValue(forKey: id) {
-                waiting.timeout.cancel()
-                waiting.continuation.resume(returning: result)
-            }
-            // A null result confirms a registered subscription; anything else is a late answer.
-        case .reading(let id, _, let frame):
-            subscriptions[id]?.receive(frame)
-        case .event: break // Complete readings drive the mobile views.
-        case .bulk(let id, let ticket, _):
-            fetch(id, ticket: ticket)
-        case .ended(let id):
-            subscriptions.removeValue(forKey: id)?.end()
-        case .error(let id?, let code, let message, let data):
-            forget(id, throwing: ServerError(code: code, message: message, data: data))
-        case .error(nil, let code, let message, let data):
-            throw ServerError(code: code, message: message, data: data)
-        case .welcome, .status, .admitted, .bridged:
-            throw RegistryQueryError("The Machine repeated its greeting; update the app")
-        }
-    }
-
-    /// Fail the request or subscription `id` without touching the connection.
-    private func forget(_ id: String, throwing error: any Error) {
-        order.discard(id)
-        if let waiting = pending.removeValue(forKey: id) {
-            waiting.timeout.cancel()
-            if failure == nil { Task { try? await socket.send(try Self.line(.cancel(id: id))) } }
-            waiting.continuation.resume(throwing: error)
-            return
-        }
-        if let subscription = subscriptions.removeValue(forKey: id) { subscription.finish(throwing: error) }
-    }
-
-    private func fail(_ error: any Error) {
-        guard failure == nil else { return }
-        failure = error
-        order = ServerMessageOrder()
-        reader?.cancel()
-        let waiting = pending.values
-        let watching = subscriptions.values
-        pending = [:]
-        subscriptions = [:]
-        // Outcomes of requests in flight are unknown, not failed.
-        for request in waiting {
-            request.timeout.cancel()
-            request.continuation.resume(throwing: RegistryQueryError("Machine connection closed; refresh before retrying"))
-        }
-        for subscription in watching { subscription.finish(throwing: error) }
-        socket.close()
-    }
-
-    private static func line(_ message: ServerClientMessage) throws -> String {
-        let line = try JSONEncoder().encode(message)
-        guard line.count <= ServerProtocol.maxBulk else { throw RegistryQueryError("Machine request exceeds its limit") }
-        return String(decoding: line, as: UTF8.self)
-    }
 }
 
-/// One subscription's readings in order; `checkpoint` asks for a reading whose
-/// `answers` carries the checkpoint, `cancel` ends it.
-@MainActor
-final class MachineSubscription {
-    let id = UUID().uuidString
-    let readings: AsyncThrowingStream<JSONValue, any Error>
-    private let continuation: AsyncThrowingStream<JSONValue, any Error>.Continuation
-    private weak var connection: MachineConnection?
-    private var ended = false
-
-    fileprivate init(connection: MachineConnection) {
-        self.connection = connection
-        (readings, continuation) = AsyncThrowingStream.makeStream()
-    }
-
-    func checkpoint(_ checkpoint: UInt64) async throws {
-        guard let connection, !ended else { throw RegistryQueryError("Task updates disconnected; reconnect for current Tasks") }
-        try await connection.checkpoint(id, checkpoint)
-    }
-
-    func cancel() {
-        guard !ended else { return }
-        ended = true
-        connection?.unsubscribe(id)
-        continuation.finish()
-    }
-
-    fileprivate func receive(_ frame: JSONValue) {
-        continuation.yield(frame)
-    }
-
-    fileprivate func end() {
-        ended = true
-        continuation.finish()
-    }
-
-    fileprivate func finish(throwing error: any Error) {
-        guard !ended else { return }
-        ended = true
-        continuation.finish(throwing: error)
+extension ServerEndpoint {
+    /// The Machine's server over its Tailscale HTTPS address.
+    static func machine(_ endpoint: URL) -> ServerEndpoint {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        return ServerEndpoint(
+            client: ServerClientIdentity(kind: "mobile", platform: "ios", name: "Loopflow", version: version),
+            control: { @MainActor in
+                let socket = try MachineSocket(endpoint: endpoint, path: ServerProtocol.machinePath, maximumMessage: ServerProtocol.maxMessage)
+                // Foreground streams need a liveness check even when nothing changes.
+                socket.keepAlive()
+                return socket
+            },
+            ticketed: { @MainActor in
+                try MachineSocket(endpoint: endpoint, path: ServerProtocol.ticketPath, maximumMessage: ServerProtocol.maxBulk)
+            })
     }
 }

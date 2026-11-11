@@ -80,39 +80,33 @@ final class TaskFeed {
             repositories = []
             loaded = false
         }
-        do {
-            let observation = try await client.observeTasks(expression: filter.expression(wave: wave))
-            guard current == generation, !Task.isCancelled else { observation.close(); return }
-            self.observation = observation
-            reader = Task { [weak self] in
-                do {
-                    for try await reading in observation.readings {
-                        guard let self, current == self.generation else { return }
-                        switch reading {
-                        case .success(let repositories):
-                            let changed = repositories != self.repositories || !self.loaded
-                            if changed { self.repositories = repositories }
-                            self.loaded = true
-                            self.error = nil
-                            Perf.launch("tasks_current")
-                            if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
-                            self.waiting = nil
-                            let known = self.paths.count
-                            await self.name(repositories.map(\.repository))
-                            if changed || self.paths.count != known { self.save() }
-                        case .failure(let error): self.error = error.message
-                        }
-                    }
-                    throw RegistryQueryError("Task updates ended.")
-                } catch {
+        let observation = client.observeTasks(expression: filter.expression(wave: wave))
+        self.observation = observation
+        reader = Task { [weak self] in
+            do {
+                for try await reading in observation.readings {
                     guard let self, current == self.generation else { return }
-                    self.stop()
-                    self.error = machineConnectionMessage(error)
+                    switch reading {
+                    case .success(let repositories):
+                        let changed = repositories != self.repositories || !self.loaded
+                        if changed { self.repositories = repositories }
+                        self.loaded = true
+                        self.error = nil
+                        Perf.launch("tasks_current")
+                        if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
+                        self.waiting = nil
+                        let known = self.paths.count
+                        await self.name(repositories.map(\.repository))
+                        if changed || self.paths.count != known { self.save() }
+                    case .failure(let error): self.error = error.message
+                    }
                 }
+                throw RegistryQueryError("Task updates ended.")
+            } catch {
+                guard let self, current == self.generation else { return }
+                self.stop()
+                self.error = machineConnectionMessage(error)
             }
-        } catch {
-            guard current == generation, !Task.isCancelled else { return }
-            self.error = machineConnectionMessage(error)
         }
     }
 

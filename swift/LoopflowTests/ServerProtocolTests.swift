@@ -46,7 +46,17 @@ struct ServerProtocolTests {
     }
 
     private func message(_ name: String) throws -> ServerMessage {
-        try JSONDecoder().decode(ServerMessage.self, from: fixture(name))
+        try ServerMessage(line: fixture(name))
+    }
+
+    /// An answer with its payload decoded, as the caller who asked would.
+    private enum Answer { case response(String, String, JSONValue), reading(String, String, JSONValue) }
+    private func answer(_ name: String) throws -> Answer? {
+        switch try message(name) {
+        case .response(let id, let trace, let result): .response(id, trace, try result.decode(JSONValue.self))
+        case .reading(let id, let checkpoint, let frame): .reading(id, checkpoint, try frame.decode(JSONValue.self))
+        default: nil
+        }
     }
 
     @Test func helloAndWelcomeNegotiateTheRevision() throws {
@@ -93,7 +103,7 @@ struct ServerProtocolTests {
         let request = ServerClientMessage.subscribe(id: "tasks-1", operation:
             .planList(directory: "/", wave: nil, task: nil, all: true), select: ["tasks.items.task.identifier", "tasks.items.task.title", "tasks.items.section"], resume: "fixture-checkpoint")
         #expect(try encoded(request) == value("subscribe"))
-        guard case .reading(let id, let checkpoint, let frame) = try message("reading") else { Issue.record("Missing reading"); return }
+        guard case .reading(let id, let checkpoint, let frame) = try answer("reading") else { Issue.record("Missing reading"); return }
         #expect(id == "tasks-1")
         #expect(checkpoint == "fixture-checkpoint")
         guard case .object(let fields) = frame else { Issue.record("Missing subscription frame"); return }
@@ -104,13 +114,13 @@ struct ServerProtocolTests {
     }
 
     @Test func commandTraceAndExistingOwnerShareRustFixtures() throws {
-        guard case .response(let id, let trace, .object(let renamed)) = try message("response") else {
+        guard case .response(let id, let trace, .object(let renamed)) = try answer("response") else {
             Issue.record("Missing response"); return
         }
         #expect(id == "rename-1")
         #expect(trace == "85c31c1e-850c-4821-878d-55527b6dba46")
         #expect(renamed["title"] == .string("Served name"))
-        guard case .response(_, _, .object(let issued)) = try message("attached"),
+        guard case .response(_, _, .object(let issued)) = try answer("attached"),
               case .string(let process)? = issued["owner_lf_process_id"], case .string(let ticket)? = issued["ticket"] else {
             Issue.record("Missing ticket"); return
         }
@@ -126,7 +136,7 @@ struct ServerProtocolTests {
     }
 
     @Test func ticketsAdmitTerminalAndBulkConnections() throws {
-        guard case .response("terminal-1", _, let result) = try message("ticket_reply"),
+        guard case .response("terminal-1", _, let result) = try answer("ticket_reply"),
               case .string(let ticket) = result["ticket"] else {
             Issue.record("Missing ticket"); return
         }
@@ -255,36 +265,36 @@ struct ServerProtocolTests {
         }
         #expect(ServedWrite.taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: nil, agent: nil, approve: true).argv
             == ["--batch", "task", "run", "LOO-1", "--json"])
-        guard case .response(_, _, .object(let running)) = try message("task_running") else {
+        guard case .response(_, _, .object(let running)) = try answer("task_running") else {
             Issue.record("Missing task.run result"); return
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let shipping)) = try message("task_shipping") else {
+        guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
             Issue.record("Missing task.ship result"); return
         }
         #expect(shipping["state"] == .string("shipping"))
-        guard case .response(_, _, .object(let held)) = try message("task_held") else {
+        guard case .response(_, _, .object(let held)) = try answer("task_held") else {
             Issue.record("Missing task.hold result"); return
         }
         #expect(held["stopped"] == .bool(true))
-        guard case .response(_, _, .object(let steered)) = try message("session_steered") else {
+        guard case .response(_, _, .object(let steered)) = try answer("session_steered") else {
             Issue.record("Missing session.steer result"); return
         }
         #expect(steered["text"] == .string("Ship the smallest slice first"))
-        guard case .response(_, _, .array(let connected)) = try message("wave_plan_connected") else {
+        guard case .response(_, _, .array(let connected)) = try answer("wave_plan_connected") else {
             Issue.record("Missing wave.plan.connect result"); return
         }
         #expect(connected.count == 1)
-        guard case .response(_, _, .object(let reteamed)) = try message("wave_plan_reteamed") else {
+        guard case .response(_, _, .object(let reteamed)) = try answer("wave_plan_reteamed") else {
             Issue.record("Missing wave.plan.reteam result"); return
         }
         #expect(reteamed["applied"] == .bool(false))
-        guard case .response(_, _, .object(let launched)) = try message("launched") else {
+        guard case .response(_, _, .object(let launched)) = try answer("launched") else {
             Issue.record("Missing detached result"); return
         }
         #expect(launched["operation"] == .string("repo.release"))
-        guard case .response(_, _, .object(let planned)) = try message("checkout_sync_planned") else {
+        guard case .response(_, _, .object(let planned)) = try answer("checkout_sync_planned") else {
             Issue.record("Missing checkout.sync plan"); return
         }
         #expect(planned["state"] == .string("planned"))
@@ -294,11 +304,11 @@ struct ServerProtocolTests {
         #expect(ServedWrite.prLand(directory: "/repo", waitAndFix: true, strict: false, local: false, worktree: nil,
                                    message: nil, title: "Serve the pr namespace", body: nil, agent: nil).argv
             == ["pr", "land", "--wait-and-fix", "--title", "Serve the pr namespace", "--json"])
-        guard case .response(_, _, .object(let published)) = try message("pr_published") else {
+        guard case .response(_, _, .object(let published)) = try answer("pr_published") else {
             Issue.record("Missing pr.publish result"); return
         }
         #expect(published["created"] == .bool(false))
-        guard case .response(_, _, .object(let checks)) = try message("pr_checks_report") else {
+        guard case .response(_, _, .object(let checks)) = try answer("pr_checks_report") else {
             Issue.record("Missing pr.checks result"); return
         }
         #expect(checks["state"] == .string("pending"))
@@ -313,7 +323,7 @@ struct ServerProtocolTests {
             == ["--batch", "graph", "code"])
         let list = ServerClientMessage.request(id: "list-1", operation: .read(.skillList(directory: "/repo", path: [])), select: nil)
         #expect(try encoded(list) == value("skill_list"))
-        guard case .response(_, _, .array(let entries)) = try message("skill_entries") else {
+        guard case .response(_, _, .array(let entries)) = try answer("skill_entries") else {
             Issue.record("Missing skill.list result"); return
         }
         #expect(entries.count == 2)
@@ -325,11 +335,11 @@ struct ServerProtocolTests {
                                                 operation: .read(.accountNext(directory: "/repo", repo: nil,
                                                                                default: false)), select: nil)
         #expect(try encoded(route) == value("account_next_request"))
-        guard case .response(_, _, .object(let report)) = try message("account_report") else {
+        guard case .response(_, _, .object(let report)) = try answer("account_report") else {
             Issue.record("Missing account.list result"); return
         }
         #expect(report["browser"] == .null)
-        guard case .response(_, _, .object(let redeemed)) = try message("account_redeemed") else {
+        guard case .response(_, _, .object(let redeemed)) = try answer("account_redeemed") else {
             Issue.record("Missing account.redeem_reset result"); return
         }
         #expect(redeemed["after"] == .null)
@@ -406,7 +416,7 @@ struct ServerProtocolTests {
         }
         #expect(step.label == "implement" && step.outcome == "succeeded")
         let unknown = Data(#"{"type":"event","id":"task","seq":2,"event":{"kind":"future.occurrence","extra":true}}"#.utf8)
-        guard case .event(let unknownID, 2, .unknown(let kind)) = try JSONDecoder().decode(ServerMessage.self, from: unknown) else {
+        guard case .event(let unknownID, 2, .unknown(let kind)) = try ServerMessage(line: unknown) else {
             Issue.record("Unknown event closed the connection"); return
         }
         #expect(unknownID == "task" && kind == "future.occurrence")
@@ -434,13 +444,13 @@ struct ServerProtocolTests {
 
     @Test func missingRequiredFieldsDoNotBecomeDefaults() {
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"welcome","revision":4}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
         }
     }
 }

@@ -18,7 +18,7 @@ final class MachinePairingTests: XCTestCase {
 
     func testOlderServerNamesTheInstallationToUpdate() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "error", withExtension: "json", subdirectory: "server"))
-        guard case .error(nil, let code, let message, let data) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: url)) else {
+        guard case .error(nil, let code, let message, let data) = try ServerMessage(line: Data(contentsOf: url)) else {
             return XCTFail("Expected the older server's handshake refusal")
         }
         XCTAssertEqual(data["update"], .string("server"))
@@ -42,10 +42,10 @@ final class MachinePairingTests: XCTestCase {
     func testLocalMobileSetupCodecMatchesTheBackendFixture() throws {
         let bundle = Bundle(for: Self.self)
         let replyURL = try XCTUnwrap(bundle.url(forResource: "remote", withExtension: "json", subdirectory: "server"))
-        guard case .response("mobile-1", _, let result) = try JSONDecoder().decode(ServerMessage.self, from: Data(contentsOf: replyURL)) else {
+        guard case .response("mobile-1", _, let result) = try ServerMessage(line: Data(contentsOf: replyURL)) else {
             return XCTFail("Expected listener configuration")
         }
-        let configuration = try JSONDecoder().decode(MachineMobileConfiguration?.self, from: JSONEncoder().encode(result["configuration"]))
+        let configuration = try result.fields()["configuration"]?.decode(MachineMobileConfiguration?.self)
         XCTAssertEqual(configuration?.endpoint, "https://host.tail.ts.net:8443")
     }
     func testAddressPreservesThePrivateEndpointAndRejectsOtherDestinations() throws {

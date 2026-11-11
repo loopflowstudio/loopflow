@@ -706,3 +706,25 @@ Checks, each failing with the write removed:
   positions/queries/drawing tests: nothing to reduce in code; this plan's two
   status records for them were merged.
 
+
+### Second pass, after the positions/queries/drawing steers — November 11, 2026
+
+Both steers (comments e16443ff, 135b346c) are built and recorded above and in
+`docs/dev/server-first.md`. Two parts of "Direction after explore" no longer
+match the design that follows from 4a, and are settled here:
+
+- **No snapshot on graceful stop.** Open views resume by position and never
+  read a rebuilt screen; only a view opened after a restart does. Ring replay
+  plus one nudge is already the path for an incompatible build, so a second
+  rebuild path from `screen.ghostsnp` buys one cold-open case at the cost of a
+  revision/position match. Dropped; `server-first.md` "Joining late" now says
+  bytes plus nudge. Slice 0 (the mode probe) still says how good that cold
+  open is.
+- **Acceptance "no per-terminal socket".** The holder protocol is one `read`
+  stream per connection, kept small on purpose; the registry holds one holder
+  connection per terminal and one per view, on one thread. The load the brief
+  named is processes and threads. The acceptance line becomes: server thread
+  count does not grow with held terminals; `lf ps --json` lists one holder
+  LfProcess per build and no owner row per held terminal. Gate automates both.
+
+No open product choice.

@@ -75,9 +75,8 @@ Rex shows `lf` there, not the agent.
   token or Move here.
 - **Joining late.** The server keeps the terminal emulator and paints a
   joining view from it. The holder keeps only recent raw bytes. After a server
-  restart the emulator is rebuilt from a snapshot saved at a graceful stop plus
-  those bytes, or from the bytes and a size nudge asking the agent to repaint;
-  scrollback from before the kept bytes may then be absent.
+  restart the emulator is rebuilt from those bytes and a size nudge asking the
+  agent to repaint; scrollback from before the kept bytes may then be absent.
 - **Staying open.** A view's place in the stream is a PTY byte position the
   holder can serve, so a view that is open across a server restart continues
   without a repaint.

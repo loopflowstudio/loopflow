@@ -80,10 +80,12 @@ final class MachineSocket {
         }
     }
 
-    func send(_ text: String) async throws {
+    /// Sends one message. The first message on a socket waits for TLS too, so
+    /// an opening sends with no limit of its own inside the handshake's deadline.
+    func send(_ text: String, opening: Bool = false) async throws {
         guard !closed else { throw connectionError(RegistryQueryError("Machine connection closed")) }
-        let timeout = deadline(seconds: 5)
-        defer { timeout.cancel() }
+        let timeout = opening ? nil : deadline(seconds: 5)
+        defer { timeout?.cancel() }
         do { try await socket.send(.string(text)) } catch { throw connectionError(error) }
     }
 
@@ -169,7 +171,7 @@ final class MachineConnection {
             let hello = ServerHello(revision: ServerProtocol.revision, minRevision: ServerProtocol.minRevision, client: ServerClientIdentity(
                 kind: "mobile", platform: "ios", name: "Loopflow",
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"))
-            try await socket.send(try line(.hello(hello)))
+            try await socket.send(try line(.hello(hello)), opening: true)
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
             case .welcome(let welcome): return MachineConnection(endpoint: endpoint, socket: socket, welcome: welcome)
             case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
@@ -260,7 +262,7 @@ final class MachineConnection {
         do {
             let handshake = socket.deadline(seconds: 10)
             defer { handshake.cancel() }
-            try await socket.send(try line(.attach(ticket: ticket)))
+            try await socket.send(try line(.attach(ticket: ticket)), opening: true)
             switch try JSONDecoder().decode(ServerMessage.self, from: try await socket.receiveText()) {
             case .admitted where !terminal: return socket
             case .bridged where terminal: return socket

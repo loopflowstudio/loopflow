@@ -347,7 +347,9 @@ struct TaskListView: View {
         }
     }
 
-    private func name(_ repository: String) -> String { feed.names[repository] ?? "Repository" }
+    /// A repository's folder name; one the Machine cannot place keeps its short ID,
+    /// so two of them stay told apart.
+    private func name(_ repository: String) -> String { feed.names[repository] ?? String(repository.prefix(11)) }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
         NavigationLink { workspace(task) } label: { row(task) }

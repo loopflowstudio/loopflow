@@ -9,20 +9,27 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 17:22 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
+At 18:01 UTC, GitHub reported PR #1812 open and unmerged at
 `bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs`. The refreshed `lf task status LOO-718 --json` still reported
+`server/ticket.rs`. At 17:27 UTC, `lf task status LOO-718 --json` still reported
 `feature` / `demo`. Implementation and authenticated acceptance require that
 landing. Landing PR #1812 is outside this Task's scope. Reinspect its shared
 store and endpoints after it lands; the remaining acceptance below still applies.
 
-At the inspected PR head `7e779e650b72ccb806888713c4e3d8756445fb82`,
+The 18:01 UTC `lf task status LOO-809 --json` refresh returned no output before
+cancellation; the queued LOO-718 refresh did not run. Its Graph status above
+remains the 17:27 observation. GitHub and fetched main confirm the dependency.
+
+At the current PR head `bfd4244858864279ca13450c9f5f102c5554643c`,
 both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.
 Only bulk tickets have direct store coverage; background expiry already releases
 abandoned bulk reservations. `mobile-same-device` permits the host's own node
 without changing ticket identity.
+The ticket store and mobile admission code are unchanged from the previously
+inspected `7e779e650b72ccb806888713c4e3d8756445fb82`; the implementation and
+acceptance below still apply.
 
 Earlier observations and references to the PR description quote and conflicting
 19:35 UTC status report remain in

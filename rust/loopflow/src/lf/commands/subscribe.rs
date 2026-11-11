@@ -964,7 +964,7 @@ mod tests {
         std::fs::write(&wave, "agent: pi\n").unwrap();
         agent("pi");
         std::fs::write(&wave, "agent: [\n").unwrap();
-        assert!(!next_frame(&subscription, &wakes)["unavailable"].is_null());
+        agent("claude");
         std::fs::write(&wave, "agent: codex\n").unwrap();
         agent("codex");
 

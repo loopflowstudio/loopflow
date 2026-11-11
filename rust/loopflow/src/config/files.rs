@@ -297,7 +297,7 @@ pub(crate) fn read_text(path: &Path) -> Result<String> {
 /// Read an authored configuration mapping in the typed layout, whichever
 /// spellings it uses; absent or empty files are empty mappings.
 pub(crate) fn read(path: &Path) -> Result<Value> {
-    let mut document = parse_document(&read_text(path)?, path)?;
+    let mut document = Value::Mapping(super::reader::parse(&read_text(path)?, path));
     super::keys::fold(&mut document);
     Ok(document)
 }

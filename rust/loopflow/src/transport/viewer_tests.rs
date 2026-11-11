@@ -1,6 +1,7 @@
 //! Descriptor changes and signal cleanup run only in disposable child processes.
 
 use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
@@ -101,6 +102,22 @@ fn snapshot_preview_fixture() {
         socket
             .write_all(&wire::frame(Tag::Snapshot, &bytes))
             .unwrap();
+        if case == "completed" {
+            // The owner finished before the viewer could acknowledge readiness.
+            // Its final output and exit status are still waiting to be read.
+            socket.shutdown(Shutdown::Read).unwrap();
+            let mut output = wire::event(
+                "nonce",
+                1,
+                Event::Return {
+                    detach: "native-client".into(),
+                },
+            );
+            output.extend_from_slice(b"provider finished\r\n");
+            output.extend(wire::event("nonce", 2, Event::ChildExited { code: 0 }));
+            socket.write_all(&wire::frame(Tag::Out, &output)).unwrap();
+            return;
+        }
         if reports_directory {
             socket
                 .write_all(&wire::frame(
@@ -380,7 +397,11 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     assert!(output
         .windows(b"saved preview".len())
         .any(|w| w == b"saved preview"));
-    assert!(case == "startup_failure" || case == "provider_failure" || cancelled || inspected);
+    assert!(
+        matches!(case, "startup_failure" | "provider_failure" | "completed")
+            || cancelled
+            || inspected
+    );
     (home, output)
 }
 
@@ -399,6 +420,12 @@ fn snapshot_preview_hands_off_to_a_fresh_primary_screen() {
 #[test]
 fn snapshot_preview_hands_off_to_mode_only_live_state() {
     preview_case("modes");
+}
+
+#[test]
+fn readiness_after_owner_exit_keeps_final_output_and_status() {
+    let (_, output) = preview_case("completed");
+    assert!(String::from_utf8_lossy(&output).contains("provider finished"));
 }
 
 #[test]

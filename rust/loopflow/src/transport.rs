@@ -2637,14 +2637,18 @@ fn view(
                             return Ok(());
                         }
                         Event::Return { detach } => {
-                            send(
+                            // The owner may have exited with its final output and
+                            // status still buffered. A readiness write cannot discard them.
+                            let acknowledged = send(
                                 &mut socket,
                                 Request::Controlled {
                                     ready: Some(detach.clone()),
                                 },
-                            )?;
+                            )
+                            .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
+                            .is_ok();
                             returning = Some(detach);
-                            if controlled {
+                            if controlled && acknowledged {
                                 acknowledge_open();
                             }
                             if let Some(status) = &mut status {

@@ -1145,8 +1145,6 @@ impl Hosted {
     }
 }
 
-/// Paint `viewer` the retained screen; a held terminal's viewer then stands
-/// at the PTY position that screen covers.
 fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
     crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
         .inspect_err(|error| tracing::warn!(%error, "planning sync unavailable to this owner"))
@@ -1176,7 +1174,7 @@ fn write_exit_record(file: &std::path::Path, record: &NativeExit) {
     }
 }
 
-fn remove_exit_record(file: &std::path::Path) {
+pub(super) fn remove_exit_record(file: &std::path::Path) {
     if let Err(error) = std::fs::remove_file(file) {
         if error.kind() != io::ErrorKind::NotFound {
             tracing::warn!(%error, file = %file.display(), "exit record not removed");
@@ -1184,6 +1182,8 @@ fn remove_exit_record(file: &std::path::Path) {
     }
 }
 
+/// Paint `viewer` the retained screen; a held terminal's viewer then stands
+/// at the PTY position that screen covers.
 fn paint(output: &output::Output, child: &Child, viewer: &mut Viewer) -> Result<()> {
     if let Some(snapshot) = output.snapshot()? {
         viewer.stream(Tag::Snapshot, &snapshot)?;

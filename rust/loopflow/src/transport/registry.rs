@@ -785,9 +785,7 @@ fn settle(exit: &mut Unsettled) -> bool {
         // An end nobody saw reads as killed.
         let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
         crate::harness::native_exit::settle(&record, std::process::ExitStatus::from_raw(status));
-        if let Err(error) = std::fs::remove_file(&file) {
-            tracing::warn!(%error, file = %file.display(), "settled exit record not removed");
-        }
+        super::hosted::remove_exit_record(&file);
     }
     let recorded = crate::journal::process_ledger()
         .and_then(|store| store.end_terminal(&exit.terminal, exit.code));

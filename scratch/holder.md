@@ -614,6 +614,10 @@ Checks:
   `held_session_survives_server_restart` passes; `documented_commands::`
   passes; clippy clean.
 
+- Compress after revision 5: the held exit record is removed through one
+  `hosted::remove_exit_record`; `paint` has its doc comment back.
+  `cargo test -p loopflow --lib transport::`: 73 passed; clippy clean.
+
 **Remaining, in order:**
 
 1. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).

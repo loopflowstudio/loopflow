@@ -755,6 +755,33 @@ fn view_plan(
     passive: bool,
     json: bool,
 ) -> Result<()> {
+    if !passive && expression.is_none() {
+        require_supported()?;
+        // Default Work displays its arrangement, like `lf workspace`.
+        return super::open::run_workspace(
+            cli,
+            &super::open::WorkspaceArgs {
+                selection: super::open::OpenSelection {
+                    url: None,
+                    host: super::open::OpenHost::Desktop,
+                    session: None,
+                    diff: false,
+                    link: false,
+                    format: None,
+                    json,
+                    server: None,
+                },
+                available: false,
+                no_focus: false,
+                follow: None,
+                seen: Vec::new(),
+                local_workspace: false,
+                arrive_task: Vec::new(),
+                into: None,
+                remote: Vec::new(),
+            },
+        );
+    }
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
         use crate::work::selection::{Selection, SelectionExpression, SelectionId};
@@ -800,33 +827,8 @@ fn view_plan(
     if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
         return Err(crate::process::CommandExit(3).into());
     }
-    if !passive {
+    if let Some(expression) = expression.filter(|_| !passive) {
         require_supported()?;
-        let Some(expression) = expression else {
-            // Default Work opens through its public address, like `lf open`.
-            return super::open::run(
-                cli,
-                &super::open::OpenArgs {
-                    server: None,
-                    no_focus: false,
-                    follow: None,
-                    seen: Vec::new(),
-                    local_workspace: false,
-                    arrive_task: Vec::new(),
-                    into: None,
-                    remote: Vec::new(),
-                    files: Vec::new(),
-                    url: None,
-                    host: super::open::OpenHost::Desktop,
-                    available: false,
-                    session: None,
-                    diff: false,
-                    link: false,
-                    format: None,
-                    json,
-                },
-            );
-        };
         let resolution = super::open::selected_context(cli, None)?;
         let repo = bound(&resolution.repository_path, "repository path")?;
         let mut url = reqwest::Url::parse("loopflow://open")?;
@@ -1058,6 +1060,104 @@ pub(crate) fn save_layout(
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     dispatch(cli, command).map_err(exit_status)
+}
+
+fn inspect_running() -> Result<Option<DesktopInspection>> {
+    if !socket_path().exists() {
+        return Ok(None);
+    }
+    let result = DesktopConnection::open()
+        .and_then(|mut connection| connection.call("inspect", serde_json::json!({})));
+    match result {
+        Ok(reading) => Ok(Some(reading)),
+        Err(error)
+            if error
+                .downcast_ref::<DesktopError>()
+                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Known native Session views, by identity, without launching Desktop.
+pub(super) fn conversation_view(session: &str) -> Result<Option<DesktopPaneTarget>> {
+    let Some(reading) = inspect_running()? else {
+        return Ok(None);
+    };
+    fn find<'a>(
+        layout: &'a DesktopLayoutInspection,
+        session: &str,
+    ) -> Option<&'a DesktopLayoutInspection> {
+        if layout.content.as_deref() == Some("session")
+            && layout.subject.as_deref() == Some(session)
+            && layout.surface.is_some()
+        {
+            Some(layout)
+        } else {
+            layout
+                .children
+                .iter()
+                .find_map(|child| find(child, session))
+        }
+    }
+    for window in reading.windows {
+        for workspace in window
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.is_open)
+        {
+            if let Some(pane) = find(&workspace.layout, session) {
+                return Ok(Some(DesktopPaneTarget {
+                    repository: window.repository.clone(),
+                    window: window.window.clone(),
+                    work: workspace.work.clone(),
+                    pane: pane
+                        .pane
+                        .clone()
+                        .context("Session view omitted pane identity")?,
+                    incarnation: pane
+                        .incarnation
+                        .clone()
+                        .context("Session view omitted incarnation")?,
+                    tab: None,
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+pub(super) fn focus_conversation(destination: &str) -> Result<()> {
+    let target: DesktopPaneTarget = serde_json::from_str(destination)?;
+    let _: DesktopActionReceipt = DesktopConnection::open()?.call(
+        "perform",
+        DesktopActionRequest {
+            repository: target.repository.clone(),
+            window: target.window.clone(),
+            pane: Some(target),
+            action: "focus".into(),
+            args: Default::default(),
+        },
+    )?;
+    Ok(())
+}
+
+pub(super) fn conversation_opening(url: &str) -> Result<Option<DesktopOpening>> {
+    let Some(reading) = inspect_running()? else {
+        return Ok(None);
+    };
+    Ok(reading
+        .openings
+        .into_iter()
+        .chain(
+            reading
+                .windows
+                .into_iter()
+                .filter_map(|window| window.opening),
+        )
+        .find(|opening| opening.url == url))
 }
 
 /// Reuse the Files surface without launching Desktop or changing conversation ownership.
@@ -2842,7 +2942,7 @@ impl DesktopConnection {
         let bundle = super::open::desktop_bundle();
         let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|error| {
             DesktopError::Unreachable(format!(
-                "Loopflow Desktop ({bundle}) is not running or not serving {} ({error}). Open it with lf open, or inspect Work with lf task status <task>.",
+                "Loopflow Desktop ({bundle}) is not running or not serving {} ({error}). Open it with lf open --host desktop, or inspect Work with lf task status <task>.",
                 path.display()
             ))
         })?;

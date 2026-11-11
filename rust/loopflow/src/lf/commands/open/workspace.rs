@@ -1,4 +1,4 @@
-//! Fresh native workspaces. Every `lf open` launches new Task tabs, each with its
+//! Fresh native workspaces. Every `lf workspace` launches new Task tabs, each with its
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
@@ -17,11 +17,10 @@ use serde_json::Value;
 use super::{
     cmux, herdr,
     rex::{self, Rex},
-    OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Opening, Resolved,
+    OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
 };
 use crate::durable::{MachineId, RepositoryId, TaskId};
 use crate::id::WaveId;
-use crate::ops::human_session::{session_state, viewed_summary, SessionState};
 use crate::store::sqlite::SqliteStore;
 use crate::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
@@ -109,12 +108,6 @@ impl Native {
             Self::Herdr(_) => OpenHost::Herdr,
             Self::Cmux(_) => OpenHost::Cmux,
         }
-    }
-
-    /// A Conversation pane. `lf resume` selects the conversation and its harness.
-    fn conversation(&self, cwd: &Path, resume: &[&str]) -> Result<Value> {
-        let argv = lf_argv(cwd, &[&["resume"], resume].concat())?;
-        Ok(self.block("Conversation", cwd, argv))
     }
 
     fn block(&self, label: &str, cwd: &Path, argv: Vec<String>) -> Value {
@@ -214,10 +207,10 @@ impl Native {
         container: &mut Container,
         content: &ViewContent,
         presentation: Presentation<'_>,
-    ) -> Result<(String, usize)> {
+    ) -> Result<(String, usize, Option<super::conversation::Attachment>)> {
         let template = templates.for_task(&TaskId::parse(&content.work.id)?)?;
         let repo = templates.repo;
-        let (native_layout, shells) = layout(
+        let (native_layout, shells, attachment) = layout(
             templates.store,
             content,
             repo,
@@ -231,7 +224,7 @@ impl Native {
             tool_cwd(content, repo),
             native_layout,
         )?;
-        Ok((tab, shells))
+        Ok((tab, shells, attachment))
     }
 
     fn focus(&self, container: &Container, tab: &str) -> String {
@@ -251,49 +244,19 @@ impl Native {
 // Opening
 // ---------------------------------------------------------------------------
 
-/// Which conversations a pane shows; Task & workflow takes the place of the rest.
-/// Resuming anything but a detached Session starts a provider or takes its input.
-#[derive(Clone, Copy, Default)]
-enum Resume {
-    /// Background arrivals do not take input from an existing terminal.
-    #[default]
-    None,
-    /// A repository or Wave opening reconnects what no terminal shows and
-    /// starts nothing, as `session_actions` offers Reconnect only then.
-    Detached,
-    /// A selected Task or Session.
-    Any,
-}
-
-impl Resume {
-    /// Whether a pane runs `session`, or starts a conversation when there is
-    /// none. The conversation running this command stays where it is.
-    fn admits(self, store: &SqliteStore, session: Option<&str>) -> Result<bool> {
-        let is_caller = |session: &str| {
-            crate::journal::agent_caller().is_some_and(|caller| caller.session_id == session)
-        };
-        Ok(match (self, session) {
-            (_, Some(session)) if is_caller(session) => false,
-            (Self::None, _) | (Self::Detached, None) => false,
-            (Self::Detached, Some(session)) => viewed_summary(store, session)?
-                .is_some_and(|summary| session_state(&summary) == SessionState::Detached),
-            (Self::Any, _) => true,
-        })
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct Presentation<'a> {
     session: Option<&'a str>,
     diff: bool,
-    resume: Resume,
+    /// Overviews show workflow; selected workspaces open conversations.
+    conversations: bool,
 }
 
-pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
+pub(super) fn run(cli: &crate::lf::Cli, args: &WorkspaceArgs, host: OpenHost) -> Result<()> {
     if let Some(session) = &args.follow {
         return follow(cli, session, args);
     }
-    let (targets, unknown) = super::targets(cli, args)?;
+    let (targets, unknown) = super::workspace_targets(cli, args)?;
     crate::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let mut report = OpenReport {
@@ -301,8 +264,6 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
         unknown,
     };
     for target in &targets {
-        // The same opening lock protects ordinary and workspace opening.
-        let _opening = Opening::lock(target)?;
         match open_machines(&store, host, target, args) {
             Ok(opened) => {
                 report.receipts.extend(opened.receipts);
@@ -313,7 +274,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Resu
                 .push(failed(target, host, format!("{error:#}"))),
         }
     }
-    if args.json || cli.json {
+    if args.selection.json || cli.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         for receipt in &report.receipts {
@@ -378,11 +339,11 @@ fn open_machines(
     store: &SqliteStore,
     host: OpenHost,
     target: &Resolved,
-    args: &OpenArgs,
+    args: &WorkspaceArgs,
 ) -> Result<OpenReport> {
     if target.task.is_none() && (args.available || target.session.is_some()) {
         return Ok(OpenReport {
-            receipts: vec![open_conversation(store, host, target, args)?],
+            receipts: vec![open_conversation(host, target, args)],
             unknown: Vec::new(),
         });
     }
@@ -415,8 +376,8 @@ fn open_machines(
     if !args.local_workspace {
         for (peer, candidates) in routed.peers {
             let mut remote_args = args.clone();
-            remote_args.session = target.session.clone();
-            remote_args.diff |= target.url.diff;
+            remote_args.selection.session = target.session.clone();
+            remote_args.selection.diff |= target.url.diff;
             let outcome = remote_open(
                 store,
                 host,
@@ -444,7 +405,7 @@ fn open_machines(
         }
     }
     if !routed.local.is_empty() || follows {
-        let result = Native::resolve(host, args.server.as_deref()).and_then(|native| {
+        let result = Native::resolve(host, args.selection.server.as_deref()).and_then(|native| {
             launch(
                 store,
                 &native,
@@ -625,7 +586,7 @@ fn remote_open(
     machine: &str,
     repository: &str,
     selection: &Selection,
-    args: &OpenArgs,
+    args: &WorkspaceArgs,
 ) -> Result<OpenReport> {
     let machine = store
         .machines()?
@@ -635,7 +596,7 @@ fn remote_open(
     let mut argv = vec![
         "--repo-id".into(),
         repository.into(),
-        "open".into(),
+        "workspace".into(),
         "--host".into(),
         host.label().to_lowercase(),
         "--local-workspace".into(),
@@ -647,13 +608,13 @@ fn remote_open(
         SelectionExpression::Repository => {}
         _ => bail!("This workspace selection cannot be routed"),
     }
-    if let Some(session) = &args.session {
+    if let Some(session) = &args.selection.session {
         argv.extend(["--session".into(), session.clone()]);
     }
     if let Some(agent) = crate::config::agent_override() {
         argv.extend(["--agent".into(), agent]);
     }
-    if args.diff {
+    if args.selection.diff {
         argv.push("--diff".into());
     }
     if args.no_focus {
@@ -762,48 +723,43 @@ fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) 
 
 /// A Session with no Task is one conversation, not a selection of Tasks: one
 /// tab in the caller's container, and nothing arrives after it.
-fn open_conversation(
-    store: &SqliteStore,
-    host: OpenHost,
+fn open_conversation(host: OpenHost, target: &Resolved, args: &WorkspaceArgs) -> OpenReceipt {
+    super::conversation::open(
+        target.clone(),
+        &super::OpenArgs {
+            selection: super::OpenSelection {
+                host,
+                ..args.selection.clone()
+            },
+            here: false,
+            tab: true,
+            focus: false,
+            files: Vec::new(),
+        },
+        !args.no_focus,
+    )
+}
+
+/// One conversation tab, independent of any saved Task layout.
+pub(super) fn conversation_tab(
     target: &Resolved,
-    args: &OpenArgs,
+    host: OpenHost,
+    server: Option<&str>,
+    argv: Vec<String>,
+    focus: bool,
 ) -> Result<OpenReceipt> {
-    if let Some(reason) = target.current_conversation() {
-        return Ok(target.receipt(Some(host), None, OpenStatus::Opening, Some(reason)));
-    }
-    let session = target
-        .conversation()
-        .context("This Work has no conversation on this Machine")?;
-    let native = Native::resolve(host, args.server.as_deref())?;
+    let native = Native::resolve(host, server)?;
     let cwd = target.cwd();
     let mut container = match native.here()? {
         Some(here) => here,
-        None => {
-            let name = container_name(store, target, &scope(store, target)?)?;
-            native.create_container(&name, cwd)?
-        }
+        None => native.create_container(&target.label, cwd)?,
     };
-    let mut receipt = conversation_tab(&native, &mut container, target, session, cwd);
-    if let (false, Some(tab)) = (args.no_focus, &receipt.destination) {
-        receipt.reason = Some(native.focus(&container, tab));
-    }
+    let layout = native.block("Conversation", cwd, argv);
+    let tab = native.add_tab(&mut container, &target.destination_name(), cwd, layout)?;
+    let reason = focus.then(|| native.focus(&container, &tab));
+    let mut receipt = target.receipt(Some(host), Some(tab), OpenStatus::Opening, reason);
     receipt.container = container.id;
     Ok(receipt)
-}
-
-fn conversation_tab(
-    native: &Native,
-    container: &mut Container,
-    target: &Resolved,
-    session: &str,
-    cwd: &Path,
-) -> OpenReceipt {
-    let mut receipt = target.receipt(Some(native.open_host()), None, OpenStatus::Opening, None);
-    let opened = native
-        .conversation(cwd, &[session])
-        .and_then(|layout| native.add_tab(container, "Conversation", cwd, layout));
-    settle_receipt(&mut receipt, opened);
-    receipt
 }
 
 fn launch(
@@ -811,7 +767,7 @@ fn launch(
     native: &Native,
     target: &Resolved,
     selected: &Selection,
-    args: &OpenArgs,
+    args: &WorkspaceArgs,
     local_tasks: &[&ViewContent],
     follow: Option<&Remotes>,
 ) -> Result<Vec<OpenReceipt>> {
@@ -831,32 +787,13 @@ fn launch(
     let presentation = if args.arrive_task.is_empty() {
         Presentation {
             session: target.session.as_deref(),
-            diff: args.diff || target.url.diff,
-            resume: if explicit {
-                Resume::Any
-            } else {
-                Resume::Detached
-            },
+            diff: args.selection.diff || target.url.diff,
+            conversations: explicit,
         }
     } else {
         Presentation::default()
     };
     let mut receipts = Vec::new();
-    if let SelectionExpression::Wave { wave } = &selected.expression {
-        match store.primary_session(&crate::session::PrimaryScope::Wave(wave.clone()))? {
-            Some(session)
-                if presentation
-                    .resume
-                    .admits(store, Some(session.id.as_str()))? =>
-            {
-                let mut receipt =
-                    conversation_tab(native, &mut container, target, session.id.as_str(), repo);
-                receipt.label = "Wave conversation".into();
-                receipts.push(receipt);
-            }
-            _ => {}
-        }
-    }
     let mut templates = Templates {
         store,
         repo,
@@ -878,7 +815,7 @@ fn launch(
         .to_string();
         let opened = native
             .add_task_tab(&mut templates, &mut container, content, presentation)
-            .map(|(tab, shells)| {
+            .map(|(tab, shells, attachment)| {
                 let showing = if focused {
                     "Focus preserved".into()
                 } else {
@@ -888,6 +825,9 @@ fn launch(
                 receipt.reason = Some(format!(
                     "Created a new Task tab; {shells} new shells; {showing}"
                 ));
+                if let Some(attachment) = attachment {
+                    attachment.settle(&mut receipt);
+                }
                 tab
             });
         settle_receipt(&mut receipt, opened);
@@ -966,7 +906,7 @@ fn start_follower(
     remotes: &[String],
 ) -> Result<()> {
     let mut words = vec![
-        "open".to_owned(),
+        "workspace".to_owned(),
         url.into(),
         "--host".into(),
         "rex".into(),
@@ -1024,8 +964,9 @@ fn with_machine_home(mut argv: Vec<String>) -> Vec<String> {
 /// another Machine's to the container held for it here. A Machine with none gets
 /// one on its first arrival. Seen Tasks, including tabs someone closed, stay in
 /// memory and never reappear. Containers live only as long as this process.
-fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
+fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<()> {
     let server = args
+        .selection
         .server
         .as_deref()
         .context("A follower needs its Rex server")?;
@@ -1033,7 +974,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
         server: server.into(),
         caller: None,
     };
-    let (targets, _) = super::targets(cli, args)?;
+    let (targets, _) = super::workspace_targets(cli, args)?;
     let target = targets
         .first()
         .context("Follower selection is unavailable")?;
@@ -1161,7 +1102,7 @@ fn arrive_remote(
     candidates: &[Candidate],
     repository: &str,
     selected: &Selection,
-    args: &OpenArgs,
+    args: &WorkspaceArgs,
 ) -> Vec<String> {
     let known = match placement {
         Placement::Uncertain => return Vec::new(),
@@ -1169,12 +1110,15 @@ fn arrive_remote(
         Placement::Container(container) => Some(container.clone()),
     };
     // Arrivals select no Session and take no focus.
-    let arrival = OpenArgs {
+    let arrival = WorkspaceArgs {
         arrive_task: candidates.iter().map(|task| task.id.clone()).collect(),
         into: known.clone(),
         no_focus: true,
-        session: None,
-        diff: false,
+        selection: super::OpenSelection {
+            session: None,
+            diff: false,
+            ..args.selection.clone()
+        },
         ..args.clone()
     };
     let outcome = remote_open(

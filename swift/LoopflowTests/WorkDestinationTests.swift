@@ -35,7 +35,7 @@ struct WorkDestinationTests {
                                             work: waveScoped ? .wave(id: wave.wave.id) : nil)
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let (model, registry) = destinationModel(query: RegistryQuery { args, _ in
-            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--reveal-existing") { return encoded }
+            if args.starts(with: ["session", "resume"]), args.contains(record.id), args.contains("--start-if-free") { return encoded }
             throw RegistryQueryError("Only the exact conversation may be prepared")
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])

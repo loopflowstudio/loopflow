@@ -857,7 +857,7 @@ final class WorkModel {
             guard let registry = workspaceRegistry, let repository = workspaceRepository, let repoPath else {
                 throw RegistryQueryError("The repository workspace is unavailable; retry opening it.")
             }
-            let record = try await query.prepareSession(id: id, cwd: repoPath, intent: .reveal)
+            let record = try await query.prepareSession(id: id, cwd: repoPath, intent: .start)
             try Task.checkCancellation()
             guard destinationGeneration == generation else { return }
             let records = [record] + (sessions.value ?? []).filter { $0.id != id }
@@ -876,7 +876,7 @@ final class WorkModel {
             guard let pane else { throw RegistryQueryError("The Session pane is unavailable; retry opening it.") }
             generation = destinationGeneration
             taskOpening = DesktopOpening(url: address, status: .opening, reason: nil)
-            await store.select(id, intent: .reveal)
+            await store.select(id, intent: .start)
             observeOpeningOwners(generation: generation, record: record, showsChanges: false,
                                  store: store, workspace: workspace, panes: [pane], files: nil)
         } catch {

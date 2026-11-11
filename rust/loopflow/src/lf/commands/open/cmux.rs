@@ -13,28 +13,53 @@ use crate::work::selection::SplitAxis;
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct CmuxLocation {
+    socket: String,
+    workspace: String,
+}
+
+impl CmuxLocation {
+    pub(super) fn current() -> Option<Self> {
+        Some(Self {
+            socket: std::env::var("CMUX_SOCKET_PATH").ok()?,
+            workspace: std::env::var("CMUX_WORKSPACE_ID").ok()?,
+        })
+    }
+}
+
 pub(super) struct Cmux {
     cli: PathBuf,
+    location: Option<CmuxLocation>,
 }
 
 impl Cmux {
     pub(super) fn local() -> Result<Self> {
-        Ok(Self { cli: cli()? })
+        let location = match super::viewed_placement() {
+            Some((super::OpenHost::Cmux, value)) => {
+                Some(serde_json::from_str(&value).context("cmux viewer placement is unavailable")?)
+            }
+            _ => CmuxLocation::current(),
+        };
+        Ok(Self {
+            cli: cli()?,
+            location,
+        })
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {
         let mut command = Command::new(&self.cli);
         command.env("CMUX_QUIET", "1").args(args);
+        if let Some(location) = &self.location {
+            command.env("CMUX_SOCKET_PATH", &location.socket);
+        }
         super::run_host(command, "cmux").map_err(|error| anyhow::anyhow!("{}", error.reason()))
     }
 
     /// The group holding the caller's workspace now; `None` when it is ungrouped
     /// or the caller is outside cmux. Native lookup follows moves since launch.
     pub(super) fn caller_group(&self) -> Result<Option<String>> {
-        let Some(workspace) = std::env::var("CMUX_WORKSPACE_ID")
-            .ok()
-            .filter(|id| !id.is_empty())
-        else {
+        let Some(location) = &self.location else {
             return Ok(None);
         };
         let output = self
@@ -42,7 +67,7 @@ impl Cmux {
             .context("cmux did not report the caller's group; nothing was opened")?;
         let list: Value = serde_json::from_str(&output)
             .context("cmux group list is unreadable; nothing was opened")?;
-        group_of(&list, &workspace)
+        group_of(&list, &location.workspace)
     }
 
     pub(super) fn create_group(&self, name: &str, cwd: &Path) -> Result<String> {
@@ -84,6 +109,17 @@ impl Cmux {
         let output = self.run(&args)?;
         reference(&output, "workspace:")
             .context("cmux did not name the created workspace; outcome is unknown")
+    }
+
+    pub(super) fn focus_view(placement: &str) -> Result<()> {
+        let location: CmuxLocation = serde_json::from_str(placement)
+            .context("The recorded cmux view has no socket and workspace identity")?;
+        let workspace = location.workspace.clone();
+        Self {
+            cli: cli()?,
+            location: Some(location),
+        }
+        .focus(&workspace)
     }
 
     pub(super) fn focus(&self, workspace: &str) -> Result<()> {

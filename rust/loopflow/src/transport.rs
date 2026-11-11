@@ -2612,6 +2612,9 @@ fn view(
                         }
                         Event::Return { detach } => {
                             returning = Some(detach);
+                            if controlled {
+                                acknowledge_open();
+                            }
                             if let Some(status) = &mut status {
                                 status.native_ready();
                             }
@@ -2783,6 +2786,22 @@ fn discard_reconnect_input() -> io::Result<()> {
         if io::stdin().read(&mut bytes)? == 0 {
             return Ok(());
         }
+    }
+}
+
+pub(crate) const OPEN_RECEIPT_ENV: &str = "LF_OPEN_RECEIPT";
+
+/// A tab launch succeeds only when this viewer holds input and its Session's
+/// native client is ready. Startup errors before Return leave no success receipt.
+fn acknowledge_open() {
+    let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
+        return;
+    };
+    std::env::remove_var(OPEN_RECEIPT_ENV);
+    let path = Path::new(&path);
+    let temporary = path.with_extension("ready");
+    if std::fs::write(&temporary, "attached").is_ok() {
+        let _ = std::fs::rename(temporary, path);
     }
 }
 

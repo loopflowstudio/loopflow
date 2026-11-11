@@ -1,11 +1,9 @@
-//! `lf open`: resolve Work through its shared owners, choose one presentation
-//! destination, and open the Work there.
-//!
-//! Hosts translate only documented caller context and open/focus operations.
-//! Native workspace hosts launch ordinary tools and `lf resume` in the checkout.
-//! Resume owns conversation attachment and continuation. Desktop resolves the same address through `--link --json`.
+//! Conversation selection and host presentation. `open` reaches one Session;
+//! `workspace` applies layouts and follows Task arrivals. Both use the shared
+//! non-replacing Session connection; explicit resume owns input takeover.
 
 mod cmux;
+mod conversation;
 mod files;
 mod herdr;
 mod rex;
@@ -31,10 +29,6 @@ use crate::work::selection::WorkWorkspaceKind;
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) const NO_DESKTOP: &str = "no installed Loopflow Desktop; `lf install` places it";
-/// How long a just-created destination stands for its Work while its
-/// conversation starts and attaches. Later, attachment placement answers.
-const STARTING: Duration = Duration::from_secs(30);
-
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -109,7 +103,7 @@ pub struct WorkLinkTarget {
     pub execution_machine: Option<String>,
 }
 
-/// Destinations this invocation would try, in order, from its own context.
+/// The selected host, or no host when focusing a recorded view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OpenRoute {
     pub hosts: Vec<OpenHost>,
@@ -121,7 +115,7 @@ pub struct OpenRoute {
 pub enum OpenStatus {
     /// The destination accepted the request; input readiness is not observed.
     Opening,
-    /// The conversation ran in this terminal.
+    /// The conversation attached, or its existing view was focused.
     Usable,
     /// Another client holds the conversation; nothing new was opened.
     Elsewhere,
@@ -166,6 +160,7 @@ struct Resolved {
     session: Option<String>,
     /// The cwd an exact Session reconnects from.
     session_cwd: Option<PathBuf>,
+    agent: Option<String>,
     /// The Work's current primary conversation, read without admitting one.
     primary: Option<String>,
     /// The other Machine of yours whose store holds this Work's primary; the
@@ -191,27 +186,22 @@ impl Resolved {
     }
 
     fn resume_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
+        let mut argv = vec![
+            lf.to_string(),
+            "session".into(),
+            "resume".into(),
+            "--start-if-free".into(),
+        ];
         match (&self.session, &self.url.target) {
             (Some(session), _) => argv.push(session.clone()),
             (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
             (None, WorkTarget::Wave(name)) => argv.extend(["--wave".into(), name.clone()]),
             (None, WorkTarget::Repository) => {}
         }
-        argv
-    }
-
-    /// The resume argv as one shell command line, for hosts that type it.
-    /// A host's new shell starts from the host's environment, so a private
-    /// Home travels with the command.
-    fn resume_shell(&self, lf: &str) -> Result<String, RouteError> {
-        let mut argv = self.resume_argv(lf);
-        if crate::store::custom_home_selected() {
-            let home = format!("LF_HOME={}", crate::store::lf_home_dir().display());
-            argv.splice(0..0, ["env".to_owned(), home]);
+        if let Some(agent) = &self.agent {
+            argv.extend(["--agent".into(), agent.clone()]);
         }
-        shlex::try_join(argv.iter().map(String::as_str))
-            .map_err(|error| RouteError::Definite(error.to_string()))
+        argv
     }
 
     fn cwd(&self) -> &Path {
@@ -223,7 +213,12 @@ impl Resolved {
 
     fn fallback_argv(&self) -> Vec<String> {
         if self.session.is_some() && !matches!(self.url.target, WorkTarget::Task(_)) {
-            return self.resume_argv("lf");
+            return vec![
+                "lf".into(),
+                "open".into(),
+                "--session".into(),
+                self.session.clone().expect("exact Session"),
+            ];
         }
         vec!["lf".into(), "open".into(), self.url.to_string()]
     }
@@ -273,16 +268,6 @@ impl Resolved {
             conversation_reason,
             route,
         }
-    }
-
-    /// Why nothing opens when this Work's conversation is the one calling.
-    fn current_conversation(&self) -> Option<String> {
-        (self.relation().0 == ConversationRelation::CurrentConversation).then(|| {
-            format!(
-                "{} is this conversation; continue here. Nothing was opened.",
-                self.label
-            )
-        })
     }
 
     /// Compare the calling conversation with this Work's selected destination.
@@ -556,6 +541,7 @@ fn describe(
         wave,
         session,
         session_cwd,
+        agent: None,
         primary,
         primary_machine,
         execution_machine,
@@ -796,8 +782,6 @@ fn route(requested: OpenHost) -> OpenRoute {
             reason: format!("{} was requested", requested.label()),
         };
     }
-    let mut hosts = Vec::new();
-    let mut reasons = Vec::new();
     // The host the caller is in is the only destination: failure there never
     // falls through to another host. An agent's current viewer outranks its
     // startup terminal, and a Herdr pane or tmux session inside a cmux or
@@ -821,19 +805,9 @@ fn route(requested: OpenHost) -> OpenRoute {
             reason: format!("{reason}; failure there never falls through to another host"),
         };
     }
-    if cfg!(target_os = "macos") {
-        hosts.push(OpenHost::Desktop);
-        reasons.push(if in_desktop() {
-            "this Desktop window"
-        } else {
-            "Desktop when Launch Services finds it"
-        });
-    }
-    hosts.push(OpenHost::Terminal);
-    reasons.push("a plain terminal");
     OpenRoute {
-        hosts,
-        reason: format!("Automatic order: {}", reasons.join(", then ")),
+        hosts: vec![OpenHost::Terminal],
+        reason: "the current terminal".into(),
     }
 }
 
@@ -872,10 +846,6 @@ pub(crate) const HOST_CONTEXT: &[&str] = &[
 
 fn in_cmux() -> bool {
     set(CMUX_WORKSPACE) && set(CMUX_SOCKET)
-}
-
-fn in_desktop() -> bool {
-    set(DESKTOP)
 }
 
 /// The Desktop a caller runs in, else the installed app.
@@ -941,24 +911,29 @@ fn in_tmux() -> bool {
 }
 
 /// The host workspace this direct process runs in, recorded as its attached
-/// terminal placement (`herdr:<workspace>`, `tmux:<pane>` or `cmux:<workspace>`)
+/// terminal placement (host endpoint and view identity)
 /// so a later opening can focus that conversation instead of starting another client.
 pub(crate) fn host_placement() -> Option<String> {
     if in_rex() {
         let location = rex::RexLocation::current().ok()?;
         return Some(format!("rex:{}", serde_json::to_string(&location).ok()?));
     }
-    let (host, name) = if in_herdr() {
-        (OpenHost::Herdr, HERDR_WORKSPACE)
-    } else if in_tmux() {
-        (OpenHost::Tmux, TMUX_PANE)
-    } else if in_cmux() {
-        (OpenHost::Cmux, CMUX_WORKSPACE)
-    } else {
-        return None;
-    };
-    let workspace = std::env::var(name).ok().filter(|value| !value.is_empty())?;
-    placement(host, &workspace)
+    if in_herdr() {
+        return Some(format!(
+            "herdr:{}",
+            serde_json::to_string(&herdr::HerdrLocation::current()?).ok()?
+        ));
+    }
+    if in_cmux() {
+        return Some(format!(
+            "cmux:{}",
+            serde_json::to_string(&cmux::CmuxLocation::current()?).ok()?
+        ));
+    }
+    Some(format!(
+        "tmux:{}",
+        serde_json::to_string(&tmux::TmuxLocation::current()?).ok()?
+    ))
 }
 
 /// Where an agent caller's own conversation is viewed now. Its environment
@@ -978,17 +953,6 @@ fn viewed_placement() -> Option<(OpenHost, String)> {
     placement_host(&placement).map(|(host, id)| (host, id.to_owned()))
 }
 
-/// `cmux:<workspace>` / `herdr:<workspace>` / `tmux:<pane>`; other hosts record no placement.
-fn placement(host: OpenHost, destination: &str) -> Option<String> {
-    match host {
-        OpenHost::Cmux => Some(format!("cmux:{destination}")),
-        OpenHost::Herdr => Some(format!("herdr:{destination}")),
-        OpenHost::Tmux => Some(format!("tmux:{destination}")),
-        OpenHost::Rex => Some(format!("rex:{destination}")),
-        _ => None,
-    }
-}
-
 fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
     let (prefix, id) = placement.split_once(':')?;
     let host = match prefix {
@@ -996,6 +960,7 @@ fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
         "herdr" => OpenHost::Herdr,
         "tmux" => OpenHost::Tmux,
         "rex" => OpenHost::Rex,
+        "desktop" => OpenHost::Desktop,
         _ => return None,
     };
     Some((host, id))
@@ -1015,215 +980,20 @@ impl RouteError {
     }
 }
 
-struct Opened {
-    status: OpenStatus,
-    destination: Option<String>,
+/// Serialize selection and presentation until attachment settles.
+struct Opening {
+    _lock: std::fs::File,
 }
-
-impl Opened {
-    fn opening(destination: Option<String>) -> Self {
-        Self {
-            status: OpenStatus::Opening,
-            destination,
-        }
-    }
-}
-
-fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<OpenReceipt> {
-    let lf = crate::os_process::resolve_lf_binary()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "lf".into());
-    let mut receipts: Vec<OpenReceipt> = Vec::new();
-    let mut desktop = DesktopBatch {
-        app: DesktopApp::current(),
-        ..DesktopBatch::default()
-    };
-    for (index, target) in targets.iter().enumerate() {
-        let focus = index + 1 == targets.len();
-        desktop.next = index;
-        receipts.push(open_one(target, route, focus, in_place, &lf, &mut desktop));
-    }
-    // Desktop addresses still unsent when the final item went elsewhere.
-    let _ = desktop.send(None, false);
-    for (index, reason) in desktop.failed {
-        receipts[index].status = OpenStatus::Failed;
-        receipts[index].reason = Some(reason);
-    }
-    // Raise one destination: the last that opened, when the final item did not.
-    if receipts
-        .last()
-        .is_some_and(|receipt| receipt.status != OpenStatus::Opening)
-    {
-        if let Some(receipt) = receipts
-            .iter()
-            .rev()
-            .find(|receipt| receipt.status == OpenStatus::Opening)
-        {
-            if let (Some(host), Some(destination)) = (receipt.host, &receipt.destination) {
-                let _ = focus_destination(host, destination);
-            }
-        }
-    }
-    receipts
-}
-
-/// A batch's Desktop addresses, sent in one Launch Services request with the
-/// final item last. Desktop opens what it receives in arrival order and raises
-/// only the latest arrival's window, so the batch changes focus once.
-#[derive(Default)]
-struct DesktopBatch {
-    app: Option<DesktopApp>,
-    /// The receipt index of the item being opened.
-    next: usize,
-    /// Receipt index and address of each item waiting to be sent.
-    waiting: Vec<(usize, String)>,
-    failed: Vec<(usize, String)>,
-}
-
-impl DesktopBatch {
-    fn app(&self) -> Result<&DesktopApp, RouteError> {
-        self.app
-            .as_ref()
-            .ok_or_else(|| RouteError::Definite(NO_DESKTOP.into()))
-    }
-
-    /// Send every waiting address, then `last`; only a focused request activates Desktop.
-    fn send(&mut self, last: Option<&str>, focus: bool) -> Result<(), RouteError> {
-        if self.waiting.is_empty() && last.is_none() {
-            return Ok(());
-        }
-        let app = self.app()?;
-        let mut command = Command::new("open");
-        command.args(app.open_args());
-        if !focus {
-            command.arg("-g");
-        }
-        command.args(self.waiting.iter().map(|(_, url)| url));
-        command.args(last);
-        let sent = run_host(command, "Launch Services").map(drop);
-        let waiting = std::mem::take(&mut self.waiting);
-        if let Err(error) = &sent {
-            // Waiting items cannot retry elsewhere: the request may have reached Desktop.
-            let reason = format!("{}: {}", OpenHost::Desktop.label(), error.reason());
-            self.failed.extend(
-                waiting
-                    .into_iter()
-                    .map(|(index, _)| (index, reason.clone())),
-            );
-        }
-        sent
-    }
-}
-
-fn open_one(
-    target: &Resolved,
-    route: &OpenRoute,
-    focus: bool,
-    in_place: bool,
-    lf: &str,
-    desktop: &mut DesktopBatch,
-) -> OpenReceipt {
-    if let Some(reason) = &target.execution_unavailable {
-        return target.receipt(
-            None,
-            None,
-            OpenStatus::Failed,
-            Some(format!(
-                "Task execution location unavailable: {reason}. Nothing was opened."
-            )),
-        );
-    }
-    // Lookup and creation for one Work are serialized across processes.
-    let mut opening = match Opening::lock(target) {
-        Ok(opening) => opening,
-        Err(error) => {
-            return target.receipt(None, None, OpenStatus::Failed, Some(format!("{error:#}")));
-        }
-    };
-    let elsewhere = elsewhere(target);
-    let mut skipped = Vec::new();
-    for &host in &route.hosts {
-        if let Some(live) = elsewhere.as_ref().filter(|_| host != OpenHost::Desktop) {
-            // Its own workspace in this host shows the conversation, draft intact.
-            // Focusing is the revalidation, so only the batch's one focus may use it.
-            if let Some(workspace) = live
-                .placement
-                .as_deref()
-                .and_then(placement_host)
-                .filter(|(placed, _)| focus && route.hosts.contains(placed))
-            {
-                if focus_destination(workspace.0, workspace.1).is_ok() {
-                    return target.receipt(
-                        Some(workspace.0),
-                        Some(workspace.1.to_owned()),
-                        OpenStatus::Usable,
-                        None,
-                    );
-                }
-            }
-            return target.receipt(
-                Some(host),
-                None,
-                OpenStatus::Elsewhere,
-                Some(live.reason.clone()),
-            );
-        }
-        // A destination created moments ago is still starting this conversation.
-        if let Some(destination) = opening.starting(host) {
-            if !focus || focus_destination(host, &destination).is_ok() {
-                return target.receipt(Some(host), Some(destination), OpenStatus::Opening, None);
-            }
-        }
-        let attempt = match host {
-            OpenHost::Desktop => open_desktop(target, focus, desktop),
-            OpenHost::Tmux => tmux::open(target, focus, lf),
-            OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
-            OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux => {
-                unreachable!("native hosts launch fresh workspaces")
-            }
-            OpenHost::Auto => unreachable!("routes contain concrete hosts"),
-        };
-        match attempt {
-            Ok(opened) => {
-                if let Some(destination) = &opened.destination {
-                    opening.record(host, destination);
-                }
-                return target.receipt(Some(host), opened.destination, opened.status, None);
-            }
-            Err(RouteError::Definite(reason)) => {
-                skipped.push(format!("{}: {reason}", host.label()));
-            }
-            Err(RouteError::Unknown(reason)) => {
-                return target.receipt(
-                    Some(host),
-                    None,
-                    OpenStatus::Failed,
-                    Some(format!(
-                        "{}: {reason}. It may have opened; check there before retrying.",
-                        host.label()
-                    )),
-                );
-            }
-        }
-    }
-    target.receipt(None, None, OpenStatus::Failed, Some(skipped.join("; ")))
-}
-
-/// The per-Work opening lock. Its file remembers the host destination the
-/// last opening created and when, so a repeated or concurrent request inside
-/// the startup window focuses it rather than starting another client.
-struct Opening(std::fs::File);
 
 impl Opening {
     fn lock(target: &Resolved) -> Result<Self> {
         use fs2::FileExt;
         let directory = crate::store::lf_home_dir().join("open");
         std::fs::create_dir_all(&directory).context("create the opening directory")?;
-        let key = format!(
-            "{}\n{}",
-            target.url,
-            target.session.as_deref().unwrap_or("")
-        );
+        let key = target
+            .conversation()
+            .map(str::to_owned)
+            .unwrap_or_else(|| target.url.work().to_string());
         let name = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1235,7 +1005,7 @@ impl Opening {
         let deadline = std::time::Instant::now() + HOST_TIMEOUT * 3;
         loop {
             match file.try_lock_exclusive() {
-                Ok(()) => return Ok(Self(file)),
+                Ok(()) => return Ok(Self { _lock: file }),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     anyhow::ensure!(
                         std::time::Instant::now() < deadline,
@@ -1247,33 +1017,6 @@ impl Opening {
             }
         }
     }
-
-    fn starting(&mut self, host: OpenHost) -> Option<String> {
-        use std::io::{Read, Seek};
-        let mut text = String::new();
-        self.0.rewind().ok()?;
-        self.0.read_to_string(&mut text).ok()?;
-        let (at, placement) = text.trim().split_once(' ')?;
-        let age = time::OffsetDateTime::now_utc().unix_timestamp() - at.parse::<i64>().ok()?;
-        let (placed, destination) = placement_host(placement)?;
-        (placed == host && (0..STARTING.as_secs() as i64).contains(&age))
-            .then(|| destination.to_owned())
-    }
-
-    fn record(&mut self, host: OpenHost, destination: &str) {
-        use std::io::{Seek, Write};
-        let Some(placement) = placement(host, destination) else {
-            return;
-        };
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let written = self.0.set_len(0).and_then(|()| {
-            self.0.rewind()?;
-            write!(self.0, "{now} {placement}")
-        });
-        if let Err(error) = written {
-            tracing::warn!(%error, "cannot record the opened destination");
-        }
-    }
 }
 
 struct Live {
@@ -1282,133 +1025,66 @@ struct Live {
     placement: Option<String>,
 }
 
-/// A live provider attached to another client keeps its conversation; tmux and
-/// plain terminals never take it over. Native hosts follow `Resume` instead, and
-/// Desktop shows and moves its own retained panes.
-/// One whose terminal closed has no viewer in control, so it opens here.
-fn elsewhere(target: &Resolved) -> Option<Live> {
-    let id = target.conversation()?;
-    let store = crate::store::read_existing_registry().ok().flatten()?;
-    let summary = crate::ops::human_session::viewed_summary(&store.sqlite, id)
-        .ok()
-        .flatten()?;
-    let viewed = summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
-        && !summary.unviewed;
-    viewed.then(|| Live {
+/// Read known live views by Session identity, without changing their input.
+fn elsewhere(target: &Resolved) -> Result<Option<Live>> {
+    let Some(id) = target.conversation() else {
+        return Ok(None);
+    };
+    if let Some(view) = super::desktop::conversation_view(id)? {
+        let location = format!("desktop:{}", serde_json::to_string(&view)?);
+        return Ok(Some(Live {
+            reason: format!("Already open in Desktop (window {}, pane {}); reveal it with `lf open --session {id} --focus`", view.window, view.pane),
+            placement: Some(location),
+        }));
+    }
+    let Some(store) = crate::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    let Some(summary) = crate::ops::human_session::viewed_summary(&store.sqlite, id)? else {
+        return Ok(None);
+    };
+    let viewed = if let Some(owner) = store.sqlite.session_transport(id)? {
+        crate::transport::controlled(&owner).unwrap_or(false)
+    } else {
+        summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+            && !summary.unviewed
+    };
+    Ok(viewed.then(|| Live {
         reason: format!(
-            "this conversation is already open in another client; move it here with `lf resume {id}` (unsent text there is not transferred)"
+            "Already open at {}; reveal it with `lf open --session {id} --focus`",
+            summary.terminal_id.as_deref().unwrap_or("another client")
         ),
         placement: summary.terminal_id,
-    })
+    }))
 }
 
-fn open_desktop(
-    target: &Resolved,
-    focus: bool,
-    batch: &mut DesktopBatch,
-) -> Result<Opened, RouteError> {
+fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
+    let result = match host {
+        OpenHost::Tmux => return tmux::focus(destination),
+        OpenHost::Desktop => super::desktop::focus_conversation(destination),
+        OpenHost::Rex => rex::focus_view(destination),
+        OpenHost::Herdr => herdr::Herdr::focus_view(destination),
+        OpenHost::Cmux => cmux::Cmux::focus_view(destination),
+        _ => return Err(RouteError::Definite("This view cannot be focused".into())),
+    };
+    result.map_err(|error| RouteError::Definite(format!("{error:#}")))
+}
+
+/// Send one conversation or arrangement address without changing hosts.
+fn open_desktop(url: &str, focus: bool) -> Result<(), RouteError> {
     if !cfg!(target_os = "macos") {
         return Err(RouteError::Definite(
             "Loopflow Desktop requires macOS; use --host terminal".into(),
         ));
     }
-    let url = target.url.to_string();
-    if focus {
-        batch.send(Some(&url), true)?;
-    } else {
-        batch.app()?;
-        batch.waiting.push((batch.next, url));
+    let app = DesktopApp::current().ok_or_else(|| RouteError::Definite(NO_DESKTOP.into()))?;
+    let mut command = Command::new("open");
+    command.args(app.open_args());
+    if !focus {
+        command.arg("-g");
     }
-    Ok(Opened::opening(None))
-}
-
-fn open_terminal(
-    target: &Resolved,
-    focus: bool,
-    in_place: bool,
-    lf: &str,
-) -> Result<Opened, RouteError> {
-    let argv = target.resume_argv(lf);
-    if in_place {
-        let status = Command::new(&argv[0])
-            .args(&argv[1..])
-            .current_dir(target.cwd())
-            .status()
-            .map_err(|error| RouteError::Definite(error.to_string()))?;
-        if !status.success() {
-            return Err(RouteError::Definite(format!(
-                "the conversation exited with {status}"
-            )));
-        }
-        return Ok(Opened {
-            status: OpenStatus::Usable,
-            destination: None,
-        });
-    }
-    let script = format!(
-        "cd {} && exec {}",
-        shlex::try_quote(&target.cwd().display().to_string())
-            .map_err(|error| RouteError::Definite(error.to_string()))?,
-        target.resume_shell(lf)?
-    );
-    if cfg!(target_os = "macos") {
-        // Launch Services opens a .command in the default terminal, without
-        // an automation permission dialog. The script removes itself first.
-        let path = std::env::temp_dir().join(format!(
-            "loopflow-open-{}.command",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::write(&path, format!("#!/bin/sh\nrm -f \"$0\"\n{script}\n"))
-            .and_then(|()| {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
-            })
-            .map_err(|error| RouteError::Definite(error.to_string()))?;
-        let mut command = Command::new("open");
-        if !focus {
-            command.arg("-g");
-        }
-        command.arg(&path);
-        return run_host(command, "Launch Services")
-            .inspect_err(|_| {
-                let _ = std::fs::remove_file(&path);
-            })
-            .map(|_| Opened::opening(None));
-    }
-    if !set("DISPLAY") && !set("WAYLAND_DISPLAY") {
-        return Err(RouteError::Definite(
-            "no graphical session or interactive terminal is reachable".into(),
-        ));
-    }
-    for launcher in ["xdg-terminal-exec", "x-terminal-emulator"] {
-        let mut command = Command::new(launcher);
-        if launcher == "x-terminal-emulator" {
-            command.arg("-e");
-        }
-        command
-            .args(["sh", "-c", &script])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        match command.spawn() {
-            Ok(_) => return Ok(Opened::opening(None)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(RouteError::Definite(error.to_string())),
-        }
-    }
-    Err(RouteError::Definite(
-        "no supported terminal launcher (xdg-terminal-exec or x-terminal-emulator) is installed"
-            .into(),
-    ))
-}
-
-/// Raise an earlier destination. Only tmux panes are focused here; Desktop
-/// raises itself and native workspace hosts never reach this route.
-fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
-    if host != OpenHost::Tmux {
-        return Ok(());
-    }
-    tmux::focus(destination)
+    command.arg(url);
+    run_host(command, "Launch Services").map(drop)
 }
 
 /// Run one host request with a finite timeout and return its stdout.
@@ -1469,64 +1145,77 @@ fn run_host(mut command: Command, host: &str) -> Result<String, RouteError> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, clap::Args)]
-pub struct OpenArgs {
+pub struct OpenSelection {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
-    /// Present original files in an attached Desktop Files view; never launch a host
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["available", "session", "diff", "link"])]
-    pub files: Vec<PathBuf>,
-    /// Presentation destination; auto uses the current Rex/Herdr/tmux/cmux host, else Desktop, then a terminal
+    /// Destination host; auto uses the calling terminal, never a fallback host
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
-    /// Open every conversation available for you to work with
-    #[arg(long, conflicts_with_all = ["url", "session"])]
-    pub available: bool,
-    /// Open this exact Session rather than its Work's primary conversation
+    /// Open this exact Session rather than its scope's primary
     #[arg(long)]
     pub session: Option<String>,
     /// Show the Task's Changes browser beside its conversation (Desktop)
     #[arg(long)]
     pub diff: bool,
-    /// Print the readable link without opening, preparing or creating anything
+    /// Print a link without opening or preparing anything
     #[arg(long)]
     pub link: bool,
-    /// Link text format; text uses a clickable span on a terminal
     #[arg(long, value_enum, requires = "link")]
     pub format: Option<LinkFormat>,
     #[arg(long)]
     pub json: bool,
-    /// Rex server address; otherwise use the current viewer or configured local server
+    /// Rex Unix socket endpoint
     #[arg(long)]
     pub server: Option<String>,
-    /// Create new Task tabs without changing the host's selection
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Layouts and overviews: lf workspace."
+)]
+pub struct OpenArgs {
+    #[command(flatten)]
+    pub selection: OpenSelection,
+    /// Attach in this terminal (direct CLI default)
+    #[arg(long, conflicts_with_all = ["tab", "focus"])]
+    pub here: bool,
+    /// Attach in a sibling tab (agent default)
+    #[arg(long, conflicts_with = "focus")]
+    pub tab: bool,
+    /// Reveal an existing conversation view; create nothing
+    #[arg(long)]
+    pub focus: bool,
+    /// Present original files in an attached Desktop Files view
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "diff", "link", "here", "tab", "focus"])]
+    pub files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct WorkspaceArgs {
+    #[command(flatten)]
+    pub selection: OpenSelection,
+    /// Open every conversation available for you to work with
+    #[arg(long, conflicts_with_all = ["url", "session"])]
+    pub available: bool,
+    /// Keep the host's current selection
     #[arg(long)]
     pub no_focus: bool,
-    /// Add newly started Tasks to this Rex session while the follower runs
     #[arg(long, hide = true, requires = "server")]
     pub follow: Option<String>,
-    /// Tasks the launching command already opened; the follower skips them
     #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
     pub seen: Vec<String>,
-    /// Open only this Machine's part of a routed workspace
     #[arg(long, hide = true)]
     pub local_workspace: bool,
-    /// Add these newly started Tasks from a routed selection, only those started here
     #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
     pub arrive_task: Vec<String>,
-    /// Append the arrival to this native container instead of creating one
     #[arg(long, hide = true, requires = "arrive_task")]
     pub into: Option<String>,
-    /// `<machine>=<container>` another Machine opened for this launch; empty when its creation is uncertain
     #[arg(long = "remote", hide = true, requires = "follow")]
     pub remote: Vec<String>,
 }
 
-/// The Work an invocation names: every available conversation, an address,
-/// or the root selectors and checkout.
-fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<String>)> {
-    if args.available {
-        return available(cli);
-    }
+/// The one conversation named by an address, root selectors or checkout.
+fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
     let store = crate::store::read_existing_registry()?;
     let store = store.as_ref();
     let session = args.session.clone();
@@ -1543,7 +1232,7 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
             describe(store, &context, session, args.diff, None)?
         }
     };
-    Ok((vec![resolved], Vec::new()))
+    Ok(resolved)
 }
 
 /// The Work a link names, resolved as if `lf open` ran in `directory`.
@@ -1576,39 +1265,28 @@ fn url_target(
 pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
     let store = crate::store::read_existing_registry()?;
     let target = url_target(store.as_ref(), directory, url, None, false)?;
-    Ok(vec![target.link(route(OpenHost::Auto))])
-}
-
-/// Read-only links for `--link` and `--explain`.
-fn links(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<WorkLink>, Vec<String>)> {
-    let (targets, unknown) = targets(cli, args)?;
-    let route = route(args.host);
-    Ok((
-        targets
-            .iter()
-            .map(|target| target.link(route.clone()))
-            .collect(),
-        unknown,
-    ))
+    let presentation = if crate::journal::agent_caller().is_some() {
+        route(OpenHost::Auto)
+    } else {
+        conversation::here_route()
+    };
+    Ok(vec![target.link(presentation)])
 }
 
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
     if !args.files.is_empty() {
         return files::run(cli, args, true);
     }
-    let (links, unknown) = links(cli, args)?;
+    let link = target(cli, &args.selection)?.link(conversation::presentation(args)?);
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({"links": links, "unknown": unknown}))?
+            serde_json::to_string_pretty(&serde_json::json!({"links": [link], "unknown": []}))?
         );
         return Ok(());
     }
-    for link in &links {
-        println!("{}  {}", link.label, link.url);
-        println!("  Route: {}", link.route.reason);
-    }
-    print_unknown(&unknown);
+    println!("{}  {}", link.label, link.url);
+    println!("  Route: {}", link.route.reason);
     println!("Nothing was executed; no app, checkout or Session was prepared.");
     Ok(())
 }
@@ -1617,19 +1295,134 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if !args.files.is_empty() {
         return files::run(cli, args, false);
     }
-    let json = args.json || cli.json;
-    if args.link {
-        let (links, unknown) = links(cli, args)?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&links)?);
-            return Ok(());
+    if args.selection.link {
+        return print_links(
+            cli,
+            &args.selection,
+            false,
+            conversation::presentation(args)?,
+        );
+    }
+    let receipt = conversation::open(target(cli, &args.selection)?, args, true);
+    print_report(
+        OpenReport {
+            receipts: vec![receipt],
+            unknown: Vec::new(),
+        },
+        args.selection.json || cli.json,
+    )
+}
+
+pub fn explain_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs, json: bool) -> Result<()> {
+    let mut selection = args.selection.clone();
+    selection.json = json;
+    print_links(cli, &selection, args.available, route(selection.host))
+}
+
+pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
+    if args.selection.link {
+        return print_links(
+            cli,
+            &args.selection,
+            args.available,
+            route(args.selection.host),
+        );
+    }
+    let host = route(args.selection.host).hosts[0];
+    if host == OpenHost::Desktop {
+        let (targets, unknown) = workspace_targets(cli, args)?;
+        let receipts = targets
+            .iter()
+            .enumerate()
+            .map(|(index, target)| {
+                let focus = !args.no_focus && index + 1 == targets.len();
+                if target.session.is_some() || args.available {
+                    return conversation::open(
+                        target.clone(),
+                        &OpenArgs {
+                            selection: args.selection.clone(),
+                            here: false,
+                            tab: false,
+                            focus: false,
+                            files: Vec::new(),
+                        },
+                        focus,
+                    );
+                }
+                let mut url = reqwest::Url::parse("loopflow://open").expect("fixed Desktop URL");
+                let expression = match (&target.task, &target.wave) {
+                    (Some(task), _) => format!("task:{}", task.id),
+                    (_, Some(wave)) => format!("wave:{wave} kind:task state:open"),
+                    _ => "kind:task state:open".into(),
+                };
+                url.query_pairs_mut()
+                    .append_pair("repo", &target.repository_path.to_string_lossy())
+                    .append_pair("view", &expression);
+                match open_desktop(url.as_str(), focus) {
+                    Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
+                    Err(error) => target.receipt(
+                        Some(host),
+                        None,
+                        OpenStatus::Failed,
+                        Some(error.reason().into()),
+                    ),
+                }
+            })
+            .collect();
+        return print_report(
+            OpenReport { receipts, unknown },
+            args.selection.json || cli.json,
+        );
+    }
+    anyhow::ensure!(
+        matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux),
+        "{} does not support workspaces; use lf open, lf task view or lf diff",
+        host.label()
+    );
+    anyhow::ensure!(
+        args.selection.server.is_none() || host == OpenHost::Rex,
+        "--server selects a Rex server"
+    );
+    workspace::run(cli, args, host)
+}
+
+fn workspace_targets(
+    cli: &crate::lf::Cli,
+    args: &WorkspaceArgs,
+) -> Result<(Vec<Resolved>, Vec<String>)> {
+    if args.available {
+        available(cli)
+    } else {
+        Ok((vec![target(cli, &args.selection)?], Vec::new()))
+    }
+}
+
+fn print_links(
+    cli: &crate::lf::Cli,
+    args: &OpenSelection,
+    all: bool,
+    presentation: OpenRoute,
+) -> Result<()> {
+    let (targets, unknown) = if all {
+        available(cli)?
+    } else {
+        (vec![target(cli, args)?], Vec::new())
+    };
+    let links: Vec<_> = targets
+        .iter()
+        .map(|target| target.link(presentation.clone()))
+        .collect();
+    if args.json || cli.json {
+        println!("{}", serde_json::to_string_pretty(&links)?);
+    } else {
+        if all && links.is_empty() {
+            println!("No available conversations.");
         }
-        let clickable = std::io::stdout().is_terminal();
         for link in &links {
             match args.format.unwrap_or(LinkFormat::Text) {
                 LinkFormat::Markdown => println!("{}", link.markdown),
                 LinkFormat::Text => {
-                    let label = if clickable {
+                    let label = if std::io::stdout().is_terminal() {
                         crate::work::link::osc8(&link.label, &link.url)
                     } else {
                         link.label.clone()
@@ -1638,76 +1431,30 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
                 }
             }
         }
-        if links.is_empty() && args.available {
-            println!("No available conversations.");
-        }
         print_unknown(&unknown);
-        return Ok(());
     }
-    let route = route(args.host);
-    if args.follow.is_some() {
-        return workspace::run(cli, args, OpenHost::Rex);
-    }
-    if let Some(&host) = route
-        .hosts
-        .first()
-        .filter(|host| matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux))
-    {
-        anyhow::ensure!(
-            args.server.is_none() || host == OpenHost::Rex,
-            "--server selects a Rex server"
-        );
-        return workspace::run(cli, args, host);
-    }
-    anyhow::ensure!(
-        args.server.is_none() && !args.no_focus && !args.local_workspace,
-        "--server and --no-focus are available for Rex, Herdr and cmux workspaces"
-    );
-    let (targets, unknown) = targets(cli, args)?;
-    // A person typing in a terminal continues the conversation right here.
-    let in_place = targets.len() == 1
-        && route.hosts.last() == Some(&OpenHost::Terminal)
-        && std::io::stdin().is_terminal()
-        && std::io::stdout().is_terminal()
-        && crate::journal::agent_caller().is_none();
-    if let [target] = targets.as_slice() {
-        if let Some(reason) = target.current_conversation() {
-            bail!(reason);
-        }
-    }
-    let receipts = open_all(&targets, &route, in_place);
-    let report = OpenReport { receipts, unknown };
+    Ok(())
+}
+
+fn print_report(report: OpenReport, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        if report.receipts.is_empty() && report.unknown.is_empty() {
-            println!("No available conversations.");
-        }
         for receipt in &report.receipts {
-            match receipt.status {
-                OpenStatus::Usable => {}
-                OpenStatus::Opening => println!(
-                    "Opening {} in {}.",
-                    receipt.label,
-                    receipt.host.map_or("its destination", OpenHost::label)
-                ),
-                OpenStatus::Elsewhere => println!(
-                    "{}: {}",
-                    receipt.label,
-                    receipt
-                        .reason
-                        .as_deref()
-                        .unwrap_or("open in another client")
-                ),
-                OpenStatus::Failed => println!(
-                    "Could not open {}: {}\n  Run: {}",
-                    receipt.label,
-                    receipt
-                        .reason
-                        .as_deref()
-                        .unwrap_or("no destination accepted it"),
-                    fallback_text(&receipt.fallback_argv)
-                ),
+            println!(
+                "{}: {}",
+                receipt.label,
+                receipt.reason.as_deref().unwrap_or(match receipt.status {
+                    OpenStatus::Opening => "Opened workspace",
+                    OpenStatus::Usable => "Attached",
+                    OpenStatus::Elsewhere => "Already open",
+                    OpenStatus::Failed => "Opening failed",
+                })
+            );
+            if receipt.status == OpenStatus::Failed {
+                if let Some(destination) = &receipt.destination {
+                    println!("  Destination: {destination}");
+                }
             }
         }
         print_unknown(&report.unknown);

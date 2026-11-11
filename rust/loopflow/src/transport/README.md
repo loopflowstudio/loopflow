@@ -70,7 +70,9 @@ Leaving a terminal relay restores keyboard and drawing modes at the current
 cursor position. Returning to the shell must not home the cursor or overwrite
 the command's output.
 
-A Session nobody views ends after `session.end_detached_after` (default `2m`,
+A held terminal has no idle ending: it runs until its Task is abandoned or its
+completed Task's workspace retires, or its agent exits.
+Any other Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn, pending request
 or running Graph keeps its owner and restarts the grace; finished Graphs do not.
@@ -432,8 +434,17 @@ reported as such, never given an invented exit code.
 ### Views
 
 Every connection to a held terminal enters the server at
-`<private dir>/held.sock`: a first line `{"terminal":ID}`, the answer
-`"hosted"`, then the viewer protocol above, unchanged. `"waiting"` means the
+`<private dir>/held.sock`: a first line `{"terminal":ID,"revision":N}`, the
+answer `{"answer":"hosted","revision":N}`, then the viewer protocol above,
+unchanged. That first exchange is the one thing every build reads the same
+way; `revision` covers everything after it. A server of another revision
+answers and admits nothing. A view in a terminal that reads another revision
+becomes the installed `lf` (`lf session attach --terminal`, the same Session)
+as a fresh view, which repaints from the server's screen; no position crosses
+builds. A view that already did so, or cannot, ends with one line and the
+agent keeps running. A child's control request that reads another revision
+is a recording gap in `logs/lf.log`; the agent and its turn go on.
+`"waiting"` means the
 terminal's holder has not answered this server yet: one that keeps its lock
 and does not list in time at startup is pending, asked again with backoff, and
 taken up when it answers; the view keeps reconnecting. A refused connection
@@ -446,9 +457,8 @@ child's own control requests (`status`, `directory`, `exit_record`, …) use the
 same entrance; `LF_TRANSPORT_HELD` names its terminal the way
 `LF_TRANSPORT_OWNER` names an owner. A terminal is no process, so the lf
 process that takes up that handoff records it as `processes.held_terminal_id`.
-Rules scoped to an owner's descendants start from those processes instead: a
-Graph started inside the conversation holds the terminal against idle
-retention, and Task retirement excuses the work beneath it.
+Rules scoped to an owner's descendants start from those processes instead:
+Task retirement excuses the work beneath it.
 
 `lf session attach --terminal TERMINAL` is the relay for a held terminal.
 When its connection drops it connects again on its own, with backoff, until a

@@ -47,8 +47,10 @@ resend input.
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
-An unviewed, settled conversation ends its processes after two minutes of quiet;
-`session.end_detached_after` changes the grace or disables it with `off`.
+A Task, Wave or repository conversation runs until its Task is done or
+abandoned or its agent exits; closing every view does not end it. Any other unviewed, settled conversation ends its
+processes after two minutes of quiet; `session.end_detached_after` changes the
+grace or disables it with `off`.
 Returning paints its saved screen while the provider reopens its history, without
 replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
 keep their owner. Drafts remain editable and requests remain answerable there.
@@ -93,8 +95,8 @@ holder once.
 |---|---|
 | `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
-| `lf resume <session>` of a Task's or Wave's conversation | the holder |
-| `lf <skill>`, `lf graph …`, `lf -i`, anything with `-b` or a pipe | its own process, as before |
+| `lf resume <session>` of a conversation one of those opened | the holder |
+| `lf <skill>`, `lf graph …`, `lf -i`, anything with `-b` or a pipe, even in a Task's checkout | its own process, as before |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations
@@ -122,9 +124,10 @@ A conversation that ends while the server is away is recorded with its real
 exit when the server returns; until then `lf session list` shows what it last
 knew.
 
-These conversations need the server. Opening one while it is stopped prints
-`Loopflow server is not running; run lf server status` and starts nothing;
-no private process is started in its place. A Graph already running keeps
+These conversations need the server. Opening one while it is stopped starts
+the server first; if it still does not answer, lf prints
+`Loopflow server is not running; run lf server status` and starts nothing.
+No private process is started in its place. A Graph already running keeps
 going without it.
 
 A conversation opened before this arrived keeps the `lf session serve`

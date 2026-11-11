@@ -229,6 +229,26 @@ impl Handoff {
         })
     }
 
+    /// A control connection to this execution's host. A server of another
+    /// build is a recording gap: its reports go unrecorded and the agent goes on.
+    fn connect(&self) -> Result<UnixStream> {
+        static GAP: Mutex<Option<crate::store::RecordingGap>> = Mutex::new(None);
+        let connected = self.owner.connect();
+        let mut gap = GAP.lock().expect("control gap lock poisoned");
+        match &connected {
+            Err(error) if error.is::<registry::OtherRevision>() => gap
+                .get_or_insert_with(Default::default)
+                .note("held terminal control", error),
+            Ok(_) => {
+                if let Some(gap) = gap.as_mut() {
+                    gap.recovered();
+                }
+            }
+            Err(_) => {}
+        }
+        connected
+    }
+
     fn pass(&self, command: &mut Command, parent: u32) {
         match &self.owner {
             Host::Owner(owner) => command.env(OWNER_ENV, owner.as_str()),
@@ -369,9 +389,11 @@ fn delegate(
 }
 
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
-/// server, so that it outlives every lf process that views it. Task and Wave
-/// conversations and Desktop panes are; a bare launch, a piped or `-b`
-/// execution and a Desktop Task shell keep an owner process of their own.
+/// server, so that it outlives every lf process that views it. A held launch
+/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too)
+/// with a terminal viewing it, or a Desktop pane. A bare launch, one in a
+/// Task's checkout, a piped or `-b` execution and a Desktop Task shell keep an
+/// owner process of their own.
 #[cfg_attr(test, allow(dead_code))]
 fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
     if !viewed {
@@ -388,10 +410,27 @@ fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
         .and_then(|store| store.session(session))
         .ok()
         .flatten()
-        .is_some_and(|session| session.task_id.is_some() || session.wave_id.is_some())
+        .and_then(|session| session.work_source)
+        .is_some_and(crate::session::WorkSource::is_managed)
 }
 
-/// A held launch found no Machine server; nothing started.
+/// The Machine server, started first by the selected installation when it is
+/// stopped, as a managed view starts it; never by this build.
+fn open_server() -> Result<crate::server::client::Connection> {
+    use crate::server::client::Connection;
+    if let Ok(server) = Connection::open() {
+        return Ok(server);
+    }
+    let setup = crate::installation::server::readiness_command()?.output()?;
+    Connection::open().with_context(|| {
+        format!(
+            "lf install server: {}",
+            String::from_utf8_lossy(&setup.stderr).trim()
+        )
+    })
+}
+
+/// A held launch found no Machine server, even after readying it; nothing started.
 #[derive(Debug, thiserror::Error)]
 #[error("Loopflow server is not running; run lf server status")]
 pub(crate) struct ServerMissing;
@@ -420,8 +459,8 @@ pub(crate) fn start_held(
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect();
     let (rows, cols) = size();
-    let mut server = crate::server::client::Connection::open().map_err(|error| {
-        tracing::debug!(%error, "held start found no Machine server");
+    let mut server = open_server().map_err(|error| {
+        tracing::info!(error = %format!("{error:#}"), "held start found no Machine server");
         ServerMissing
     })?;
     let answer = server.request(Operation::Server(ServerOperation::SessionStart {
@@ -1944,7 +1983,12 @@ fn attach_with_terminal(
         socket
     } else {
         match id {
-            Host::Terminal(_) => id.connect()?,
+            Host::Terminal(held) => match id.connect() {
+                Ok(socket) => socket,
+                Err(error) => {
+                    return replace_view(held, session, &error.downcast::<registry::OtherRevision>()?)
+                }
+            },
             Host::Owner(owner) if server => crate::server::client::bridge(bridged()?, owner)?,
             Host::Owner(owner) => UnixStream::connect(endpoint(owner)?).context(
                 "Execution owner is unavailable; no provider was restarted and no input was replayed",
@@ -2090,8 +2134,16 @@ fn view(
                     .map(|(socket, _)| socket)
             } else {
                 match owner {
-                    Host::Terminal(_) => {
+                    Host::Terminal(held) => {
                         let next = reconnect_held(owner);
+                        if let Some(skew) = next
+                            .as_ref()
+                            .err()
+                            .and_then(|error| error.downcast_ref::<registry::OtherRevision>())
+                        {
+                            drop(terminal.take());
+                            return replace_view(held, session, skew);
+                        }
                         // An agent that exited while no server ran ends the
                         // view as its exit would have.
                         if let Some(code) = next.as_ref().err().and_then(exit_code) {
@@ -2604,8 +2656,12 @@ fn reconnect_held(host: &Host) -> Result<Option<UnixStream>> {
                 discard_reconnect_input()?;
                 return Ok(Some(socket));
             }
-            // A server answered: the terminal has ended.
-            Err(error) if error.is::<crate::engine::Error>() => return Err(error),
+            // A server answered: the terminal has ended, or another build hosts it.
+            Err(error)
+                if error.is::<crate::engine::Error>() || error.is::<registry::OtherRevision>() =>
+            {
+                return Err(error)
+            }
             Err(_) => {}
         }
         let until = Instant::now() + wait;
@@ -2630,6 +2686,41 @@ fn reconnect_held(host: &Host) -> Result<Option<UnixStream>> {
         }
         wait = (wait * 2).min(Duration::from_secs(2));
     }
+}
+
+/// Set on a view that replaced one of another build, so that meeting another
+/// revision again ends it instead of starting a third.
+const REPLACED_ENV: &str = "LF_VIEW_REPLACED";
+
+/// A server of another build hosts `host`: become the installed lf as a fresh
+/// view of the same terminal. A fresh view repaints from that server's screen,
+/// so no position crosses builds. The agent keeps running either way; a view
+/// that cannot be replaced ends with one line.
+fn replace_view(
+    terminal: &crate::id::TerminalId,
+    session: Option<&LfSessionId>,
+    skew: &registry::OtherRevision,
+) -> Result<()> {
+    let failure = if std::env::var_os(REPLACED_ENV).is_some() {
+        "the installed lf is this build".to_owned()
+    } else {
+        match crate::os_process::resolve_lf_binary() {
+            Ok(lf) => {
+                let mut command = Command::new(lf);
+                command
+                    .env(REPLACED_ENV, "1")
+                    .args(RELAY_COMMAND)
+                    .args([RELAY_TERMINAL_FLAG, terminal.as_str()]);
+                if let Some(session) = session {
+                    command.args([RELAY_SESSION_FLAG, session.as_str()]);
+                }
+                crate::journal::carry_across_exec(&mut command)?;
+                command.exec().to_string()
+            }
+            Err(error) => error.to_string(),
+        }
+    };
+    bail!("{skew} and {failure}; the agent keeps running. Run lf install, then lf session attach --terminal {terminal}")
 }
 
 /// The code a held terminal's agent exited with, when `error` is a server's
@@ -2722,7 +2813,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
     let handoff = HANDOFF
         .get()
         .context("this launch has no execution owner to hand its wait to")?;
-    let mut socket = handoff.owner.connect()?;
+    let mut socket = handoff.connect()?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     // A delayed reply does not undo the owner's acceptance. Wait for its
     // decision or a closed connection before choosing who records the exit.
@@ -2745,7 +2836,7 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
 pub(crate) fn drop_exit_record() {
     let dropped = (|| -> Result<()> {
         let handoff = HANDOFF.get().context("no execution owner")?;
-        let mut socket = handoff.owner.connect()?;
+        let mut socket = handoff.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2809,7 +2900,7 @@ pub(crate) fn detach_viewers() -> Result<()> {
     let handoff = HANDOFF
         .get()
         .context("Execution has no retained transport; use Ctrl+] in an attached viewer")?;
-    let mut socket = handoff.owner.connect()?;
+    let mut socket = handoff.connect()?;
     send(
         &mut socket,
         Request::DetachViewers {
@@ -2832,7 +2923,7 @@ fn selected_directory(record: &NativeExit) -> Option<PathBuf> {
 pub(crate) fn report_directory(cwd: &Path) {
     let Some(handoff) = HANDOFF.get() else { return };
     let result = (|| -> Result<()> {
-        let mut socket = handoff.owner.connect()?;
+        let mut socket = handoff.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2858,7 +2949,7 @@ pub(crate) struct NativeClient {
 pub(crate) fn native_client(exit: String, detach: String) -> Option<NativeClient> {
     let handoff = HANDOFF.get()?;
     let started = (|| -> Result<UnixStream> {
-        let mut socket = handoff.owner.connect()?;
+        let mut socket = handoff.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2914,7 +3005,7 @@ pub(crate) struct InputHint {
 pub(crate) fn input_hint(hint: String) -> Option<InputHint> {
     let handoff = HANDOFF.get()?;
     let registered = (|| -> Result<UnixStream> {
-        let mut socket = handoff.owner.connect()?;
+        let mut socket = handoff.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
@@ -2965,7 +3056,7 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
         if step { "/step" } else { "" }
     );
     let result = (|| -> Result<()> {
-        let mut socket = handoff.owner.connect()?;
+        let mut socket = handoff.connect()?;
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,

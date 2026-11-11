@@ -4,6 +4,8 @@
 //! quiet: no viewer, no output from its command, and nothing in the store
 //! holding it (a turn, pending request, running Graph, a Task conversation's
 //! running Task Graph, or a headless Run).
+//! A held terminal has no such grace: it runs until its Task is abandoned or
+//! its completed Task's workspace retires, or its agent exits.
 //! Task abandonment ends unviewed conversations even during a turn. Completed
 //! Task retirement can also end eligible owners after its absence grace. Desktop
 //! shells use Close and retirement policy instead of idle-agent ending.
@@ -108,7 +110,10 @@ impl Ending {
                 notice: Some("Task abandoned".into()),
             }));
         }
-        if !self.may_end(activity, input_queued) || store.idle_retention(*owner)?.is_some() {
+        let held = matches!(owner, crate::store::sqlite::Transport::Terminal(_));
+        if !self.may_end(activity, input_queued)
+            || (!held && store.idle_retention(*owner)?.is_some())
+        {
             return Ok(None);
         }
         if owner_retiring(&store, *owner)? {
@@ -116,6 +121,11 @@ impl Ending {
                 held: false,
                 notice: Some("Completed Task workspace retired".into()),
             }));
+        }
+        // A held terminal has no idle ending: it runs until its scope closes
+        // or its agent exits.
+        if held {
+            return Ok(None);
         }
         tracing::info!(%owner, "ending a Session nobody has viewed");
         Ok(Some(Event::Control {
@@ -310,7 +320,10 @@ impl Watch {
         {
             self.recorded_hold = Some(hold);
         }
-        if self.terminal && self.grace.limit.is_none() {
+        let held = matches!(self.host, Host::Terminal(_));
+        if held {
+            self.grace.limit = Some(DetachedLimit::Off);
+        } else if self.terminal && self.grace.limit.is_none() {
             self.grace.limit = report_result(
                 &mut self.repository_failure,
                 "Session repository",
@@ -341,6 +354,9 @@ impl Watch {
         let retiring = owner_retiring(store, owner).unwrap_or(false);
         if !abandoned && !retiring && !self.grace.expired(now) {
             return true;
+        }
+        if held {
+            return self.offer();
         }
         let Some(retention) = report_result(
             &mut self.retention_failure,

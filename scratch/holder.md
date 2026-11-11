@@ -802,3 +802,138 @@ The other proposals from the session with a person (Desktop Task shells
 held, a managed launch readying the server, listing what a killed holder
 took) are still unanswered. They are additions beyond this cut and are not
 built here.
+
+### Second round, against LOO-821/822/823 — November 11, 2026
+
+Jack Heart: "can you talk to 821, 822, 823 and read how their designs have
+progressed and the regenerate the concept-review". Read from their scratch
+plans and commits (PRs #1879, #1880, #1877); no run was messaged.
+[concept-review.html](concept-review.html). Unanswered:
+
+- **Two managed rules.** LOO-821 `WorkSource::is_managed` (Declared|Bound)
+  decides hooks, steers and its server check; this branch's
+  `transport::managed` decides holding (`task_run`, `LF_SERVER`, or the
+  Session has a Task/Wave). They differ on resume of a Checkout-attributed
+  Session (bare there, held here), on a Desktop conversation with no
+  Task/Wave (bare there, held here), and on a stopped server (821's
+  `require_server` runs readiness first; here `ServerMissing` at once).
+  Proposed: 821's rule and check are the one; `transport::managed` and
+  `ServerMissing` go. Open: is a Desktop conversation with no Task managed.
+- **Lifetime.** LOO-823's next pass deletes idle ending,
+  `end_detached_after`, `DetachedLimit`, `idle_retention` and the
+  native-input ledger; held terminals share `lifetime.rs`'s watcher
+  (e7198a3b7). Proposed: held terminals live until their scope closes or
+  the agent exits, no idle grace; sync onto 823 once it lands. 823's limit
+  suspension (input line from the server's emulator) is a follow-up.
+- Status reports read by the server for every held terminal (LOO-822 makes
+  availability come from them): proposed follow-up.
+- LOO-821's stale-server question is the same class as the `held.sock`
+  revision built here (d07928fef); proposed that hooks match it.
+
+Jack Heart, after asking "what is managed vs eld?": "managed shoudl = held"
+
+One predicate decides both: a launch is held exactly when it is managed
+(hooks, steers, server check). LOO-821's `WorkSource::is_managed` (Declared
+or Bound) is that predicate, which keeps the earlier LOO-821 answer that a
+bare `lf` in a Task checkout gets no hooks; so resuming such a Session is
+not held either. Held additionally needs a terminal viewing it (piped and
+`-b` executions stay unheld). A managed launch uses LOO-821's
+`require_server` (readiness, then fail); `transport::managed`'s own rule and
+`ServerMissing` go when the two branches meet. Whichever of LOO-821 and
+LOO-824 lands second calls the other's function. Still open: whether a
+Desktop conversation with no Task or Wave is managed (today: held here, bare
+in LOO-821).
+
+Jack Heart, on `lf resume <session>` of an `lf implement` run typed in a Task
+checkout: "bare is correct here". Matches the steer above (not held).
+
+Jack Heart, on "a Desktop conversation with no Task or Wave": "no such
+thing? unless you mean soemthing that happens inside a shell in desktop?",
+then "i think teh right hting to do there is to hold shells probably".
+
+Read here: `LF_SERVER=1` is set only on Desktop Session panes
+(`GhosttyTerminalView.swift:674`), which open Task, Wave and repository
+primaries. The repository primary needs no Task or Wave; LOO-823 recorded
+"wave/repo should behave exactly like open tasks". Whether LOO-821's
+`is_managed` counts a repository primary as Declared/Bound is unchecked.
+Desktop Task shells held (an `lf` typed inside one stays bare, a child of
+the held shell) is proposal 5a; in this Task or a follow-up is not said.
+Then: "if we want to do that. dont need to do it yet". Shells stay on their
+owner in LOO-824; holding them is later work, not filed.
+Then: "actually we probably do watn to do that for mobile anyway".
+Then: "we should amke the desktop hold the pty for all shells in desktop/mobile and throw them away when we throw away task sessions". Filed as LOO-830.
+
+Jack Heart, on a managed launch with the server down (LOO-821 starts it, then fails; LOO-824 fails at once): "821 is correct here". Matches the "managed should = held" steer: require_server, ServerMissing goes.
+
+Jack Heart, on how long a held terminal lives: "823s rule is correct". Held terminals run until their Task is done or abandoned, their Wave or repository conversation closes, or their agent exits. No idle grace for held terminals; sync onto LOO-823 once it lands.
+
+Jack Heart, on the three still-open items: server reads status for every
+held terminal: "do it now"; plain terminal title reading Reconnecting…:
+"not sure"; LOO-830: "the servers holder should hold the pty".
+
+In this Task, then: the server's hosted execution already parses OSC 7501
+Program Status from each held terminal's output (`transport/output.rs`,
+`program_status::Records`). For held terminals the server writes that as
+the Session's program status (`begin_program_status`, the store path
+Desktop's `session.status` writes use) whether or not any view is open.
+Desktop's `session.status` stays for what is not held (Task shells, until
+LOO-830). The plain-terminal title stays as built (nothing drawn).
+
+Jack Heart, in the LOO-821 conversation (comment 778081f8): "no. in 824 i
+explained that there is no such thing other than one you start through a
+shell. shells in desktop should be managed by the holder as well, but they
+should not be managed (and their pty holding should be more generic than the
+lf session one)".
+
+This refines "managed shoudl = held": every managed launch is held, but the
+holder also holds things that are not managed. A Desktop shell is held (in
+LOO-830, with holding more generic than an lf Session's terminal); an agent
+started inside it is bare by `WorkSource::is_managed`. In LOO-824 nothing
+changes: lf Session terminals are held exactly when managed; shells stay on
+their owner until LOO-830.
+
+## Implementation — November 11, 2026 (handshake, managed rule, status, lifetime)
+
+Built this pass:
+
+- **`held.sock` revision.** `registry::REVISION` (1). `Named` is
+  `{terminal,revision}`; the answer `{"answer":…,"revision":N}`. A server
+  of another revision answers and admits nothing. `connect` returns
+  `OtherRevision`; a plain-terminal view (`attach_with_terminal` first
+  connect, `reconnect_held`) calls `transport::replace_view`, which execs
+  `os_process::resolve_lf_binary()` as `session attach --terminal T
+  [--session S]` with `LF_VIEW_REPLACED=1`; a replacement meeting another
+  revision again, or a failed exec, ends with one line. `--moved` and
+  `--session-json` are not carried. `Handoff::connect` notes a
+  `RecordingGap` for control requests. Desktop's `session.attach` bridge
+  treats another revision at its own entrance as an error (same server).
+- **Managed rule.** `transport::managed` reads `work_source.is_managed()`
+  (`session.rs::WorkSource::is_managed`, identical to LOO-821's, added here
+  so the two agree; whichever lands second keeps one). A resumed Checkout
+  Session is no longer held. `LF_SERVER` (Desktop pane) and `task_run`
+  still hold. Later steer (778081f8): held ≠ managed in general; Desktop
+  shells will be held but bare (LOO-830), not built here.
+- **Server down.** `start_held` → `open_server`: readiness
+  (`lf install server` via the selected installation), then
+  `ServerMissing`. Mirrors LOO-821's `require_server`; collapse on merge.
+- **Program Status.** The registry hands each held terminal's changed
+  `Records` to one `held-status` thread → `record_held_program_status`
+  (stream `held:<terminal>`, new stream on a new provider or server).
+  `ops::human_session::record_program_status` ignores readings for a held
+  Session (`session_is_held`).
+- **Lifetime.** Held terminals: `DetachedLimit::Off`, no `idle_retention`;
+  only abandonment and completed-Task retirement end them
+  (`lifetime.rs`). `a_graph_started_in_a_held_conversation_keeps_it`
+  replaced by `a_held_conversation_has_no_idle_ending`. Sync onto LOO-823
+  when it lands; the native-input hold is untouched here (823 deletes it).
+
+Tests added: `a_held_view_meeting_another_build_reopens_as_the_installed_lf`,
+`a_held_terminal_with_no_view_reports_that_it_waits`.
+
+Checks, November 11: `transport_tests -- held_ a_held session_attach_waits
+server_threads_do_not` 10 passed; `--lib -- transport:: holder:: session::`
+138 passed; `--lib -- transport::lifetime store::sqlite::program_status
+ops::human_session` 55 passed; `--lib -- transport::registry::` 10 passed
+after the last edit; `documented_commands::` 4 passed; clippy clean. Left
+for gate: Slice 0 mode probe, Swift/Desktop suites, Linux RunPod restart
+test, `session_lifecycle_tests`.

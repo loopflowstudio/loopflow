@@ -100,8 +100,9 @@ lf install         # repair a build mismatch or missing registration
 ```
 
 `lf task run`, `lf resume --task` and Wave session commands start their agent
-through the server, so they stop with this message when it is not answering.
-Nothing was started and nothing needs cleaning up; run the command again once
+through the server. When it is stopped they start it first, as
+`lf install server` does, and stop with this message only when it still does
+not answer. Nothing was started and nothing needs cleaning up; run the command again once
 `lf server status` reads ready. Conversations that were already open are
 still running in their holder and their views return on their own.
 `lf <skill>` and `-b` runs do not need the server.

@@ -1999,6 +1999,8 @@ fn active_session_token() -> Result<HumanSessionToken> {
 /// One Program Status reading from the terminal showing a Session. `stream`
 /// names one observer; its first reading (`sequence` 1) fences any earlier
 /// stream, even on the same provider. It owns no Session and no provider.
+/// A held terminal's server records its Session's status; a view's reading
+/// of one is ignored.
 pub(crate) async fn record_program_status(
     store: &SharedStore,
     id: &str,
@@ -2015,6 +2017,10 @@ pub(crate) async fn record_program_status(
     let session = find_session(store, id, false)
         .await?
         .context("Session not found")?;
+    // A held terminal's server records its status; a view's would race it.
+    if store.sqlite.session_is_held(&session.id)? {
+        return Ok(());
+    }
     if sequence == 1 {
         let current = store
             .sqlite

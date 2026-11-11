@@ -23,6 +23,7 @@ use crate::holder::client::Client;
 use crate::holder::wire::{self, Held};
 use crate::holder::Place;
 use crate::id::{LfSessionId, TerminalId};
+use crate::program_status::Records;
 
 use super::held::Source;
 use super::hosted::{Child, Hosted, Pass, Watchers};
@@ -90,6 +91,11 @@ pub(crate) struct Start {
     pub placement: Option<String>,
 }
 
+/// The revision of what follows the entrance's answer: the viewer protocol
+/// and the child's control requests. The first exchange itself never changes,
+/// so either side of an install reads the other's revision.
+pub(crate) const REVISION: u32 = 1;
+
 /// Where connections to held terminals enter the server.
 pub(crate) fn entrance() -> Result<PathBuf> {
     Ok(super::private_directory()?.join("held.sock"))
@@ -117,7 +123,14 @@ pub(crate) fn connect(terminal: &TerminalId) -> Result<UnixStream> {
             }
         }
     }
-    match serde_json::from_slice(&line)? {
+    let answer: Answer = serde_json::from_slice(&line)?;
+    if answer.revision != REVISION {
+        return Err(OtherRevision {
+            server: answer.revision,
+        }
+        .into());
+    }
+    match answer.answer {
         Answered::Hosted => {}
         // Not an engine error: the relay keeps trying, as for a lost server.
         Answered::Waiting => anyhow::bail!(waiting(terminal).message),
@@ -130,7 +143,14 @@ pub(crate) fn connect(terminal: &TerminalId) -> Result<UnixStream> {
 /// The refusal in the entrance's answer `line`, for a client of the server
 /// protocol; none when the viewer protocol follows.
 pub(crate) fn refusal(line: &[u8], terminal: &TerminalId) -> Result<Option<crate::engine::Error>> {
-    Ok(match serde_json::from_slice(line)? {
+    let answer: Answer = serde_json::from_slice(line)?;
+    // The server bridging this connection is the server answering it.
+    anyhow::ensure!(
+        answer.revision == REVISION,
+        "held terminal entrance answered revision {}",
+        answer.revision
+    );
+    Ok(match answer.answer {
         Answered::Hosted => None,
         Answered::Waiting => Some(waiting(terminal)),
         Answered::Ended => Some(ended(terminal)),
@@ -165,6 +185,21 @@ pub(crate) fn ended(terminal: &TerminalId) -> crate::engine::Error {
         .with(serde_json::json!({ "terminal_id": terminal, "exit_code": code }))
 }
 
+/// A server of another build answered the entrance: what follows its answer
+/// is not this build's to read.
+#[derive(Debug, thiserror::Error)]
+#[error("Loopflow server speaks held-terminal revision {server}; this lf speaks {REVISION}")]
+pub(crate) struct OtherRevision {
+    pub server: u32,
+}
+
+/// The entrance's answer line: the answer and the server's revision.
+#[derive(Serialize, Deserialize)]
+struct Answer {
+    answer: Answered,
+    revision: u32,
+}
+
 /// What the entrance answers a named connection before the viewer protocol.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,12 +216,15 @@ enum Answered {
 pub(crate) fn named(terminal: &TerminalId) -> Vec<u8> {
     wire::line(&Named {
         terminal: terminal.clone(),
+        revision: REVISION,
     })
 }
 
 #[derive(Serialize, Deserialize)]
 struct Named {
     terminal: TerminalId,
+    /// The sender's revision of what follows the answer.
+    revision: u32,
 }
 
 struct Entry {
@@ -196,6 +234,8 @@ struct Entry {
     /// A screen rebuilt from the ring asks its program to repaint once the
     /// replay reaches this position.
     nudge: Option<Nudge>,
+    /// The Program Status last handed to the store.
+    reported: Option<Records>,
 }
 
 enum Nudge {
@@ -713,6 +753,30 @@ fn spawn_with_ledger(
         })
 }
 
+/// Record each held terminal's Program Status as its Session's, off the
+/// terminals' loop: a slow store delays a reading, never a terminal. Only
+/// the newest reading of each terminal is written.
+fn record_statuses(reported: mpsc::Receiver<(TerminalId, Records)>) {
+    let mut gap = crate::store::RecordingGap::default();
+    let mut sequences: HashMap<TerminalId, i64> = HashMap::new();
+    while let Ok(first) = reported.recv() {
+        let mut newest: HashMap<TerminalId, Records> = HashMap::new();
+        for (terminal, records) in std::iter::once(first).chain(reported.try_iter()) {
+            newest.insert(terminal, records);
+        }
+        for (terminal, records) in newest {
+            let sequence = sequences.entry(terminal.clone()).or_default();
+            *sequence += 1;
+            let recorded = crate::journal::process_ledger()
+                .and_then(|store| store.record_held_program_status(&terminal, *sequence, &records));
+            match recorded {
+                Ok(_) => gap.recovered(),
+                Err(error) => gap.note("held terminal program status", &format!("{error:#}")),
+            }
+        }
+    }
+}
+
 /// A connection that has not named its terminal yet.
 struct Arriving {
     socket: UnixStream,
@@ -723,14 +787,13 @@ struct Arriving {
 impl Arriving {
     /// The terminal named, once the whole line is here. Read a byte at a
     /// time: what follows the line belongs to the terminal's host.
-    fn named(&mut self) -> io::Result<Option<TerminalId>> {
+    fn named(&mut self) -> io::Result<Option<Named>> {
         loop {
             let mut byte = [0];
             match self.socket.read(&mut byte) {
                 Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
                 Ok(_) if byte[0] == b'\n' => {
-                    let named: Named = serde_json::from_slice(&self.line)?;
-                    return Ok(Some(named.terminal));
+                    return Ok(Some(serde_json::from_slice(&self.line)?));
                 }
                 Ok(_) if self.line.len() >= 128 => return Err(io::ErrorKind::InvalidData.into()),
                 Ok(_) => self.line.push(byte[0]),
@@ -751,6 +814,10 @@ fn run(
     mut unsettled: Vec<Unsettled>,
     live: Live,
 ) {
+    let (statuses, reported) = mpsc::channel();
+    if let Err(error) = spawn_with_ledger("held-status", move || record_statuses(reported)) {
+        tracing::warn!(%error, "held terminals' Program Status goes unrecorded");
+    }
     let mut terminals: HashMap<TerminalId, Entry> = adopted.into_iter().collect();
     let mut arriving: Vec<Arriving> = Vec::new();
     loop {
@@ -791,27 +858,31 @@ fn run(
         let mut waiting = Vec::new();
         for mut connection in arriving.drain(..) {
             match connection.named() {
-                Ok(Some(terminal)) => {
+                Ok(Some(Named { terminal, revision })) => {
                     // A terminal neither hosted here nor kept by a pending
                     // holder has ended or was never started. Attach never creates.
                     let entry = terminals.get_mut(&terminal);
-                    let answer = wire::line(&if entry.is_some() {
-                        Answered::Hosted
-                    } else if pending
-                        .lock()
-                        .expect("registry lock poisoned")
-                        .iter()
-                        .any(|holder| holder.terminals.contains(&terminal))
-                    {
-                        Answered::Waiting
-                    } else {
-                        Answered::Ended
+                    let answer = wire::line(&Answer {
+                        answer: if entry.is_some() {
+                            Answered::Hosted
+                        } else if pending
+                            .lock()
+                            .expect("registry lock poisoned")
+                            .iter()
+                            .any(|holder| holder.terminals.contains(&terminal))
+                        {
+                            Answered::Waiting
+                        } else {
+                            Answered::Ended
+                        },
+                        revision: REVISION,
                     });
                     // A few bytes into an empty socket buffer.
                     if (&connection.socket).write_all(&answer).is_err() {
                         continue;
                     }
-                    if let Some(entry) = entry {
+                    // Another build reads the revision and goes its own way.
+                    if let Some(entry) = entry.filter(|_| revision == REVISION) {
                         entry.hosted.admit(connection.socket);
                     }
                 }
@@ -825,7 +896,9 @@ fn run(
             // One terminal's failure is never another's.
             let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 entry.nudge();
-                entry.hosted.pass(&mut entry.child)
+                let pass = entry.hosted.pass(&mut entry.child);
+                entry.report(terminal, &statuses);
+                pass
             }));
             match pass {
                 Ok(Ok(Pass::Continue)) => {}
@@ -934,7 +1007,22 @@ impl Entry {
             child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
             place: place.clone(),
             nudge: None,
+            reported: None,
         })
+    }
+
+    /// Hand the store the terminal's Program Status when it changed: the
+    /// server reads it for every held terminal, viewed or not. A rebuilt
+    /// screen reports what its replay holds.
+    fn report(&mut self, terminal: &TerminalId, statuses: &mpsc::Sender<(TerminalId, Records)>) {
+        let Some(records) = self.hosted.program_status() else {
+            return;
+        };
+        if !records.seen || self.reported.as_ref() == Some(records) {
+            return;
+        }
+        self.reported = Some(records.clone());
+        let _ = statuses.send((terminal.clone(), records.clone()));
     }
 
     /// Ask a program whose screen was rebuilt from the ring to repaint: one

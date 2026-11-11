@@ -7,6 +7,11 @@ the kept capacity change. Five alternating pairs each; all full JSON matches,
 zero errors, and no measurable guard regressions. Next limiter: repeated Git
 repository discovery during planning field delivery.
 
+Kept implementation and detailed check receipts are recoverable from
+`8d47895760:scratch/optimize-session-list.md`; sync merged `763da5c92f` in
+`86e72927a4`. The timings below predate that sync, whose turn hooks now record
+through the Machine server. No post-sync speedup is claimed.
+
 ## Iteration 1 verdict
 
 **Better: keep `d9e3c1f3b`.** Indexed reverse Task probes cut the default
@@ -52,31 +57,6 @@ window, but no Session-event/usage revisions: event-stream contention remains
 unmeasured. Pi's answer was incomplete; its detached processes were stopped.
 No normal measured read acquired a writer lock or retried a lock failure.
 The unreproduced stall still needs stacks captured while it is happening.
-
-## Iteration 2 — Process inventory (2026-11-11)
-
-Replace the Process scans with an unfinished-agent partial index ordered by
-id, and cwd equality/range probes from the selected Task. Keep relocation
-receipts, history and attachment membership, ordering and all returned fields.
-Reuse `session_list_indexes.sql`. Session flags and primary-Session design
-are outside this iteration.
-
-Delete — do not maintain: the `lf_process_ids` full Process join using
-`instr(cwd, root)`; its behavior moves to binary lexical cwd probes. No data,
-API or existing behavior test is deleted. `process_membership` remains for
-single-Process and bounded unfinished-Process reads.
-
-Focused coverage: `store::sqlite::processes` live inventory and
-`store::sqlite::task_work` membership, upgrade plans and VM-step bounds.
-Direct callers: `harness::agent_process`, Task status and Project adoption.
-Gate owns the remaining affected suites, `two_people`, `transport_tests`,
-and frozen full-JSON/wall-time comparisons before a speedup verdict.
-
-- `cargo test -p loopflow --lib -- store::sqlite::task_work::tests::`: 13 passed, including cwd equality/range plans, VM bound and lexical/relocation equivalence.
-- `cargo test -p loopflow --lib -- store::sqlite::processes::attachment_tests::live_agent_inventory_upgrade_skips_other_processes store::sqlite::processes::attachment_tests::detached_and_replaced_agents_remain_in_the_process_inventory`: both passed; the upgrade test passed on rerun after adding its missing fixture cwd. Checks compare every selected value across migration and bound live-index scans to two steps. LF variables unset and stdin closed for all tests.
-- `uv run python scripts/check_migrations.py`; `cargo fmt`: passed. The test linker repeated the existing oversized `__eh_frame` warning; compilation and tests passed.
-- `cargo clippy --all-targets -- -D warnings`; `git diff --check`: passed.
-
 
 ## Iteration 2 measurement — sealed private stores (2026-11-11)
 
@@ -137,29 +117,6 @@ the invalid cohort.
   [bound plans and counters](session-list-measure/iteration2-profiles.json),
   [validation and stacks](session-list-measure/iteration2-checks.json).
 
-## Iteration 3 — Task-status repeated reads (2026-11-11)
-
-Read LaunchCapacity once per Task detail and reuse it for every Session row.
-Resolve planning scope once per distinct repository in a scope check, sharing
-answers between its Wave and Task loops. Keep all JSON fields, selection,
-ordering, freshness, and error handling. No credential values in diagnostics.
-
-Delete — do not maintain: per-row capacity acquisition in `human_session::listed`
-and repeated repository scope resolution in `linear_observe::check_scope`.
-Keep the existing renderers and scope resolver; no persistent cache or migration.
-
-Focused coverage: Task detail with multiple Sessions and one capacity read;
-planning scope checks with multiple Tasks/Waves, shared and foreign teams and
-unreadable configuration. Direct callers: Session card and Task screens.
-Gate owns wider Session/Task and planning suites; measure owns frozen full-JSON
-comparisons and attribution before retaining a performance claim.
-
-- Capacity: `cargo test -p loopflow --lib task_detail_reads_capacity_once_for_all_sessions` passed (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. LF variables unset, stdin closed; existing oversized unwind-table linker warning only. Initial test-counter compile failure used an unstable Cell API, replaced before this pass.
-
-- Scope: `cargo test -p loopflow --lib linear_scope_reads_each_repository_once_and_refreshes_next_check` passed (1), covering one resolution per repository, failed resolutions, live/finished selection and next-check config edits. Fixture borrow and column-name errors were corrected before this pass.
-- `cargo test -p loopflow --lib linear_on_demand_adopts_new_open_issues_without_allocating_execution` passed (1).
-- Scope fix: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; LF variables unset and stdin closed. Existing oversized unwind-table linker warning only.
-
 ## Iteration 3 measurement — repeated reads (2026-11-11)
 
 **Better: keep both commits.** Claim tested: “Each repeated-read removal reduces
@@ -185,18 +142,14 @@ medians come from different cohorts; no combined paired speedup is claimed.
 
 ### Frozen inputs and correctness
 
-Reuse iteration 2’s checkpointed `after.db`, with no new live-store backup.
-All three standalone files have the same SHA-256, no WAL, and matching digests
-for all 78 application tables. Every benchmark sets `LF_HOME` under
-`/tmp/loo822-reads-measure`; none runs against the live `~/.lf` store.
-The five sealed harness hashes still match. Only side selection and the
-requested four workloads change in the iteration-3 driver.
-
-Exact commit exports use the same `cargo build --release -p loopflow --bin lf`,
-development provenance, Rust 1.98.1 and macOS 26.0.1 arm64. All builds finish
-before their measurements. The clock shim, private transcript copies and
-excluded warm-up procedure are unchanged. Calibration distinguishes one row
-at 265.8–269.3 ms from the default 100 rows at 435.5–448.1 ms.
+Iteration 3 reuses iteration 2's checkpointed snapshot. All three database
+files had the same SHA-256, no WAL, and matching digests for all 78 tables;
+the five sealed harness hashes matched. Private homes and transcript copies,
+a frozen wall clock and excluded warm-ups are shared across sides. Exact
+commit exports used release builds, Rust 1.98.1 and macOS 26.0.1 arm64.
+Calibration distinguishes one row at 265.8–269.3 ms from the default 100 rows
+at 435.5–448.1 ms. Reproduction details and private paths are in the history
+reference above and the linked artifacts below.
 
 All 80 timed calls and warm-ups match complete JSON per workload, as do the
 60 separate spawn-count calls, three native samples and four wall/SQL
@@ -268,13 +221,10 @@ SQLite is another remaining cost: 29.8% of final main-thread samples are in
 `sqlite3_step`; the final SQL trace’s leading Process query takes 112.7 ms
 across five executions. Profile measurements overlap and are not added.
 
-- Three uninstrumented and two attribution release builds: passed.
-- `cargo fmt --check`; `git diff --check`: passed. Production source is
-  unchanged, so the focused tests and clippy recorded above are not repeated.
-- All frozen store and harness hashes: unchanged. `scratch/loo-822.md` matches
-  its starting hash, including the pre-existing edit. No server was started;
-  every sampler and command exited. The kept uninstrumented binary is restored
-  at `target/release/lf`.
+Three uninstrumented and two attribution release builds passed, as did
+`cargo fmt --check` and `git diff --check`. Frozen store and harness hashes
+were unchanged. All samplers and commands exited.
+
 - [Every trial and warm-up](measure.html#iteration3-trials),
   [timings, spawn counts and hashes](session-list-measure/iteration3-results.json),
   [stack attribution and checks](session-list-measure/iteration3-checks.json),
@@ -282,21 +232,18 @@ across five executions. Profile measurements overlap and are not added.
   All 151 calls and their excluded warm-ups are retained; raw JSON, stores and
   captures stay in the private `/tmp/loo822-reads-measure` directory.
 
-## Compress (2026-11-11)
+## Kept implementation and verification
 
-Delete — do not maintain: duplicate relocation-table probes and cached scope
-strings used only for equality. The shared probe keeps released read-only
-schemas readable; each scope check stores repository match booleans, including
-failed resolutions. Single-Session tests share fresh capacity setup; the Task
-detail regression still checks one read and every returned Session field.
+`8d47895760` shares the relocation probe and stores repository-match booleans
+within each scope check. It retains the four measured indexes, released-schema
+reads, lexical/relocation behavior, upgrade comparisons, query-plan assertions
+and VM bounds. `2667788c6` reverted `f8b742d8c`; its two extra indexes are absent.
+No further optimization was implemented for the Git-discovery cost above.
 
-No remaining optimization deletion targets. `f8b742d8c`'s Rust changes were
-fully reverted by `2667788c6`; `session_provider_thread_created` and
-`session_activity_observed` are absent from the migration. Keep the four
-measured indexes and the SQL shapes, lexical/relocation behavior cases, upgrade
-comparisons, query-plan assertions and VM bounds. Measurement scripts stay in
-scratch; `loo-822.md` is untouched.
-
-- `cargo test -p loopflow --lib -- store::sqlite::task_work::tests:: store::sqlite::processes::attachment_tests::live_agent_inventory_upgrade_skips_other_processes store::sqlite::processes::attachment_tests::detached_and_replaced_agents_remain_in_the_process_inventory ops::human_session::tests:: linear_scope_reads_each_repository_once_and_refreshes_next_check linear_on_demand_adopts_new_open_issues_without_allocating_execution`: 45 passed, LF variables unset and stdin closed; existing oversized unwind-table linker warning only.
-- `cargo fmt`; `git diff --check`: passed.
-- `cargo clippy --all-targets -- -D warnings`: passed, LF variables unset and stdin closed.
+- Pre-sync combined focused Rust check: 45 passed (Task membership, live
+  Process inventory, Session operations and planning scope/adoption).
+- `cargo fmt`; `git diff --check`; `cargo clippy --all-targets -- -D warnings`:
+  passed before sync. Existing oversized unwind-table linker warning only.
+- Exact commands and earlier focused checks:
+  `8d47895760:scratch/optimize-session-list.md`. Gate owns affected suites on
+  the merged tree; documentation reconciliation does not rerun these checks.

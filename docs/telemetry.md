@@ -20,6 +20,21 @@ Each row is one Session's recorded input: input, output and cache-read tokens,
 cost, and how many of its provider streams finished (`FINAL`). `GAPS` counts the
 places the record is incomplete. The window defaults to the last 30 days.
 
+New usage rows hold one turn's tokens and model from the provider's transcript.
+Turn-end hooks ask the Machine server to read and record ended turns; the
+hooks themselves open no store. At provider exit, the launching process reads
+the whole transcript, records usage still missing and fills in unrecorded
+completions. This exit read needs no server and also covers bare headless runs,
+which have no turn-end hook. Recording is best-effort: a missed turn-end read
+can be caught at the next turn end or exit. Raw conversations lf never launched
+get no usage or completion rows.
+
+Claude and Codex usage rows carry tokens without cost. Pi and OpenCode include
+the turn's reported cost. Claude's live completion keeps `total_cost_usd`, a
+running process total; it is not a per-turn cost. A bare run in a Task's
+checkout counts toward that Task. Runs outside Task and Wave checkouts also
+record rows today.
+
 Find where the tokens went:
 
 ```bash

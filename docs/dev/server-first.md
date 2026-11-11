@@ -194,12 +194,17 @@ A bare run in a Task's checkout counts toward that Task, and the cost-per-PR
 work (LOO-732) reads per-turn `usage` and `completed` rows from the store.
 The transcript is the only writer of `usage` rows (`transcript/facts.rs`):
 one row per turn id, holding that turn's tokens and model, not a running
-total. The Machine server writes it at each Stop moment (Claude's and Codex's Stop hook, Pi's
-`agent_settled`, OpenCode's `session.execution.succeeded`), for each ended
-turn at the transcript's end, and again when the provider exits, for every
-turn; a turn that has a row keeps it. When a hook fires before the
-transcript shows the turn's end (not measured for either provider), that
-turn's row lands at the next turn's end or at exit. The live stream (`harness/fact_writer.rs`) writes
+total. Turn-end hooks send `session.boundary` to the Machine server and open
+no store themselves. Before answering a Stop, `server/boundary.rs::answer`
+reads the transcript's tail and records each complete ended turn (Claude's
+and Codex's Stop hook, Pi's `agent_settled`, OpenCode's
+`session.execution.succeeded`). Bare headless runs have no turn-end hook.
+The launching process reads every turn at exit, through
+`harness/native_exit.rs` or `process/runtime.rs`; that write needs no server.
+A turn that has a row keeps it. If a hook arrives before the transcript
+shows the end, the next turn-end read or the exit read can record it. The
+ordering has not been measured; recording failures are logged and do not
+fail the turn or exit. The live stream (`harness/fact_writer.rs`) writes
 `started` and `completed` and no `usage`. Pi's stream names a turn by lf's
 own request id, which Pi's session file never holds, so a Pi turn's `usage`
 row (Pi's entry id) and its stream `completed` row carry different ids; the

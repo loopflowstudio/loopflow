@@ -149,7 +149,7 @@ lf session list --no-raw           # only conversations lf started
 ## See what each one is doing
 
 ```bash
-lf session list                    # every conversation, with its current turn
+lf session list                    # open interactive conversations in this repository, with their current turn
 lf session card <session>          # one conversation: its turn, when the last one ended, its usage
 ```
 
@@ -193,6 +193,14 @@ A raw conversation open in a Task's checkout lists under that Task:
 `lf session list --task <task>` includes it.
 A transcript caught halfway through writing a line is read up to its last
 complete line.
+
+For managed launches and interactive conversations lf starts, turn-end hooks
+ask the Machine server to record finished turns' usage from the transcript.
+The hooks open no store; if the server cannot answer, the conversation continues.
+Bare headless runs have no turn-end hook. The launching process reads the
+transcript at exit to record usage and missing completions, without needing
+the server. Raw conversations are displayed without recording those rows.
+See [Telemetry](telemetry.md#what-it-cost) for the recorded totals.
 
 ## Switch agents mid-conversation
 

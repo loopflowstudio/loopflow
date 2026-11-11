@@ -36,8 +36,9 @@ load average ~90 at the time:
 
 Choices taken (reversible):
 
-- The hook sends the inbox as paths (`inbox: {socket, key}`); the server reads
-  the key when it sends. No token on lf's wire or in its logs.
+- The hook sends only the inbox key path (`inbox`); the server saves it on
+  the AgentProcess (`processes.inbox`), finds the socket in `<pid>.json` and
+  reads the key when it sends. No token on lf's wire or in its logs.
 - `crossSessionInbound: accept` goes only on managed Claude launches, the
   Sessions the server registers. Any same-user process can message those
   sessions without review. Attesting a permission mode instead was not done:
@@ -81,25 +82,12 @@ again.
 
 Open, from the concept review (November 11):
 
-1. Settled by the design in concept review 2 as (a): the steer keeps idle
-   waking "as today", and today a Task comment wakes an idle conversation;
-   with one delivery per comment it arrives as a steer, so only (a) or (c)
-   keep that, and (c) adds a distinction people learn for no benefit. Still
-   reversible. Earlier text: Do steers wake an idle managed conversation? Built as (a), reversible
-   (November 11 implement pass): the wake carries the pending steer batch
-   with the Task update; "A steer starts no turn" is gone from the docs.
-   Before that pass: "A steer starts no turn"; Task updates did. Today a person's Task comment
-   reaches an idle conversation anyway, as a Task update, so waking already
-   happens for most direction, framed as worker progress. Once a comment is
-   delivered once (as a steer, `loo-826.md`):
-   a. steers wake through the same server path; `docs/sessions.md` drops "A
-      steer starts no turn". A comment wakes as direction.
-   b. steers keep waiting; a person's comment on an idle Task conversation
-      waits for its next turn, which is less waking than before this branch.
-   c. Task comments wake, `lf session steer`/`lf task steer` don't.
-   Why it matters: whether typing direction at a Task makes an idle agent act
-   on it now is the product, not plumbing. The wake path serves (a) at no
-   extra cost.
+1. Do steers wake an idle managed conversation? Settled by the design in
+   concept review 2 as (a), still reversible: the steer keeps idle waking "as
+   today", today a Task comment wakes an idle conversation, and with one
+   delivery per comment it arrives as a steer. Built: the wake carries the
+   pending steer batch with the Task update. Alternatives were (b) steers wait
+   for the next turn, (c) only Task comments wake.
 2. Bare conversations (above): get nothing, as built, or next-boundary
    updates, as the steer's words say? The brief's "Bare Sessions get none of
    this" can be read as no registration or push, which fits either answer.

@@ -136,6 +136,21 @@ Legacy/New enums, v2 types, adapters, fallbacks, dual writes, compatibility
 shims and parallel stores block by default; use one only when the reviewed
 design calls for it and names when it is deleted.
 
+**Write for the load it will carry.** Take the data size and concurrency from
+what the repository says it serves (its agent guide or docs), not from the
+fixture. For every query you add or change:
+
+- Read its plan (`EXPLAIN` in SQLite and Postgres). A full scan of a table that
+  grows with use needs an index on the columns it filters, joins or sorts by.
+- Bound what a hot path reads. Code that runs per request, turn or event
+  touches its own rows by key, with a `LIMIT` where a result can grow; no
+  query in a loop where one query would do.
+- Keep writes short. A write transaction or lock holds every other writer
+  back; take none when there is nothing to change, and do no slow work inside
+  one.
+- Check it at realistic size: time it against a store as large as the one it
+  will run on, and record the number in the plan.
+
 **Test behavior.** Test what people see, not implementation details. Assert on
 results, not mock calls.
 

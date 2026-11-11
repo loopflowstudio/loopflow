@@ -258,44 +258,33 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
         .save_session_steer("session", "Named author", "Change direction")
         .unwrap();
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool:one",
-            |_, items, remaining| {
-                assert_eq!(items, std::slice::from_ref(&steer));
-                assert_eq!(remaining, 0);
-                Ok(rendered("payload"))
-            },
-            |payload| {
-                assert_eq!(payload, "payload");
-                Ok(())
-            },
-        )
+        .emit_session_steers(&adapter, "native", "tool:one", |_, items, remaining| {
+            assert_eq!(items, std::slice::from_ref(&steer));
+            assert_eq!(remaining, 0);
+            Ok(rendered("payload"))
+        })
         .unwrap();
+    // Handed to a hook, the batch is delivered once that hook says it printed it.
     let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].evidence, "uncertain");
     assert_eq!(page.pending, 0);
     assert!(page.items[0].payload_hash.is_some());
+    let batch = page.items[0].batch_id.clone().unwrap();
+    assert!(store.confirm_session_steers(&adapter, &[], 2).unwrap());
+    assert!(!store.confirm_session_steers(&adapter, &[batch], 2).unwrap());
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.items[0].evidence, "emitted");
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "compact",
-            |_, _, _| panic!("compaction replayed"),
-            |_| panic!("compaction wrote"),
-        )
+        .emit_session_steers(&adapter, "native", "compact", |_, _, _| {
+            panic!("compaction replayed")
+        })
         .unwrap();
     store.retry_session_steer("session", &steer.id).unwrap();
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool:two",
-            |_, _, _| Ok(rendered("retry")),
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "tool:two", |_, _, _| {
+            Ok(rendered("retry"))
+        })
         .unwrap();
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].attempt,
@@ -304,42 +293,31 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
 }
 
 #[test]
-fn prewrite_failure_releases_but_write_failure_retains_uncertainty() {
+fn a_failed_render_releases_and_an_answered_batch_stays_uncertain() {
     let (_home, store, adapter) = fixture();
     store
         .save_session_steer("session", "Author", "Direction")
         .unwrap();
     assert!(store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "first",
-            |_, _, _| Err(StoreError::InvalidData("source disk full".into())),
-            |_| panic!("render failure wrote")
-        )
+        .emit_session_steers(&adapter, "native", "first", |_, _, _| Err(
+            StoreError::InvalidData("source disk full".into())
+        ),)
         .is_err());
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 1);
     assert!(store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "first",
-            |_, _, _| Ok(rendered("payload")),
-            |_| Err(StoreError::InvalidData("broken pipe".into()))
-        )
-        .is_err());
+        .emit_session_steers(&adapter, "native", "first", |_, _, _| Ok(rendered(
+            "payload"
+        )),)
+        .unwrap()
+        .is_some());
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].evidence,
         "uncertain"
     );
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "next",
-            |_, _, _| panic!("uncertain replay"),
-            |_| panic!("uncertain write"),
-        )
+        .emit_session_steers(&adapter, "native", "next", |_, _, _| {
+            panic!("uncertain replay")
+        })
         .unwrap();
 }
 
@@ -354,44 +332,28 @@ fn concurrent_boundaries_reserve_independent_bounded_pages() {
     let other = store.clone();
     let another = adapter.clone();
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, first, remaining| {
-                assert_eq!(first.len(), 8);
-                assert_eq!(remaining, 12);
-                other
-                    .emit_session_steers(
-                        &another,
-                        "native",
-                        "two",
-                        |_, second, pending| {
-                            assert_eq!(second.len(), 8);
-                            assert_eq!(pending, 4);
-                            assert!(second
-                                .iter()
-                                .all(|row| !first.iter().any(|item| item.id == row.id)));
-                            Ok(rendered("second"))
-                        },
-                        |_| Ok(()),
-                    )
-                    .unwrap();
-                // A status read cannot cancel the first callback's live reservation.
-                assert_eq!(other.session_steers("session", 0, 32).unwrap().pending, 4);
-                Ok(rendered("first"))
-            },
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "one", |_, first, remaining| {
+            assert_eq!(first.len(), 8);
+            assert_eq!(remaining, 12);
+            other
+                .emit_session_steers(&another, "native", "two", |_, second, pending| {
+                    assert_eq!(second.len(), 8);
+                    assert_eq!(pending, 4);
+                    assert!(second
+                        .iter()
+                        .all(|row| !first.iter().any(|item| item.id == row.id)));
+                    Ok(rendered("second"))
+                })
+                .unwrap();
+            // A status read cannot cancel the first callback's live reservation.
+            assert_eq!(other.session_steers("session", 0, 32).unwrap().pending, 4);
+            Ok(rendered("first"))
+        })
         .unwrap();
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| panic!("duplicate boundary selected the pending page"),
-            |_| panic!("duplicate write"),
-        )
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| {
+            panic!("duplicate boundary selected the pending page")
+        })
         .unwrap();
     let first = store.session_steers("session", 0, 3).unwrap();
     assert_eq!(first.items.len(), 3);
@@ -408,30 +370,22 @@ fn only_abandoned_prewrite_reservations_return_to_pending() {
         .save_session_steer("session", "Author", "Direction")
         .unwrap();
     let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.emit_session_steers(
-            &adapter,
-            "native",
-            "crashed",
-            |_, _, _| panic!("simulated emitter exit before write"),
-            |_| Ok(()),
-        )
+        store.emit_session_steers(&adapter, "native", "crashed", |_, _, _| {
+            panic!("simulated emitter exit before write")
+        })
     }));
     assert!(crashed.is_err());
     let status = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(status.pending, 1);
     assert_eq!(status.items[0].steer.id, direction.id);
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "crashed",
-            |_, _, _| Ok(rendered("recovered")),
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "crashed", |_, _, _| {
+            Ok(rendered("recovered"))
+        })
         .unwrap();
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
 }
 
@@ -456,18 +410,12 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].steer, edited);
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| Ok(rendered("payload")),
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| Ok(rendered("payload")))
         .unwrap();
     let latest = publish("latest", &"界".repeat(20_000));
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 2);
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].evidence, "uncertain");
     assert!(store.retry_session_steer("session", &edited.id).is_err());
     assert_eq!(
         store
@@ -555,16 +503,10 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
         assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, count);
     }
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "tool",
-            |_, rows, _| {
-                assert_eq!(rows.len(), 4);
-                Ok(rendered("payload"))
-            },
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "tool", |_, rows, _| {
+            assert_eq!(rows.len(), 4);
+            Ok(rendered("payload"))
+        })
         .unwrap();
     assert_eq!(store.session_steers("peer", 0, 32).unwrap().pending, 3);
     store
@@ -584,6 +526,110 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
         )
         .unwrap();
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 0);
+}
+
+#[test]
+fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
+    let (_home, store, _adapter) = fixture();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,worktree,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1','/work/task',1);
+            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1);",
+        )
+        .unwrap();
+    save_in(
+        &store.conn.lock().unwrap(),
+        ("task", "task"),
+        "task",
+        "1",
+        &Author::Named("Author".into()),
+        "Task direction",
+    )
+    .unwrap();
+    let pending = |cwd: &str| {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE agent_sessions SET cwd=?1 WHERE id='session'", [cwd])
+            .unwrap();
+        store.session_steers("session", 0, 32).unwrap().pending
+    };
+    assert_eq!(pending("/work/task/rust/src/"), 1);
+    assert_eq!(pending("/work/task"), 1);
+    assert_eq!(pending("/work/task-other"), 0);
+    assert_eq!(pending("/work"), 0);
+}
+
+#[test]
+fn a_new_task_session_skips_steers_an_earlier_session_read() {
+    let (_home, store, adapter) = fixture();
+    let save = |source: &str, text: &str| {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            source,
+            "1",
+            &Author::Named("Author".into()),
+            text,
+        )
+        .unwrap();
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,worktree,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1','/task',1);
+            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1);
+            UPDATE agent_sessions SET cwd='/task';",
+        )
+        .unwrap();
+    save("read", "Already read");
+    store
+        .emit_session_steers(&adapter, "native", "tool", |batch, _, _| {
+            Ok(rendered(batch))
+        })
+        .unwrap();
+    let batch = store.session_steers("session", 0, 32).unwrap().items[0]
+        .batch_id
+        .clone()
+        .unwrap();
+    store.confirm_session_steers(&adapter, &[batch], 2).unwrap();
+    // Pending for no Session when the next one starts.
+    save("unread", "Never read");
+    store.test_session("next", &crate::session_record::new_artifact_key());
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE steers SET created_at=unixepoch()-10;
+            UPDATE agent_sessions SET cwd='/task',created_at=unixepoch()-5 WHERE id='next';",
+        )
+        .unwrap();
+    let texts = |page: crate::steer::SessionSteerPage| {
+        page.items
+            .into_iter()
+            .map(|item| item.steer.text)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts(store.session_steers("next", 0, 32).unwrap()),
+        ["Never read"]
+    );
+    save("later", "Saved after it started");
+    let page = store.session_steers("next", 0, 32).unwrap();
+    assert_eq!(page.pending, 2);
+    assert_eq!(texts(page), ["Never read", "Saved after it started"]);
 }
 
 #[test]
@@ -660,41 +706,29 @@ fn correction_during_render_cancels_the_superseded_batch_before_write() {
         .save_session_steer("session", "Author", "Independent direction")
         .unwrap();
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "one",
-            |_, _, _| {
-                save_in(
-                    &store.conn.lock().unwrap(),
-                    ("session", "session"),
-                    "source",
-                    "2",
-                    &Author::Named("Author".into()),
-                    "Correction",
-                )
-                .unwrap();
-                Ok(rendered("obsolete rendered text"))
-            },
-            |_| panic!("superseded direction escaped"),
-        )
+        .emit_session_steers(&adapter, "native", "one", |_, _, _| {
+            save_in(
+                &store.conn.lock().unwrap(),
+                ("session", "session"),
+                "source",
+                "2",
+                &Author::Named("Author".into()),
+                "Correction",
+            )
+            .unwrap();
+            Ok(rendered("obsolete rendered text"))
+        })
         .unwrap();
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.pending, 2);
     assert_eq!(page.items[0].steer, retained);
     assert_eq!(page.items[1].steer.text, "Correction");
     store
-        .emit_session_steers(
-            &adapter,
-            "native",
-            "two",
-            |_, rows, _| {
-                assert_eq!(rows[0], retained);
-                assert_eq!(rows[1].text, "Correction");
-                Ok(rendered("corrected text"))
-            },
-            |_| Ok(()),
-        )
+        .emit_session_steers(&adapter, "native", "two", |_, rows, _| {
+            assert_eq!(rows[0], retained);
+            assert_eq!(rows[1].text, "Correction");
+            Ok(rendered("corrected text"))
+        })
         .unwrap();
 }
 
@@ -738,19 +772,15 @@ fn a_cleared_conversation_becomes_the_selection_and_receives_steers() {
     );
     let emitted = store
         .with_provider_context(&adapter, "cleared", NativeBoundary::Turn, || {
-            store.emit_session_steers(
-                &adapter,
-                "cleared",
-                "UserPromptSubmit:one",
-                |_, _, _| Ok(rendered("payload")),
-                |_| Ok(()),
-            )
+            store.emit_session_steers(&adapter, "cleared", "UserPromptSubmit:one", |_, _, _| {
+                Ok(rendered("payload"))
+            })
         })
         .unwrap();
-    assert!(emitted);
+    assert!(emitted.is_some());
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
 }
 

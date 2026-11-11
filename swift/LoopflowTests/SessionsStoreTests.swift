@@ -122,6 +122,22 @@ struct SessionsStoreTests {
         #expect(item(store, "main")?.agentOverride == nil)
     }
 
+    @Test("A Task workspace reopens its Session by id with the Task beside it, so it resumes managed")
+    func taskWorkspaceReopenNamesTheTask() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args == ["session", "resume", "--reveal-existing", "main", "--task", "task_1", "--prepare", "--json"] else {
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+            return session(id: "main", state: "closed")
+        }, work: .task(id: "task_1"))
+        let original = try #require(records([session(id: "main", state: "active")]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        await store.refresh("main")
+        #expect(item(store, "main")?.state == .prepared)
+    }
+
     @Test("Reset restarts the same Session with a fresh launch")
     func resetRestartsSameSession() async throws {
         let submitted = OSAllocatedUnfairLock<String?>(initialState: nil)

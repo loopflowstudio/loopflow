@@ -139,6 +139,8 @@ fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own
     support::bind_task_planning(&repo);
     repo.create_branch("agent-proof");
     let home = tempfile::tempdir().unwrap();
+    let _server =
+        loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let _env = support::EnvGuard::with_home(
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -500,6 +502,8 @@ fn runtime_and_exported_occurrences_resolve_unsets_and_invocation_overrides() {
 fn exercise_live_occurrence_preferences(overrides: bool) {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _server =
+        loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let _env = support::EnvGuard::with_home(
         &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
@@ -878,6 +882,8 @@ impl Drop for TaskCheckouts<'_> {
 fn session_and_resume_choices_do_not_select_existing_or_new_task_workers() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let _server =
+        loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let claude = r#"#!/usr/bin/python3
 import json
 import os

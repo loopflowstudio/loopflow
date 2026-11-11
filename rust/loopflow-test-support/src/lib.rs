@@ -104,6 +104,63 @@ pub fn lf_binary() -> &'static str {
     })
 }
 
+/// The Machine server under a fixture home, stopped when dropped. Task and
+/// Wave launches start their agent only once it answers; a fixture without one
+/// would have `lf` ask the OS supervisor for a server under the temporary home.
+#[derive(Debug)]
+pub struct MachineServer(std::process::Child);
+
+impl MachineServer {
+    /// Run `lf server run` for `home` and wait until it is ready.
+    pub fn start(lf: &str, home: &Path) -> Self {
+        std::fs::create_dir_all(home).expect("create the fixture's Machine home");
+        let command = |args: &[&str]| {
+            let mut command = Command::new(lf);
+            command
+                .env_clear()
+                .env("HOME", home)
+                .env("LF_HOME", home)
+                .env("LF_BIN", lf)
+                .env("PATH", "/usr/bin:/bin")
+                .env("HTTPS_PROXY", "http://127.0.0.1:1")
+                .env("HTTP_PROXY", "http://127.0.0.1:1")
+                .args(args)
+                .stdin(std::process::Stdio::null());
+            command
+        };
+        let server = Self(
+            command(&["server", "run"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("start the fixture's Machine server"),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            let status = command(&["server", "status"])
+                .output()
+                .expect("read the fixture's Machine server status");
+            let status: serde_json::Value =
+                serde_json::from_slice(&status.stdout).unwrap_or_default();
+            if status["ready"] == true {
+                return server;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Machine server did not start: {status}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for MachineServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 #[derive(Debug)]
 pub struct TestRepo {
     bare: TempDir,

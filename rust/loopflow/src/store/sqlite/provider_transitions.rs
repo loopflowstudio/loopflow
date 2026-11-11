@@ -69,28 +69,52 @@ fn decode(payload: &str, at: i64) -> StoreResult<ProviderTransition> {
     })
 }
 
-pub(crate) fn observe_in(
+fn live_process(
     conn: &Connection,
     session: &str,
-    thread: &str,
-    source: &str,
-) -> StoreResult<()> {
-    let process: Option<crate::id::AgentProcessId> = conn
+) -> StoreResult<Option<crate::id::AgentProcessId>> {
+    Ok(conn
         .query_row(
             "SELECT p.id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
          WHERE s.id=?1 AND p.pid IS NOT NULL AND p.completed_at IS NULL",
             [session],
             |row| row.get(0),
         )
-        .optional()?;
-    let Some(process) = process else {
+        .optional()?)
+}
+
+fn is_latest(
+    previous: Option<&ProviderTransition>,
+    process: &crate::id::AgentProcessId,
+    thread: &str,
+) -> bool {
+    previous.is_some_and(|p| p.to_agent_process == *process && p.to_provider_session == thread)
+}
+
+/// Whether [`observe_in`] would record nothing: no live provider, or `thread`
+/// in it is already the latest transition.
+pub(crate) fn observed_in(conn: &Connection, session: &str, thread: &str) -> StoreResult<bool> {
+    let Some(process) = live_process(conn, session)? else {
+        return Ok(true);
+    };
+    Ok(is_latest(
+        latest_in(conn, session)?.as_ref(),
+        &process,
+        thread,
+    ))
+}
+
+pub(crate) fn observe_in(
+    conn: &Connection,
+    session: &str,
+    thread: &str,
+    source: &str,
+) -> StoreResult<()> {
+    let Some(process) = live_process(conn, session)? else {
         return Ok(());
     };
     let previous = latest_in(conn, session)?;
-    if previous
-        .as_ref()
-        .is_some_and(|p| p.to_agent_process == process && p.to_provider_session == thread)
-    {
+    if is_latest(previous.as_ref(), &process, thread) {
         return Ok(());
     }
     let lineage: Option<String> = conn.query_row(

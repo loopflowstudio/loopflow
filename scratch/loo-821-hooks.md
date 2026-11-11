@@ -160,13 +160,12 @@ Remaining:
   direct" (above).
 - Gate: the suites under Checks marked gate.
 - `limit` / `record-limit` still open the store, on a usage limit only.
-- An interactive resume of an existing conversation (`lf resume`, Desktop
-  reopening) runs no launch check: it gets every hook either way, and the
-  resume path carries no command flag down to the native launch.
-  QA, November 11: `lf -i --task <id> resume` with the server stopped ran
-  the Task's conversation without starting it; a steer posted meanwhile
-  waited and the start hook logged one gap. `resume_session_with_env`
-  resolves its config with `Cli::default()` in the process the owner execs.
+- Desktop opening a Task's conversation is not managed. It prepares with
+  `session resume --prepare --task X`, then runs the record's `open_argv`,
+  which `surface` builds per Session as `lf session resume <id>`: a Session
+  target, so bare. Making it managed means `open_argv` names the Task, which
+  would decide managed from the Session's row (see `scratch/questions.md`).
+  Interactive resumes keep every hook either way.
 
 Choices taken (reversible):
 
@@ -292,6 +291,20 @@ QA fixes (November 11; both were on main before this branch):
   on every harness.
 - `store::sqlite::steers::tests::a_new_task_session_skips_steers_an_earlier_session_read`,
   `context_block::tests::repeated_requests_over_unchanged_files_write_one_manifest` — pass
+
+Built (November 11): a Task or Wave resume is managed. QA that day ran
+`lf -i --task <id> resume` with the server stopped: the conversation ran
+unrecorded, a steer waited, the start hook logged a gap. `resume_session_with_env`
+now takes `managed` from the resume command (`session.rs::resumes_work`: a Task
+or Wave target, or a Task-run step) through `human_session::open`,
+`open_without_replacing` and `resume_native_session`, as `run::resume` already
+did for `-b`. Bare `lf resume <session>` stays bare.
+
+Checks (November 11, managed resume):
+
+- `--test integration session_steers::an_interactive_task_resume_with_no_machine_server_fails_naming_it` — passes; fails without `config.managed = managed` (the resume succeeds)
+- `--lib -- ops::human_session:: lf::commands::util::tests::` — 53 pass; `session_cli_tests::session_cli_uses_one_truthful_resolution_contract` — passes
+- Gate: `test(session_steers::) | test(session_cli_tests::) | test(context_launch_tests::) | test(ops::human_session::)`, clippy
 
 Checks (November 11, managed by command and boundary queries):
 

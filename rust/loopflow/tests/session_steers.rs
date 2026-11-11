@@ -342,6 +342,76 @@ touch \"$LF_HOME/provider-started\"\n",
     assert!(!home.path().join("provider-started").exists());
 }
 
+/// A Task resume is managed as its launch was: `lf -i --task X resume` of the
+/// Task's recorded Claude conversation, after the server stopped, fails naming
+/// it instead of continuing unrecorded.
+#[test]
+fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    connect_fixture_account(home.path(), &store);
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+    fs::write(
+        bin.join("claude"),
+        "#!/bin/sh
+[ \"$1\" = --version ] && { echo fixture; exit 0; }
+for arg in \"$@\"; do [ \"$arg\" = --resume ] && touch \"$LF_HOME/provider-resumed\"; done
+exit 0\n",
+    )
+    .unwrap();
+    let lf = home.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then\n  echo 'no supervisor here' >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    for path in [bin.join("security"), bin.join("claude"), lf.clone()] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", &lf)
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .env("USER", "fixture")
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .current_dir(repo.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
+    let launched = run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    drop(server);
+    let output = run(&["-i", "--task", "INF-123", "resume"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(!stderr.contains("Nothing to resume here"), "{stderr}");
+    assert!(
+        stderr.contains("Loopflow server is not running") && stderr.contains("lf install server"),
+        "{stderr}"
+    );
+    assert!(!home.path().join("provider-resumed").exists());
+}
+
 #[test]
 fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
     use loopflow::id::LfProcessId;

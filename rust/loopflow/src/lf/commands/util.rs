@@ -74,21 +74,32 @@ pub(crate) fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
+    managed: bool,
 ) -> Result<()> {
-    resume_session_with_env(artifact_key, Some(provider_session), &BTreeMap::new(), None)
+    resume_session_with_env(
+        artifact_key,
+        Some(provider_session),
+        &BTreeMap::new(),
+        None,
+        managed,
+    )
 }
 
+/// Continue a recorded conversation. `managed` is the resume command's: a
+/// Task or Wave resume starts only beside the Machine server.
 pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
+    managed: bool,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
+    config.managed = managed;
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -1354,6 +1365,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
+                    false,
                 )
             };
             if index % 2 == 0 {

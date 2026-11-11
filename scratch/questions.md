@@ -90,3 +90,11 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   load it will carry") appeared uncommitted in this checkout from another
   Session during publish; `lf sync` checkpointed it into this branch. Kept in
   PR #1879; move it to its own PR if it shouldn't land with LOO-821.
+
+Open (November 11, managed resume): Desktop opens a Task's conversation by
+running `lf session resume <id>` (`human_session_argv`, built per Session in
+`surface`), so it stays bare after `lf resume --task` became managed. Choices:
+(a) `open_argv` carries `--task`/`--wave` when the prepare command named one,
+so the record differs by how it was asked for; (b) Desktop runs
+`lf --task X session resume <id>`, which `SessionTarget::from_selectors` refuses
+today ("select one Session, Task or Wave target"). Left as is in this pass.

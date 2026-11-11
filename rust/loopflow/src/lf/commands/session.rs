@@ -667,12 +667,8 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
+    let managed = resumes_work(&target);
     if let Some(message) = message {
-        let managed = matches!(
-            target,
-            crate::ops::human_session::SessionTarget::Task(_)
-                | crate::ops::human_session::SessionTarget::Wave(_)
-        ) || crate::journal::task_run_step();
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
@@ -696,9 +692,19 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
+        managed,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
+}
+
+/// A Task or Wave resume is managed, as `Cli::names_work` is for a launch.
+fn resumes_work(target: &crate::ops::human_session::SessionTarget<'_>) -> bool {
+    matches!(
+        target,
+        crate::ops::human_session::SessionTarget::Task(_)
+            | crate::ops::human_session::SessionTarget::Wave(_)
+    ) || crate::journal::task_run_step()
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -731,6 +737,7 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
+    managed: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -743,11 +750,21 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
+            managed,
         )
         .await;
     }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
+    crate::ops::human_session::open(
+        store,
+        directory,
+        &id,
+        fork,
+        !connection.prepare,
+        json,
+        managed,
+    )
+    .await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -766,7 +783,8 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, connection, *fork, false).await
+                let managed = resumes_work(&target);
+                reopen(&store, directory, target, connection, *fork, false, managed).await
             }
             SessionCommand::New {
                 id,

@@ -32,6 +32,39 @@ Settled by the design (concept review, November 10):
   observer like `__codex-observe`, not a turn-boundary hook: it moves with
   "Observers become server registrations" (`server-first.md`), not here.
 
+Concept review with a person, November 11 (`scratch/concept-review.html`).
+Items 2 and 3 are unanswered; the "Settled by the design" entries on the same
+subjects were written headless and are open again.
+
+1. Which launches need the server. Shown the two rows where the built check
+   and `server-first.md`'s managed rule differ (`lf implement` typed in a Task
+   checkout; a subagent `lf research` started by a Task's agent), Jack Heart:
+   "I think these are both ok", then "no i mean 1b -- i think its ok that
+   these dont get hooks". 1b on the page: launches through Task and Wave
+   commands and Desktop need the server; a plain `lf <skill>` in a Task
+   checkout runs without one and still counts toward the Task. Not built:
+   `require_server_for_work` still asks `session_has_work`, and the plan's one
+   managed function is unwritten. Today the start and compact hooks also print
+   the context block (`context.rs::emit_block`), so a launch with no hooks
+   needs its context in the launch prompt first; `server-first.md` has that as
+   "Bare launches drop their hooks", after transcript telemetry.
+   Told that, Jack Heart: "these should be lighter weight." and "if its a
+   subagent the agent driving can steer". Implement next: one managed
+   function (Task and Wave commands, Desktop); managed launches get hooks and
+   the server check; bare launches get neither, with the context block in
+   their launch prompt. A bare run's Session still carries its checkout's
+   Task. Lost until transcript telemetry: a bare run's turn records and its
+   context after a compaction.
+2. A stale server passes the launch check (hello) and then answers no
+   boundary (QA, beside installed 0.15.2). No server and a stale server leave
+   the same conversation; only one refuses. Choices: as built, refuse both, or
+   start both with one line at launch naming the fix.
+3. Steer confirmation puts every steer through `uncertain` for a tool
+   interval. Choices: keep it and show that state as `sent`, or have the hook
+   send its deadline so a late server hands over nothing (no `.printed`, no
+   `waiting`; a steer is lost only when a hook dies between read and print).
+   "arrive twice" was said when the choice was lost-until-retried or twice.
+
 Remaining:
 
 - Demo with a real Claude turn in a Task Session. QA (`scratch/qa.html`) ran

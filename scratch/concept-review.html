@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-821 concept review</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --ink: #1d1c1a; --soft: #5f5b54; --rule: #dedad2;
+    --built: #f1eee7; --prop: #eaf1ea; --prop-edge: #3f7d4e; --warn: #9a4a12;
+    --code: #efece4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --ink: #e9e6df; --soft: #a39e94; --rule: #34322d;
+      --built: #201f1c; --prop: #1a261d; --prop-edge: #6fb07e; --warn: #e0965a;
+      --code: #25241f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.55rem; line-height: 1.25; margin: 0 0 6px; }
+  h2 { font-size: 1.15rem; margin: 40px 0 10px; }
+  h3 { font-size: 1rem; margin: 22px 0 6px; }
+  p { margin: 0 0 12px; }
+  .meta { color: var(--soft); font-size: .88rem; margin-bottom: 24px; }
+  code, pre { font: .86em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: var(--code); padding: 1px 4px; border-radius: 3px; }
+  pre { background: var(--code); padding: 10px 12px; border-radius: 6px;
+    overflow-x: auto; margin: 0 0 12px; }
+  pre code { background: none; padding: 0; }
+  .lead { font-size: 1.05rem; }
+  .scroll { overflow-x: auto; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; min-width: 520px; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 9px;
+    border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; }
+  .no { color: var(--warn); font-weight: 600; }
+  .built, .prop { padding: 12px 14px; border-radius: 6px; margin: 0 0 14px; }
+  .built { background: var(--built); border-left: 3px solid var(--rule); }
+  .prop { background: var(--prop); border-left: 3px dashed var(--prop-edge); }
+  .built > :last-child, .prop > :last-child { margin-bottom: 0; }
+  .tag { font-weight: 600; }
+  ol.q > li { margin-bottom: 18px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+  ol.q ol li { margin-bottom: 6px; }
+  blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--rule);
+    color: var(--soft); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Which conversations depend on the Machine server?</h1>
+<p class="meta">LOO-821 · concept review at the demo step · November 11, 2026 · PR #1879<br>
+Built from <code>scratch/loo-821-hooks.md</code>, <code>scratch/questions.md</code>,
+<code>scratch/qa.html</code>, <code>docs/dev/server-first.md</code>,
+<code>server/README.md</code>, <code>server/boundary.rs</code>,
+<code>lf/commands/context.rs</code>, <code>harness/agent_process.rs</code></p>
+
+<p class="lead">The branch answers that question three different ways, and two of
+them contradict each other in the same PR. Question 1 picks one. Questions 2 and 3
+are smaller and follow from it.</p>
+
+<h2>What people do, as built</h2>
+<div class="scroll">
+<table>
+<tr><th>You do</th><th>What you have to know</th><th>What changes state</th></tr>
+<tr><td><code>lf task steer LOO-1 "…"</code></td>
+  <td>It reaches the agent at its next prompt or tool. If the server is down it waits.</td>
+  <td><code>task.steer</code> saves it; a hook's <code>session.boundary</code> hands it over; the next one confirms it</td></tr>
+<tr><td><code>lf task run</code>, <code>lf resume --task</code>, Desktop</td>
+  <td>The agent starts only beside the server. A launch with none runs <code>lf install server</code>, and fails if that doesn't bring one up.</td>
+  <td>hello on <code>machine.sock</code>, then a launchd or systemd job</td></tr>
+<tr><td><code>lf implement</code> typed in a Task's checkout, or run there by the Task's agent</td>
+  <td>Same as the row above: the Session carries the Task.</td>
+  <td>same</td></tr>
+<tr><td><code>lf implement</code>, <code>lf --machine M implement</code>, no Task</td>
+  <td>Runs anywhere. With no server its turns aren't recorded and <code>logs/lf.log</code> gets one gap line.</td>
+  <td><code>session.boundary</code>, unanswered</td></tr>
+<tr><td><code>lf session steers</code>, <code>lf session history</code></td>
+  <td>A steer is <code>pending</code>, <code>uncertain</code>, then <code>emitted</code>. Missed turns are one <code>store-gap</code> entry.</td>
+  <td>reads</td></tr>
+</table>
+</div>
+
+<h2>The mismatch</h2>
+<p>Three rules decide how a conversation relates to the server. Each draws its line
+in a different place.</p>
+<div class="scroll">
+<table>
+<tr><th>Launch</th><th>Gets hooks</th><th>Server required (built)</th><th>Managed (<code>server-first.md</code>)</th></tr>
+<tr><td><code>lf task run</code> step, <code>resume --task</code>, Desktop</td><td>yes</td><td>yes</td><td>yes</td></tr>
+<tr><td><code>lf implement</code> typed in a Task checkout</td><td>yes</td><td>yes</td><td class="no">no: "stays bare"</td></tr>
+<tr><td>Subagent <code>lf research</code> started by a Task's agent</td><td>yes</td><td>yes</td><td class="no">no</td></tr>
+<tr><td><code>lf implement</code>, no Task</td><td>yes</td><td>no</td><td>no</td></tr>
+</table>
+</div>
+<p><code>docs/dev/server-first.md</code> on this branch now says both things. The
+managed rule, written in LOO-819:</p>
+<blockquote>A launch is managed when it comes through a Task or Wave command or from
+Desktop. A bare <code>lf</code> typed inside a Task's checkout stays bare and records the
+Task as its ancestry. One function answers this for every launch path.</blockquote>
+<p>And the line this Task added, a few paragraphs away:</p>
+<blockquote>A Task or Wave launch starts the server before its agent and fails when none
+comes up.</blockquote>
+<p>The code implements the second by asking the store whether the Session has a Task
+or Wave (<code>session_has_work</code>), which is true for the middle two rows. The
+plan's "one function" does not exist yet.</p>
+
+<h3>One interaction, with its failure</h3>
+<p>An agent is working LOO-900 on <code>mini</code>. The server there has stopped. The
+agent runs <code>lf -b research</code> to get a second opinion.</p>
+<div class="built">
+<p><span class="tag">Built.</span> The subagent's launch finds no server and runs
+<code>lf install server</code> on <code>mini</code>, registering a systemd unit, and waits
+for it. If it comes up, the subagent runs. If not, the tool call fails with
+"Loopflow server is not running, and Task and Wave work needs it". A research
+subagent that receives no steers and records nothing mid-run has been stopped by
+lf's own state.</p>
+</div>
+<div class="prop">
+<p><span class="tag">Proposed.</span> The subagent runs. It was not started by a Task
+command, so it is bare. Its hooks find no server, exit in a third of a second and
+leave one gap line. Its Session still carries LOO-900, so its cost counts there.
+<code>lf task run LOO-900</code> on <code>mini</code> is unchanged: it needs the server
+and starts it.</p>
+</div>
+<p>What survives either way: steers to the Task's own conversations, turn records
+for them, and "<code>lf --machine M &lt;skill&gt;</code> works with no server". What the
+proposal changes on purpose: a bare run in a Task checkout on a Machine with no
+server gets no launch error, so a steer aimed at it waits silently until a server
+answers. On a Machine whose server is running, the two behave the same.</p>
+
+<h3>What the proposal looks like in the docs</h3>
+<div class="prop">
+<p><span class="tag">Proposed</span>, replacing the added line in <code>server-first.md</code>
+and the troubleshooting entry's last paragraph:</p>
+<pre><code>lf task run LOO-900          # needs the Machine server; starts it
+lf resume --task LOO-900     # same
+lf implement                 # no server needed, in a Task's checkout or not</code></pre>
+<p>Agents started by a Task or Wave command, or from Desktop, start beside the
+Machine server. Anything you or an agent start with a plain <code>lf &lt;skill&gt;</code>
+runs without one, and still counts toward the Task whose checkout it ran in.</p>
+</div>
+
+<h2>Two smaller things</h2>
+
+<h3>A launch check that a stale server passes</h3>
+<p>The check asks "does a server say hello?". The thing it protects is "will
+<code>session.boundary</code> be answered?". QA ran branch hooks beside the installed
+0.15.2 server: the launch passed, then every boundary logged "this server has no
+operation <code>session.boundary</code>". So no server refuses the launch, and a
+server that can't take boundaries doesn't, though both leave the conversation in
+the same state. The check uses hello on purpose: <code>lf server status</code> reports
+"not ready" whenever the server runs another executable, which would refuse every
+launch from a branch build
+(<code>resumed_session_completes_turns_after_build_replacement_and_viewer_return</code>).</p>
+
+<h3>Steer confirmation's moving parts</h3>
+<p>"Arrive twice" is built as: an answered batch sits in <code>uncertain</code> until the
+conversation's next hook lists it in <code>printed</code>, read from a <code>.printed</code>
+file beside the delivery file; <code>waiting</code> in the answer covers two tools finishing
+together. Every steer now passes through <code>uncertain</code> for one tool interval, so
+<code>lf session steers</code> shows that word for a healthy delivery.</p>
+<p>The case this exists for is a server that answers after the hook gave up. There
+is a second way to close it: the hook sends its deadline, and a server that reaches
+the request too late hands over nothing, so the steer stays <code>pending</code> for the
+next boundary. That needs no <code>.printed</code> file, no <code>waiting</code> and no
+in-between state, and never duplicates. Its counterexample: a hook that reads the
+answer and dies before printing loses that steer until <code>--retry</code>, where
+confirmation delivers it again.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Which launches need the Machine server?
+  <ol>
+  <li>Every Session that carries a Task or Wave, including a plain <code>lf &lt;skill&gt;</code>
+      in a Task checkout and subagents (built). <code>server-first.md</code>'s managed rule
+      then changes to match.</li>
+  <li>Launches through Task and Wave commands and Desktop, the managed rule as written.
+      A plain <code>lf &lt;skill&gt;</code> in a Task checkout runs without a server and still
+      counts toward the Task. The plan's one function gets written here and the launch
+      check calls it.</li>
+  </ol></li>
+<li>When a launch that needs the server can't get one that answers
+    <code>session.boundary</code>:
+  <ol>
+  <li>Refuse when none comes up; start without a word beside an older one (built).</li>
+  <li>Refuse in both cases, naming <code>lf install</code>. A branch <code>lf</code> beside
+      the installed server then can't launch Task work until the server is updated.</li>
+  <li>Start in both cases, after trying <code>lf install server</code>, and print one line
+      at launch: steers and turn records wait for the server, and the command that
+      fixes it. Nothing refuses.</li>
+  </ol></li>
+<li>Steer delivery:
+  <ol>
+  <li>Keep confirmation (built), and show the in-between state in
+      <code>lf session steers</code> as <code>sent</code> rather than <code>uncertain</code>.</li>
+  <li>Replace it with the deadline in the request: no duplicates, fewer parts, and a
+      steer is lost until <code>--retry</code> only when a hook dies between reading and
+      printing.</li>
+  </ol></li>
+</ol>
+
+</main>
+</body>
+</html>

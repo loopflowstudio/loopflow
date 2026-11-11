@@ -7,16 +7,16 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
-Inspected PR #1812 at `51bbe6e7232a46858b308e778487762e2332cdab`: both
+Inspected PR #1812 at `3f1a7d434736779139695ba4c91ebf8245c4e121`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
 Only bulk tickets have direct store coverage; terminal consume-on-attempt
 coverage is missing. Background expiry already releases abandoned bulk
 reservations.
 The server tree is unchanged from the previously inspected
-`f3ff3041d0718ddc16dad51bc9a384c44ab2fe9a`.
+`51bbe6e7232a46858b308e778487762e2332cdab`.
 
-At November 11 01:03 UTC, GitHub reports PR #1812 open and unmerged at
+At November 11 02:13 UTC, GitHub reports PR #1812 open and unmerged at
 that revision, with no auto-merge. Freshly fetched main remains
 `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
 or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.

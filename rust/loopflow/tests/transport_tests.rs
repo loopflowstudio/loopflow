@@ -1033,6 +1033,8 @@ fn session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence() 
         "-c",
         "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
     ]);
+    // The Session retains its owner after exit so the final hold remains readable.
+    fixture.session(&owner);
     assert_eq!(viewer_hold(&fixture, &owner), None);
     // A controlling and a passive (hidden, unfocused) viewer both hold.
     let mut controller = fixture.viewer(&owner, true);

@@ -5713,20 +5713,24 @@
       "type": "string"
     },
     "OpenRoute": {
-      "description": "Destinations this invocation would try, in order, from its own context.",
+      "description": "The selected host, or no host when focusing a recorded view.",
       "properties": {
-        "hosts": {
-          "items": {
-            "$ref": "#/$defs/OpenHost"
-          },
-          "type": "array"
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenHost"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reason": {
           "type": "string"
         }
       },
       "required": [
-        "hosts",
+        "host",
         "reason"
       ],
       "type": "object"

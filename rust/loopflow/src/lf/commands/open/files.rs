@@ -15,14 +15,14 @@ struct FilePresentation<'a> {
 
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Result<()> {
     anyhow::ensure!(
-        matches!(args.host, OpenHost::Auto | OpenHost::Desktop),
+        matches!(args.selection.host, OpenHost::Auto | OpenHost::Desktop),
         "File presentation uses an attached Desktop Files view; no host was opened"
     );
-    let (targets, _) = match super::targets(cli, args) {
-        Ok(targets) => targets,
+    let target = match super::target(cli, &args.selection) {
+        Ok(target) => target,
         Err(_)
-            if args.host == OpenHost::Auto
-                && args.url.is_none()
+            if args.selection.host == OpenHost::Auto
+                && args.selection.url.is_none()
                 && cli.task.is_none()
                 && cli.wave.is_none()
                 && !cli.selects_repository()
@@ -32,12 +32,9 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         }
         Err(error) => return Err(error),
     };
-    let target = targets
-        .first()
-        .context("File presentation has no selected Work")?;
     let cwd = match &target.task {
         Some(task) => task.worktree()?.clone(),
-        None if args.url.is_none() => {
+        None if args.selection.url.is_none() => {
             let directory = std::env::current_dir()?;
             crate::repo::discover_repo_root(&directory)?.unwrap_or(directory)
         }
@@ -110,7 +107,7 @@ fn report(
         host,
         paths,
     };
-    if cli.json || args.json {
+    if cli.json || args.selection.json {
         println!("{}", serde_json::to_string(&result)?);
     } else if let Some(host) = host {
         for path in result.paths {

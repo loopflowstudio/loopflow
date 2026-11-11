@@ -404,7 +404,7 @@ final class SessionsWorkspace {
     let pages = BrowserPages()
     private var surfaceClosed: AnyCancellable?
 
-    private var retainedStore: SessionsStore?
+    private(set) var retainedStore: SessionsStore?
 
     func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
         if let retainedStore {
@@ -852,11 +852,14 @@ final class SessionsWorkspaceRegistry {
     func inspect() -> [DesktopWorkspaceInspection] {
         workspaces.values.sorted { ($0.key.repository, $0.key.kind.rawValue, $0.key.id) < ($1.key.repository, $1.key.kind.rawValue, $1.key.id) }.map { workspace in
             let panes = workspace.multiplexer
+            let repository = WorkWorkspaceKey(repository: workspace.key.repository, kind: .repository, id: workspace.key.repository)
+            let sessions = workspaces[repository]?.retainedStore
             return DesktopWorkspaceInspection(work: workspace.key, title: workspace.title,
                 isOpen: openWork.contains(workspace.key), selected: selectedWork == workspace.key,
                 layout: DesktopLayoutInspection(panes.layout,
                     surface: { content in content.terminal.flatMap { surfaces.surfaceIncarnation(for: $0) } },
-                    commands: { content in content.terminal.flatMap { surfaces.commandStatus(for: $0) } }),
+                    commands: { content in content.terminal.flatMap { surfaces.commandStatus(for: $0) } },
+                    attachment: { id in sessions?.attachment(id) ?? .failed }),
                 focusedPane: panes.focusedPaneId,
                 zoomedPane: panes.zoomedPaneId, hiddenPanes: panes.collapsedPaneIds.sorted())
         }
@@ -1051,6 +1054,15 @@ struct SessionItem: Identifiable, Equatable {
     var launchId = UUID()
     var lastScreen: String?
 
+    var attachment: DesktopOpening.Status {
+        switch state {
+        case .opening, .prepared: .opening
+        case .live: .usable
+        case .elsewhere: .elsewhere
+        case .pending, .failed, .unavailable, .ended: .failed
+        }
+    }
+
     var id: String { record.id }
     var presentationProvider: String? { agentOverride ?? record.provider }
 
@@ -1182,6 +1194,13 @@ final class SessionsStore {
                     next[index].agentOverride = nil
                 }
                 if case .opening = next[index].state { continue }
+                if observedState == .live {
+                    // A retained surface does not repair its failed attachment.
+                    switch next[index].state {
+                    case .failed, .unavailable, .ended: continue
+                    default: break
+                    }
+                }
                 if observedState == .pending {
                     switch next[index].state {
                     case .unavailable:
@@ -1239,7 +1258,9 @@ final class SessionsStore {
     }
 
     func adoptPreparation(_ record: SessionRecord, intent: SessionOpenIntent = .start) {
-        guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
+        guard let index = _index(record.id) else { return }
+        if sessions[index].state != .pending, attachment(record.id) == .failed { release(record.id) }
+        guard localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
         case .pending, .failed, .unavailable, .ended, .elsewhere:
             sessions[index].adoptPreparation(record, intent: intent)
@@ -1267,10 +1288,21 @@ final class SessionsStore {
 
     func select(_ id: String, intent: SessionOpenIntent = .reveal) async {
         guard let index = _index(id) else { return }
+        if sessions[index].state != .pending, attachment(id) == .failed { release(id) }
         if localTerminal(for: sessions[index].record) != nil {
-            if sessions[index].state == .prepared { return }
-            sessions[index].state = .live
-            return
+            switch sessions[index].state {
+            case .failed, .unavailable, .ended:
+                release(id)
+            case .opening, .prepared, .live:
+                return
+            case .pending, .elsewhere:
+                // An agent in a retained shell owns its own connection.
+                if case .shell = localTerminal(for: sessions[index].record) {
+                    sessions[index].state = .live
+                    return
+                }
+                release(id)
+            }
         }
         if case .live = sessions[index].state {
             sessions[index].state = sessions[index].record.heldElsewhere ? .elsewhere : .pending
@@ -1341,6 +1373,20 @@ final class SessionsStore {
         if surfaces.hasSurface(session) { return session }
         return record.terminalIds.lazy.map { TerminalIdentity.shell($0, machineId: machineId) }
             .first(where: surfaces.hasSurface)
+    }
+
+    func connectionReading(_ id: String) -> ServerConnectionReading? {
+        guard let item = sessions.first(where: { $0.id == id }),
+              let machine = item.record.workspace?.machineId else { return nil }
+        return surfaces.connectionReading(for: .session(id, machineId: machine))
+    }
+
+    func attachment(_ id: String) -> DesktopOpening.Status? {
+        guard let item = sessions.first(where: { $0.id == id }) else { return nil }
+        switch item.state {
+        case .failed, .unavailable, .ended: return .failed
+        default: return connectionReading(id)?.attachment ?? item.attachment
+        }
     }
 
     func recordPaneLive(_ id: String) {

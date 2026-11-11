@@ -210,8 +210,10 @@ turn and `null` while it works. `lf resume <id>` opens it.
 
 `state` is `running`, `asking` (stopped on a question to you), `ended` or
 `interrupted`; `ended_at` and `usage` are `null` until it ends. A conversation
-read from its transcript is `available` whenever its turn is not `running`. `source` says where the reading came from: `hooks` for a
-turn boundary lf recorded, `transcript` for the provider's own transcript.
+read from its transcript is `available` whenever its turn is not `running`.
+`source` says where the reading came from: `stream` for a turn boundary lf
+recorded from the provider's live stream, `transcript` for the provider's own
+transcript.
 A live conversation lf never launched lists with `"raw": true` and its provider
 conversation ID as `id`.
 

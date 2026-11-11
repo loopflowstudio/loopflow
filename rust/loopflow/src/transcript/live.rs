@@ -392,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn hooks_turns_read_their_boundaries() {
+    fn stream_turns_read_their_boundaries() {
         let turn = SessionTurn::from_stream(Some(1_794_327_900), None, None);
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00Z"));

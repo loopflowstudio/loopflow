@@ -419,12 +419,15 @@ fn emit_context(
     adapter: Option<&crate::steer::SteerAdapter>,
 ) -> Result<()> {
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let identity = (moment != crate::context_block::ContextMoment::Tool)
-        .then(|| session_identity(&delivery, adapter))
-        .flatten();
+    // Start and compaction name the conversation before its files, so an agent
+    // never reads its environment to learn who it is.
+    let identity = match (moment, adapter) {
+        (crate::context_block::ContextMoment::Tool, _) | (_, None) => String::new(),
+        (_, Some(adapter)) => session_identity(&delivery.home, adapter),
+    };
     let render = |prefix: &str| -> crate::store::StoreResult<String> {
         delivery
-            .block_with_prefix(moment, identity.as_ref(), prefix)
+            .block_with_prefix(moment, &format!("{prefix}{identity}"))
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
     };
     let write = |text: &str| -> crate::store::StoreResult<()> {
@@ -451,31 +454,30 @@ fn emit_context(
     result
 }
 
-/// The Session a hook runs for, from the provider context every native launch
-/// installs, and its Task when it has exactly one. A store it cannot read only
-/// drops the Task line.
-fn session_identity(
-    delivery: &crate::context_block::ContextDelivery,
-    adapter: Option<&crate::steer::SteerAdapter>,
-) -> Option<crate::context_block::SessionIdentity> {
-    let session: crate::id::LfSessionId = adapter?.session.as_str().into();
-    let task = hook_store(&delivery.home).and_then(|store| {
-        match store.session_task_ids(session.as_str())?.as_slice() {
+/// The lines naming the Session a hook runs for, from the provider context
+/// every native launch installs, and its Task when it has exactly one. A store
+/// it cannot read only drops the Task line.
+fn session_identity(home: &std::path::Path, adapter: &crate::steer::SteerAdapter) -> String {
+    let session = adapter.session.as_str();
+    let task =
+        hook_store(home).and_then(|store| match store.session_task_ids(session)?.as_slice() {
             [task] => store.task(task),
             _ => Ok(None),
-        }
-    });
-    let task = task.unwrap_or_else(|error| {
-        tracing::warn!(%error, "Task identity unavailable for the context block");
-        None
-    });
-    Some(crate::context_block::SessionIdentity {
-        session,
-        task: task.map(|task| crate::context_block::TaskName {
-            identifier: task.identifier,
-            title: task.title,
-        }),
-    })
+        });
+    let task = task
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "Task identity unavailable for the context block");
+            None
+        })
+        .map(|task| {
+            format!(
+                "This Session's Task: {} {}\n",
+                task.identifier,
+                serde_json::to_string(&task.title).expect("title serializes")
+            )
+        })
+        .unwrap_or_default();
+    crate::prompt::render_reference(&format!("This Session: {session}\n{task}"))
 }
 
 fn deliver_steers(
@@ -708,7 +710,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, session_identity};
     use crate::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -728,6 +730,51 @@ mod tests {
         assert!(error.contains(&path.display().to_string()));
         assert!(error.contains("Decode provider context delivery"));
         assert!(!error.contains("PRIVATE_MALFORMED_CONTENT"));
+    }
+
+    #[test]
+    fn hook_names_its_session_and_task_from_the_provider_context() {
+        let home = tempfile::tempdir().unwrap();
+        let db = home.path().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&db).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                due_date: None,
+                id: crate::durable::TaskId::parse("task_0123456789abcdef0123456789abcdef").unwrap(),
+                project_id: None,
+                title: "Tell agents who they are".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,interactive,task_id)
+               VALUES('session_0123456789abcdef0123456789abcdef','t','human',1,0,'/repo',1,'task_0123456789abcdef0123456789abcdef'),
+                     ('session_fedcba9876543210fedcba9876543210','t','human',1,0,'/elsewhere',1,NULL);",
+        )
+        .unwrap();
+        let adapter = |session: &str| crate::steer::SteerAdapter {
+            session: session.into(),
+            agent_process_id: crate::id::AgentProcessId::new(),
+            capability: "capability".into(),
+        };
+        assert_eq!(
+            session_identity(
+                home.path(),
+                &adapter("session_0123456789abcdef0123456789abcdef")
+            ),
+            format!(
+                "This Session: session_0123456789abcdef0123456789abcdef\nThis Session's Task: {} \"Tell agents who they are\"\n",
+                task.identifier
+            )
+        );
+        assert_eq!(
+            session_identity(
+                home.path(),
+                &adapter("session_fedcba9876543210fedcba9876543210")
+            ),
+            "This Session: session_fedcba9876543210fedcba9876543210\n"
+        );
     }
 
     #[test]

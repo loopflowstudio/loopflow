@@ -22,7 +22,8 @@ or when the planning procedure calls for it.
 
 `lf task create --title "<outcome>"` files new work wherever you are. `--run`
 starts it; it never picks up existing work. To keep the current conversation,
-pass `--session <id>` with this Session's ID from the lf context block. `--worktree <path>` adopts that linked checkout.
+pass `--session <id>` with this Session's ID from the lf context block.
+`--worktree <path>` adopts that linked checkout.
 
 `lf session bind <id> --task <task>` permanently makes an unfinished interactive
 Session the Task's primary conversation (closed Sessions and headless Runs

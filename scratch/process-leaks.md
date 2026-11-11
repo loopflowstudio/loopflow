@@ -305,6 +305,27 @@ passes alone were insufficient. No startup repair remains from that finding.
 
 ## Remaining verification
 
+Publish attempt, 2026-11-11 06:00: `lf sync` merged `49037487d` cleanly
+at `c3932878a`. The affected-suite gate stopped at resource preflight, before
+any product suite: 16.8 GiB free, below the 32.0 GiB emergency reserve, even
+after automatic recovery. Full log: `/tmp/loo823-publish-gate.log`. Restore
+at least 15.2 GiB of free space before rerunning gate. No product failure was
+observed in this attempt; no process-cleanup claim follows from an unrun suite.
+
+- `uv run pytest python/tests/test_third_party.py`: 14 passed, 0.71s.
+- `git diff --check`: passed after sync.
+- Gate command (inherited `LF_*` unset, stdin closed, candidate `target/debug`
+  first on PATH): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | test(transport::lifetime_tests::) | binary(transport_tests) | test(ops::task::retirement::) | test(store::sqlite::task_retirement::) | test(store::sqlite::task_work::) | test(store::sqlite::sessions::) | test(store::sqlite::steers_tests::) | test(rollover::) | test(config::) | test(lf::tests::) | test(wave_resolution_matrix::) | test(cli_discovery::) | test(server::schema::tests::) | test(documented_commands::) | binary(golden_prompt) | binary(two_people) | test(configuration_changes_reach_an_existing_subscription) | test(graph_defaults_follow_task_wave_and_repository) | test(wave_setup_tests::)'`: resource preflight failed; next publish run reruns it.
+
+Publication was not attempted. PR #1877 still describes the earlier input
+retention design and earlier test counts. Before publication, prepare copy
+around scope-based conversation lifetime, deletion of input retention, closure
+without a checkout and after retirement, and descriptor/fixture cleanup; replace
+the superseded remaining-limits paragraphs with the current deferred resident
+limit and unchanged existing-process limitation. Gate, opt-in SSH cleanup,
+packaging and the final process recount remain as listed below. No server or
+watcher from this publish attempt remains running.
+
 - Gate: affected transport, retirement (including store queries), native-turn/steers,
   rollover, config, CLI resolution/parser, server schema and `documented_commands::` suites;
   Clippy. Reuse passing results only for identical content and command plans.
@@ -323,3 +344,50 @@ Full build/test results before the lifetime revision do not cover its deletions;
 the later 110-test runs cover those deletions but predate Task-based closure.
 No new product decision is needed for this PR; resident-limit suspension stays
 deferred with the choices in `questions.md`.
+
+## Concept review with a person, at demo (2026-11-11, branch `c3932878a`)
+
+Page: `scratch/concept-review.html` (replaces the earlier one).
+
+Two places the built change departs from "only cost is slightly slower spin
+up time next time you switch to them" (Jack Heart):
+
+- `lf resume` after an install. `human_session::attaches`: an idle owner on
+  another build "gives way to native continuation". Before this branch the
+  input ledger kept a conversation with typed keys on its old owner; now
+  every idle one is replaced, so any install followed by `lf resume` drops an
+  unsent draft. Attaching across builds is supported and tested
+  (`resume_takes_over_an_owner_from_another_build`).
+- The background cap. `BACKGROUND_TASK_CONVERSATIONS = 16` in
+  `human_session/primary.rs` skips the background start of a new Task's
+  conversation once 16 Task conversations run. With nothing ending open
+  Tasks' conversations, the oldest stay warm and every new Task starts cold:
+  the inverse of a least-recently-viewed cache. 63 Task conversations ran at
+  the 01:40 read.
+
+Not a product question: the publish step's gate stopped at resource preflight
+(16.8 GiB free, 32 GiB reserve); `df` at review time shows 53 GiB free. PR
+#1877's body still describes input retention.
+
+Answers on the review page (Jack Heart): "1a 2b".
+- 1a: resume keeps replacing an idle owner on another build; a draft is lost,
+  as built. Docs already say so.
+- 2b: drop `BACKGROUND_TASK_CONVERSATIONS`; every `lf task run` starts its
+  conversation in the background.
+
+## Next implement pass (from `scratch/simplification-opportunities.md`)
+
+1. 2b: delete the cap and its skip path in `human_session/primary.rs`, its
+   tests and the `running_task_conversations` query if nothing else reads it.
+   Desktop's `warmConversationLimit` bounds views only; leave it.
+2. Opportunity 1: retirement and abandonment write a close request per owner
+   (extend the `desktop_shells.close_requested` mechanism, or one column on
+   the owner's process row; pick whichever keeps one close path). The owner
+   ends when a request is present, it is unviewed and no input is queued.
+   Drop `owner_task_completed`/`owner_task_abandoned` from the owner poll, the
+   second check pass in `Ending::confirm`, and the `output`/`viewers` counters
+   if nothing still needs them. Keep viewer-hold recording (retirement's
+   fifteen-minute grace reads it). Keep every behavior in `docs/sessions.md`:
+   done ends after the grace once live work settles, with or without checkout,
+   and after resume; abandoned ends unviewed conversations even mid-turn.
+3. File a Task for the staged drop of `processes.native_input`.

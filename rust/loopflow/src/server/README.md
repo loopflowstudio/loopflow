@@ -411,8 +411,8 @@ the provider's hook output:
 ```text
 → {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"]},"select":null}
-← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"waiting":false}}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"],"inbox":{"socket":"/var/…/claude.sock","key":"/Users/me/.claude/sessions/4242.9c1d….key"}},"select":null}
+← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
 `moment` is `start`, `compact`, `tool` or `stop`. `delivery` is the Session's
@@ -422,16 +422,25 @@ such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
 gap, `{first, last}`, or null. `printed` lists the steer batches this
-conversation's hooks printed since its last answered request.
+conversation's hooks printed since its last answered request. `inbox` names a
+Claude conversation's cross-session inbox: the socket Claude gives its
+children as `CLAUDE_CODE_MESSAGING_SOCKET` and the key file it publishes for
+peers, `sessions/<pid>.<sha256 of socket>.key` in its configuration
+directory; null for other providers.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
 scheduled wakeups Claude reports), the acknowledgement of the native input, and
 a `store-gap` observation for a non-null `gap`. `steers` is the Session's
 pending steers as `{batch, text}`, the text already rendered for the provider,
-or null when none are ready. At `stop` it
-answers first and then refreshes the Session's planning and starts any pending
-Session move, so neither waits inside the turn.
+or null when none are ready. `update` is what changed on the Session's Tasks
+since its last update (Graph runs and steps, its Graph position, comments from
+anyone else), rendered for the provider and recorded as delivered when
+answered; the Session's first boundary records the baseline and gets none. At
+`stop` it answers first, then records a Codex Session's turns from its
+app-server, refreshes the Session's planning, wakes the Session with an update
+its turn missed, and starts any pending Session move, so none of it waits inside
+the turn.
 
 A steer counts as delivered once the hook says it printed it. The hook prints
 `steers.text`, appends `steers.batch` to a `.printed` file beside the delivery
@@ -447,8 +456,31 @@ at its next tool boundary.
 its confirmation.
 
 The hook renders the context block from the delivery file itself, prefixes
-`steers.text` and prints the result. Context comes from files in the checkout, so
+`steers.text` and `update` and prints the result. Context comes from files in the checkout, so
 a hook that gets no answer still prints the block.
+
+### Waking an idle conversation
+
+Each managed Session's boundaries register it with the server (`wake.rs`):
+its provider context, its conversation, and how to reach it while it waits for
+the person. A turn end marks it idle and any other boundary busy. One server
+thread waits on the store's change signal (`store::changes`) and reads the
+`task_updates` revision; when it moves, every idle registration with news gets
+its update, recorded as delivered first:
+
+- Claude: a message in its cross-session inbox, from `loopflow`, which Claude
+  runs as the conversation's next turn. Managed Claude launches set
+  `crossSessionInbound` to `accept`: lf has no permission mode to attest, and
+  a session that bypasses permission prompts otherwise holds the message for
+  review.
+- Codex: a `turn/start` on the Session's private app-server whose tool output
+  is the update.
+
+Registrations live in the server's memory. A conversation it cannot reach is
+dropped and hears the update at its next boundary, which registers it again;
+after a server restart, so does every conversation. Bare Sessions never
+register. No process or clock runs per Session: the watcher's only clock is
+the change signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

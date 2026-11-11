@@ -143,36 +143,22 @@ fn watch() {
 /// registers it again and hears the update there.
 fn wake(store: &SqliteStore, registration: &Registration) {
     let session = &registration.adapter.session;
+    let (adapter, thread) = (&registration.adapter, registration.thread.as_str());
     let delivered = (|| -> Result<bool> {
-        let mut inbox = match &registration.wake {
-            Wake::Claude(inbox) => Some(open_inbox(inbox)?),
-            Wake::Codex(_) => None,
-        };
-        let Some(text) = claim(store, &registration.adapter, &registration.thread)? else {
-            return Ok(false);
-        };
-        match (&registration.wake, &mut inbox) {
-            (Wake::Claude(_), Some((socket, token))) => {
-                send_inbox(socket, token, &registration.thread, &text)?;
+        match &registration.wake {
+            Wake::Claude(inbox) => {
+                let (mut socket, token) = open_inbox(inbox)?;
+                let Some(text) = claim(store, adapter, thread)? else {
+                    return Ok(false);
+                };
+                send_inbox(&mut socket, &token, thread, &text)?;
             }
-            (Wake::Codex(endpoint), _) => {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?;
-                runtime.block_on(async {
-                    tokio::time::timeout(
-                        CODEX_DEADLINE,
-                        crate::harness::codex_connection::deliver_update(
-                            endpoint,
-                            &registration.thread,
-                            &text,
-                        ),
-                    )
-                    .await
-                    .map_err(|_| anyhow!("Codex turn start timed out"))?
-                })?;
+            Wake::Codex(endpoint) => {
+                let Some(text) = claim(store, adapter, thread)? else {
+                    return Ok(false);
+                };
+                start_codex_turn(endpoint, thread, &text)?;
             }
-            (Wake::Claude(_), None) => unreachable!("a Claude inbox opens before its claim"),
         }
         Ok(true)
     })();
@@ -217,6 +203,20 @@ fn open_inbox(inbox: &ClaudeInbox) -> Result<(UnixStream, String)> {
         .with_context(|| format!("Claude inbox {} unreachable", inbox.socket.display()))?;
     socket.set_write_timeout(Some(SEND_DEADLINE))?;
     Ok((socket, token.trim().to_owned()))
+}
+
+fn start_codex_turn(endpoint: &std::path::Path, thread: &str, text: &str) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        tokio::time::timeout(
+            CODEX_DEADLINE,
+            crate::harness::codex_connection::deliver_update(endpoint, thread, text),
+        )
+        .await
+        .map_err(|_| anyhow!("Codex turn start timed out"))?
+    })
 }
 
 /// Claude's own peer envelope, so its transcript attributes the message to

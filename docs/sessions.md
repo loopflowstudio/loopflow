@@ -165,26 +165,28 @@ Delivery proves the agent saw the steer, not that it followed it;
 ## Keep several conversations open
 
 ```bash
-lf task steer LOO-12 "the flaky test is fixed on main"   # each open conversation on LOO-12 sees it at its next turn
-lf process list                                          # one lf server, no process per conversation
+lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake and report it
+lf process list       # one lf server, no process per conversation
 ```
 
 Leave Task conversations open while their Graphs run. Each managed
 conversation, one opened through a Task or Wave command or from Desktop, is
-registered with this Machine's lf server. When a steer, a tracker comment or a
-Graph step lands on its Task, the server holds the update and the conversation
-receives it at its next turn, on Claude and Codex alike. Ten idle conversations
-cost nothing beyond the one server: no watcher per conversation and no clock
-tick.
+registered with this Machine's lf server. When a Graph step settles, the Graph
+moves or a tracker comment arrives on its Task, the server wakes the conversation
+if it is waiting for you: Claude takes the update as a message from
+`loopflow`, Codex as a turn of its own. A conversation in the middle of a turn
+hears it when that turn ends. Ten idle conversations cost nothing beyond the
+one server: no watcher per conversation and no clock tick. Steers still wait
+for the conversation's next turn.
 
 A conversation you start with a bare `lf <skill>` in a terminal is not
 registered and gets no Task progress.
 
 Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. If the server is
-down or restarting, the turn goes ahead without the update, lf records the gap
-in `logs/lf.log`, and the update arrives at the first turn after the server
-answers again. Nothing is lost and nothing arrives twice.
+down or restarting, or cannot reach a conversation, the update waits for that
+conversation's next turn, and lf records the gap in `logs/lf.log`. Each update
+reaches a conversation once.
 
 ## One more headless turn
 

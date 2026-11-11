@@ -176,7 +176,6 @@ fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Resu
 mod tests {
     use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
-    use sha2::{Digest, Sha256};
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions() {

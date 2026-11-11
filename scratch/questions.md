@@ -1,13 +1,64 @@
 # Open questions
 
-- Today an idle conversation is woken by a Task update: Codex gets a `turn/start` with
-  `loopflow_task_update` from `__codex-observe`, Claude gets an async `task-updates` Stop hook
-  that waits. With no per-Session process, should an idle managed conversation still be woken
-  by a Task update, or does it receive the update only at its next turn? The docs in
-  `docs/sessions.md` follow the Task's demo ("a steer and a Task comment still reach each
-  Session at its next turn") and say next turn, which matches steers (`docs/work.md`:
-  "Idle Sessions stay idle; nothing is replayed into them"). Waking Claude without a process
-  would need the holder to type into the PTY.
+## LOO-826: waking idle conversations
+
+Steered November 11 (Jack Heart, Task comments 164b4dd8, 50c0310a): "Keep idle
+waking: a Task update that lands while a managed conversation is idle should
+still wake it, as today, not wait for the person's next turn. Do it from the
+server when the update is recorded, with no process per Session and no timer."
+"Claude idle waking is open; explore before picking." "Ship the option that
+holds up". "Codex waking via turn/start from the server is not in question."
+
+Spikes against installed claude 2.1.322, haiku, scratch dir under /tmp, Machine
+load average ~90 at the time:
+
+1. Channels (`--channels server:loopflow` with an HTTP MCP entry): refused at
+   startup, "server: entries need --dangerously-load-development-channels".
+   With that flag every launch opens "WARNING: Loading development channels …
+   1. I am using this for local development 2. Exit". A managed launch cannot
+   answer a dialog; not viable. HTTP transport itself was not reached.
+2. Async Stop hook blocked on a socket: `/usr/bin/nc -U <socket>` as the hook
+   command measured 2.8 MB RSS, one process per idle Session (as `sh -c` too).
+   Rejected by the steer's "Don't keep a waiting async Stop hook per Session";
+   Claude's `asyncRewake` wake was not exercised.
+3. Typing into the terminal through Desktop/Rex: not run. The holder (LOO-824)
+   is not on this branch, and typed text lands in the person's prompt draft.
+4. Chosen: Claude's cross-session inbox, the socket the old watcher wrote to.
+   `~/.claude/sessions/<pid>.json` names `messagingSocketPath`; the auth key is
+   `sessions/<pid>.<sha256(socket path)>.key` (matched on a live session). From
+   outside, auth + `{"type":"user","priority":"next","from":"loopflow",…}` to
+   an idle session: held ("The sender did not attest its permission mode and
+   this session bypasses prompts. Review it below, or set
+   "crossSessionInbound" to "accept"."). With per-launch
+   `--settings '{"crossSessionInbound":"accept"}'`: the idle session ran a
+   turn and its transcript had the reply 2.9 s after the write. No resident
+   process. The socket directory must be mode 0700 (Claude refuses otherwise).
+
+Choices taken (reversible):
+
+- The hook sends the inbox as paths (`inbox: {socket, key}`); the server reads
+  the key when it sends. No token on lf's wire or in its logs.
+- `crossSessionInbound: accept` goes on every Claude launch with turn hooks,
+  which includes bare interactive launches (`claude_args(…, managed)` is "has
+  turn hooks" since LOO-821). Any same-user process can then message those
+  sessions without review. Attesting a permission mode instead was not done:
+  lf has none.
+- The watcher's only clock is `StoreChanges`' 60 s fallback (missed WAL event,
+  checkpoint, sleep). On Linux `StoreChanges` has no vnode watch and polls at
+  50 ms, as served subscriptions already do.
+- Registrations are server memory. After a server restart a conversation is
+  woken again only after its next boundary.
+- Codex wakes only when its last boundary was a Stop; a woken conversation is
+  busy until its next Stop. A turn end delivers anything its turn missed.
+- An update is recorded `dispatched` before it is sent (after the Claude inbox
+  connects). A write that fails after that, or a hook that misses its deadline
+  after the server answered, loses that update; nothing is sent twice.
+- An unrecorded process exit no longer gets a polling clock; it is reported
+  when something else on the Task moves.
+- Task comments from tracker sync arrive at the turn-end planning refresh; the
+  launch-time `sync_for_conversation` is gone.
+- The `task_updates` revision triggers stay (shipped migration); the watcher
+  reads them.
 
 ## Inherited from LOO-821
 

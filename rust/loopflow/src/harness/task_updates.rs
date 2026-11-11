@@ -65,8 +65,9 @@ impl RunObservation {
 }
 
 /// The Session's Task changes since the update it last received, or `None`.
-/// Read at a turn boundary; worker Runs never receive updates. The first read
-/// records a baseline: history already in the conversation is not news.
+/// The Machine server reads it at a boundary and to wake an idle conversation;
+/// worker Runs never receive updates. The first read records a baseline:
+/// history already in the conversation is not news.
 pub(crate) fn read(store: &SqliteStore, session_id: &str) -> StoreResult<Option<TaskUpdate>> {
     let Some(session) = store.session(session_id)? else {
         return Ok(None);

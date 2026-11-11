@@ -389,6 +389,41 @@ mod tests {
             .unwrap();
     }
 
+    /// An idle conversation wakes on a turn whose input is the update, kept as
+    /// a tool result in its history.
+    #[tokio::test]
+    async fn an_update_starts_a_turn_on_the_conversations_app_server() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let initialize = receive(&mut socket).await;
+            send(&mut socket, json!({"id":initialize["id"],"result":{}})).await;
+            assert_eq!(receive(&mut socket).await["method"], "initialized");
+            let start = receive(&mut socket).await;
+            send(
+                &mut socket,
+                json!({"id":start["id"],"result":{"turn":{"id":"report"}}}),
+            )
+            .await;
+            let _ = socket.next().await;
+            start
+        });
+        super::deliver_update(&endpoint, "native-thread", "gate: failed")
+            .await
+            .unwrap();
+        let start = provider.await.unwrap();
+        assert_eq!(start["method"], "turn/start");
+        assert_eq!(start["params"]["threadId"], "native-thread");
+        assert_eq!(start["params"]["input"], json!([]));
+        assert_eq!(
+            start["params"]["toolOutput"],
+            json!({"name":"loopflow_task_update","output":"gate: failed","retain":true})
+        );
+    }
+
     #[tokio::test]
     async fn an_opened_thread_is_named_so_a_client_can_resume_it() {
         let home = tempfile::tempdir_in("/tmp").unwrap();

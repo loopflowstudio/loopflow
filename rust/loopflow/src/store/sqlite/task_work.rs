@@ -2169,14 +2169,19 @@ mod tests {
             .session_summaries(
                 &SessionFilter {
                     task: Some("PROOF-1".into()),
-                    interactive: None,
-                    history: true,
+                    headless: true,
                     ..Default::default()
                 },
                 0,
             )
             .unwrap();
-        assert_eq!(summaries.len(), work.sessions.len());
+        assert_eq!(
+            summaries.len(),
+            work.sessions
+                .iter()
+                .filter(|session| session.completed_at.is_none())
+                .count()
+        );
         assert!(summaries
             .iter()
             .all(|session| session.task_ids == std::slice::from_ref(&task)));

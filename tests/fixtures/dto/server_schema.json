@@ -7479,7 +7479,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> session list`, with `--interactive all`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
+          "description": "`lf --cwd <directory> session list`, with `--headless`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
           "properties": {
             "after": {
               "type": [

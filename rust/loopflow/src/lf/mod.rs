@@ -1623,25 +1623,6 @@ pub enum GraphCommand {
     External(Vec<String>),
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum SessionMode {
-    #[value(name = "true")]
-    Interactive,
-    #[value(name = "false")]
-    Headless,
-    All,
-}
-
-impl SessionMode {
-    pub fn interactive(self) -> Option<bool> {
-        match self {
-            Self::Interactive => Some(true),
-            Self::Headless => Some(false),
-            Self::All => None,
-        }
-    }
-}
-
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
@@ -1716,7 +1697,7 @@ impl SessionConnectionArgs {
     }
 }
 
-/// Which Sessions `lf session list` and `lf desktop sessions` read.
+/// Which unfinished Sessions `lf session list` reads.
 #[derive(Args, Debug, Clone)]
 pub struct SessionListArgs {
     #[command(flatten)]
@@ -1726,12 +1707,9 @@ pub struct SessionListArgs {
     /// Include Sessions from every repository on this machine
     #[arg(long)]
     pub all: bool,
-    /// Select interactive (true), headless (false), or both (all)
-    #[arg(long, value_enum, default_value = "true")]
-    pub interactive: SessionMode,
-    /// Include completed conversations and historical reviews
+    /// Include headless Sessions alongside interactive conversations
     #[arg(long)]
-    pub history: bool,
+    pub headless: bool,
     /// Only conversations available for your input
     #[arg(long)]
     pub available: bool,
@@ -1871,7 +1849,7 @@ pub enum SessionCommand {
         #[command(flatten)]
         selection: crate::lf::Selection,
     },
-    /// List Sessions
+    /// List unfinished Sessions; use `lf history` for finished conversations
     List(SessionListArgs),
     /// Show direct provider-authored usage from recorded Session inputs
     Usage(commands::history::UsageArgs),
@@ -1923,7 +1901,7 @@ pub enum SessionCommand {
     },
     /// Bind a Session as the Task's primary conversation without starting work
     #[command(
-        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Sessions cannot become primary. Remote calls use the target Machine's Sessions and paths."
     )]
     Bind {
         /// Session ID or provider conversation ID
@@ -3689,11 +3667,32 @@ mod tests {
             };
             assert_eq!(args.primary, Some(expected));
             assert_eq!(args.wave.as_deref(), Some("craft"));
-            assert_eq!(args.interactive.interactive(), Some(true));
+            assert!(!args.headless);
             assert!(args.all);
         }
         assert!(Cli::try_parse_from(["lf", "session", "list", "--offset", "1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "session", "list", "--primary", "former"]).is_err());
+    }
+
+    #[test]
+    fn session_list_adds_headless_and_rejects_history_and_mode_filters() {
+        let cli = Cli::try_parse_from(["lf", "session", "list", "--headless"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List(SessionListArgs { headless: true, .. })
+            })
+        ));
+        for flags in [
+            vec!["--history"],
+            vec!["--interactive", "true"],
+            vec!["--interactive", "false"],
+            vec!["--interactive", "all"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["lf", "session", "list"].into_iter().chain(flags)).is_err()
+            );
+        }
     }
 
     #[test]

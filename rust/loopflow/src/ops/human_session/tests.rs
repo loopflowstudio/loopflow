@@ -1050,6 +1050,7 @@ fn no_raw_leaves_raw_conversations_out_of_the_list() {
         super::lists_raw(&filter)
     };
     assert!(lists_raw(&["lf", "session", "list", "--all"]));
+    assert!(lists_raw(&["lf", "session", "list", "--all", "--headless"]));
     assert!(lists_raw(&[
         "lf",
         "session",

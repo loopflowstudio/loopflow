@@ -368,8 +368,7 @@ pub(crate) fn list_filter(
         primary: args.primary,
         orphan: args.orphan,
         search: args.search.clone(),
-        interactive: args.interactive.interactive(),
-        history: args.history,
+        headless: args.headless,
         limit: args.limit,
         after: args.page.then(|| args.after.clone().unwrap_or_default()),
     })
@@ -383,8 +382,8 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects both Sessions and Runs.
-    interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    headless: bool,
 }
 
 pub(crate) fn subscribe_list(
@@ -395,7 +394,7 @@ pub(crate) fn subscribe_list(
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
-        interactive: filter.interactive,
+        headless: filter.headless,
     };
     super::subscribe::start(
         args,
@@ -404,7 +403,7 @@ pub(crate) fn subscribe_list(
                 repo: args.repo,
                 task: args.task,
                 search: args.search,
-                interactive: args.interactive,
+                headless: args.headless,
                 ..filter.clone()
             };
             async move {

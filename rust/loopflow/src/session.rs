@@ -232,12 +232,12 @@ pub struct SessionFilter {
     pub wave: Option<WaveId>,
     pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
-    pub interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    pub headless: bool,
     /// Only conversations available for a person, chosen before paging.
     pub available: bool,
     /// Also list raw conversations: providers lf never launched, which have no Session.
     pub raw: bool,
-    pub history: bool,
     pub limit: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
@@ -259,10 +259,9 @@ impl Default for SessionFilter {
             wave: None,
             primary: None,
             search: None,
-            interactive: Some(true),
+            headless: false,
             available: false,
             raw: true,
-            history: false,
             limit: 100,
             after: None,
         }

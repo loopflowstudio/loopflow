@@ -100,7 +100,7 @@ Already-running clients may keep their original directory; subsequent connection
 use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
 linked checkout. Done Tasks can still select an unfinished conversation without
 reopening work. With no Task checkout, the conversation stays in place and no
-checkout is adopted. Closed Sessions and headless Runs cannot become primary.
+checkout is adopted. Closed or headless Sessions cannot become primary.
 
 ## Steer it while it runs
 

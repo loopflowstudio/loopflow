@@ -1319,25 +1319,13 @@ async fn historical_feedback_is_not_live_availability() {
             [&finished.agent_process_id],
         )
         .unwrap();
-    let output = command(
-        home.path(),
-        home.path(),
-        &[
-            "session",
-            "list",
-            "--all",
-            "--interactive",
-            "all",
-            "--history",
-            "--json",
-        ],
-    )
-    .output()
-    .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     for id in ["waiting", "finished", "legacy_finished", "unobserved"] {
-        let session = sessions.iter().find(|session| session["id"] == id).unwrap();
+        let output = command(home.path(), home.path(), &["session", "card", id, "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let card: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let session = &card["session"];
         assert!(session["availability"].is_null(), "{session}");
         assert_ne!(session["state"], "active", "{session}");
     }

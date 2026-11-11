@@ -24,6 +24,22 @@ struct DTOFixtureTests {
         #expect(card.session.raw == false)
     }
 
+    @Test func sessionEncodingKeepsRequiredNullableTurnFields() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
+        let encoded = try JSONEncoder().encode(session)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(object["turn"] is NSNull)
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: encoded) == session)
+
+        let turn = try JSONDecoder().decode(SessionTurn.self, from: Data(#"{"id":null,"state":"running","started_at":null,"ended_at":null,"model":null,"usage":null}"#.utf8))
+        let turnData = try JSONEncoder().encode(turn)
+        let turnObject = try #require(JSONSerialization.jsonObject(with: turnData) as? [String: Any])
+        for field in ["id", "started_at", "ended_at", "model", "usage"] {
+            #expect(turnObject[field] is NSNull)
+        }
+        #expect(try JSONDecoder().decode(SessionTurn.self, from: turnData) == turn)
+    }
+
     @Test func screenReadsRejectSelectedAnswers() throws {
         var card = try #require(JSONSerialization.jsonObject(with: loadFixtureData("session_card.json")) as? [String: Any])
         card.removeValue(forKey: "last_line")

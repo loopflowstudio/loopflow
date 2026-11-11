@@ -2,7 +2,7 @@
 
 ```bash
 lf -b implement
-lf session list --interactive false --json
+lf session list --headless --json
 lf resume SESSION
 ```
 

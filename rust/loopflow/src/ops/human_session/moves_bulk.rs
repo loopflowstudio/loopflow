@@ -101,7 +101,7 @@ pub(crate) async fn move_sessions(
         bail!("a Session move needs a selector: --blocked or --on <account|harness[:model]>");
     }
     let mut selection = filter.clone();
-    selection.interactive = Some(true);
+    selection.headless = false;
     selection.limit = 0;
     selection.after = None;
     let mut report = MoveReport::default();

@@ -16,3 +16,10 @@ with 10,000 synthetic Tasks, 100 Projects and 1,000 Sessions. `EXPLAIN QUERY PLA
 uses `idx_projects_wave_updated` → `idx_tasks_project` for Wave Task IDs;
 `session_inventory` for primary selection and `tasks_primary_session` for
 Task-primary probes (including bare primary selection). No Task table scan.
+
+2026-11-11 `--headless`/completed filters: SQLite 3.50.4, memory copy of the
+retained after.db with synthetic Tasks bringing it to 10,000 (14,804 Sessions).
+The retained summary query with the new predicates and no OFFSET selects
+`session_inventory (interactive, completed_at)` by default and scans the partial
+`open_sessions` index with headless included. Both retain `tasks_checkout_root`
+and `tasks_primary_session` probes. No Task table scan.

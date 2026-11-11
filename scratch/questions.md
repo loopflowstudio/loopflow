@@ -6,7 +6,7 @@
 - Raw rows carry no actions and empty `open_argv`; they join an unpaged list,
   and `--task` (their checkout's Task) and `--available` (turn not running),
   `--wave` and `--orphan`, but not `--primary`, `--blocked`, `--on`,
-  `--search`, `--history`, `--page`.
+  `--search`, `--page`.
 - History's `Turn` is in neither `server_schema.json` nor Swift; only
   `lf history show --transcript --json` emits it. Its shape changed once on
   2026-11-11: a turn has `id`, `state`, `started_at`, `ended_at`, `model`,

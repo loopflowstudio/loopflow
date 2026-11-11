@@ -71,7 +71,7 @@ lf session list --primary task     # current Task primaries, excluding former pr
 lf session list --primary wave     # current Wave primaries
 lf session list --primary          # Task, Wave and repository primaries
 lf session list --orphan           # outside the work model: no Task association and no Wave
-lf session list --all --interactive all # every repository and both interactive and headless work
+lf session list --all --headless   # every repository, including headless Sessions
 ```
 
 `--wave` includes Sessions attributed to that Wave and conversations inside
@@ -81,13 +81,14 @@ any of its Tasks' checkouts, including bare lf runs and raw provider conversatio
 `--orphan` includes raw conversations outside every Task checkout. `--no-raw`
 independently leaves raw conversations out.
 
-`--all` covers every repository on this machine; `--history` adds finished
-conversations, and `--search` narrows the list. Lists default to interactive
-conversations; `--interactive all` includes headless work too.
+`--all` covers every repository on this machine; `--search` narrows the list.
+Lists show unfinished interactive conversations; `--headless` adds unfinished
+headless Sessions. Finished conversations belong in `lf history`; an exact
+`lf session card <session>` remains readable after completion.
 `--page --json` returns a stable-ID page; pass its `next` value to `--after`
 with the same filters for the following page. Raw conversations appear only
 in unpaged lists and have no primary scope. They also stay out of selections
-by `--history`, `--search`, `--blocked` or `--on`.
+by `--search`, `--blocked` or `--on`.
 
 ## When Desktop loses its connection
 
@@ -140,8 +141,9 @@ Other conversations stay stopped until opened.
 | steers and reports | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
-`lf resume` takes Sessions. A Run (`-b`, a Graph step), running or finished, is
-refused with a pointer to `lf resume --task <task>`; the Task's Session reads its log.
+`lf resume` takes interactive Sessions. A headless Session (`-b`, a Graph step),
+running or finished, is refused with a pointer to `lf resume --task <task>`; the
+Task's Session reads its log.
 
 ## Bring in one you started elsewhere
 
@@ -300,7 +302,7 @@ An open Task without a worktree adopts the Session's unowned linked checkout;
 main and Wave checkouts stay shared. Done Tasks can still select an unfinished
 conversation. If the Task has no checkout, the conversation stays in place and
 no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
-closed. Closed Sessions and headless Runs cannot become primary.
+closed. Closed or headless Sessions cannot become primary.
 `--dry-run` shows the exact target first.
 
 ## Which login it runs on

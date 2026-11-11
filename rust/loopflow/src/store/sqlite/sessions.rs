@@ -179,20 +179,14 @@ fn inventory_query(
     live_agents: &str,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
-    let mut sql = format!("{select} WHERE 1");
+    let mut sql = format!("{select} WHERE s.completed_at IS NULL");
     let mut values = Vec::new();
     let mut bind = |value| {
         values.push(value);
         format!("?{}", values.len())
     };
-    if let Some(interactive) = filter.interactive {
-        sql.push_str(&format!(
-            " AND s.interactive={}",
-            bind(Value::Integer(i64::from(interactive)))
-        ));
-    }
-    if !filter.history {
-        sql.push_str(" AND s.completed_at IS NULL");
+    if !filter.headless {
+        sql.push_str(" AND s.interactive=1");
     }
     if filter.available {
         sql.push_str(&format!(
@@ -2471,6 +2465,8 @@ mod metadata_tests {
                 ("a", "Alpha%", true, "/repo", Some("independent")),
                 ("b", "Beta", true, "/repo", None),
                 ("headless", "Headless", false, "/repo", None),
+                ("closed", "Closed", true, "/repo", None),
+                ("closed-headless", "Closed headless", false, "/repo", None),
                 ("foreign", "Foreign", true, "/other", None),
                 ("later", "Zulu", true, "/repo", None),
             ] {
@@ -2492,6 +2488,15 @@ mod metadata_tests {
                 }
             }
         }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=2 WHERE id IN ('closed','closed-headless')",
+                [],
+            )
+            .unwrap();
         let mut filter = SessionFilter {
             repo: Some("/repo".into()),
             limit: 2,
@@ -2513,12 +2518,18 @@ mod metadata_tests {
         filter.search = Some("ALPHA".into());
         assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "a");
         filter.search = None;
-        filter.interactive = Some(false);
+        filter.headless = true;
+        filter.limit = 0;
         assert_eq!(
-            store.session_summaries(&filter, 0).unwrap()[0].id,
-            "headless"
+            store
+                .session_summaries(&filter, 0)
+                .unwrap()
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "headless", "later"]
         );
-        filter.interactive = Some(true);
+        filter.headless = false;
         filter.limit = 1;
         filter.after = Some(String::new());
         let first = store.session_summaries(&filter, 0).unwrap();

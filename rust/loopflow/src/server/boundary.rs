@@ -89,16 +89,6 @@ pub(super) fn answer(
             .map(|(tasks, crons)| tasks.len() + crons.len());
         let thread = thread.ok_or_else(no_thread)?;
         store.record_native_turn(adapter, thread, yielded, open_tools)?;
-        if let Some(prompt_id) = callback["prompt_id"].as_str().filter(|id| !id.is_empty()) {
-            let prompt = if yielded {
-                None
-            } else {
-                callback["prompt"].as_str()
-            };
-            if yielded || prompt.is_some() {
-                store.acknowledge_native_input(adapter, thread, prompt_id, prompt)?;
-            }
-        }
     }
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;

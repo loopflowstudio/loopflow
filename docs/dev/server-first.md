@@ -143,7 +143,7 @@ deleted when the server's emulator reads status itself.
 | Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
 | Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, Move here | Holder |
 | Observers become server registrations | `__codex-observe`, Task-update watchers | Hooks call the server |
-| CLI cleanup: `session serve`, `session attach`, the detach key, `session.end_detached_after` | The owner's surface | Bare direct, holder |
+| CLI cleanup: `session serve`, `session attach`, the detach key | The owner's surface | Bare direct, holder |
 
 Server operations for these pieces are added under one protocol revision
 bump; pieces that add operations take the next revision together rather than

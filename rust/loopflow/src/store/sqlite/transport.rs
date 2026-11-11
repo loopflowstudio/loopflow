@@ -47,7 +47,7 @@ impl Transport<'_> {
         }
     }
 
-    /// The table whose row carries this host's viewer hold and native input.
+    /// The table whose row carries this host's viewer hold.
     pub(super) fn table(&self) -> &'static str {
         match self {
             Self::Owner(_) => "processes",
@@ -57,23 +57,6 @@ impl Transport<'_> {
 }
 
 impl SqliteStore {
-    /// The repository a host's work belongs to, whose settings bound its idle time.
-    pub(crate) fn host_repository(&self, host: Transport<'_>) -> StoreResult<Option<String>> {
-        match host {
-            Transport::Owner(owner) => Ok(self.lf_process(owner)?.and_then(|process| process.repo)),
-            Transport::Terminal(terminal) => {
-                let conn = self.conn.lock().expect("store mutex poisoned");
-                Ok(conn
-                    .query_row(
-                        "SELECT repo FROM agent_sessions WHERE held_terminal_id=?1 AND repo IS NOT NULL LIMIT 1",
-                        [terminal],
-                        |row| row.get(0),
-                    )
-                    .optional()?)
-            }
-        }
-    }
-
     /// Record a terminal before its holder is asked to start it.
     pub(crate) fn create_terminal(
         &self,
@@ -119,7 +102,7 @@ impl SqliteStore {
 
     pub(crate) fn end_terminal(&self, terminal: &TerminalId, code: Option<u8>) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE held_terminals SET ended_at=unixepoch(),exit_code=?2,native_input=NULL
+            "UPDATE held_terminals SET ended_at=unixepoch(),exit_code=?2
              WHERE id=?1 AND ended_at IS NULL",
             params![terminal, code],
         )?;

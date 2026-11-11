@@ -5,11 +5,7 @@ mod connection;
 mod held;
 mod hosted;
 mod input;
-#[cfg(test)]
-mod input_retry_tests;
 mod lifetime;
-#[cfg(test)]
-mod lifetime_tests;
 mod native;
 mod output;
 pub(crate) mod registry;
@@ -59,8 +55,6 @@ pub(crate) const STREAM_ENV: &str = "LF_VIEWER_STREAM";
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 // SSH connection setup and destination Session resolution precede attachment.
 const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
-/// Continuous output tells the lifetime policy once per pause, not per read.
-const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -472,7 +466,9 @@ pub(crate) fn start(
     command
         .args(["session", "serve"])
         .env_remove("LF_SERVER_STATUS")
-        .env_remove(STREAM_ENV);
+        .env_remove(STREAM_ENV)
+        // It names a descriptor the owner does not inherit.
+        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
     if terminal {
         command.arg("--terminal");
     }
@@ -490,11 +486,15 @@ pub(crate) fn start(
     if let Some(terminal) = crate::session_record::current_terminal_id() {
         command.env(TERMINAL_ENV, terminal);
     }
-    // SAFETY: only an async-signal-safe syscall is used between fork and exec.
+    let descriptors = open_descriptors();
+    // SAFETY: only async-signal-safe syscalls are used between fork and exec.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            for fd in &descriptors {
+                libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
             Ok(())
         });
@@ -510,6 +510,21 @@ pub(crate) fn start(
         .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
     LfProcessId::parse(line.trim())
         .context("Owner exited before acknowledging execution; inspect transport.log")
+}
+
+/// Descriptors above stderr, such as a terminal host's pipes to its other
+/// children that this process inherited. A detached owner outlives that host, so
+/// it must not hold them: a reader waiting for the host's end to close would
+/// wait for as long as the owner runs. Marking an already close-on-exec or
+/// closed number (the listing's own) again is harmless.
+fn open_descriptors() -> Vec<RawFd> {
+    let Ok(entries) = std::fs::read_dir("/dev/fd") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|fd| *fd > libc::STDERR_FILENO)
+        .collect()
 }
 
 pub(crate) fn directory(home: &Path) -> Result<PathBuf> {
@@ -1227,8 +1242,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         shell_jobs,
     });
     loop {
-        #[cfg(test)]
-        hosted.before_accept(&mut child)?;
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
             hosted.admit(socket);
@@ -2195,7 +2208,9 @@ fn view(
                 revents: 0,
             },
             libc::pollfd {
-                fd: if stdin_open && (controlled || terminal.is_some()) {
+                fd: if stdin_open
+                    && (controlled || (terminal.is_some() && acknowledgement_deadline.is_none()))
+                {
                     0
                 } else {
                     -1
@@ -2849,6 +2864,19 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 /// leaves its execution running with none, ready for the next viewer.
 pub(crate) fn controlled(id: &Host) -> Result<bool> {
     attachment(id).map(|(held, _)| held)
+}
+
+/// Announce cleanup before its caller signals the owner. A held terminal,
+/// which has no process to signal, ends on the notice. No decision is stored.
+pub(crate) fn close_notice(id: &Host, text: &str) -> Result<()> {
+    let mut socket = id.connect()?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    send(&mut socket, Request::CloseNotice { text: text.into() })?;
+    match receive_reply(&mut socket)? {
+        Reply::Accepted => Ok(()),
+        other => bail!("unexpected close notice reply {other:?}"),
+    }
 }
 
 /// Input ownership and the controlling viewer's native readiness are separate.

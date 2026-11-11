@@ -1100,6 +1100,30 @@ fn assert_background_conversation(run_graph: bool) {
     .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
+    // Older open Tasks must not prevent this newly checked-out conversation
+    // from starting. These receipts deliberately exceed the former count cap.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    for _ in 0..16 {
+        let task = loopflow::durable::TaskId::new();
+        let owner = loopflow::id::LfProcessId::new();
+        let session = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+            SELECT ?1,repository_id,?1,1 FROM tasks WHERE id=?2",
+            rusqlite::params![task.as_str(), id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,command,cwd,started_at)
+            VALUES(?1,?1,'[\"lf\"]','/older',1)",
+            [&owner],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,interactive,transport_lf_process_id)
+            VALUES(?1,'Older conversation','generated',1,1,'/older',?2,1,?3)", rusqlite::params![session,task.as_str(),owner]).unwrap();
+    }
+    drop(conn);
+
     let worktree = if run_graph {
         succeed(
             claude_launch(home.path(), &script)

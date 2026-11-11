@@ -864,7 +864,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
 }
 
 /// Environment naming the inherited descriptor that holds a Session launch lock.
-const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
+pub(crate) const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
 
 fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
     use std::os::fd::AsRawFd;
@@ -969,7 +969,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 }
 
 /// Get back to a Session. A terminal showing it hands over control; a provider
-/// client lf started stops only when no live turn, draft or request needs it.
+/// client lf started stops only when no live turn or request needs it.
 /// With `fork`, the holder keeps it and a new Session continues from its log. A
 /// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
@@ -1622,7 +1622,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// cannot reconstruct an active turn or pending request. An idle owner that is
 /// superseded or does not answer gives way to native continuation. So does an
 /// unanswering superseded owner with no open Session: no work is known there, while
 /// an answering one may hold a turn or draft nothing records, so a viewer attaches.
@@ -1691,6 +1691,13 @@ pub(crate) fn end_owner(
     pid: u32,
 ) -> Result<()> {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    if !owner_running(store, owner)? {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        crate::journal::live_process_pid(store, owner) == Some(pid),
+        "owner {owner} no longer has verified pid {pid}"
+    );
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, owner)? {

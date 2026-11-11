@@ -10,8 +10,9 @@
 //! its Sessions resumes on the
 //! selected lf. The sweep signals owners directly, so existing viewers may
 //! need to reopen.
-//! An owner holding a turn, draft or pending request stays, answering or not:
-//! saved history cannot restore its native editor. A Graph runner isn't
+//! An owner holding a turn or pending request stays, answering or not:
+//! saved history cannot restore a pending request. Moving an idle owner discards
+//! unsent input, just as quitting its provider does. A Graph runner isn't
 //! stopped: each step resolves the installed entry when it launches, so its next
 //! step already runs on the selected lf and the runner leaves with the Graph.
 //! Everything else is listed with why it stays.
@@ -880,10 +881,5 @@ mod tests {
             owner_disposition(&store, &owner.id).unwrap(),
             Disposition::Moves(_)
         ));
-        // No active turn is needed to protect either a plain or edited draft.
-        for bytes in [b"draft".as_slice(), b"\x7f"] {
-            assert!(store.try_record_owner_input(&owner.id, bytes).unwrap());
-            stays("native input");
-        }
     }
 }

@@ -114,15 +114,7 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     };
     save_abandon(&store, &task).await?;
     // Failed cleanup cannot undo the decision or grant control over live work.
-    let cleanup = async {
-        if let Some(deletion) =
-            prepare_abandon(repo, &store, Some(&task), selector, force, false).await?
-        {
-            crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
-        }
-        Ok::<(), crate::ops::OpsError>(())
-    }
-    .await;
+    let cleanup = cleanup_abandoned(repo, &store, &task, force).await;
     if let Err(error) = cleanup {
         crate::journal::request::diagnostic(format_args!(
             "{} is canceled; retained checkout/PR: {error}",
@@ -132,11 +124,27 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     Ok(task.identifier)
 }
 
+pub(super) async fn cleanup_abandoned(
+    repo: &Path,
+    store: &SharedStore,
+    task: &Task,
+    force: bool,
+) -> OpsResult<bool> {
+    if let Some(deletion) =
+        prepare_abandon(repo, store, Some(task), &task.identifier, force, false).await?
+    {
+        crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     store
         .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
         .await
         .map_err(task_error)?;
+    super::retirement::close_conversations(&store.sqlite, &task.id)?;
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),

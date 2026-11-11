@@ -13,10 +13,9 @@ use crate::store::{StoreError, StoreResult};
 use super::transport::Transport;
 use super::SqliteStore;
 
-/// Why a Session owner cannot retire without losing work or native input.
+/// Why a Session owner cannot retire without losing work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OwnerRetention {
-    NativeInput,
     RunningGraph,
     /// No open Session names the owner. This is unknown, not work: the row may
     /// be complete or absent, so it cannot show the owner is safe to end.
@@ -28,7 +27,6 @@ pub(crate) enum OwnerRetention {
 impl std::fmt::Display for OwnerRetention {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            OwnerRetention::NativeInput => "native input",
             OwnerRetention::RunningGraph => "a running Graph",
             OwnerRetention::NoOpenSession => "no open Session",
             OwnerRetention::HeadlessRun => "a headless Run",
@@ -710,69 +708,8 @@ impl SqliteStore {
         )?)
     }
 
-    /// What keeps an unviewed owner from ending for idleness: its own work,
-    /// or a Task conversation's running Graph, which the person may come back
-    /// to talk about. Rollover and takeover judge `owner_retention` alone.
-    pub(crate) fn idle_retention<'a>(
-        &self,
-        owner: impl Into<Transport<'a>>,
-    ) -> StoreResult<Option<OwnerRetention>> {
-        let owner = owner.into();
-        if let Some(retention) = self.owner_retention(owner)? {
-            return Ok(Some(retention));
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let task_graph: bool = conn.query_row(
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM agent_sessions s
-                 JOIN task_graphs tg ON tg.task_id=s.task_id
-                 JOIN processes g ON g.id=tg.lf_process_id
-                 WHERE s.{}=?1 AND s.interactive=1
-                     AND s.completed_at IS NULL AND g.completed_at IS NULL)",
-                owner.session_column()
-            ),
-            [owner.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(task_graph.then_some(OwnerRetention::RunningGraph))
-    }
-
-    pub(crate) fn owner_task_abandoned<'a>(
-        &self,
-        owner: impl Into<Transport<'a>>,
-    ) -> StoreResult<bool> {
-        let owner = owner.into();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
-                 WHERE s.{}=?1 AND s.interactive=1
-                     AND s.completed_at IS NULL AND t.abandoned_at IS NOT NULL)",
-                owner.session_column()
-            ),
-            [owner.as_str()],
-            |row| row.get(0),
-        )?)
-    }
-
-    /// Open Task conversations whose execution host is still running.
-    pub(crate) fn running_task_conversations(&self) -> StoreResult<usize> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM agent_sessions s
-                 LEFT JOIN processes p ON p.id=s.transport_lf_process_id
-                 LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
-                 WHERE s.task_id IS NOT NULL AND s.interactive=1 AND s.completed_at IS NULL
-                     AND ((p.id IS NOT NULL AND p.completed_at IS NULL)
-                         OR (t.id IS NOT NULL AND t.ended_at IS NULL))",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(usize::try_from(count).expect("COUNT is never negative"))
-    }
-
     /// What keeps execution owner `owner` running. None means its standalone
-    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
+    /// interactive Sessions hold no work; finished Graphs hold nothing.
     pub(crate) fn owner_retention<'a>(
         &self,
         owner: impl Into<Transport<'a>>,
@@ -790,11 +727,7 @@ impl SqliteStore {
                          AND a.id IN (SELECT lf_process_id FROM graph_processes))))"
             }
         };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        if super::native_input::pending(&conn, owner)? {
-            return Ok(Some(OwnerRetention::NativeInput));
-        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.
@@ -2582,105 +2515,5 @@ mod metadata_tests {
             ["a", "b"],
             "renaming must not reorder the ID page used to build its cursor"
         );
-    }
-}
-
-#[cfg(test)]
-mod background_task_conversation_tests {
-    use rusqlite::params;
-
-    use super::{OwnerRetention, SqliteStore};
-    use crate::durable::TaskId;
-    use crate::id::LfProcessId;
-
-    fn process(store: &SqliteStore, completed: bool) -> LfProcessId {
-        let id = LfProcessId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO processes(id,trace_id,command,cwd,started_at,completed_at)
-                 VALUES(?1,?1,'[\"lf\"]','/fixture',1,?2)",
-                params![id, completed.then_some(2)],
-            )
-            .unwrap();
-        id
-    }
-
-    fn task_conversation(store: &SqliteStore, name: &str, owner: &LfProcessId) -> TaskId {
-        let task = TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository("/fixture").unwrap(),
-                id: task.clone(),
-                project_id: None,
-                title: name.into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        store.test_session(name, &crate::session_record::new_artifact_key());
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET task_id=?2, transport_lf_process_id=?3 WHERE id=?1",
-                params![name, task.as_str(), owner],
-            )
-            .unwrap();
-        task
-    }
-
-    fn run_graph(store: &SqliteStore, task: &TaskId, graph: &LfProcessId) {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-                 VALUES(?1,'{}','implement','{}',?2,1)",
-                params![task.as_str(), graph],
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn a_running_task_graph_keeps_its_conversation_from_ending_idle() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let owner = process(&store, false);
-        let task = task_conversation(&store, "conversation", &owner);
-        assert_eq!(store.idle_retention(&owner).unwrap(), None);
-        let graph = process(&store, false);
-        run_graph(&store, &task, &graph);
-        assert_eq!(
-            store.idle_retention(&owner).unwrap(),
-            Some(OwnerRetention::RunningGraph)
-        );
-        assert_eq!(
-            store.owner_retention(&owner).unwrap(),
-            None,
-            "rollover and takeover still move the conversation"
-        );
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE processes SET completed_at=3 WHERE id=?1", [&graph])
-            .unwrap();
-        assert_eq!(store.idle_retention(&owner).unwrap(), None);
-    }
-
-    #[test]
-    fn only_running_owners_count_toward_the_background_cap() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let running = process(&store, false);
-        let ended = process(&store, true);
-        task_conversation(&store, "running", &running);
-        task_conversation(&store, "ended", &ended);
-        assert_eq!(store.running_task_conversations().unwrap(), 1);
     }
 }

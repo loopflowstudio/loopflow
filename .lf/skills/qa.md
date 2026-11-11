@@ -110,6 +110,29 @@ when WindowServer is unavailable.
 - `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
   release build.
 
+For a live window on private data, build a world and launch the Dev app on it:
+`target/debug/lf-world build one-task /tmp/lf-qa-<name>/world`, then
+`uv run python scripts/loopflow-dev.py run-debug --world <world>`. It installs
+`~/Applications/Loopflow Dev.app` and stays in the foreground until the app quits.
+Run the app's bundled `lf` with the world's `env.json` variables and
+`LF_DESKTOP=com.loopflow.mac.dev`; the control socket is under the world's
+`LF_HOME`, so `lf desktop state --json` reads only that app.
+
+- Drive it over the socket: `lf desktop ls`, `lf desktop goto 1`,
+  `lf desktop run --task <id> '<line>'`. Do not use `lf desktop view` or
+  `lf open` there: they open a `loopflow://` URL, and when
+  `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
+  on the world instead. It then owns the socket, and its panes run the installed
+  `lf`.
+- An install that fails with "Third-party inputs changed" means `Cargo.lock`
+  changed: `uv run python scripts/third_party.py refresh`, and commit the result.
+- To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
+  those of its children and of the PIDs in the world's `processes` table.
+- Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
+  `swift` script; both apps answer to one bundle ID. Then end the world's owners
+  by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
+  `server.plist`.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience
@@ -418,3 +441,33 @@ A view continuing from a PTY position after a server restart writes
 most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
 swap, `lf monitor rollover --dry-run` should list the old holder and its views
 as staying; `lf ps` BINARIES names each build with its version.
+
+## Task conversation lifetime
+
+`cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
+writes a private Machine whose `bin/claude` stand-in echoes each line; its
+printed environment holds `LF_HOME`, the provider homes and `PATH`. Under an
+isolated `HOME`, give that home a Git `user.email` first or the build fails at
+claiming. Copy `lf` and `lf-world` out of `target/` before a long walkthrough so
+a rebuild can't change the binary under its owners. `lf task checkout <task>`
+warms the Task's conversation detached; `lf session list --json` maps it to its
+Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
+Task's Session in a PTY with `lf session resume <session>`, type a line without
+Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
+schedules checkout cleanup in a private home; call `lf task retire <task>` to
+exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
+After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
+passed without a viewer and live work has settled. That pass signals the verified
+conversation owner directly, even without a checkout; a held Task
+conversation ends on the server's notice instead.
+
+A new conversation's stand-in reads its opening turn from stdin, then the
+terminal, as Claude does, but writes no transcript: before resuming one after
+its provider ends, write any line to
+`$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl` (the ID follows `started`). For a done Task without a checkout, prepare a repository
+conversation (`lf session resume --prepare --json` in the repository), complete
+a checkout-less Task, then `lf session bind <session> --task <task>`. Binding
+claims the Task, which reads `git config user.email` in the repository: with an
+isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
+text can match the repainted saved screen before the new provider reads input;
+wait for text only the new provider prints.

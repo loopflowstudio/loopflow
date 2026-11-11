@@ -353,6 +353,49 @@ lf process prune                   # releases it; the Session can resume
 
 The release is kept as a Session fact in `lf session history show <session>`.
 
+## Many `lf` processes running
+
+```bash
+ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
+lf session list --all --interactive all      # the conversations they serve
+lf process list                              # live call trees lf recorded
+lf process rollover --dry-run                # why each owner is still running
+```
+
+Most resident processes belong to one conversation each. `lf process list`
+and `lf process rollover --dry-run` name a `session serve` owner by its PID.
+
+| In `ps` | What it is | Stopping it loses |
+|---|---|---|
+| `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
+| `lf session serve --terminal -- /bin/sh -c …` | A Desktop shell tab, shown or hidden | The shell's jobs and environment; its saved screen stays |
+| `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
+| `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
+| `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
+| `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
+| `lf server run` | The Machine server | Desktop's connection until the server is started again |
+
+Conversations remain running while their scope is open. Done Tasks end their
+conversations during cleanup, about fifteen minutes after you stop viewing them,
+once live turns, pending requests and Graphs settle. Abandoning a Task ends its
+unviewed conversation. Typed input does not hold either cleanup.
+`lf process rollover --dry-run` shows which owners can move to the selected lf;
+rollover discards unsent input when it replaces a provider.
+
+A Desktop shell runs until you close its tab or its Task is cleaned up; hiding
+it or quitting Desktop leaves it running.
+
+A process started from a build other than the installed `lf`, such as
+`target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from
+development. Tests end every process they start before they exit; one that
+remains is a bug worth filing with its command line. Quitting a demo app leaves
+its conversation owners running. Use the demo's saved Machine environment to
+`lf resume` each conversation and quit its agent before stopping anything by PID.
+
+Stop processes one at a time by PID, after reading what each serves. Never stop
+them by name or pattern (`pkill lf`, `killall lf`): that ends live
+conversations in other checkouts along with the leftovers.
+
 ## A Wave isn't moving
 
 Wave passes are finite; nothing runs between them unless you schedule one.

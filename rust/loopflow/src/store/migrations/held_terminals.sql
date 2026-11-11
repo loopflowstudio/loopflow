@@ -2,8 +2,7 @@
 -- these columns say `held_terminal`.
 -- A held terminal: one PTY a holder keeps for a managed Session's agent. It is
 -- not a Process: the holder is one process however many terminals it holds.
--- A terminal carries what an owner's Process row carries for an owned
--- execution: who is viewing it and the input its provider has not acknowledged.
+-- A terminal carries who is viewing it, as an owner's Process row does.
 CREATE TABLE held_terminals (
     id TEXT PRIMARY KEY,
     -- SHA-256 of the holder's executable; names the holder that has the PTY.
@@ -12,7 +11,6 @@ CREATE TABLE held_terminals (
     ended_at INTEGER,
     -- NULL after ending when the holder died before reporting a status.
     exit_code INTEGER,
-    native_input TEXT,
     viewer_hold TEXT CHECK(viewer_hold IN ('viewed','absent')),
     viewer_hold_at INTEGER,
     viewed INTEGER CHECK(viewed IN (0,1))

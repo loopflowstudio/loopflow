@@ -34,9 +34,9 @@ struct RepositoryPath {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", url.normalizedFilePath] + args
-        let output = Pipe()
+        let output = Pipe.uninherited()
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = Pipe.uninherited()
 
         do {
             try process.run()

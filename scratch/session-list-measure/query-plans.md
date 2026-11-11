@@ -10,3 +10,9 @@ Captured with SQLite 3.53.2 and NULL placeholder bindings; no bound values or
 result content. Inclusive profile time includes nested reads and profiler
 overhead, and is not wall time. Baseline interpretation and measurement limits:
 [optimization plan](../optimize-session-list.md).
+
+2026-11-11 flag filters: SQLite 3.50.4, in-memory copy of the retained schema
+with 10,000 synthetic Tasks, 100 Projects and 1,000 Sessions. `EXPLAIN QUERY PLAN`
+uses `idx_projects_wave_updated` → `idx_tasks_project` for Wave Task IDs;
+`session_inventory` for primary selection and `tasks_primary_session` for
+Task-primary probes (including bare primary selection). No Task table scan.

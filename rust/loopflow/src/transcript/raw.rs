@@ -45,6 +45,17 @@ struct Written {
 }
 
 impl RawDirectory {
+    #[cfg(test)]
+    pub(crate) fn fixture(cwd: PathBuf, id: &str) -> Self {
+        Self {
+            harness: HarnessKind::Claude,
+            named: vec![(id.into(), Source::File(cwd.join("missing-transcript")))],
+            cwd,
+            unnamed: 0,
+            written: vec![],
+        }
+    }
+
     /// Every conversation it could list.
     pub(crate) fn ids(&self) -> impl Iterator<Item = &str> {
         let named = self.named.iter().map(|(id, _)| id.as_str());

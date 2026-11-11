@@ -537,16 +537,19 @@ pub(crate) async fn list(
     // Checkout resolution must precede Task filtering and pagination: SQL path
     // prefixes cannot recognize symlink aliases or nested repositories. Neither
     // can they judge capacity.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
+    let association_filter = filter.orphan
+        || filter.task.is_some()
+        || filter.wave.is_some()
+        || filter.blocked
+        || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
+        selection.wave = None;
         selection.orphan = false;
         selection.blocked = false;
         selection.on = None;
         selection.limit = 0;
-        selection.offset = 0;
     }
     let on = match &filter.on {
         Some(raw) => Some(SessionOn::resolve(store, raw).await?),
@@ -558,7 +561,7 @@ pub(crate) async fn list(
     for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session, &capacity));
     }
-    workspace::associate(store, &mut sessions).await?;
+    let mut workspaces = workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
     let task = match &filter.task {
         Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
@@ -570,21 +573,29 @@ pub(crate) async fn list(
                 .as_ref()
                 .is_some_and(|task| session.task_ids.contains(task))
     };
+    let wave_tasks = match &filter.wave {
+        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
+        None => Default::default(),
+    };
+    let mut in_work = |session: &SessionRecord| {
+        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
+            && in_task(session)
+            && (filter.wave.is_none()
+                || session.wave_id == filter.wave
+                || session
+                    .task_ids
+                    .iter()
+                    .any(|task| wave_tasks.contains(task))
+                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
+    };
     if association_filter {
         sessions.retain(|session| {
-            (!filter.orphan || session.task_ids.is_empty())
-                && in_task(session)
+            in_work(session)
                 && (!filter.blocked || session.blocked)
                 && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
-        let offset = if filter.after.is_some() {
-            0
-        } else {
-            filter.offset
-        };
         sessions = sessions
             .into_iter()
-            .skip(offset)
             .take(if filter.limit == 0 {
                 usize::MAX
             } else {
@@ -596,7 +607,7 @@ pub(crate) async fn list(
         let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
         sessions.extend(
             raw.into_iter()
-                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_task(raw)),
+                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
         );
     }
     Ok(sessions)
@@ -607,14 +618,13 @@ pub(crate) async fn list(
 /// them out. One open in a Task's checkout lists under that Task.
 fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
     filter.raw
-        && !filter.orphan
+        && filter.primary.is_none()
         && !filter.blocked
         && !filter.history
         && filter.on.is_none()
         && filter.search.is_none()
         && filter.interactive != Some(false)
         && filter.after.is_none()
-        && filter.offset == 0
 }
 
 /// Where a Session's step stands in its Graph: the last one a still-open Graph

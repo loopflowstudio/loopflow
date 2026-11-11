@@ -65,8 +65,29 @@ log. `lf session new` keeps the same Session and name: a new provider thread
 starts from that log and current instructions, and the old thread stays in
 `lf session history`.
 
-`lf session list --all` covers every repository on this machine; `--history`
-adds finished conversations, and `--search` narrows the list.
+```bash
+lf session list --wave craft       # the Wave's conversations, ad hoc runs and Task checkouts
+lf session list --primary task     # current Task primaries, excluding former primaries
+lf session list --primary wave     # current Wave primaries
+lf session list --primary          # Task, Wave and repository primaries
+lf session list --orphan           # outside the work model: no Task association and no Wave
+lf session list --all --interactive all # every repository and both interactive and headless work
+```
+
+`--wave` includes Sessions attributed to that Wave and conversations inside
+any of its Tasks' checkouts, including bare lf runs and raw provider conversations.
+`--primary repository` selects repository primaries. `--primary` combines with
+`--wave` and `--all`; former Task primaries still appear without `--primary`.
+`--orphan` includes raw conversations outside every Task checkout. `--no-raw`
+independently leaves raw conversations out.
+
+`--all` covers every repository on this machine; `--history` adds finished
+conversations, and `--search` narrows the list. Lists default to interactive
+conversations; `--interactive all` includes headless work too.
+`--page --json` returns a stable-ID page; pass its `next` value to `--after`
+with the same filters for the following page. Raw conversations appear only
+in unpaged lists and have no primary scope. They also stay out of selections
+by `--history`, `--search`, `--blocked` or `--on`.
 
 ## When Desktop loses its connection
 

@@ -972,9 +972,18 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
-    let end = fixture.json(&["session", "list", "--json", "--limit", "2", "--offset", "2"]);
-    assert_eq!(end.as_array().unwrap().len(), 1);
-    assert_eq!(end[0]["id"], "inventory-112");
+    let end = fixture.json(&[
+        "session",
+        "list",
+        "--json",
+        "--page",
+        "--limit",
+        "2",
+        "--after",
+        "inventory-111",
+    ]);
+    assert_eq!(end["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(end["entries"][0]["id"], "inventory-112");
     fixture
         .db()
         .execute(

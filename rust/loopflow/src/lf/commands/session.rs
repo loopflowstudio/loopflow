@@ -354,12 +354,23 @@ pub(crate) fn list_filter(
             crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
+        wave: args
+            .wave
+            .as_deref()
+            .map(|wave| {
+                crate::work::wave::context::resolve_managed_wave_sync(
+                    (!args.all).then_some(directory),
+                    Some(wave),
+                )
+                .map(|wave| wave.id().clone())
+            })
+            .transpose()?,
+        primary: args.primary,
         orphan: args.orphan,
         search: args.search.clone(),
         interactive: args.interactive.interactive(),
         history: args.history,
         limit: args.limit,
-        offset: args.offset,
         after: args.page.then(|| args.after.clone().unwrap_or_default()),
     })
 }

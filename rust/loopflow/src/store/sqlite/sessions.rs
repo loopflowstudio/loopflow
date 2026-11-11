@@ -214,9 +214,21 @@ fn inventory_query(
             super::task_work::session_ids(&task)
         ));
     }
+    if let Some(primary) = filter.primary {
+        use crate::session::SessionPrimary;
+        let task = "EXISTS (SELECT 1 FROM tasks t WHERE t.primary_session_id=s.id)";
+        sql.push_str(&match primary {
+            SessionPrimary::All => {
+                format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
+            }
+            SessionPrimary::Task => format!(" AND {task}"),
+            SessionPrimary::Wave => " AND s.primary_scope='wave'".into(),
+            SessionPrimary::Repository => " AND s.primary_scope='repository'".into(),
+        });
+    }
     if filter.orphan {
         sql.push_str(&format!(
-            " AND NOT EXISTS ({})",
+            " AND s.wave_id IS NULL AND NOT EXISTS ({})",
             super::task_work::session_tasks("s")
         ));
     }
@@ -236,12 +248,7 @@ fn inventory_query(
         let after = bind(Value::Text(after.clone()));
         sql.push_str(&format!(" AND s.id>{after} ORDER BY s.id LIMIT {limit}"));
     } else {
-        let offset = bind(Value::Integer(
-            i64::try_from(filter.offset).map_err(invalid)?,
-        ));
-        sql.push_str(&format!(
-            " ORDER BY s.title, s.id LIMIT {limit} OFFSET {offset}"
-        ));
+        sql.push_str(&format!(" ORDER BY s.title, s.id LIMIT {limit}"));
     }
     Ok((sql, values))
 }
@@ -2512,9 +2519,7 @@ mod metadata_tests {
             "headless"
         );
         filter.interactive = Some(true);
-        filter.offset = 1;
         filter.limit = 1;
-        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "b");
         filter.after = Some(String::new());
         let first = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(first[0].id, "a");

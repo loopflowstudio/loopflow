@@ -103,7 +103,6 @@ pub(crate) async fn move_sessions(
     let mut selection = filter.clone();
     selection.interactive = Some(true);
     selection.limit = 0;
-    selection.offset = 0;
     selection.after = None;
     let mut report = MoveReport::default();
     for session in &list(store, &selection).await? {

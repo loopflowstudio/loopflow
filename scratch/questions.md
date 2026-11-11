@@ -5,7 +5,8 @@
   Session.
 - Raw rows carry no actions and empty `open_argv`; they join an unpaged list,
   and `--task` (their checkout's Task) and `--available` (turn not running),
-  but not `--orphan`, `--blocked`, `--on`, `--search`, `--history`, `--page`.
+  `--wave` and `--orphan`, but not `--primary`, `--blocked`, `--on`,
+  `--search`, `--history`, `--page`.
 - History's `Turn` is in neither `server_schema.json` nor Swift; only
   `lf history show --transcript --json` emits it. Its shape changed once on
   2026-11-11: a turn has `id`, `state`, `started_at`, `ended_at`, `model`,
@@ -76,3 +77,9 @@ for the parent plan after its obsolete scratch plans were removed.
   freeze the clock and migrate/seal each side before timing. Compare baseline
   `00851d9c6` with `b8fd92ab6b`; do not revert unrelated main or Task work for
   an inconclusive final confirmation.
+
+- Session-list filters, 2026-11-11: `--wave` is an explicit filter, never
+  inherited from ambient `LF_WAVE_ID`. With `--all`, a UUID or unambiguous
+  Wave name resolves across repositories. Existing primary-scope checkout
+  exemption from Task association remains; Wave filtering still includes
+  primaries physically inside its Tasks' checkouts.

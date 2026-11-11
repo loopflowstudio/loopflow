@@ -1714,3 +1714,235 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
             .is_none());
     });
 }
+
+struct ListFilters {
+    home: SessionHome,
+    store: SharedStore,
+    wave: crate::id::WaveId,
+    repo: loopflow_test_support::TestRepo,
+}
+
+impl ListFilters {
+    async fn new() -> Self {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::durable::TaskId::new();
+        let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'craft',?2,1)",
+            rusqlite::params![wave, repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000000000000000000000001',?1,1)",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
+            rusqlite::params![project.as_str(), wave],
+        )
+        .unwrap();
+        db.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,worktree,checkout_machine_id,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,'TEST-1',?3,(SELECT id FROM machines WHERE is_local=1),1)", rusqlite::params![task.as_str(), project.as_str(), repo.path().to_str().unwrap()]).unwrap();
+        for id in [
+            "outside",
+            "wave-primary",
+            "ad-hoc",
+            "task-primary",
+            "former",
+            "bare",
+            "repository-primary",
+            "repository-in-task",
+        ] {
+            store
+                .sqlite
+                .test_session(id, &crate::session_record::new_artifact_key());
+            db.execute("UPDATE agent_sessions SET title=id WHERE id=?1", [id])
+                .unwrap();
+        }
+        db.execute("UPDATE agent_sessions SET wave_id=?1 WHERE id IN ('wave-primary','ad-hoc','task-primary','former')", [&wave]).unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET primary_scope='wave' WHERE id='wave-primary'",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE agent_sessions SET primary_scope='repository', repo=id WHERE id IN ('repository-primary','repository-in-task')", []).unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1 WHERE id IN ('task-primary','former')",
+            [task.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE tasks SET primary_session_id='task-primary' WHERE id=?1",
+            [task.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET cwd=?1 WHERE id IN ('bare','repository-in-task')",
+            [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        Self {
+            home,
+            store,
+            wave,
+            repo,
+        }
+    }
+
+    async fn ids(&self, filter: crate::session::SessionFilter) -> Vec<String> {
+        let mut ids = super::list(&self.store, &filter)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id.to_string())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+}
+
+#[test]
+fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging() {
+    use clap::Parser;
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    let cli = crate::lf::Cli::try_parse_from(["lf", "session", "list", "--all", "--wave", "craft"])
+        .unwrap();
+    let Some(crate::lf::Commands::Session {
+        cmd: crate::lf::SessionCommand::List(args),
+    }) = cli.command
+    else {
+        panic!("session list")
+    };
+    let filter = crate::lf::commands::session::list_filter(&args, fixture.repo.path()).unwrap();
+    assert_eq!(filter.wave, Some(fixture.wave.clone()));
+    assert!(filter.repo.is_none());
+    let raw = crate::observe::Cache::with_raw_conversations(vec![
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.repo.path().to_path_buf(),
+            "raw-in-task",
+        ),
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.home.home.path().to_path_buf(),
+            "raw-outside",
+        ),
+    ]);
+    raw.capture(|| {
+        runtime.block_on(async {
+            assert_eq!(
+                fixture.ids(filter.clone()).await,
+                [
+                    "ad-hoc",
+                    "bare",
+                    "former",
+                    "raw-in-task",
+                    "repository-in-task",
+                    "task-primary",
+                    "wave-primary"
+                ]
+            );
+            let filter = crate::session::SessionFilter {
+                after: Some("outside".into()),
+                limit: 1,
+                ..filter
+            };
+            assert_eq!(fixture.ids(filter).await, ["repository-in-task"]);
+        })
+    });
+}
+
+#[test]
+fn list_orphan_means_no_task_and_no_wave_including_raw_conversations() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    let raw = crate::observe::Cache::with_raw_conversations(vec![
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.repo.path().to_path_buf(),
+            "raw-in-task",
+        ),
+        crate::transcript::raw::RawDirectory::fixture(
+            fixture.home.home.path().to_path_buf(),
+            "raw-outside",
+        ),
+    ]);
+    raw.capture(|| {
+        runtime.block_on(async {
+            let filter = crate::session::SessionFilter {
+                orphan: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                fixture.ids(filter.clone()).await,
+                [
+                    "outside",
+                    "raw-outside",
+                    "repository-in-task",
+                    "repository-primary"
+                ]
+            );
+            assert_eq!(
+                fixture
+                    .ids(crate::session::SessionFilter {
+                        raw: false,
+                        ..filter
+                    })
+                    .await,
+                ["outside", "repository-in-task", "repository-primary"]
+            );
+        })
+    });
+}
+
+#[test]
+fn list_primary_selects_current_scopes_before_paging() {
+    use crate::session::{SessionFilter, SessionPrimary};
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(ListFilters::new());
+    runtime.block_on(async {
+        for (primary, expected) in [
+            (
+                SessionPrimary::All,
+                vec![
+                    "repository-in-task",
+                    "repository-primary",
+                    "task-primary",
+                    "wave-primary",
+                ],
+            ),
+            (SessionPrimary::Task, vec!["task-primary"]),
+            (SessionPrimary::Wave, vec!["wave-primary"]),
+            (
+                SessionPrimary::Repository,
+                vec!["repository-in-task", "repository-primary"],
+            ),
+        ] {
+            let filter = SessionFilter {
+                primary: Some(primary),
+                ..Default::default()
+            };
+            assert_eq!(fixture.ids(filter.clone()).await, expected);
+            assert_eq!(
+                fixture.ids(SessionFilter { limit: 1, ..filter }).await,
+                expected[..1]
+            );
+        }
+        assert_eq!(
+            fixture
+                .ids(SessionFilter {
+                    primary: Some(SessionPrimary::Wave),
+                    wave: Some(fixture.wave.clone()),
+                    limit: 1,
+                    ..Default::default()
+                })
+                .await,
+            ["wave-primary"]
+        );
+    });
+}

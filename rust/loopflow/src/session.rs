@@ -213,12 +213,24 @@ pub enum WorkSource {
     Bound,
 }
 
-/// SQL selection for conversation inventory; mode and completion are independent.
+/// Which scopes' current primary conversations to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SessionPrimary {
+    All,
+    Task,
+    Wave,
+    Repository,
+}
+
+/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
+    /// Attribution or resolved checkout membership, selected before pagination.
+    pub wave: Option<WaveId>,
+    pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
     pub interactive: Option<bool>,
     /// Only conversations available for a person, chosen before paging.
@@ -227,7 +239,6 @@ pub struct SessionFilter {
     pub raw: bool,
     pub history: bool,
     pub limit: usize,
-    pub offset: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
     /// Only Sessions whose next message would fail: their login cannot take
@@ -245,13 +256,14 @@ impl Default for SessionFilter {
             orphan: false,
             repo: None,
             task: None,
+            wave: None,
+            primary: None,
             search: None,
             interactive: Some(true),
             available: false,
             raw: true,
             history: false,
             limit: 100,
-            offset: 0,
             after: None,
         }
     }

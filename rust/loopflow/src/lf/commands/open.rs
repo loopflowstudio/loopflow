@@ -689,13 +689,14 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
                 None
             },
             task: cli.task.clone(),
+            wave: None,
+            primary: None,
             search: None,
             interactive: Some(true),
             available: true,
             raw: true,
             history: false,
             limit: 0,
-            offset: 0,
             after: None,
         },
     ))?;

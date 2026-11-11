@@ -1741,17 +1741,21 @@ pub struct SessionListArgs {
     /// Maximum conversations; 0 reads the complete matching inventory
     #[arg(long, default_value_t = 100)]
     pub limit: usize,
-    #[arg(long, default_value_t = 0)]
-    pub offset: usize,
     /// Return a bounded stable-ID page with a continuation cursor
-    #[arg(long, requires = "json", conflicts_with = "offset")]
+    #[arg(long, requires = "json")]
     pub page: bool,
     /// Previous page's next identity; keep the same filters
     #[arg(long, requires = "page")]
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Only Sessions without a Task association
+    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    #[arg(long, id = "session_wave", value_name = "W")]
+    pub wave: Option<String>,
+    /// Current primary conversations; omit the value to include all three scopes
+    #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "all", value_name = "task|wave|repository")]
+    pub primary: Option<crate::session::SessionPrimary>,
+    /// Outside the work model: no Task association and no Wave
     #[arg(long, conflicts_with = "task")]
     pub orphan: bool,
     #[arg(long)]
@@ -3659,6 +3663,37 @@ mod tests {
             Cli::try_parse_from(["lf", "task", "changes", "A-1", "--json", "--select", "id"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn session_list_selects_wave_and_optional_primary_without_changing_launch_wave() {
+        use crate::session::SessionPrimary;
+        for (words, expected) in [
+            (vec!["--primary"], SessionPrimary::All),
+            (vec!["--primary", "task"], SessionPrimary::Task),
+            (vec!["--primary=wave"], SessionPrimary::Wave),
+            (vec!["--primary", "repository"], SessionPrimary::Repository),
+        ] {
+            let cli = Cli::try_parse_from(
+                ["lf", "session", "list", "--wave", "craft", "--all"]
+                    .into_iter()
+                    .chain(words),
+            )
+            .unwrap();
+            assert!(cli.wave.is_none());
+            let Some(Commands::Session {
+                cmd: SessionCommand::List(args),
+            }) = cli.command
+            else {
+                panic!("session list")
+            };
+            assert_eq!(args.primary, Some(expected));
+            assert_eq!(args.wave.as_deref(), Some("craft"));
+            assert_eq!(args.interactive.interactive(), Some(true));
+            assert!(args.all);
+        }
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--offset", "1"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--primary", "former"]).is_err());
     }
 
     #[test]

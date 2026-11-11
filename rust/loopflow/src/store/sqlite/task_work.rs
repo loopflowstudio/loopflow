@@ -585,6 +585,22 @@ fn members(
 }
 
 impl SqliteStore {
+    pub(crate) fn task_ids_in_wave(
+        &self,
+        wave: &crate::id::WaveId,
+    ) -> StoreResult<std::collections::HashSet<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
+        )?;
+        let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

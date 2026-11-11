@@ -266,6 +266,23 @@ impl Cache {
         self.refresh(Source::Local);
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_raw_conversations(
+        raw: Vec<crate::transcript::raw::RawDirectory>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            entries: Mutex::new(HashMap::from([(
+                Fact::RawConversations,
+                Arc::new(Mutex::new(Entry {
+                    answer: Some(Answer::Raw(raw)),
+                    revision: 0,
+                    checked: SystemTime::now(),
+                    used: SystemTime::now(),
+                })),
+            )])),
+        })
+    }
+
     pub(crate) fn capture<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> (T, Dependencies) {
         let dependencies = Dependencies::default();
         let result = scope(

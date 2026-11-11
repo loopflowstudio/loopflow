@@ -102,62 +102,16 @@ schema-inventory query sees the two additional indexes. No board speedup is
 attributed to the change. Task status’s ranges separate by only 16 ms; this is
 a five-pair result on this snapshot, not a general latency guarantee.
 
-### Setup correction and retained trials
+### Sealed inputs, attribution and limits
 
-The first 60-call cohort is **invalid**, despite matching answers. Python’s
-SQLite connection context manager commits but does not close the connection.
-The preparation backup left the baseline’s already-kept Task indexes in a
-650 MB WAL. `activate` copied only the main database. Immutable inspection
-showed no Task indexes in that file, while a normal connection saw both.
-Commands that open the registry for migration repaired this; Work selection’s
-read-only path did not. Its apparent 45.3% gain therefore included iteration 1.
+Complete iteration-2 setup, excluded trials, stack counts and check receipts:
+`a33b0721fb:scratch/optimize-session-list.md`. The initial 60-call cohort was
+invalid: a backup connection left the kept Task indexes in a WAL, and copying
+only the main database omitted them. Retained trials use checkpointed DELETE-mode
+stores; immutable reads verified all 78 application tables match. The backup
+contains 14,759 Sessions, 236,791 events, 160,314 Processes and 1,099 Tasks.
 
-Both private databases were checkpointed and sealed in DELETE journal mode.
-`immutable=1` reads verified their standalone indexes and all 78 application
-tables: every row digest matches, with only `schema_migrations` differing.
-The preparation script now closes connections and seals the destination before
-copying. The timing code (`compare.py`, `planning_compare.py`, `run.py`, clock
-shim and iteration-2 plan) is unchanged; its hashes were checked again after
-all runs. All six workloads were rerun, five pairs each. The ledger retains
-both cohorts, all warm-ups, calibration, preparation and profiling calls.
-
-Fresh read-only online Machine-store backup: **14,759 Sessions, 236,791 events,
-12,983 activity rows, 160,314 Processes, 1,099 Tasks and six accounts**. Every
-benchmark command used `/tmp/loo822-process-measure`, never the live store.
-The private provider transcript copies from iteration 1 were reused without
-credentials. Wall time stayed fixed at the epoch in the manifest; monotonic
-clocks supplied elapsed time. No artificial load or writer was introduced.
-
-Both exact commit archives were built with `cargo build --release -p loopflow
---bin lf`, Rust/Cargo 1.98.1, macOS 26.0.1 arm64, 16 logical CPUs, 128 GiB RAM.
-Both attribution binaries use the same release flags and the existing
-`trace_bound.rs` callback. All four builds finished before retained timing.
-Executable and home paths are identical across sides. No output field was
-removed or normalized. The exported builds have development provenance and no
-Git metadata; commit mapping and binary hashes are in the receipt.
-
-The corrected calibration distinguished a one-row list (248.3–253.3 ms) from
-the default list (423.0–441.3 ms), two alternating pairs. Timed work
-includes command execution and output collection; served timing includes the
-checkpoint’s reading. Clone/reset, migrations and validation are outside it.
-Every CLI has an excluded warm-up; every server has an initial subscription.
-All private servers were stopped after their reads.
-
-The 60 retained timed calls return 7 Waves, one Task with 84 Session rows,
-100 default Sessions, 372 served Sessions, 183 board Tasks and 25 Work members.
-Session title/cwd and Task titles match the private store; IDs are unique and
-turn states/usage validate. Full JSON also matches all 12 attribution reads
-and both final stack samples. The ten board reads emit 40 existing unknown-
-`crons` warning lines from another checkout. Network-denied planning measures
-the local answer, not successful exchange; expected blocked network attempts
-are not counted as successful work. OS processes, Git/config files and legacy
-absolute transcript paths remain ambient; one-minute Machine load ranged from
-7.9 to 11.0 in the retained cohort and is recorded per trial.
-
-### Bundled-SQLite attribution and the latency limit
-
-SQLite **3.53.2**, actual bound plans, monotonic statement timing, separate runs.
-Counters are per execution, **fullscan / VM steps**:
+SQLite 3.53.2 bound plans and work counters, fullscan / VM steps per execution:
 
 | Statement | Before | After |
 |---|---:|---:|
@@ -165,82 +119,23 @@ Counters are per execution, **fullscan / VM steps**:
 | Task Process membership | 175,320 / 7,641,629 | 15,007 / 274,770 |
 | Work-selection Session summary | 4,401 / 270,064 | 4,401 / 270,064 |
 
-`store/sqlite/processes.rs::agent_processes` changes from the Process primary-
-key scan to `agent_process_unfinished`; VM work falls **99.7%**. The warm
-profile reads 59 unfinished agents after recovery, rather than scanning the
-160,314 retained Processes. Some ambient agents exited since preparation;
-profile outputs still match the timing cohort in full.
+The unfinished-agent partial index and cwd equality/range indexes remove
+retained-history scans. Session membership and relocation scans remain.
+Warm native samples found repeated Keychain reads at 62.1% of the after
+main-thread samples and planning scope checks at 22.6%; iteration 3 follows
+those costs. These samples do not explain the original 18–75 s stall.
 
-`store/sqlite/task_work.rs::lf_process_ids` uses `processes_cwd` equality and
-range searches; VM work falls **96.4%**. The remaining scans include Session
-membership and relocation rows. Its history and attachment lookups remain.
-The corrected Work-selection plans use the previously kept Task indexes on
-both sides and perform identical work.
+All 60 retained timed calls and warm-ups match complete JSON, with zero errors.
+Private stores and provider copies omit credentials; network is denied and
+OS/Git/config facts remain ambient. No board speedup is attributed to the
+change: its substantive SQL plans and counters match. All samplers and servers
+exited. Raw captures stay in `/tmp/loo822-process-measure`; `unsealed/` retains
+the invalid cohort.
 
-Wave inventory SQL takes **187.6 → 0.3 ms** in a **461.5 → 303.7 ms** traced
-path. That statement is 40.7% of the traced baseline: deleting it permits at
-most a 40.7% latency reduction (about 69% faster), and the observed traced path
-reduction is 34.2%. Task inventory plus membership takes **567.6 → 6.3 ms**,
-7.1% of its 7960.3 ms traced baseline; its traced path falls to 7829.5 ms.
-These are limits on those instrumented runs. The uninstrumented reductions,
-194.9 and 508.3 ms, are consistent with hundreds of milliseconds removed from
-SQL, within different runs’ variation. Tracing adds work; its path shares
-cannot predict the uninstrumented medians exactly. Nested SQL times are not
-summed, and no profile timing enters the five-pair result.
-
-### Task status’s remaining non-SQL time
-
-Warm native `sample` runs, separate from timing, return the same full JSON:
-**8601.2 ms before; 7156.4 ms after**. Sampling at 5 ms gives these inclusive
-main-thread counts (nested rows must not be added):
-
-| Stack | Before, of 1267 | After, of 1105 |
-|---|---:|---:|
-| Claude Keychain subprocess reads | 752 (59.4%) | 686 (62.1%) |
-| Planning transport/config loading | 213 (16.8%) | 182 (16.5%) |
-| Whole planning scope check, containing config loading | 275 (21.7%) | 250 (22.6%) |
-
-The dominant stack is `lf/commands/waves.rs::task_detail` →
-`ops/human_session.rs::listed` → `provider_account.rs::LaunchCapacity::read` →
-`provider_account/identity.rs::same_login` →
-`provider_auth/mod.rs::read_claude_keychain_blob_with_security` → child output
-and `poll`. `task_detail` emits 84 Session rows and `listed` reads launch
-capacity separately for each. Descendant observations also caught repeated
-`security` subprocesses; no credential output was collected.
-
-The next stack is `ops/linear_observe.rs::check_scope` →
-`ops/planning_client.rs::repository_scope` → `config::load_planning_transport`
-→ `config/settings.rs::resolve_layers`, including YAML parsing and validation.
-The scope check resolves repository configuration inside its Task loop before
-checking freshness. The profiles locate repeated local work, not a long
-SQLite lock wait. The initial exploratory sample overlapped compilation and
-is retained but excluded from these percentages.
-
-Next measurement target: read launch capacity once for the whole Task detail,
-then measure repeated configuration resolution in planning refresh. The
-private provider copies omit credential files, so native-login fallback costs
-may differ from ordinary homes. The samples identify this reproduction’s
-limiter, not a promise that online Task status has the same shares. No further
-optimization was made. The original 18–75 s Session-list stall remains open.
-
-### Decision and receipts
-
-Keep both Process changes in `761c28056`: Wave list clears the noise, and the
-membership rewrite contributes a measured Task-status improvement without
-changing output. No measurable Session-list or Work-selection benefit is
-claimed. Source and tests were not modified during measurement.
-
-- Both uninstrumented release builds and both attribution builds passed.
-- `cargo fmt --check`; `git diff --check`: passed. Prior focused implementation
-  test and clippy results remain above; no Rust edit requires repeating them.
-- `scratch/loo-822.md` matches its pre-run hash. The release executable is the
-  uninstrumented candidate. No private server or sampler remains running.
 - [Every trial](measure.html#iteration2-trials),
-  [full samples, hashes and excluded cohort](session-list-measure/iteration2-results.json),
+  [samples, hashes and excluded cohort](session-list-measure/iteration2-results.json),
   [bound plans and counters](session-list-measure/iteration2-profiles.json),
-  [validation and stack counts](session-list-measure/iteration2-checks.json).
-  Raw JSON, stores, stack captures and logs remain in the mode-0700 private
-  directory; `unsealed/` holds the invalid cohort unchanged.
+  [validation and stacks](session-list-measure/iteration2-checks.json).
 
 ## Iteration 3 — Task-status repeated reads (2026-11-11)
 
@@ -386,3 +281,22 @@ across five executions. Profile measurements overlap and are not added.
   [leading SQL and counters](session-list-measure/iteration3-profiles.json).
   All 151 calls and their excluded warm-ups are retained; raw JSON, stores and
   captures stay in the private `/tmp/loo822-reads-measure` directory.
+
+## Compress (2026-11-11)
+
+Delete — do not maintain: duplicate relocation-table probes and cached scope
+strings used only for equality. The shared probe keeps released read-only
+schemas readable; each scope check stores repository match booleans, including
+failed resolutions. Single-Session tests share fresh capacity setup; the Task
+detail regression still checks one read and every returned Session field.
+
+No remaining optimization deletion targets. `f8b742d8c`'s Rust changes were
+fully reverted by `2667788c6`; `session_provider_thread_created` and
+`session_activity_observed` are absent from the migration. Keep the four
+measured indexes and the SQL shapes, lexical/relocation behavior cases, upgrade
+comparisons, query-plan assertions and VM bounds. Measurement scripts stay in
+scratch; `loo-822.md` is untouched.
+
+- `cargo test -p loopflow --lib -- store::sqlite::task_work::tests:: store::sqlite::processes::attachment_tests::live_agent_inventory_upgrade_skips_other_processes store::sqlite::processes::attachment_tests::detached_and_replaced_agents_remain_in_the_process_inventory ops::human_session::tests:: linear_scope_reads_each_repository_once_and_refreshes_next_check linear_on_demand_adopts_new_open_issues_without_allocating_execution`: 45 passed, LF variables unset and stdin closed; existing oversized unwind-table linker warning only.
+- `cargo fmt`; `git diff --check`: passed.
+- `cargo clippy --all-targets -- -D warnings`: passed, LF variables unset and stdin closed.

@@ -161,15 +161,13 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     if !super::planning_client::connected(repository) {
         return Ok(false);
     }
-    let repo = std::path::Path::new(repository);
+    let repo = Path::new(repository);
     let team = super::planning_client::repository_scope(repo)?;
-    let mut scopes = HashMap::from([(repo.to_path_buf(), Some(team.clone()))]);
+    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
     let mut same_scope = |repo: &Path| {
-        scopes
-            .entry(repo.to_path_buf())
-            .or_insert_with(|| super::planning_client::repository_scope(repo).ok())
-            .as_ref()
-            == Some(&team)
+        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
+            super::planning_client::repository_scope(repo).is_ok_and(|scope| scope == team)
+        })
     };
     let mut live = Vec::new();
     let mut finished = Vec::new();

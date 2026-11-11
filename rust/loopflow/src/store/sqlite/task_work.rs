@@ -23,15 +23,18 @@ fn checkout(cwd: &str) -> String {
     format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
-fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
-    let current = checkout(&format!("{process}.cwd"));
+fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
     // Read-only clients also inspect released databases before promotion.
     // Those schemas cannot have relocation receipts; leave them untouched.
-    let relocations: bool = conn.query_row(
+    Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
         [], |row| row.get(0),
-    )?;
-    Ok(if relocations {
+    )?)
+}
+
+fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
+    let current = checkout(&format!("{process}.cwd"));
+    Ok(if has_relocations(conn)? {
         format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
     } else {
         current
@@ -74,11 +77,7 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
-    let relocations: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?;
-    let (unmoved, relocated) = if relocations {
+    let (unmoved, relocated) = if has_relocations(conn)? {
         (
             "AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)",
             "UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id",
@@ -135,11 +134,7 @@ pub(super) fn task_of_process(
 /// joins the checkout that is its directory or one of its ancestors, the same
 /// containment `checkout` tests from the other side.
 fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
-    let relocations: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?;
-    let (unmoved, relocated) = if relocations {
+    let (unmoved, relocated) = if has_relocations(conn)? {
         (
             "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
             "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id

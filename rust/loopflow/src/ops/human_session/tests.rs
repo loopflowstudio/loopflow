@@ -1,3 +1,8 @@
+fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
+    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
+    super::listed(store, id, &capacity).unwrap().unwrap()
+}
+
 #[test]
 fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let ledger = crate::journal::TestLedgerGuard::new();
@@ -1134,13 +1139,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
                 .any(|action| action.kind == super::SessionActionKind::Open));
             action
         };
-        let listed = super::listed(
-            &store,
-            &record.id,
-            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-        )
-        .unwrap()
-        .unwrap();
+        let listed = listed_session(&store, &record.id);
         assert_eq!(retry(&listed).label, "Try again");
         assert!(retry(&listed).unavailable_reason.is_none());
         let refused = super::open_without_replacing(
@@ -1209,13 +1208,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .contains("No saved provider history"));
         for refreshed in [
             super::surface(&store, &before).await.unwrap(),
-            super::listed(
-                &store,
-                &record.id,
-                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-            )
-            .unwrap()
-            .unwrap(),
+            listed_session(&store, &record.id),
             super::list(&store, &crate::session::SessionFilter::default())
                 .await
                 .unwrap()
@@ -1304,13 +1297,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             )
             .unwrap();
         // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
-        let refreshed = super::listed(
-            &store,
-            &record.id,
-            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-        )
-        .unwrap()
-        .unwrap();
+        let refreshed = listed_session(&store, &record.id);
         let takeover = refreshed
             .actions
             .iter()
@@ -1340,13 +1327,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .sqlite
             .record_agent_process_exit(&record.id, &holder, true)
             .unwrap();
-        let refreshed = super::listed(
-            &store,
-            &record.id,
-            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-        )
-        .unwrap()
-        .unwrap();
+        let refreshed = listed_session(&store, &record.id);
         assert!(!refreshed
             .actions
             .iter()
@@ -1411,13 +1392,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             )
             .await
             .unwrap();
-            let refreshed = super::listed(
-                &store,
-                &record.id,
-                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-            )
-            .unwrap()
-            .unwrap();
+            let refreshed = listed_session(&store, &record.id);
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed
@@ -1451,13 +1426,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             )
             .await
             .unwrap();
-            let refreshed = super::listed(
-                &store,
-                &next.id,
-                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
-            )
-            .unwrap()
-            .unwrap();
+            let refreshed = listed_session(&store, &next.id);
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed

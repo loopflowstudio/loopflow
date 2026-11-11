@@ -17,6 +17,12 @@
   or was observed within 2 s after a run that began at or after its own turn.
 - `lf` ancestors are recognized by name: `lf`, `lf-*`, `*-lf`. A provider
   started by another app (Paseo, Codex Desktop) lists as raw.
+- The exit read writes rows for every provider lf launched, with no check
+  that a Task or Wave claims the directory. Such a launch already has a
+  Session and, with hooks, the same rows from the live stream; its Task is
+  decided once, at launch (`counted_task`), so "only managed work" is a
+  filter on the Session's Task when rows are read, and a gate at the write
+  would make transcript rows disagree with live ones for the same launch.
 
 Steers after kickoff, what remains and open choices: `loo-822.md`.
 

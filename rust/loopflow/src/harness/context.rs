@@ -90,7 +90,8 @@ pub(crate) fn add_opencode_context(
     instructions: &str,
     managed: bool,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "managed":managed});
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "managed":managed,
+        "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -98,9 +99,10 @@ pub(crate) fn add_opencode_context(
         None,
     )?;
     let source = format!(
-        "const spec = {};\nconst delivery = {};\n{}",
+        "const spec = {};\nconst delivery = {};\n{}\n{}",
         spec,
         serde_json::to_string(&delivery)?,
+        include_str!("server_connection.js"),
         include_str!("context_opencode.js")
     );
     let path = write_prompt_log(&context.repo, &source, "opencode-plugin", None)?;
@@ -141,13 +143,29 @@ pub(crate) fn pi_args(
         .map(|c| c.home.clone())
         .unwrap_or_else(crate::store::lf_home_dir);
     let source = format!(
-        "const spec = {};\n{}",
+        "const spec = {};\n{}\n{}",
         json!({"native":native, "managed":managed, "executable":crate::os_process::resolve_lf_binary()?,
-            "log":home.join("logs").join("pi-extension.log")}),
-        include_str!("context_pi.mjs")
+            "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension")}),
+        include_str!("context_pi.mjs"),
+        include_str!("server_connection.js")
     );
     let extension = save_hook(&home, "pi", "mjs", source.as_bytes())?;
     Ok(vec!["--extension".into(), extension.display().to_string()])
+}
+
+/// What a plugin needs to open its `machine.sock` connection: the `hello` a
+/// hook sends, under the plugin's own name. Null when the socket has no
+/// address, so every boundary is a recording gap rather than a failed launch.
+fn server_spec(name: &str) -> Value {
+    match crate::server::socket_path() {
+        Ok(socket) => json!({"socket":socket, "revision":crate::server::wire::REVISION,
+            "min_revision":crate::server::wire::MIN_REVISION, "platform":std::env::consts::OS,
+            "name":name, "version":crate::build_info::BUILD_VERSION}),
+        Err(error) => {
+            tracing::warn!(error = %format!("{error:#}"), "plugin starts without a server address");
+            Value::Null
+        }
+    }
 }
 
 fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
@@ -304,28 +322,105 @@ mod tests {
         lf
     }
 
-    fn run_probe(directory: &std::path::Path, source: &str) -> String {
+    /// A stand-in Machine server on the plugin's socket: it welcomes every
+    /// `hello`, answers the first `answer_steers` boundary with one batch, and
+    /// keeps each hello and request in `server.json`.
+    const STAND_IN_SERVER: &str = r#"import { createServer } from 'node:net';
+import { writeFileSync } from 'node:fs';
+const seen = { hellos: [], requests: [] };
+let answered = false;
+const keep = () => writeFileSync(SEEN, JSON.stringify(seen));
+const server = createServer((socket) => {
+  let buffer = '';
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk) => {
+    buffer += chunk;
+    for (let end = buffer.indexOf('\n'); end >= 0; end = buffer.indexOf('\n')) {
+      const message = JSON.parse(buffer.slice(0, end));
+      buffer = buffer.slice(end + 1);
+      if (message.type === 'hello') {
+        seen.hellos.push(message);
+        socket.write(JSON.stringify({ type: 'welcome' }) + '\n');
+        continue;
+      }
+      const operation = message.operation;
+      seen.requests.push(operation);
+      keep();
+      const steers = !answered && (ANSWER_STEERS)(operation)
+        ? { batch: 'batch-1', text: 'STEER ' } : null;
+      answered ||= steers !== null;
+      socket.write(JSON.stringify({ type: 'response', id: message.id, trace_id: 't',
+        result: { steers, waiting: false } }) + '\n');
+    }
+  });
+});
+await new Promise((resolve) => server.listen(SOCKET, resolve));
+"#;
+
+    struct Probe {
+        /// Each `lf` the plugin started, one line of arguments per process.
+        calls: String,
+        /// What the stand-in server saw: `hellos` and `requests`.
+        server: serde_json::Value,
+    }
+
+    /// Run `source` under Node beside a stand-in server. `answer_steers` is a
+    /// JavaScript predicate over a request's operation.
+    fn run_probe(
+        directory: &std::path::Path,
+        managed: bool,
+        answer_steers: &str,
+        source: &str,
+    ) -> Probe {
+        let socket = crate::server::socket_path().unwrap();
+        let seen = directory.join("server.json");
+        let server = STAND_IN_SERVER
+            .replace("SEEN", &serde_json::to_string(&seen).unwrap())
+            .replace("SOCKET", &serde_json::to_string(&socket).unwrap())
+            .replace("ANSWER_STEERS", answer_steers);
         let probe = directory.join("probe.mjs");
-        std::fs::write(&probe, source).unwrap();
-        let output = std::process::Command::new("node")
-            .arg(&probe)
+        std::fs::write(&probe, format!("{server}\n{source}\nprocess.exit(0);\n")).unwrap();
+        let mut node = std::process::Command::new("node");
+        node.arg(&probe)
             .env("LF_CONTEXT_DELIVERY", directory.join("delivery.json"))
-            .output()
-            .unwrap();
+            .env_remove(crate::steer::PROVIDER_CONTEXT_ENV);
+        if managed {
+            node.env(
+                crate::steer::PROVIDER_CONTEXT_ENV,
+                r#"{"session":"session","agent_process_id":"process","capability":"capability"}"#,
+            );
+        }
+        let output = node.output().unwrap();
+        let _ = std::fs::remove_file(&socket);
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        std::fs::read_to_string(directory.join("calls")).unwrap_or_default()
+        Probe {
+            calls: std::fs::read_to_string(directory.join("calls")).unwrap_or_default(),
+            server: std::fs::read(&seen)
+                .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+                .unwrap_or_else(|_| serde_json::json!({"hellos":[],"requests":[]})),
+        }
     }
 
-    /// One conversation through the OpenCode plugin: a prompt, its context
-    /// request, then the turn's end.
-    fn opencode_calls(managed: bool) -> String {
+    fn moments(probe: &Probe) -> Vec<&str> {
+        probe.server["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|request| request["moment"].as_str().unwrap())
+            .collect()
+    }
+
+    /// One conversation through the OpenCode plugin: a prompt, three model
+    /// requests with a compaction before the third, then the turn's end.
+    fn opencode_turn(managed: bool) -> Probe {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir(repo.path().join("machine")).unwrap();
         std::env::set_var("LF_HOME", repo.path().join("machine"));
         std::env::set_var("LF_BIN", recording_lf(repo.path()));
         let context = ContextDelivery {
@@ -342,6 +437,8 @@ mod tests {
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
+            managed,
+            "(operation) => operation.moment === 'tool'",
             &format!(
                 r#"import assert from 'node:assert/strict';
 import plugin from {plugin};
@@ -356,35 +453,64 @@ const close = await plugin.setup({{
   }} }},
 }});
 await hooks.prompt({{ sessionID: 'native' }});
-const request = {{ sessionID: 'native', system: [] }};
-await hooks.context(request);
-assert.deepEqual(request.system.map((part) => part.text), ['Fixed instructions', 'BLOCK']);
+const texts = [];
+for (const compact of [false, false, true]) {{
+  if (compact) await hooks.compaction({{ sessionID: 'native' }});
+  const request = {{ sessionID: 'native', system: [] }};
+  await hooks.context(request);
+  texts.push(request.system.map((part) => part.text));
+}}
+const steered = {steered};
+assert.deepEqual(texts[0], ['Fixed instructions', 'BLOCK']);
+assert.deepEqual(texts[1], ['Fixed instructions', steered ? 'STEER BLOCK' : 'BLOCK']);
 end();
 await new Promise((resolve) => setTimeout(resolve, 200));
 await close();
 "#,
-                plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap()
+                plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap(),
+                steered = managed,
             ),
         )
     }
 
     #[test]
-    fn a_bare_opencode_run_serves_context_and_reports_no_turn_end() {
-        let managed = opencode_calls(true);
-        assert!(managed.contains("--moment start") && managed.contains("--moment stop"));
-        let bare = opencode_calls(false);
-        assert!(bare.contains("--moment start"), "{bare}");
-        assert_eq!(bare.lines().count(), 1, "{bare}");
+    fn a_managed_opencode_turn_asks_its_connection_and_renders_only_at_start_and_compaction() {
+        let managed = opencode_turn(true);
+        let renders: Vec<_> = managed
+            .calls
+            .lines()
+            .map(|call| call.rsplit(' ').next().unwrap())
+            .collect();
+        assert_eq!(renders, ["start", "compact"], "{}", managed.calls);
+        assert_eq!(moments(&managed), ["start", "tool", "compact", "stop"]);
+        let hellos = managed.server["hellos"].as_array().unwrap();
+        assert_eq!(hellos.len(), 1, "{}", managed.server);
+        assert_eq!(hellos[0]["client"]["kind"], "plugin");
+        // The batch the second request carried is named by the next one.
+        let requests = &managed.server["requests"];
+        assert_eq!(requests[1]["printed"], serde_json::json!([]));
+        assert_eq!(requests[2]["printed"], serde_json::json!(["batch-1"]));
+        assert_eq!(requests[1]["adapter"]["session"], "session");
     }
 
-    /// One headless Pi turn through the extension, with Pi's package stood in.
-    fn pi_calls(managed: bool) -> String {
+    #[test]
+    fn a_bare_opencode_run_serves_context_and_opens_no_connection() {
+        let bare = opencode_turn(false);
+        assert_eq!(bare.calls.lines().count(), 2, "{}", bare.calls);
+        assert!(bare.calls.contains("--moment start") && bare.calls.contains("--moment compact"));
+        assert!(moments(&bare).is_empty(), "{}", bare.server);
+        assert!(bare.server["hellos"].as_array().unwrap().is_empty());
+    }
+
+    /// One headless Pi turn with two tool calls through the extension, with
+    /// Pi's package stood in.
+    fn pi_turn(native: bool, managed: bool) -> Probe {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", recording_lf(home.path()));
-        let args = super::pi_args(None, false, managed).unwrap();
+        let args = super::pi_args(None, native, managed).unwrap();
         let package = home
             .path()
             .join("hook-settings/node_modules/@earendil-works/pi-coding-agent");
@@ -403,10 +529,14 @@ export const createLocalBashOperations = () => ({});
         .unwrap();
         run_probe(
             home.path(),
+            managed,
+            "(operation) => operation.moment !== 'start' && operation.callback.type === 'tool_execution_start'
+  || operation.callback.hook_event_name === 'PiSteer'",
             &format!(
                 r#"import assert from 'node:assert/strict';
 import extension from {extension};
 const handlers = {{}};
+const steers = [];
 const fire = async (name, event) => {{
   let result;
   for (const handler of handlers[name] ?? []) result = await handler(event, ctx);
@@ -415,7 +545,7 @@ const fire = async (name, event) => {{
 const pi = {{
   on: (name, handler) => {{ (handlers[name] ??= []).push(handler); }},
   getSettings: () => ({{}}), getAllTools: () => [], getActiveTools: () => [],
-  sendMessage: () => {{}},
+  sendMessage: (message, options) => {{ steers.push([message.content, options.deliverAs]); }},
 }};
 const ctx = {{ cwd: '/', sessionManager: {{ getSessionFile: () => '/pi/session.jsonl' }},
   abort() {{}}, shutdown() {{}} }};
@@ -425,28 +555,75 @@ await fire('before_agent_start', {{}});
 const request = await fire('context_with_system', {{ messages: [{{ role: 'system', sections: {{}} }}] }});
 assert.equal(request.messages[0].sections.loopflow, 'BLOCK');
 await fire('agent_start', {{ type: 'agent_start' }});
-await fire('tool_execution_start', {{ type: 'tool_execution_start', toolCallId: 'tool' }});
-await fire('tool_execution_end', {{ type: 'tool_execution_end', toolCallId: 'tool' }});
-await new Promise((resolve) => setTimeout(resolve, 1200));
+for (const tool of ['one', 'two']) {{
+  await fire('tool_execution_start', {{ type: 'tool_execution_start', toolCallId: tool }});
+  await fire('tool_execution_end', {{ type: 'tool_execution_end', toolCallId: tool }});
+}}
 await fire('agent_settled', {{ type: 'agent_settled' }});
 await fire('session_shutdown', {{}});
+assert.deepEqual(steers, {steers});
 "#,
-                extension = serde_json::to_string(&args[1]).unwrap()
+                extension = serde_json::to_string(&args[1]).unwrap(),
+                steers = if managed { r#"[["STEER ", "steer"]]"# } else { "[]" },
             ),
         )
     }
 
     #[test]
-    fn a_bare_pi_run_serves_context_without_steer_polls_or_a_turn_end() {
-        let managed = pi_calls(true);
-        for moment in ["start", "tool", "stop"] {
-            assert!(
-                managed.contains(&format!("--moment {moment}\n")),
-                "{moment}: {managed}"
-            );
-        }
-        let bare = pi_calls(false);
-        assert_eq!(bare, "__context-block --moment start\n");
+    fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
+        let native = pi_turn(true, true);
+        // One render at start, beside the conversation's Task-update watcher;
+        // no lf per event, tool or steer check.
+        let calls: Vec<_> = native
+            .calls
+            .lines()
+            .filter(|call| !call.ends_with("task-updates"))
+            .collect();
+        assert_eq!(
+            calls,
+            ["__context-block --moment start"],
+            "{}",
+            native.calls
+        );
+        assert_eq!(
+            moments(&native),
+            ["event", "start", "event", "event", "event", "event", "event", "event", "stop"]
+        );
+        let requests = native.server["requests"].as_array().unwrap();
+        let types: Vec<_> = requests
+            .iter()
+            .filter(|request| request["moment"] == "event")
+            .map(|request| request["callback"]["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            types,
+            [
+                "session_start",
+                "agent_start",
+                "tool_execution_start",
+                "tool_execution_end",
+                "tool_execution_start",
+                "tool_execution_end",
+                "agent_settled"
+            ]
+        );
+        // The steer the first tool start answered is confirmed by the next event.
+        assert_eq!(requests[4]["printed"], serde_json::json!(["batch-1"]));
+        assert_eq!(requests[2]["callback"]["sessionFile"], "/pi/session.jsonl");
+    }
+
+    #[test]
+    fn a_driven_pi_turn_asks_for_steers_and_a_bare_one_opens_no_connection() {
+        let driven = pi_turn(false, true);
+        assert_eq!(driven.calls, "__context-block --moment start\n");
+        // Pi's RPC driver records the events; the extension asks only for steers.
+        assert_eq!(
+            moments(&driven),
+            ["start", "tool", "tool", "tool", "tool", "tool", "tool", "stop"]
+        );
+        let bare = pi_turn(false, false);
+        assert_eq!(bare.calls, "__context-block --moment start\n");
+        assert!(moments(&bare).is_empty(), "{}", bare.server);
     }
 
     #[test]

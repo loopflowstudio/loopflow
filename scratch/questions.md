@@ -95,3 +95,13 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 - Assumed (the Task lists it open): steers are asked for at each boundary on
   the open connection, not pushed by a subscription. Pi asks with every
   event it reports, so latency is bounded by the longest tool.
+- Assumed (reversible): the plugin connection closes after each turn's `stop`
+  and reconnects at the next boundary, instead of staying open for the whole
+  conversation: the server has 64 connection slots (`MAX_CONNECTIONS`), and
+  idle conversations would otherwise hold them. Docs say so.
+- Unverified: OpenCode awaits an async `context` hook. The plugin now awaits
+  the boundary before pushing system text; if OpenCode does not await, the
+  block would miss the request. Check in qa with a real OpenCode.
+- A native Pi launch with no context delivery file (`LF_CONTEXT_DELIVERY`
+  unset) opens no connection and records no events; `pi-event` used to record
+  them without a delivery. No production launch path found that does this.

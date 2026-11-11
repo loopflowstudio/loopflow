@@ -65,8 +65,12 @@ pub(super) fn answer(
         return Ok((nothing, Some(after)));
     };
     // OpenCode's turn end names no conversation: it records no turn, and
-    // still confirms, refreshes planning and applies a pending move.
-    let thread = callback["session_id"].as_str();
+    // still confirms, refreshes planning and applies a pending move. A Pi
+    // event names its conversation by its session file.
+    let thread = match moment {
+        BoundaryMoment::Event => callback["sessionFile"].as_str(),
+        _ => callback["session_id"].as_str(),
+    };
     let no_thread = || anyhow!("Provider callback names no native conversation");
     let event = callback["hook_event_name"]
         .as_str()
@@ -98,6 +102,23 @@ pub(super) fn answer(
     }
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
+    }
+    if *moment == BoundaryMoment::Event {
+        crate::harness::pi::observe_native(store, adapter, callback)?;
+        // Pi takes a steer only while a turn runs; outside one it would be
+        // stored without starting a run, so the event answers none.
+        let running = callback["turn"].is_string() && callback["type"] != "agent_settled";
+        if !running {
+            let waiting =
+                store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+            return Ok((
+                SessionBoundaryAnswer {
+                    steers: None,
+                    waiting,
+                },
+                None,
+            ));
+        }
     }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
@@ -272,6 +293,17 @@ mod tests {
         SteerAdapter,
         std::path::PathBuf,
     ) {
+        fixture_on("native")
+    }
+
+    fn fixture_on(
+        thread: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteStore,
+        SteerAdapter,
+        std::path::PathBuf,
+    ) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
@@ -295,7 +327,7 @@ mod tests {
         store
             .with_provider_context(
                 &adapter,
-                "native",
+                thread,
                 NativeBoundary::Activate { source: "startup" },
                 || Ok(()),
             )
@@ -368,6 +400,37 @@ mod tests {
         let (answered, _) = answer(&store, &tool("second", &[steers.batch])).unwrap();
         assert_eq!((answered.steers, answered.waiting), (None, false));
         assert_eq!(evidence(), "emitted");
+    }
+
+    /// A Pi event is recorded, and answers steers only while a turn runs:
+    /// outside one, Pi would store the steer without starting a run.
+    #[test]
+    fn a_pi_event_answers_steers_only_during_a_turn() {
+        let (_home, store, adapter, delivery) = fixture_on("/pi/session.jsonl");
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let event = |callback: serde_json::Value| {
+            let mut callback = callback;
+            callback["sessionFile"] = "/pi/session.jsonl".into();
+            answer(
+                &store,
+                &boundary(BoundaryMoment::Event, &adapter, &delivery, callback),
+            )
+            .unwrap()
+        };
+        let (idle, after) =
+            event(serde_json::json!({"type":"ui_prompt_end","openTools":0,"pendingInput":0}));
+        assert_eq!(
+            (idle.steers, idle.waiting, after.is_none()),
+            (None, false, true)
+        );
+        let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
+            "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
+        assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
+            "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
+        assert_eq!((settled.steers, settled.waiting), (None, true));
     }
 
     /// A checkout that moved since launch: the server points the delivery

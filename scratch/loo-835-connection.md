@@ -1,28 +1,37 @@
 # LOO-835: OpenCode and Pi keep one server connection
 
-Docs written for this change (read these first; they are the intended behavior):
+Intended behavior lives in the docs (maintained in place):
+`rust/loopflow/src/server/README.md` "OpenCode and Pi keep one connection",
+`rust/loopflow/src/harness/README.md`, `docs/troubleshooting.md`,
+`docs/dev/server-first.md` Pieces row.
 
-- `rust/loopflow/src/server/README.md`, "OpenCode and Pi keep one connection"
-  (wire example, Pi `moment: "event"`, OpenCode `tool` per request, gaps and reconnect)
-- `rust/loopflow/src/harness/README.md`, "lf never breaks the conversation"
-- `docs/troubleshooting.md`, "A steer arrived late, or a turn is missing from history"
-- `docs/dev/server-first.md`, Pieces table row
+Built (uncommitted on this branch until the next checkpoint):
 
-Choices the docs take (reversible, headless):
+- `harness/server_connection.js`: one Node client both plugins embed
+  (`hello` kind `plugin`, one `session.boundary` per boundary, serialized,
+  2 s deadline covering reconnect, gap and printed batches in memory,
+  `close()` after the turn's `stop`). Spec carries `server` (socket, revision)
+  from `harness/context.rs::server_spec`.
+- Pi: every reported event is `moment: "event"` (native) or `tool` (RPC-driven,
+  steers only, during a turn). 1 s poll and `--moment pi-event` deleted.
+  Start/compact go over the connection; `lf __context-block` renders the block
+  with `LF_PROVIDER_CONTEXT` removed, so it asks no server.
+- OpenCode: block rendered at first request and after compaction (the old
+  `compacted` never reset); `tool` on the connection for every other request;
+  `stop` on the connection.
+- Server: `BoundaryMoment::Event` → `harness::pi::observe_native`, steers only
+  while `turn` is set and the event is not `agent_settled`.
+- Deleted: `ContextMoment::PiEvent`, `pi::native_event`,
+  `SqliteStore::open_for_hook` (no hook opens the store now).
 
-- Steers: the plugin asks at each boundary over the open connection; no
-  subscription. Pi asks with every event it reports (message end, tool
-  start/end, UI prompt, `working` every 5 s while streaming), so a steer
-  waits at most for a tool to end, as on Claude.
-- Pi events go to the server as `session.boundary` with a new
-  `BoundaryMoment::Event`, callback = the Pi event; server records it as
-  `pi::native_event` did and answers steers. Replaces `--moment pi-event` and
-  the 1 s `setInterval`.
-- OpenCode: block rendered by `lf __context-block` at start and after
-  compaction (fixes `compacted` never resetting); every request sends `tool`
-  over the connection for steers. Turn end `stop` over the connection.
-- Gap and `printed` batches kept in plugin memory, sent with the next
-  answered request; no `.store-gap` / `.printed` files for these plugins.
-- hello `client.kind` is `"plugin"`; `ClientIdentity` grants nothing.
-- Unchanged: Pi bash guard (`--moment tool-group`, one lf per bash tool),
-  Pi Task-update watcher (one lf child per conversation).
+Checks run here (all pass): `harness::context::tests::` (stand-in server,
+counts lf processes), `server::boundary::`, `server::schema::tests::`
+(schema fixture regenerated), `harness::pi` (lib), `session_launch_contract pi_`,
+`documented_commands::`, `cargo clippy --all-targets -D warnings`.
+
+Compress: Pi's `readContext` confirms its own steer batch and returns the text;
+nothing else cut (`harness::context::tests::` 8/8 pass).
+
+Left for demo/qa: a live managed Pi and OpenCode turn with `ps` during the turn
+(Done line), steer arrival on a real provider, server stopped mid-turn.
+Left for gate: affected suites once (`--swift` for the ServerProtocol comment).

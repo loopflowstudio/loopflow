@@ -16,9 +16,9 @@ reservations.
 The server tree is unchanged from the previously inspected
 `3f1a7d434736779139695ba4c91ebf8245c4e121`.
 
-At November 11 08:29 UTC, GitHub still reports PR #1812 open and unmerged
-at that head. Freshly fetched main remains
-`f7faf56f91b8f1054f985612583c362167650ca5`,
+At November 11 09:06 UTC, GitHub still reports PR #1812 open and unmerged
+at that head, with no auto-merge. Freshly fetched main is
+`6d8fad3375a81890d00965ba46ea396360f7db2a`,
 still without `server/mobile.rs` or `server/ticket.rs`.
 `lf task status LOO-718 --json` still places it at `feature`'s `demo` step,
 with PR settlement not armed.
@@ -41,7 +41,16 @@ restore the terminal coverage below on the shared store. Retain bulk cases,
 service-level bridge tests and wire fixtures. Do not extend the UID-only store
 while waiting for transport to land.
 
+The transport represents local admission as `Admission::Local` after checking
+the socket peer UID against the server's effective UID. Keep that admission
+model; local/remote separation does not require a second per-ticket UID field.
+
 ## Implementation and acceptance
+
+Read the shipping docs in `docs/server.md` (Phone access) and
+`rust/loopflow/src/server/README.md` (Remote attach contract and Terminal and
+provider recovery). The remote example includes the missing-owner failure
+between ticket issue and redemption. No product question is open.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Through authenticated client and bridge connections, test that

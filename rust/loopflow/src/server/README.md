@@ -597,7 +597,9 @@ endpoint and send `attach` first, without `hello`:
 
 After `bridged`, use the [binary owner protocol](../transport/README.md).
 Keep `/v1/machine` for requests and live Work updates; each terminal has its
-own bridge. For reconnection and exact-owner attachment, follow
+own bridge. If the terminal owner's endpoint disappears before the ticket is
+redeemed, attachment returns `not_found {owner_lf_process_id}`. For reconnection
+and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 
 Both connections must authenticate as the same Tailscale node stable ID and

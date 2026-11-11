@@ -357,27 +357,32 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. Transport IDs
   correlate diagnostics and are **not** durable deduplication receipts. Only
   `task.create` and `session.new` have the creation retry contract below.
-- `session.attach {session, owner_lf_process_id}` answers a ticket
-  `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
-  connection. A separate bridge sends `{"type":"attach","ticket":"<ticket>"}`
-  as its only JSON message. After `bridged {owner_lf_process_id}`, it speaks the
-  [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
-  as 22 base64url characters, opens one bridge and lasts 60 seconds. It is bound
-  to the requesting client's Unix peer UID. Every redemption attempt consumes
-  the ticket, including a UID mismatch. Remote identity and sleep-aware expiry
-  are planned in the [remote attach contract](#remote-attach-contract).
-  An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
-  and closes the connection. Bridges do not occupy the 64 client slots.
-  The owner is the LfProcess holding the Session's terminal (`lf session
-  serve`), never the provider's AgentProcess beneath it. The server resolves the
-  Session's current owner when it issues the ticket, without starting a provider.
-  No running owner returns `not_found {session}`; a missing owner endpoint at
-  issue or redemption returns `not_found {owner_lf_process_id}`.
-  When the owner ends, the bridge closes.
-  `lf session resume` and `server::client::attach` perform both ticket steps.
-  Each terminal has its own connection, so readings never wait behind terminal
-  bytes and a control failure never closes a bridged terminal. Follow
-  [terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
+
+## Terminal attachment
+
+`session.attach {session, owner_lf_process_id}` answers a ticket
+`{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client connection.
+A separate bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only
+JSON message. After `bridged {owner_lf_process_id}`, it speaks the
+[binary owner protocol](../transport/README.md). A ticket is 16 random bytes
+as 22 base64url characters, opens one bridge and lasts 60 seconds. It is bound
+to the requesting client's Unix peer UID. Every redemption attempt consumes
+the ticket, including a UID mismatch. Remote identity and sleep-aware expiry
+are planned in the [remote attach contract](#remote-attach-contract).
+An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
+and closes the connection. Bridges do not occupy the 64 client slots.
+
+The owner is the LfProcess holding the Session's terminal (`lf session serve`),
+never the provider's AgentProcess beneath it. The server resolves the Session's
+current owner when it issues the ticket, without starting or resuming a provider.
+No running owner returns `not_found {session}`; a missing owner endpoint at
+issue or redemption returns `not_found {owner_lf_process_id}`.
+When the owner ends, the bridge closes.
+`lf session resume` and `server::client::attach` perform both ticket steps.
+
+Each terminal has its own connection, so readings never wait behind terminal
+bytes and a control failure never closes a bridged terminal. Follow
+[terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
 
 ## Events alongside readings
 
@@ -587,9 +592,9 @@ Local and remote tickets are not interchangeable.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
-with a Session ID from `session.list`. A Session without a running terminal
-owner returns `not_found {session}`; attachment never starts or resumes a
-provider. A null `owner_lf_process_id` selects the current terminal owner:
+with a Session ID from `session.list`. Owner resolution and errors follow
+[terminal attachment](#terminal-attachment). A null `owner_lf_process_id`
+selects the current terminal owner:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
@@ -605,8 +610,7 @@ the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 ```
 
 After `bridged`, use the [binary owner protocol](../transport/README.md).
-Keep `/v1/machine` for requests and live Work updates. If the owner's endpoint
-disappears before redemption, attachment returns `not_found {owner_lf_process_id}`.
+Keep `/v1/machine` for requests and live Work updates.
 For reconnection and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 

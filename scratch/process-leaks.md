@@ -85,3 +85,49 @@ shells; the report lists them under `desktop shell` with Task and state from
   sweep itself runs (`com.loopflow.cleanup`; `Task cleanup pending` lines in
   `logs/lf.log` through 18:53). No shell-specific bug: it is the input hold in
   `scratch/questions.md`, which records these five Tasks.
+
+## Next implement pass: conversations live as long as their scope (2026-11-11)
+
+Direction (Jack Heart, word for word, in the demo-step review):
+- "with bare lf, noting holds its at all"
+- "with task sessions, i think we can just hold them until the task is closed basically"
+- "wave/repo should behave exactly like open tasks tho"
+- On what to change before bare-direct lands: "whatever gets to the cleantest possible world fastest. transition costs ok"
+- Where: "3a - here" (this Task, PR #1877). "Closed" means both done and abandoned ("4a").
+- Suspension under a resident limit: "6a" (agent count per Machine, in config); "no opinion on 5".
+
+Build in this PR:
+1. Delete idle ending: the quiet/viewer grace in `transport/lifetime.rs`,
+   `idle_retention`, `DetachedLimit` and `session.end_detached_after`. Keep
+   abandonment ending, Desktop shell Close, and completed-Task retirement ending.
+   `.lf/config.yaml` is read by the released lf too and `SessionConfig` is
+   `deny_unknown_fields`: keep `end_detached_after` parseable and ignored,
+   marked with the Task that removes it, and file that Task (AGENTS.md rule).
+2. Delete the native-input ledger: `store/sqlite/native_input.rs`,
+   recording before forwarding in `transport/input.rs` (and its retry path),
+   `acknowledge_native_input`, `OwnerRetention::NativeInput`. Stop reading and
+   writing `processes.native_input`; dropping the column is a later staged
+   contract migration, not this PR.
+3. A closed Task ends its conversation at cleanup whatever its input:
+   `retirement::require_settled_work` no longer waits on input. A running
+   Graph or live turn still holds cleanup as today.
+4. Rollover and takeover (`lf process rollover`, `human_session.rs`) lose
+   input as a reason. Rollover is a person's or operator's explicit act; it
+   now moves an owner with a draft the way quitting would. Say so in its
+   help and docs.
+5. Docs: `docs/sessions.md` (lifetime = scope; no two-minute rule),
+   `docs/config.md`, the troubleshooting section this PR added (its "send or
+   clear" sentence goes), transport README, `lifetime.rs` module doc,
+   `docs/dev/server-first.md` (CLI cleanup row no longer lists
+   `end_detached_after`).
+6. Tests pinning the ledger or idle ending go; add one that a done Task's
+   conversation with typed input ends at cleanup.
+
+Not in this PR: suspension under a limit (6a). It needs to know the editor is
+empty, and the ledger is being deleted; proposed (nobody picked it) to build
+it with the server-first holder and read the input line off the server's
+emulator (5a). Bare launches with no owner stay the server-first piece; until
+then the 14 unscoped owners run until someone quits them, accepted as
+transition cost.
+
+Questions 1a-1d in `scratch/questions.md` are superseded by this section.

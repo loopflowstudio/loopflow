@@ -298,6 +298,7 @@ Checks (November 11, Desktop opening a Task):
 
 - `--test integration session_steers::a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server` — passes; fails without `open_through` (the reopened argv resumes bare)
 - `--lib ops::human_session::` — 42 pass; `session_steers:: session_cli_tests::session_cli_uses_one_truthful_resolution_contract` — 9 pass; `documented_commands::` — 4 pass; clippy clean
+- Compress: a `--fork` prepare keeps its new Session id in `open_argv` (reselecting through `--task` would open the Task's conversation, not the fork); `a_prepared_task_resume…` — passes; clippy clean
 - Gate: the same filter as below, clippy
 
 Checks (November 11, managed resume):

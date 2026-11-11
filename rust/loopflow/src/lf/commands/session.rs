@@ -806,7 +806,10 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 let managed = resumes_work(&target);
                 let mut record =
                     reopen(&store, directory, target, connection, *fork, false, managed).await?;
-                open_through(&mut record, target);
+                // A fork is a new Session the target would not select again.
+                if !*fork {
+                    open_through(&mut record, target);
+                }
                 Ok(record)
             }
             SessionCommand::New {

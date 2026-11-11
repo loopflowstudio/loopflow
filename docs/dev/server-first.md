@@ -178,5 +178,10 @@ run ends with its parent.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.
+- Protocol negotiation between an `lf` and a server on another build. Today
+  a server that speaks the same revision but lacks an operation welcomes the
+  hook and answers `invalid {kind}`. Negotiation reuses the `hello`/`welcome`
+  exchange (`revision`, `min_revision`) Desktop already sends; no second
+  handshake. Until then, upgrade the server.
 - How the holder is started on macOS and Linux so the service manager leaves
   it alone when the server's service is replaced.

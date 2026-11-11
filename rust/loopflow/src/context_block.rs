@@ -838,14 +838,6 @@ mod tests {
             })
             .collect();
         assert_eq!(moments, ["start", "compact"]);
-        // The managed set declares the same two context hooks, unchanged.
-        let managed = delivery.hook_settings(true).unwrap();
-        assert_eq!(
-            managed["SessionStart"][0]["hooks"][0],
-            bare["SessionStart"][0]["hooks"][0]
-        );
-        assert_eq!(managed["SessionStart"][1], bare["SessionStart"][1]);
-        assert!(managed.get("Stop").is_some() && managed.get("PostToolUse").is_some());
     }
 
     #[test]

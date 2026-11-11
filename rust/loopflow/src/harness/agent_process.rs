@@ -159,10 +159,14 @@ pub(crate) fn require_server() -> Result<()> {
 /// A bare headless run carries none: its two context hooks reach no server.
 fn steer_environment(command: &mut std::process::Command, owner: &AttachmentOwner) -> Result<()> {
     let (store, session, attachment) = owner;
-    let (managed, interactive) = store.session_launch(session)?;
-    if managed {
+    let record = store.session(session)?;
+    if record
+        .as_ref()
+        .and_then(|record| record.work_source)
+        .is_some_and(crate::session::WorkSource::is_managed)
+    {
         require_server()?;
-    } else if !interactive {
+    } else if record.is_some_and(|record| !record.interactive) {
         return Ok(());
     }
     let capability = store.reserve_steer_adapter(session, attachment)?;

@@ -9,15 +9,15 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 16:40 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
-`7e779e650b72ccb806888713c4e3d8756445fb82`. Fetched main was
+At 17:22 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
+`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs`. `lf task status LOO-718 --json` still reported
+`server/ticket.rs`. The refreshed `lf task status LOO-718 --json` still reported
 `feature` / `demo`. Implementation and authenticated acceptance require that
 landing. Landing PR #1812 is outside this Task's scope. Reinspect its shared
 store and endpoints after it lands; the remaining acceptance below still applies.
 
-At the previously inspected `ac2cba2a3b6b28be3b1e3fb97d609221981f126e`,
+At the inspected PR head `7e779e650b72ccb806888713c4e3d8756445fb82`,
 both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.
 Only bulk tickets have direct store coverage; background expiry already releases

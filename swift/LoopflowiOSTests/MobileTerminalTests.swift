@@ -428,6 +428,62 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertEqual(client.transport.controlRequests, controls)
     }
 
+    func testFirstOversizedSnapshotShowsLatestThenKeepsTheReadingPosition() async throws {
+        let (workspace, client, previousController) = try await connected()
+        defer { workspace.leave(); previousController.terminal.updateUiClosed() }
+        client.link.loseControl()
+        try await waitForState(.viewing, in: workspace)
+        let controller = SessionTerminalController(workspace: workspace)
+        controller.loadViewIfNeeded()
+        defer { controller.terminal.updateUiClosed() }
+        let window = try XCTUnwrap(window)
+        window.rootViewController = controller
+        controller.view.frame = window.bounds
+        controller.update(theme: .light)
+        workspace.setGeometry?(TerminalGeometry(columns: 120, rows: 80))
+        let viewport = try XCTUnwrap(controller.view.subviews.first {
+            $0.accessibilityIdentifier == "terminal-viewport"
+        } as? UIScrollView)
+        let sent = client.transport.sent.count
+        let sizes = client.link.sizes
+        let controls = client.transport.controlRequests
+        let snapshot = Data("\u{1b}[2J\u{1b}[80;1HCurrent prompt".utf8)
+        workspace.render?(snapshot, true)
+        controller.view.layoutIfNeeded()
+        XCTAssertGreaterThan(viewport.contentSize.height, viewport.bounds.height)
+        XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1)
+
+        viewport.setContentOffset(CGPoint(x: 100, y: 120), animated: false)
+        workspace.render?(Data("More output".utf8), false)
+        workspace.render?(snapshot, true)
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(viewport.contentOffset, CGPoint(x: 100, y: 120), "Later output and same-Session snapshots must keep the reading position")
+        XCTAssertEqual(workspace.state, .viewing)
+        XCTAssertEqual(client.transport.sent.count, sent)
+        XCTAssertTrue(client.link.sizes.elementsEqual(sizes, by: { $0.0 == $1.0 && $0.1 == $1.1 }))
+        XCTAssertEqual(client.transport.controlRequests, controls)
+
+        // Opening another Session clears the renderer before its reply arrives.
+        // Returning to this one before that reply still begins a fresh view.
+        workspace.render?(Data(), true)
+        workspace.render?(snapshot, true)
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1)
+
+        client.terminal.columns = 120
+        client.terminal.rows = 80
+        let task = try XCTUnwrap(workspace.selected)
+        await workspace.open(task, sessionID: "session_fixture_4")
+        try await waitForState(.viewing, in: workspace)
+        controller.update(theme: .light)
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1,
+                       "Choosing a different Session starts at its latest output")
+        XCTAssertEqual(client.transport.controlRequests, 0)
+        XCTAssertTrue(client.transport.sent.isEmpty)
+        XCTAssertTrue(client.link.sizes.isEmpty)
+    }
+
     func testObserverCanSelectAndOpenWebLinksWithoutAKeyboardOrRemoteInput() async throws {
         let (workspace, client, controller) = try await connected()
         defer { workspace.leave(); controller.terminal.updateUiClosed() }

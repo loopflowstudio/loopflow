@@ -55,7 +55,8 @@ the previous attachment. Theme colors are installed only when the theme changes.
 System text size also enlarges the terminal and its accessory controls. At
 accessibility sizes the Session header stacks vertically. Observing still keeps
 every remote cell; pan to read the wider screen. Only explicit geometry control
-fits the larger text to the phone.
+fits the larger text to the phone. A newly opened Session starts at the bottom of
+its remote screen, including when that screen is taller than the phone.
 When reading earlier output or the top of a taller remote screen, **Latest**
 returns to the bottom locally. New output leaves the reading position alone;
 Latest preserves selection and never takes keyboard or geometry control.

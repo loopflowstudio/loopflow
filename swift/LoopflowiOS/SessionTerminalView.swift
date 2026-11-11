@@ -122,6 +122,8 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private var finding = false
     private var findGeometry: TerminalGeometry?
     private var displayedSessionID: String?
+    private var snapshotSessionID: String?
+    private var revealLatestAfterLayout = false
 
     init(workspace: MobileWorkspace) {
         self.workspace = workspace
@@ -155,10 +157,20 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         workspace.render = { [weak self] bytes, reset in
             guard let self else { return }
             if reset {
+                if bytes.isEmpty {
+                    snapshotSessionID = nil
+                    revealLatestAfterLayout = false
+                }
                 terminal.clearSearch()
                 terminal.feed(text: "\u{1b}c")
             }
             terminal.feed(byteArray: Array(bytes)[...])
+            if reset, !bytes.isEmpty, snapshotSessionID != workspace.sessionID {
+                snapshotSessionID = workspace.sessionID
+                revealLatestAfterLayout = true
+                view.setNeedsLayout()
+                view.layoutIfNeeded()
+            }
             if reset, finding { findFeedback.text = "Search again" }
             updateLatestButton()
         }
@@ -270,6 +282,10 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutTerminal()
+        if revealLatestAfterLayout, viewport.bounds.height > 0, viewport.contentSize.height > 0 {
+            revealLatestAfterLayout = false
+            showLatest()
+        }
         updateLatestButton()
     }
 

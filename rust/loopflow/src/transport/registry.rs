@@ -549,7 +549,7 @@ impl Registry {
         let mut wait = Duration::from_millis(200);
         loop {
             std::thread::sleep(wait);
-            let resolved = match Client::connect(&holder.place) {
+            let (entries, unsettled) = match Client::connect(&holder.place) {
                 Err(_) => {
                     // Gone: what it held ended with nobody watching.
                     let unsettled = holder
@@ -569,7 +569,6 @@ impl Registry {
                     }
                 },
             };
-            let (entries, unsettled) = resolved;
             // A stopped loop has nothing left to tell.
             let _ = self.send(Command::Resolved {
                 place: holder.place,

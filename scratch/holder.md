@@ -377,31 +377,6 @@ Jack Heart, on question 2 after asking what "ended" means: "i think i want 2a"
 Plain `lf resume SESSION` of an ended Session bound to a Task or Wave starts
 its new process managed, as the managed-rule table above already has it.
 
-## Docs written ahead of the code — November 10, 2026
-
-Implement reads these as the intended behavior and corrects them where the
-build differs:
-
-- `docs/sessions.md` "Keep working through an update" (what runs in the
-  holder, the interruption table, the server-required failure)
-- `docs/server.md` (reconnect paragraphs, Updates)
-- `docs/troubleshooting.md` (`Loopflow server is not running`, several
-  `lf holder run` processes)
-- `docs/glossary.md` (Holder)
-- `rust/loopflow/src/transport/README.md` "Held terminals" (managed rule,
-  identity, holder protocol, positions, restart, settlement)
-- `rust/loopflow/src/server/README.md` (`session.start`, `session.attach` by
-  `terminal_id`, recovery)
-- `docs/dev/server-first.md` (Staying open, managed rule, piece row)
-
-Since built: `lf holder run` is in Clap (hidden) and `documented_commands`
-passes. Still open: the "Local protocol, revision 4" heading and handshake
-examples in `server/README.md` (`server/wire.rs` `REVISION` is still 4). The
-owner-only paragraphs of `transport/README.md` were not rewritten; its
-"Held terminals" section says where held terminals differ. The holder
-protocol names its key `terminal` (the `TerminalId`), and `start` carries a
-`request` identity per the explore finding on ambiguous starts.
-
 ### Positions, queries and view drawing — November 10, 2026
 
 Three gaps were raised from a pasted review: positions need an identity,
@@ -543,11 +518,6 @@ Checks:
   `terminal_id: null` in `session.attach`),
   Desktop suites, the full matrix. Gate/CI.
 
-- Compress: `transport::resize_foreground` and `transport::is_raw` shared by
-  owner and holder; `start_held` answers a `TerminalId`; one registry `Entry::new`.
-  `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session
-  terminal_title`: 124 passed; the build-replacement `transport_tests` case passes.
-
 Found on the way: frames arriving with the holder's `reading` answer were
 left undecoded until more output came (fixed in `Source::read`). A test
 holder idles out in 2 s, too short beside a slow store open; fixtures set
@@ -583,11 +553,6 @@ Checks:
   pass alone, as in the earlier pass (load timing). Gate reruns them.
 - `documented_commands::`: 4 passed. Clippy clean.
 
-- Compress after 4a: a held relay never sends `resume` (its viewers keep no
-  spool): it continues from its position or attaches fresh; catch-up and
-  chunk-span code flattened. `cargo test -p loopflow --lib -- transport:: holder::`:
-  80 passed; `held_session_survives_server_restart` passes; clippy clean.
-
 - Revision 5 (Rust `REVISION`/`MIN_REVISION`, Swift `ServerProtocol`,
   fixtures, server README); Swift `ServerMessage.bridged` decodes a
   `ServerBridge` (owner or terminal) from both required nullable keys, with
@@ -612,14 +577,6 @@ Checks:
   `held_session_survives_server_restart` passes; `documented_commands::`
   passes; clippy clean.
 
-- Compress after revision 5: the held exit record is removed through one
-  `hosted::remove_exit_record`; `paint` has its doc comment back.
-  `cargo test -p loopflow --lib transport::`: 73 passed; clippy clean.
-
-- Realign after revision 5: the `session.attach` ticket was still described
-  without `terminal_id` (`ServerOperation::SessionAttach` doc, server README,
-  `server_schema.json`); fixed. `cargo test -p loopflow --lib server::schema`: 7 passed.
-
 - Pane placement: `session.start` and holder `Start` carry `placement`
   (the pane `current_terminal_id` validated on the caller's terminal); the
   holder sets `LF_TERMINAL_ID` and the held slave's tty name for the child.
@@ -641,15 +598,6 @@ Checks:
   92 passed; `--test transport_tests` 110/111, `resume_takes_over_an_owner_from_another_build`
   (owner path, untouched) failed once in the full run and passed alone;
   `documented_commands::` passes; clippy clean. Swift tests: gate.
-
-- Compress after placement: kept handoffs read through one `hosted::read_kept`
-  and are dropped through `Hosted::forget_kept`. `cargo test -p loopflow --lib transport::`:
-  73 passed; `--test transport_tests -- held_ a_held_pane`: 3 passed; clippy clean.
-
-- Realign after placement: the previous pass's two open items (pane
-  placement, Desktop wording) are built above; the Outcome's plain-terminal
-  "Reconnecting…" contradicted the view-drawing addition and now reads as
-  the code does.
 
 **Remaining, in order:**
 
@@ -695,13 +643,6 @@ Checks, each failing with the write removed:
   `retirement_ends_an_idle_held_conversation` fails "Process … still has live
   or unresolved work" without it.
 - `cargo test -p loopflow --lib journal::`: 35 passed.
-
-- Compress after the `held_terminal_id` write: nothing to reduce. The held
-  terminal stays an explicit `record_process_in` argument (the store does not
-  read the transport handoff); `LfProcess` gains no field. Compress after the
-  positions/queries/drawing tests: nothing to reduce in code; this plan's two
-  status records for them were merged.
-
 
 ### Second pass, after the positions/queries/drawing steers — November 11, 2026
 
@@ -763,6 +704,9 @@ whose process is dead (also at every startup). Test:
 
 Checks (after this pass): `transport_tests -- held_ a_held` 6 passed; `--lib --
 transport:: holder::` 86 passed; clippy clean; `documented_commands::` 4 passed.
+
+- Compress passes (history in git): nothing further to reduce; the last inlined
+  one binding in `Registry::retry`. `cargo test -p loopflow --lib -- transport::registry::`: 9 passed.
 
 ## Concept review with a person — November 11, 2026
 

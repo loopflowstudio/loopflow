@@ -20,6 +20,7 @@ pub(crate) mod ghostty_vt;
 pub mod git;
 pub mod graph;
 pub mod harness;
+pub mod holder;
 pub mod id;
 pub mod installation;
 pub mod journal;

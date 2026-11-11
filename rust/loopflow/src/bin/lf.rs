@@ -1357,6 +1357,17 @@ fn print_thread(
 
 fn main() -> std::process::ExitCode {
     loopflow::transport::initialize();
+    // The holder outlives servers and installs. It records no Process itself
+    // and opens no store, so it runs before any of that is set up.
+    if std::env::args().skip(1).eq(["holder", "run"]) {
+        return match loopflow::holder::run() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("lf holder: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
         let result = run();
@@ -2859,6 +2870,7 @@ fn execute_command(
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
+        Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {

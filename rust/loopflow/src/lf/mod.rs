@@ -572,6 +572,12 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ServerCommand,
     },
+    /// Keep this build's Task and Wave terminals; started only by the server
+    #[command(hide = true)]
+    Holder {
+        #[command(subcommand)]
+        cmd: HolderCommand,
+    },
     /// Name, connect, pool and rent Machines
     Machine {
         #[command(subcommand)]
@@ -1162,7 +1168,7 @@ impl Commands {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Server { .. } => false,
+            Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
@@ -1411,6 +1417,12 @@ impl WtCommand {
             Self::Create { .. } | Self::Delete { .. } => true,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HolderCommand {
+    /// Hold PTYs and their agents until the last one ends.
+    Run,
 }
 
 #[derive(Debug, Subcommand)]

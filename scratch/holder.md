@@ -577,3 +577,44 @@ rewritten, the new section says where held terminals differ. The holder
 protocol in the docs names its key `terminal` (the `TerminalId`) where the
 kickoff table said `pty`, and `start` carries a `request` identity per the
 explore finding on ambiguous starts.
+
+### Positions, queries and view drawing — November 10, 2026
+
+Three gaps were raised from a pasted review: positions need an identity,
+who answers the agent's terminal queries, and what a view draws itself.
+Jack Heart: "(1) no opinion", "(2) pasted proposal works", "(3) i dot know
+that we want to do any overlay for raw lf".
+
+- **Position identity.** A `TerminalId` names one PTY and is never reused; a
+  process started by resuming an ended Session gets a new one. A `read` or
+  resume naming an id the holder does not hold is an error, never an answer
+  from byte 0. Test both.
+- **Queries.** The server's emulator answers every cursor, device and mode
+  query, with or without views attached. Query replies arriving from a
+  view's terminal are dropped before they reach the PTY, including the late
+  ones a view produces while catching up from an old position. Today
+  (`transport/output.rs` `process`) the emulator's replies are discarded
+  while a view is attached and the view's terminal answers. Changed with
+  this: the agent sees the server emulator's answers for size, device
+  attributes and colors, not the viewing terminal's. Default colors follow
+  the viewer's theme today; implement states what a color query returns and
+  notes it in the transport README.
+- **View drawing.** The plain-terminal relay draws nothing of its own into
+  the screen while reconnecting, so its position stays exact and resume
+  needs no repaint. Desktop keeps its overlay, which is outside the stream.
+  Any text the relay still must print into the terminal (for example on
+  giving up) is followed by a refresh, not a position resume.
+
+Jack Heart, after the above: "that said i am ok with deferring 2 to one of
+hte other prpojects if you think thats better"
+
+**Queries, revised: deferred.** This Task keeps today's rule: the emulator
+answers only while no view is attached, and the controlling view's terminal
+answers otherwise. The one new case 4a creates is a view catching up from an
+old position, whose terminal answers queries already answered; the relay
+discards terminal input until it has caught up (`discard_reconnect_input`
+already does this while reconnecting). "The server's emulator answers every
+query and view replies are dropped" moves to the every-view-types piece,
+where several typing views make it necessary; telling a query reply from a
+keystroke in a view's input, and what color queries return, are designed
+there. `docs/dev/server-first.md` records it under that piece.

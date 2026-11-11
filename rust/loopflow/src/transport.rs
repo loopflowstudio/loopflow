@@ -371,7 +371,7 @@ pub(crate) fn private_directory() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn nonblocking(fd: RawFd) -> io::Result<()> {
+pub(crate) fn nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: fcntl operates on a borrowed live descriptor without taking ownership.
     unsafe {
         let flags = libc::fcntl(fd, libc::F_GETFL);

@@ -433,9 +433,14 @@ reported as such, never given an invented exit code.
 
 Every connection to a held terminal enters the server at
 `<private dir>/held.sock`: a first line `{"terminal":ID}`, the answer
-`{"hosted":true}`, then the viewer protocol above, unchanged. `{"hosted":false}`
-means no server hosts that terminal: it ended or never started, and the
-connection is refused as `not_found`. Attaching never starts anything. The
+`"hosted"`, then the viewer protocol above, unchanged. `"waiting"` means the
+terminal's holder has not answered this server yet: one that accepts a
+connection at startup and does not list in time is pending, asked again with
+backoff, and taken up when it answers; the view keeps reconnecting. A pending
+holder whose socket refuses is gone, and its terminals and its LfProcess row
+settle with what its records say, else an unknown outcome. `"ended"` means no
+live or pending holder could hold that terminal: it ended or never started,
+and the connection is refused as `not_found`. Attaching never starts anything. The
 child's own control requests (`status`, `directory`, `exit_record`, …) use the
 same entrance; `LF_TRANSPORT_HELD` names its terminal the way
 `LF_TRANSPORT_OWNER` names an owner. A terminal is no process, so the lf

@@ -37,6 +37,11 @@ const ARRIVAL: Duration = Duration::from_secs(5);
 const NUDGE: Duration = Duration::from_millis(400);
 /// How often an exit the store could not record is offered again.
 const SETTLE_RETRY: Duration = Duration::from_secs(2);
+/// How long a holder has to answer while a server starts. One that does not is
+/// asked again off the server's loop, with the holder client's own patience.
+const STARTUP_ANSWER: Duration = Duration::from_secs(1);
+/// The longest pause between asks of a holder that has not answered.
+const PENDING_RETRY: Duration = Duration::from_secs(5);
 
 /// What the server writes beside a terminal before asking its holder to start
 /// it, so that another server instance can host the same child.
@@ -112,9 +117,13 @@ pub(crate) fn connect(terminal: &TerminalId) -> Result<UnixStream> {
             }
         }
     }
-    let answer: Answered = serde_json::from_slice(&line)?;
-    if !answer.hosted {
-        return Err(ended(terminal).into());
+    match serde_json::from_slice(&line)? {
+        Answered::Hosted => {}
+        // Not an engine error: the relay keeps trying, as for a lost server.
+        Answered::Waiting => anyhow::bail!(
+            "the holder of terminal {terminal} has not answered yet; its agent keeps running"
+        ),
+        Answered::Ended => return Err(ended(terminal).into()),
     }
     socket.set_read_timeout(None)?;
     Ok(socket)
@@ -140,8 +149,14 @@ pub(crate) fn ended(terminal: &TerminalId) -> crate::engine::Error {
 
 /// What the entrance answers a named connection before the viewer protocol.
 #[derive(Serialize, Deserialize)]
-struct Answered {
-    hosted: bool,
+#[serde(rename_all = "snake_case")]
+enum Answered {
+    /// The viewer protocol follows.
+    Hosted,
+    /// Its holder has not answered this server yet; ask again.
+    Waiting,
+    /// No live or pending holder could hold it.
+    Ended,
 }
 
 /// The first line of a connection through the entrance.
@@ -180,6 +195,12 @@ enum Nudge {
 
 enum Command {
     Add(TerminalId, Box<Entry>),
+    /// A pending holder answered, or is gone: what it held is hosted or settled.
+    Resolved {
+        place: Place,
+        entries: Vec<(TerminalId, Entry)>,
+        unsettled: Vec<Unsettled>,
+    },
     /// The server is going; its terminals stay with their holders. A real
     /// server's exit is enough; fixtures replace one within a process.
     #[cfg(test)]
@@ -193,6 +214,40 @@ struct Unsettled {
     place: Place,
     code: Option<u8>,
     retry_at: Instant,
+}
+
+impl Unsettled {
+    /// A terminal that ended with nobody watching: its holder's record says
+    /// how, else the outcome is unknown.
+    fn recorded(place: &Place, terminal: TerminalId) -> Self {
+        let code = crate::holder::recorded_exit(place, terminal.as_str())
+            .ok()
+            .flatten()
+            .map(|exit| exit.status());
+        Self {
+            terminal,
+            place: place.clone(),
+            code,
+            retry_at: Instant::now(),
+        }
+    }
+}
+
+/// A holder that accepted a connection at startup and did not answer: alive
+/// and slow, or stopped. Its terminals are neither hosted nor ended; their
+/// views wait until it answers, or until its socket refuses and it is gone.
+#[derive(Clone)]
+struct Pending {
+    place: Place,
+    terminals: Vec<TerminalId>,
+}
+
+/// What a holder's listing gives a server: running terminals to host, ended
+/// ones to settle, and every terminal it named.
+struct TakenUp {
+    entries: Vec<(TerminalId, Entry)>,
+    unsettled: Vec<Unsettled>,
+    known: Vec<TerminalId>,
 }
 
 #[derive(Debug)]
@@ -217,6 +272,7 @@ impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Add(terminal, _) => write!(f, "Add({terminal})"),
+            Self::Resolved { place, .. } => write!(f, "Resolved({})", place.socket.display()),
             #[cfg(test)]
             Self::Stop => f.write_str("Stop"),
         }
@@ -246,7 +302,7 @@ impl Registry {
             build: build.to_owned(),
             place: Place::of(build)?,
             commands: Mutex::new(commands),
-            waker: waker.try_clone()?,
+            waker,
             watchers: Watchers::spawn(),
             started: Mutex::new(HashMap::new()),
             live: Live::default(),
@@ -254,21 +310,15 @@ impl Registry {
             thread: Mutex::new(None),
         });
         let mut unsettled = Vec::new();
-        let entries = registry.adopt(&waker, &mut unsettled);
+        let (entries, pending) = registry.adopt(&mut unsettled);
         let live = registry.live.clone();
-        #[cfg(test)]
-        let ledger = crate::journal::test_ledger_path();
-        let _thread = std::thread::Builder::new()
-            .name("held-terminals".into())
-            .spawn(move || {
-                let run = || run(listener, wake, received, entries, unsettled, live);
-                #[cfg(test)]
-                let run = || match ledger {
-                    Some(ledger) => crate::journal::with_test_ledger(ledger, run),
-                    None => run(),
-                };
-                run()
-            })?;
+        for holder in &pending {
+            let (registry, holder) = (registry.clone(), holder.clone());
+            spawn_with_ledger("held-pending", move || registry.retry(holder))?;
+        }
+        let _thread = spawn_with_ledger("held-terminals", move || {
+            run(listener, wake, received, entries, pending, unsettled, live)
+        })?;
         #[cfg(test)]
         {
             *registry.thread.lock().expect("registry lock poisoned") = Some(_thread);
@@ -409,48 +459,28 @@ impl Registry {
 
     /// Take up what the holders keep: running terminals are hosted again under
     /// their ids, and exits that happened with no server running are settled.
-    fn adopt(
-        &self,
-        waker: &UnixStream,
-        unsettled: &mut Vec<Unsettled>,
-    ) -> Vec<(TerminalId, Entry)> {
+    /// A holder that does not answer in time is pending, never given up.
+    fn adopt(&self, unsettled: &mut Vec<Unsettled>) -> (Vec<(TerminalId, Entry)>, Vec<Pending>) {
         let mut entries = Vec::new();
+        let mut pending = Vec::new();
         let mut known = Vec::new();
         for place in holders() {
-            let listed = Client::connect(&place)
-                .map_err(anyhow::Error::from)
-                .and_then(|mut client| {
-                    crate::holder::client::adopt(&place, client.hello()?.pid);
-                    client.list()
-                });
-            let listed = match listed {
-                Ok(listed) => listed,
-                Err(error) => {
-                    // A holder that is alive and slow keeps its terminals;
-                    // their views say so until it answers.
-                    tracing::warn!(%error, socket = %place.socket.display(), "holder did not answer at startup");
-                    continue;
-                }
+            // A refused socket is a holder that is gone; the store's running
+            // terminals below settle what it held.
+            let Ok(client) = Client::connect_within(&place, STARTUP_ANSWER) else {
+                continue;
             };
-            for held in listed {
-                let Ok(terminal) = TerminalId::parse(&held.terminal) else {
-                    continue;
-                };
-                known.push(terminal.clone());
-                if let Some(exit) = &held.exit {
-                    unsettled.push(Unsettled {
-                        terminal,
-                        place: place.clone(),
-                        code: Some(exit.status()),
-                        retry_at: Instant::now(),
-                    });
-                    continue;
+            match self.take_up(&place, client) {
+                Ok(taken) => {
+                    entries.extend(taken.entries);
+                    unsettled.extend(taken.unsettled);
+                    known.extend(taken.known);
                 }
-                match self.readopt(&place, &terminal, &held, waker) {
-                    Ok(entry) => entries.push((terminal, entry)),
-                    Err(error) => {
-                        tracing::warn!(%error, %terminal, "held terminal could not be hosted again")
-                    }
+                Err(error) => {
+                    tracing::warn!(%error, socket = %place.socket.display(), "holder did not answer at startup; retrying");
+                    let terminals = kept(&place);
+                    known.extend(terminals.iter().cloned());
+                    pending.push(Pending { place, terminals });
                 }
             }
         }
@@ -465,31 +495,92 @@ impl Registry {
             let Ok(place) = Place::of(&build) else {
                 continue;
             };
-            if Client::connect(&place).is_ok() {
-                // Its holder is there and did not list it in time; leave it.
+            if let Some(holder) = pending.iter_mut().find(|holder| holder.place == place) {
+                holder.terminals.push(terminal);
                 continue;
             }
-            let code = crate::holder::recorded_exit(&place, terminal.as_str())
-                .ok()
-                .flatten()
-                .map(|exit| exit.status());
-            unsettled.push(Unsettled {
-                terminal,
-                place,
-                code,
-                retry_at: Instant::now(),
-            });
+            if Client::connect(&place).is_ok() {
+                // Its holder answered and did not list it; leave it.
+                continue;
+            }
+            unsettled.push(Unsettled::recorded(&place, terminal));
         }
-        entries
+        crate::holder::client::settle_departed();
+        (entries, pending)
     }
 
-    fn readopt(
-        &self,
-        place: &Place,
-        terminal: &TerminalId,
-        held: &Held,
-        waker: &UnixStream,
-    ) -> Result<Entry> {
+    /// Take up what the holder at `place` lists.
+    fn take_up(&self, place: &Place, mut client: Client) -> Result<TakenUp> {
+        let holder = client.hello()?;
+        let listed = client.list()?;
+        crate::holder::client::adopt(place, holder.pid);
+        let mut taken = TakenUp {
+            entries: Vec::new(),
+            unsettled: Vec::new(),
+            known: Vec::new(),
+        };
+        for held in listed {
+            let Ok(terminal) = TerminalId::parse(&held.terminal) else {
+                continue;
+            };
+            taken.known.push(terminal.clone());
+            if let Some(exit) = &held.exit {
+                taken.unsettled.push(Unsettled {
+                    terminal,
+                    place: place.clone(),
+                    code: Some(exit.status()),
+                    retry_at: Instant::now(),
+                });
+                continue;
+            }
+            match self.readopt(place, &terminal, &held) {
+                Ok(entry) => taken.entries.push((terminal, entry)),
+                Err(error) => {
+                    tracing::warn!(%error, %terminal, "held terminal could not be hosted again")
+                }
+            }
+        }
+        Ok(taken)
+    }
+
+    /// Ask a pending holder again, waiting longer each time, until it answers
+    /// and is taken up as at startup, or refuses and is gone.
+    fn retry(&self, holder: Pending) {
+        let mut wait = Duration::from_millis(200);
+        loop {
+            std::thread::sleep(wait);
+            let resolved = match Client::connect(&holder.place) {
+                Err(_) => {
+                    // Gone: what it held ended with nobody watching.
+                    let unsettled = holder
+                        .terminals
+                        .iter()
+                        .map(|terminal| Unsettled::recorded(&holder.place, terminal.clone()))
+                        .collect();
+                    crate::holder::client::settle_departed();
+                    (Vec::new(), unsettled)
+                }
+                Ok(client) => match self.take_up(&holder.place, client) {
+                    Ok(taken) => (taken.entries, taken.unsettled),
+                    Err(error) => {
+                        tracing::debug!(%error, socket = %holder.place.socket.display(), "holder still not answering");
+                        wait = (wait * 2).min(PENDING_RETRY);
+                        continue;
+                    }
+                },
+            };
+            let (entries, unsettled) = resolved;
+            // A stopped loop has nothing left to tell.
+            let _ = self.send(Command::Resolved {
+                place: holder.place,
+                entries,
+                unsettled,
+            });
+            return;
+        }
+    }
+
+    fn readopt(&self, place: &Place, terminal: &TerminalId, held: &Held) -> Result<Entry> {
         let meta = Meta::read(place, terminal)
             .with_context(|| format!("terminal {terminal} has no readable meta.json"))?;
         self.started
@@ -506,7 +597,7 @@ impl Registry {
             held.pid,
             held.ring_start,
             meta.control_key,
-            waker,
+            &self.waker,
             &self.watchers,
         )?;
         entry.hosted.take_up(held.rows, held.cols, held.written)?;
@@ -537,6 +628,36 @@ fn holders() -> Vec<Place> {
             Place::of(short).ok()
         })
         .collect()
+}
+
+/// The terminals whose directories `place` keeps.
+fn kept(place: &Place) -> Vec<TerminalId> {
+    let Ok(entries) = std::fs::read_dir(&place.state) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| TerminalId::parse(entry.file_name().to_str()?).ok())
+        .collect()
+}
+
+/// A named thread that records into its spawner's store: fixtures pin a test
+/// ledger per thread.
+fn spawn_with_ledger(
+    name: &str,
+    work: impl FnOnce() + Send + 'static,
+) -> io::Result<std::thread::JoinHandle<()>> {
+    #[cfg(test)]
+    let ledger = crate::journal::test_ledger_path();
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            #[cfg(test)]
+            if let Some(ledger) = ledger {
+                return crate::journal::with_test_ledger(ledger, work);
+            }
+            work()
+        })
 }
 
 /// A connection that has not named its terminal yet.
@@ -573,6 +694,7 @@ fn run(
     wake: UnixStream,
     commands: mpsc::Receiver<Command>,
     adopted: Vec<(TerminalId, Entry)>,
+    mut pending: Vec<Pending>,
     mut unsettled: Vec<Unsettled>,
     live: Live,
 ) {
@@ -594,6 +716,15 @@ fn run(
                 Command::Add(terminal, entry) => {
                     terminals.insert(terminal, *entry);
                 }
+                Command::Resolved {
+                    place,
+                    entries,
+                    unsettled: ended,
+                } => {
+                    pending.retain(|holder| holder.place != place);
+                    terminals.extend(entries);
+                    unsettled.extend(ended);
+                }
                 #[cfg(test)]
                 Command::Stop => return,
             }
@@ -605,13 +736,20 @@ fn run(
         for mut connection in arriving.drain(..) {
             match connection.named() {
                 Ok(Some(terminal)) => {
-                    // A terminal that is not hosted here has ended or was
-                    // never started: closing says so. Attach never creates.
+                    // A terminal neither hosted here nor kept by a pending
+                    // holder has ended or was never started. Attach never creates.
                     let entry = terminals.get_mut(&terminal);
-                    let answer = wire::line(&Answered {
-                        hosted: entry.is_some(),
+                    let answer = wire::line(&if entry.is_some() {
+                        Answered::Hosted
+                    } else if pending
+                        .iter()
+                        .any(|holder| holder.terminals.contains(&terminal))
+                    {
+                        Answered::Waiting
+                    } else {
+                        Answered::Ended
                     });
-                    // Sixteen bytes into an empty socket buffer.
+                    // A few bytes into an empty socket buffer.
                     if (&connection.socket).write_all(&answer).is_err() {
                         continue;
                     }

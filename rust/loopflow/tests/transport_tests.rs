@@ -390,25 +390,26 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
-    /// Wait until a viewer holds input control of a held terminal, asking
-    /// through the server's entrance as every view does.
+    /// Name `terminal` at the server's entrance, as every view does: the
+    /// connection and the entrance's answer.
+    fn held_entrance(&self, terminal: &str) -> (UnixStream, Value) {
+        let mut socket = UnixStream::connect(self.endpoint("held")).unwrap();
+        socket
+            .write_all(format!("{}\n", json!({ "terminal": terminal })).as_bytes())
+            .unwrap();
+        let mut answer = Vec::new();
+        let mut byte = [0];
+        while socket.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
+            answer.push(byte[0]);
+        }
+        (socket, serde_json::from_slice(&answer).unwrap())
+    }
+    /// Wait until a viewer holds input control of a held terminal.
     fn wait_held_controlled(&self, terminal: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let mut socket = UnixStream::connect(self.endpoint("held")).unwrap();
-            socket
-                .write_all(format!("{}\n", json!({ "terminal": terminal })).as_bytes())
-                .unwrap();
-            let mut answer = Vec::new();
-            let mut byte = [0];
-            while socket.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
-                answer.push(byte[0]);
-            }
-            assert_eq!(
-                serde_json::from_slice::<Value>(&answer).unwrap()["hosted"],
-                true,
-                "{terminal} is not hosted"
-            );
+            let (mut socket, answer) = self.held_entrance(terminal);
+            assert_eq!(answer, "hosted", "{terminal} is not hosted");
             socket
                 .write_all(&frame(
                     REQUEST,
@@ -7947,6 +7948,131 @@ fn held_session_survives_server_restart() {
     view.wait_text("The agent exited with 3.");
     let screen = String::from_utf8_lossy(&view.screen.lock().unwrap()).into_owned();
     assert!(!screen.contains("is not running"), "{screen:?}");
+}
+
+/// A holder that does not answer while a server starts keeps its terminals:
+/// their views wait and continue once it answers. Gone instead, its terminals
+/// and its row settle with an unknown outcome.
+#[test]
+fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let home = fixture.home.path();
+    let script = format!(
+        "echo $$ > {home}/agent.pid; i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
+        home = home.display()
+    );
+    let started = service
+        .connect()
+        .request(loopflow::server::wire::Operation::Server(
+            loopflow::server::wire::ServerOperation::SessionStart {
+                session: None,
+                request: "held-stopped".into(),
+                argv: vec!["/bin/sh".into(), "-c".into(), script],
+                cwd: home.to_path_buf(),
+                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+                rows: 24,
+                cols: 80,
+                placement: None,
+            },
+        ))
+        .unwrap();
+    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let agent: libc::pid_t = loop {
+        if let Some(pid) = std::fs::read_to_string(home.join("agent.pid"))
+            .ok()
+            .and_then(|pid| pid.trim().parse().ok())
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the agent never started");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let _agent = KillOnDrop(agent);
+    let holder = command_line(agent).0;
+    let signal = |signal| {
+        // SAFETY: the holder this fixture's server started.
+        assert_eq!(unsafe { libc::kill(holder, signal) }, 0);
+    };
+    let mut view =
+        Terminal::spawn(service.command(&["session", "attach", "--terminal", &terminal]));
+    view.wait_text("tick:3");
+    let ticks = |screen: &[u8]| -> Vec<u32> {
+        String::from_utf8_lossy(screen)
+            .split("tick:")
+            .skip(1)
+            .filter_map(|tick| {
+                tick.split(|c: char| !c.is_ascii_digit())
+                    .next()?
+                    .parse()
+                    .ok()
+            })
+            .collect()
+    };
+
+    // The holder is stopped while a new server starts.
+    service.stop();
+    signal(libc::SIGSTOP);
+    let stopped = view.screen.lock().unwrap().len();
+    let before = ticks(&view.screen.lock().unwrap())
+        .into_iter()
+        .max()
+        .unwrap();
+    service.child = Some(service.launch());
+    service.ready();
+    assert_eq!(fixture.held_entrance(&terminal).1, "waiting");
+    std::thread::sleep(Duration::from_millis(800));
+    view.assert_viewing("the view of a stopped holder");
+
+    // It answers: the view continues from its position.
+    signal(libc::SIGCONT);
+    view.wait_text(&format!("tick:{}", before + 5));
+    let after = ticks(&view.screen.lock().unwrap()[stopped..]);
+    assert_eq!(after.first(), Some(&(before + 1)), "{after:?}");
+    assert!(
+        after.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "the stream skipped or repeated output: {after:?}"
+    );
+
+    // Stopped again at the next server's startup, then killed: gone.
+    service.stop();
+    signal(libc::SIGSTOP);
+    service.child = Some(service.launch());
+    service.ready();
+    assert_eq!(fixture.held_entrance(&terminal).1, "waiting");
+    signal(libc::SIGKILL);
+    fixture.held_ends(&terminal);
+    let code: Option<i64> = fixture
+        .sql()
+        .query_row(
+            "SELECT exit_code FROM held_terminals WHERE id=?1",
+            [&terminal],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(code, None, "nobody saw the agent exit");
+    let unfinished = || {
+        fixture
+            .sql()
+            .query_row(
+                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
+                   AND pid=?1 AND completed_at IS NULL"#,
+                [holder],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while unfinished() > 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the gone holder's row never ended"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(fixture.held_entrance(&terminal).1, "ended");
+    assert!(!view.wait_exit().success());
 }
 
 /// Every held terminal shares its build's one holder, which `lf ps` lists

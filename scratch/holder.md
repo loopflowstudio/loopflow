@@ -49,12 +49,7 @@ repainted (both print history inline), and pyte does not model terminal
 modes, so whether either re-sends bracketed paste, focus or Kitty keyboard
 modes on resize is unknown. Script: re-creatable from this description.
 
-## Kickoff candidate A (superseded)
-
-The owner-loop-per-Session cut, its holder sketch, server side, slices and
-delete list are at `06532757c:scratch/holder.md`. What the holder and the
-server do now is in `rust/loopflow/src/transport/README.md` "Held
-terminals". Risks, Forbidden and the gate test below still apply.
+Superseded kickoff candidate A: `06532757c:scratch/holder.md`.
 
 ## Risks and answers
 
@@ -666,9 +661,8 @@ Checks:
 **Not as planned, open without a slot:**
 
 - The gate test's `ps` step checks the agent's parent is `lf holder run`,
-  not a whole-process-group count; ten-terminal thread/socket counts and
-  `lf ps --json` holder rows are not automated (the registry still holds
-  one socket per viewer and one per held source).
+  not a whole-process-group count; ten-terminal thread/socket counts are
+  not automated (one socket per viewer and per held source).
 - No snapshot file on graceful stop; rebuild is ring replay plus nudge.
 - `attaches` for a held terminal is "its child runs": a superseded build in
   a holder is never moved onto the installed lf by `lf resume`.
@@ -751,46 +745,45 @@ agent exited while no server ran prints `The agent exited with 3.` and exits 3.
 The transport `Fixture` kills every holder its store recorded on drop.
 Malformed `lf session attach` args name the expected form.
 
-Remaining: a holder that did not answer at startup is never adopted, so if it
-exits later its row stays unfinished (`lf ps` still hides it by OS identity).
-Its terminals are skipped too (`Registry::adopt` logs and continues), so
-that view is stuck until a server restart. Open choice: retry unanswered
-holders from the registry loop, or leave both.
+**A holder unanswered at startup** (QA gap; concept review, third pass,
+November 11: "settled, retry", since a dropped holder connection says nothing
+about its agents and a CPU-starved holder must not be displaced). Before this
+its views got `hosted:false` and the relay exited while the agent ran.
 
-**Concept review, third pass — November 11, 2026: settled, retry.** Not a
-product choice; three settled rules decide it. "A dropped connection to a
-holder says nothing about its agents" and "a CPU-starved holder must not be
-displaced" rule out treating silence as an end, and the demo's "restart it:
-views return" fails for a slow holder. Today it is worse than stuck: a view
-of a terminal in that holder is answered `hosted:false`, `ended()` returns
-`NotFound` ("terminal … is not running"), and the relay exits, since an
-`engine::Error` is the one error `reconnect_held` does not retry. The
-agent is still running.
+Built (November 11): a holder that accepts and does not answer `hello`/`list`
+within 1 s at startup is `Pending` (its directory's terminals plus the store's
+running ones for its build); the entrance answers those `"waiting"`, which the
+relay retries. Deviation: each pending holder is retried on its own thread
+(`Registry::retry`, backoff to 5 s), not in `run`, since a stopped holder would
+block the loop for the client's 10 s answer; `Command::Resolved` lets the loop
+alone drop it. Refused = gone: terminals settle via `recorded_exit`, else
+unknown; `holder::client::settle_departed` completes unfinished holder rows
+whose process is dead (also at every startup). Test:
+`a_held_view_waits_for_a_holder_stopped_at_server_startup`.
 
-Next implement direction:
+Checks (after this pass): `transport_tests -- held_ a_held` 6 passed; `--lib --
+transport:: holder::` 86 passed; clippy clean; `documented_commands::` 4 passed.
 
-- `Registry::adopt` keeps a holder it could not list as pending (its
-  `Place`), instead of `continue`. The `run` loop retries pending holders
-  with backoff (the `Unsettled::retry_at` pattern); a holder that answers is
-  adopted exactly as at startup (row written, idle watch connection, its
-  terminals re-hosted and exits settled).
-- A pending holder whose socket refuses connection is gone: settle its
-  terminals as the store-recorded path already does (`recorded_exit`, else
-  unknown) and its LfProcess row with no outcome through
-  `holder::client::settle`. That closes the unfinished-row gap too. Pending
-  holders come from the sockets `holders()` finds and from the store's
-  unfinished holder rows, so one that died before this server started is
-  settled as well.
-- While a terminal's holder is pending, its views are not refused: the
-  entrance answers a retryable "waiting" (not `hosted:false`), so the relay
-  reads `reconnecting` and keeps trying, and Desktop shows its existing
-  "Reconnecting…" overlay. `ended()` stays the answer only for a terminal no
-  live or pending holder could hold.
-- Test: a holder that does not answer `list` at server startup (stopped
-  with SIGSTOP, then SIGCONT) — the view reads reconnecting rather than
-  ended, then continues from its position once the holder answers; and with
-  SIGKILL instead of SIGCONT, the holder row and its terminals settle.
+## Concept review with a person — November 11, 2026
 
-Checks (after 50ae64b2a): `transport_tests -- held_ a_held` 5 passed; `--lib --
-transport:: holder::` 85 passed; clippy clean; `documented_commands::` passed
-before 6dc4041fa (no command changed since).
+Jack Heart ran `/concept-review` while run 1afadabb was on implement.
+[concept-review.html](concept-review.html). Proposals, none answered:
+
+- **Cross-build talk to the server.** After an install the holder, the
+  launcher beside each agent and every plain-terminal relay are still the old
+  build. The holder's protocol carries a revision; `held.sock` (viewer
+  frames, launcher control requests) was read without finding one
+  (`reconnect_held`, `wire.rs` header; not every handler was read). The gate
+  test restarts one binary. Proposed: a plain-terminal view that finds a
+  server of another build execs the installed `lf` as a view of the same
+  terminal from its position; an old launcher's unreadable report is a
+  recording gap. Test: install a build whose frames differ, mid-turn.
+- Desktop Task shells as held terminals, so the owner has no caller left
+  after LOO-820.
+- A managed launch gets the server ready itself before failing;
+  `lf task run` starts its Graph either way (troubleshooting.md and
+  sessions.md disagree today).
+- Plain terminal while the server is away: title reads Reconnecting…, screen
+  untouched.
+- One place listing the conversations a killed holder took.
+- Rollover and resume-takeover have nothing to do for held terminals.

@@ -28,30 +28,17 @@ Reversible choices made in kickoff; the plan is `holder.md`.
   managed. The brief names Task/Wave commands and Desktop only.
 - Desktop Task shells stay on their own `session serve` owner: they run
   without a server on headless Linux.
-- A graceful server stop writes a Ghostty snapshot per held Session. Exact
-  recovery requires a compatible revision and continuous retained bytes;
-  ring + nudge also applies to incompatible upgrades. Terminal-mode recovery
-  after a gap has not been verified.
+- No snapshot on graceful stop (as built): rebuild is ring replay plus a
+  nudge; terminal-mode recovery after a gap has not been verified.
 - Ring 2 MiB per PTY; holder exits 60 s after its last child.
 
 ## Raised while writing the docs
 
-Written into the docs as assumptions; none was said by anyone.
-
-- `lf task run` with the server stopped: does the whole command fail with
-  `Loopflow server is not running; run lf server status`, or does the Graph
-  start and only the Task's background conversation go unstarted (as it
-  already does past sixteen conversations)? `docs/troubleshooting.md` says the
-  command stops and nothing starts; `docs/sessions.md` says a Graph already
-  running keeps going.
-- A CLI managed launch never starts the server itself (Desktop's first
-  connection does ask the installation for readiness). On headless Linux with
-  the user service disabled, `lf resume --task` therefore cannot open a
-  conversation until the service is enabled. Should a managed launch ask for
-  readiness the way Desktop does before failing?
-- A killed holder ends every agent it holds, and the docs say so. Nothing
-  restarts one. Is "views say the process is gone and offer resume" the whole
-  experience, or should the server say which conversations were lost?
+Written into the docs as assumptions; none was said by anyone. All three
+(`lf task run` with the server stopped, where troubleshooting.md and
+sessions.md disagree; a CLI managed launch never readying the server; nothing
+saying which conversations a killed holder took) are proposals in holder.md
+"Concept review with a person".
 
 ## Raised while implementing
 
@@ -65,6 +52,10 @@ Written into the docs as assumptions; none was said by anyone.
   `terminal_id`, one of them null, instead of two shapes under one name.
 - A lost `session.start` holder reply answers `outcome_unknown`; the caller
   repeats the same `request`.
+- The entrance answer changed from `{"hosted":bool}` to `"hosted"`/`"waiting"`/
+  `"ended"`. A relay of an older build reads the new answer as noise and
+  keeps reconnecting instead of ending; the cross-build proposal in holder.md
+  is where that skew belongs.
 
 ## Sync onto main — November 10, 2026
 

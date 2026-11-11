@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>LOO-824 · Concept review</title>
+<style>
+:root{--bg:#f7f5ef;--ink:#1f2a2e;--muted:#5b6a6c;--line:#cfd4cc;--paper:#fffef9;--accent:#1f625c;--soft:#e9efe9;--warm:#a1452a;--code:#edf0e9}
+@media(prefers-color-scheme:dark){:root{--bg:#141d20;--ink:#e6ebe5;--muted:#a3b3b3;--line:#3d4e51;--paper:#1a272b;--accent:#a6d4bb;--soft:#22352f;--warm:#f0ae8f;--code:#222f33}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:800px;margin:auto;padding:56px 24px 96px}
+a{color:var(--accent);text-underline-offset:3px}
+h1{font:500 clamp(32px,6vw,50px)/1.12 Georgia,serif;letter-spacing:-.03em;margin:18px 0 22px}
+h2{font:500 29px/1.2 Georgia,serif;letter-spacing:-.015em;margin:0 0 14px}
+h3{font-size:17px;margin:26px 0 6px}
+p{margin:0 0 16px}
+code{font:.88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:3px}
+.meta{font-size:14px;color:var(--muted)}
+.lead{font-size:21px;line-height:1.5}
+section{padding:44px 0 8px;border-top:1px solid var(--line);margin-top:40px}
+.note{font-size:14px;color:var(--muted)}
+.wrap{overflow-x:auto;margin:14px 0 20px}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:540px}
+th,td{text-align:left;padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:14px;color:var(--muted)}
+.built,.prop{margin:0 0 14px;padding-left:16px;border-left:3px solid var(--line)}
+.prop{border-color:var(--warm)}
+.built b,.prop b{display:block;font-size:14px;color:var(--accent)}
+.prop b{color:var(--warm)}
+td.p{color:var(--warm)}
+.opts{margin:6px 0 18px;padding:0;list-style:none}
+.opts li{margin:0 0 8px;padding-left:44px;text-indent:-44px}
+.opts strong{display:inline-block;width:44px;text-indent:0;color:var(--accent)}
+.demo{background:var(--paper);border:1px solid var(--line);border-radius:8px;margin:22px 0;padding:20px}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+button{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:4px;padding:7px 11px;background:var(--paper);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button:focus-visible,a:focus-visible{outline:3px solid var(--warm);outline-offset:3px}
+pre{margin:0;padding:16px;background:var(--code);border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;min-height:250px}
+.questions{background:var(--soft);border-radius:8px;padding:28px 24px 12px;margin-top:48px;border:0}
+footer{margin-top:36px;font-size:14px;color:var(--muted)}
+@media(max-width:560px){body{font-size:16px}main{padding:36px 16px 72px}.lead{font-size:19px}}
+</style>
+</head>
+<body><main>
+
+<header>
+<p class="meta">LOO-824 · concept review, while run 1afadabb is on implement · November 11, 2026</p>
+<h1>The holder survives an install. Does everything that talks to the server?</h1>
+<p class="lead">The code now keeps agents alive through a server restart, and the test for that passes. But the promise in the docs is about <code>lf install</code>, and an install changes the server's build while four other processes from the old build keep running and keep talking to it. Only two of those conversations are checked. That is the decision this page is about; four smaller ones follow.</p>
+<p class="meta">Built from <a href="holder.md">scratch/holder.md</a>, <code>docs/sessions.md</code>, <code>docs/troubleshooting.md</code>, <code>rust/loopflow/src/transport/README.md</code>, <code>transport.rs</code> (<code>reconnect_held</code>), <code>holder/wire.rs</code>, <code>server/service.rs</code> and commits <code>5f040e37f..0afb960f5</code>. Text beside an orange rule is proposed; everything else is built on this branch.</p>
+</header>
+
+<section>
+<h2>What people do, and what stands behind it</h2>
+<div class="wrap"><table>
+<tr><th>You</th><th>Before</th><th>Now, on this branch</th><th>Changes state through</th></tr>
+<tr><td>Open a Task conversation<br><code>lf resume --task</code>, a Desktop pane</td><td>An owner process per conversation holds the agent</td><td>The server asks a holder to start the agent in a held terminal; you get a view</td><td><code>session.start</code> → holder <code>start</code></td></tr>
+<tr><td>Look at it from a second place</td><td>A viewer of the owner; one holds control, <strong>Move here</strong> takes it</td><td>A view of the terminal; same control rules</td><td><code>session.attach</code> ticket (Desktop), <code>held.sock</code> (plain terminal)</td></tr>
+<tr><td>Run <code>lf install</code> mid-turn</td><td>Owner and agent stay on the old build; <code>lf resume</code> or <code>lf process rollover</code> moves an idle one</td><td>Holder and agent stay; server is replaced; views pause and continue from a byte position</td><td>holder <code>list</code>, <code>read {from}</code></td></tr>
+<tr><td>Come back after the server crashed</td><td>Nothing to do, owners were separate</td><td>Views reconnect on their own; a view opened later gets the kept output and a redraw</td><td>registry adopt, ring replay, size nudge</td></tr>
+<tr><td>Let it end</td><td>Owner settles the exit</td><td>Holder writes <code>exit.json</code>; server settles, even late</td><td>holder <code>forget</code></td></tr>
+</table></div>
+<p>Concepts someone now has to hold: <strong>Session</strong>, <strong>view</strong>, <strong>holder</strong> (seen in <code>ps</code> and <code>lf ps</code>), and which launches go to it. <strong>Held terminal</strong> and <strong>position</strong> stay inside. The owner has not gone: skills, <code>-b</code> runs and Desktop Task shells still get one, so <code>docs/sessions.md</code> carries a five-row table of what runs where. "Terminal" also now means two things in the store: the pane you look through (<code>terminal_id</code>) and the PTY the agent lives in (<code>held_terminal_id</code>).</p>
+</section>
+
+<section>
+<h2>The mismatch: one build used to stand on both sides</h2>
+<p>An owner and the launcher beside its agent were always the same build, started together. The server now stands where the owner stood, and the server is the one process an install always replaces. After <code>lf install</code>, these are still running on the old build:</p>
+<div class="wrap"><table>
+<tr><th>Old-build process</th><th>Talks to the new server over</th><th>Mismatch handled?</th></tr>
+<tr><td>The holder</td><td>holder protocol, revision 1</td><td>Yes. <code>hello</code> carries a revision, the protocol is eight requests, and the README says a newer server speaks to any older holder.</td></tr>
+<tr><td>A Desktop pane's view</td><td>server protocol, revision 5</td><td>Checked, and refused: the plan records "Revision 5 has no revision-4 fallback". Desktop is normally replaced by the same install.</td></tr>
+<tr><td>A plain-terminal view (the <code>lf</code> relay in your terminal)</td><td><code>held.sock</code>, the viewer frames</td><td>I found no revision on this path. An old relay sends whatever its build's frames were.</td></tr>
+<tr><td>The launcher <code>lf</code> beside the agent</td><td><code>held.sock</code>, control requests (exit record, native started and ended, status, directory, input hint)</td><td>Same path, same absence.</td></tr>
+</table></div>
+<p>The gate test (<code>held_session_survives_server_restart</code>) stops and starts the same binary. So "<code>lf install</code> mid-turn: the turn keeps streaming and views continue" is shown for a restart, and holds for an install only while the viewer frames and control requests happen not to change. On November 4 an install broke live Sessions through exactly this kind of gap. I read the reconnect path and the wire headers, not every handler; a check I missed would change this section.</p>
+
+<div class="demo">
+<div class="row" role="group" aria-label="Scenario"><button data-s="same" aria-pressed="true">Server restarts, same build</button><button data-s="built" aria-pressed="false">Install changes the frames · built</button><button data-s="prop" aria-pressed="false">Install changes the frames · proposed</button></div>
+<pre id="t"></pre>
+</div>
+
+<div class="prop"><b>Proposed: a view replaces itself; a conversation never has to</b>
+A view holds nothing that matters: the screen is in your terminal and its place is one number. When a plain-terminal view reconnects and finds a server of another build, it execs the installed <code>lf</code> as a view of the same terminal from the same position. It already draws nothing while waiting, so nothing shows. The server then only ever speaks its own build's viewer frames, and those can keep changing freely.</div>
+<div class="prop"><b>Proposed: what an old launcher says is best effort</b>
+The launcher's reports improve the record; none of them keeps the agent running. A report the new server does not understand is logged once as a recording gap and the conversation carries on. The exit code still arrives from the holder's <code>exit.json</code>.</div>
+<p>That leaves one protocol that must be readable across builds, the holder's, which is the one already designed for it.</p>
+</section>
+
+<section>
+<h2>Smaller things the walk turned up</h2>
+
+<h3>Desktop Task shells are the last reason the owner exists</h3>
+<p>When bare launches go direct (LOO-820), skills and <code>-b</code> runs stop needing an owner. Desktop Task shells would be the only thing left on <code>lf session serve</code>, and the reason on file is "they run without a server on headless Linux". A holder already starts any argv and knows nothing about agents.</p>
+<div class="prop"><b>Proposed</b>A Task shell is a held terminal like any other. The table in <code>docs/sessions.md</code> shrinks to two rows: in the holder, or in your terminal. The owner and its takeover and rollover rules can then be deleted, not kept for one caller.</div>
+
+<h3>A stopped server is refused, not started</h3>
+<p>Built: <code>lf resume --task</code> with the server down prints <code>Loopflow server is not running; run lf server status</code> and starts nothing. Desktop's first connection asks the installation to make the server ready. The docs written in this run disagree with each other about <code>lf task run</code> in that state: troubleshooting says nothing starts, sessions says the Graph runs and only the conversation is skipped.</p>
+<div class="prop"><b>Proposed</b>A managed launch asks for readiness the way Desktop does and only reports failure when that fails. <code>lf task run</code> starts its Graph either way.</div>
+
+<h3>A plain terminal says nothing while the server is away</h3>
+<p>Built from "(3) i dot know that we want to do any overlay for raw lf": the view "waits, drawing nothing and discarding what is typed". During an install that is a second or two. After a crash it lasts until the OS restarts the server, and the terminal looks hung while keystrokes vanish.</p>
+<div class="prop"><b>Proposed</b>Still nothing in the screen. The terminal's title, which the relay already sets, reads <code>Reconnecting…</code> until the view continues.</div>
+
+<h3>A killed holder</h3>
+<p>Built: every agent in it ends; each view says the process is gone and offers resume. Nothing lists what was lost. Someone with thirty conversations in one holder finds out pane by pane.</p>
+
+<h3>What falls away</h3>
+<p>For a held conversation, "superseded" has little left to mean. The agent is not an lf build; the holder is small and stable; a view replaces itself. So <code>lf process rollover</code> and resume's takeover of an old owner have nothing to do for held terminals, and the plan's open line "a superseded build in a holder is never moved onto the installed lf" can read as intended. An old holder is retired by its conversations ending.</p>
+</section>
+
+<section class="questions">
+<h2>Questions</h2>
+<h3>1. A plain-terminal view open across an install that changed the viewer frames</h3>
+<ul class="opts"><li><strong>1a</strong> Replaces itself with the installed <code>lf</code> and continues from its position.</li><li><strong>1b</strong> Closes with a line telling you to run <code>lf resume</code>.</li><li><strong>1c</strong> The server keeps speaking older viewer frames.</li></ul>
+<h3>2. Reports from an old-build launcher beside a running agent</h3>
+<ul class="opts"><li><strong>2a</strong> Best effort: an unreadable one is a logged gap, the conversation carries on.</li><li><strong>2b</strong> A small frozen set the server always understands, like the holder protocol.</li></ul>
+<h3>3. Desktop Task shells</h3>
+<ul class="opts"><li><strong>3a</strong> Held terminals too, in this Task.</li><li><strong>3b</strong> Held terminals, as a follow-up Task alongside LOO-820.</li><li><strong>3c</strong> Stay on their own owner process.</li></ul>
+<h3>4. A Task or Wave launch while the server is not running</h3>
+<ul class="opts"><li><strong>4a</strong> lf gets the server ready itself, then fails only if that fails.</li><li><strong>4b</strong> As built: print the message and stop.</li></ul>
+<h3>5. A plain terminal while the server is away</h3>
+<ul class="opts"><li><strong>5a</strong> Nothing at all, as built.</li><li><strong>5b</strong> The title says Reconnecting…; the screen is untouched.</li></ul>
+<h3>6. After a holder is killed</h3>
+<ul class="opts"><li><strong>6a</strong> As built: each view says so and offers resume.</li><li><strong>6b</strong> Also one place that lists the conversations it took.</li></ul>
+<p class="note">The run is still implementing. Answers go to it as a steer and into holder.md; nothing here has been sent.</p>
+</section>
+
+<footer>Decisions and what was said live in <a href="holder.md">holder.md</a>. The earlier comparison is <a href="explore.html">explore.html</a>; the run's own QA page is <a href="qa.html">qa.html</a>.</footer>
+</main>
+<script>
+const T={
+same:`$ lf resume --task LOO-12          turn streaming
+  (server stopped and started, same binary)
+
+holder        keeps the PTY, drains output into its ring
+agent         never notices
+launcher      reconnects, same frames
+this view     waits, draws nothing, continues from byte 418,220
+Desktop pane  Reconnecting…, then continues
+
+Tested: held_session_survives_server_restart`,
+built:`$ lf resume --task LOO-12          turn streaming
+$ lf install                       new build; viewer frames differ
+
+holder        old build · revision 1 understood by the new server
+agent         never notices
+launcher      old build · sends old control requests to held.sock
+              what the new server does with them: not defined
+this view     old build · reconnects with old frames to held.sock
+              not defined; no revision is exchanged on this path
+Desktop pane  replaced with the app, or refused as incompatible
+
+Not tested. The agent survives; whether you can still see it
+in this terminal depends on what changed.`,
+prop:`$ lf resume --task LOO-12          turn streaming
+$ lf install                       new build; viewer frames differ
+
+holder        old build · revision 1 understood by the new server
+agent         never notices
+launcher      old build · a report the server cannot read is one
+              line in logs/lf.log; exit code comes from the holder
+this view     reconnects, sees another build, execs the installed
+              lf as a view of the same terminal from byte 418,220
+              nothing drawn; the turn carries on in place
+Desktop pane  replaced with the app
+
+Proposed. Test: install a build whose frames differ, mid-turn.`};
+function show(s){document.getElementById("t").textContent=T[s];document.querySelectorAll("button[data-s]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.s===s)));}
+document.querySelectorAll("button[data-s]").forEach(b=>b.addEventListener("click",()=>show(b.dataset.s)));
+show("same");
+</script>
+</body>
+</html>

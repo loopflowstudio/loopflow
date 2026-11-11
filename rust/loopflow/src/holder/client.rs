@@ -244,6 +244,8 @@ fn spawn() -> Result<()> {
 
 // ---- The holder's LfProcess ----
 
+const HOLDER_COMMAND: &str = r#"["lf","holder","run"]"#;
+
 /// The LfProcess a holder is recorded as. Its id comes from the holder's pid
 /// and OS start time, so every server that meets the same holder names the
 /// same row, however many terminals it holds.
@@ -259,7 +261,7 @@ fn holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
         via_agent: Some(false),
         caller_session_id: None,
         caller_agent_process_id: None,
-        command: Some(r#"["lf","holder","run"]"#.to_owned()),
+        command: Some(HOLDER_COMMAND.to_owned()),
         repo: None,
         cwd: None,
         started_at: os_started_at,
@@ -296,6 +298,31 @@ pub fn adopt(place: &Place, pid: u32) {
         let _ = io::copy(&mut socket, &mut io::sink());
         settle(pid, started, None);
     });
+}
+
+/// Complete the row of every recorded holder that is no longer running, with
+/// no outcome: nobody saw it exit. A process that cannot be read is left.
+pub fn settle_departed() {
+    let Ok(rows) = crate::journal::process_ledger().and_then(|store| store.unfinished_processes())
+    else {
+        return;
+    };
+    for row in rows {
+        let crate::process::ProcessEntry::Lf(process) = row else {
+            continue;
+        };
+        let (Some(pid), Some(started)) = (process.pid, process.os_started_at) else {
+            continue;
+        };
+        if process.command.as_deref() != Some(HOLDER_COMMAND) {
+            continue;
+        }
+        if crate::journal::process_identity_evidence(pid, started)
+            == crate::journal::ProcessIdentityEvidence::Dead
+        {
+            settle(pid, started, None);
+        }
+    }
 }
 
 /// Complete the holder's row. With no `status` nobody saw the exit, so the row

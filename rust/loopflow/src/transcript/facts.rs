@@ -96,11 +96,12 @@ fn record(
     let Some(read) = super::ended_reader(harness) else {
         return Ok(0);
     };
-    let turns = read(&super::json_lines(transcript).collect::<Vec<_>>());
+    let rows = super::json_lines(transcript).collect::<Vec<_>>();
+    let turns = read(&rows);
     let last_row = || {
-        super::json_lines(transcript)
-            .filter_map(|row| unix_seconds(&row["timestamp"]))
-            .last()
+        rows.iter()
+            .rev()
+            .find_map(|row| unix_seconds(&row["timestamp"]))
     };
     let recorded = store.session_completions(session, thread)?;
     let mut written = 0;

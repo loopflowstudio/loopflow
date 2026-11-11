@@ -15,16 +15,6 @@ pub(crate) struct CurrentConversation {
     pub thread: AgentSessionId,
 }
 
-/// One turn's boundaries as Loopflow recorded them, in Unix seconds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RecordedTurn {
-    /// The provider's name for the turn.
-    pub id: Option<String>,
-    pub started_at: Option<i64>,
-    pub settled_at: Option<i64>,
-    pub status: Option<String>,
-}
-
 impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
@@ -173,58 +163,23 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// The last turn recorded in `thread`, by its latest start or completion.
-    pub(crate) fn last_recorded_turn(
+    /// The turn last recorded starting in `thread`, and when, in Unix seconds.
+    pub(crate) fn last_started_turn(
         &self,
         session: &str,
         thread: &AgentSessionId,
-    ) -> StoreResult<Option<RecordedTurn>> {
-        let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let conn = connection.savepoint()?;
-        let latest = conn
+    ) -> StoreResult<Option<(String, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
             .query_row(
-                "SELECT provider_turn,kind,observed_at,payload FROM session_events
-                 WHERE session_id=?1 AND provider_thread=?2 AND kind IN ('started','completed')
+                "SELECT provider_turn,observed_at FROM session_events
+                 WHERE session_id=?1 AND provider_thread=?2 AND kind='started'
+                   AND provider_turn IS NOT NULL
                  ORDER BY seq DESC LIMIT 1",
                 params![session, thread],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?;
-        Ok(match latest {
-            None => None,
-            Some((turn, kind, at, _)) if kind == "started" => Some(RecordedTurn {
-                id: turn,
-                started_at: Some(at),
-                settled_at: None,
-                status: None,
-            }),
-            Some((turn, _, at, payload)) => {
-                let started_at = conn
-                    .query_row(
-                        "SELECT observed_at FROM session_events
-                         WHERE session_id=?1 AND provider_thread=?2 AND kind='started'
-                           AND provider_turn IS ?3
-                         ORDER BY seq DESC LIMIT 1",
-                        params![session, thread, turn],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()?;
-                let payload: Value = serde_json::from_str(&payload)?;
-                Some(RecordedTurn {
-                    id: turn,
-                    started_at,
-                    settled_at: Some(at),
-                    status: payload["status"].as_str().map(str::to_owned),
-                })
-            }
-        })
+            .optional()?)
     }
 
     /// When turn `turn` of `thread` was recorded complete, and its status.

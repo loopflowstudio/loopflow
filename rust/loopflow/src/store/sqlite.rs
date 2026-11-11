@@ -72,7 +72,7 @@ pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use session_events::{CurrentConversation, RecordedTurn};
+pub(crate) use session_events::CurrentConversation;
 pub use task_details::TaskDetailFacts;
 pub(crate) use task_work::TaskShipping;
 

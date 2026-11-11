@@ -4,18 +4,16 @@
 //! permission prompt until it is answered, so a turn waiting on one reads as
 //! running.
 
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{rfc3339, seconds, Turn};
 use crate::harness::HarnessKind;
-use crate::store::sqlite::{CurrentConversation, RecordedTurn, SqliteStore};
+use crate::store::sqlite::{CurrentConversation, SqliteStore};
 
 /// How much of a transcript's end is read first; the window grows fourfold
 /// until it holds the turn's start…
@@ -111,21 +109,17 @@ impl SessionTurn {
         })
     }
 
-    /// A turn as Loopflow recorded its boundaries from the provider's live
-    /// stream: all there is for a harness whose transcript keeps no turn ends.
-    pub(crate) fn from_stream(stream: RecordedTurn) -> Self {
-        let mut turn = Self {
-            id: stream.id,
+    /// A turn Loopflow recorded starting at `at`, in Unix seconds: all there
+    /// is for a harness whose transcript keeps no turn ends.
+    pub(crate) fn started(id: String, at: i64) -> Self {
+        Self {
+            id: Some(id),
             state: TurnState::Running,
-            started_at: stream.started_at.and_then(rfc3339),
+            started_at: rfc3339(at),
             ended_at: None,
             model: None,
             usage: None,
-        };
-        if let Some(at) = stream.settled_at {
-            turn.close(at, stream.status.as_deref());
         }
-        turn
     }
 
     /// End a turn the transcript left open at the end Loopflow recorded for
@@ -228,11 +222,8 @@ fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
 
 // -- Finding a conversation's transcript --
 
-/// Where each conversation's transcript was found; a transcript never moves.
-static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::new(Mutex::default);
-
-/// The transcript of `conversation`, which a Session ran in `cwd`; `None`
-/// when its harness keeps none or its home is gone.
+/// The transcript file of `conversation`, which a Session ran in `cwd`;
+/// `None` when its harness keeps none here or it is gone.
 pub(crate) fn locate(
     store: &SqliteStore,
     conversation: &CurrentConversation,
@@ -241,31 +232,15 @@ pub(crate) fn locate(
     let Some(harness) = HarnessKind::parse(&conversation.provider) else {
         return Ok(None);
     };
-    let Some(provider) = harness.provider() else {
-        return Ok(None);
-    };
-    let thread = &conversation.thread;
-    let Some(home) = super::conversation_home(store, provider, thread)? else {
-        return Ok(None);
-    };
-    Ok(find(harness, &home, thread.as_str(), cwd).map(|path| (harness, path)))
-}
-
-/// Conversation `id`'s transcript in `home`, which ran in `cwd`.
-pub(crate) fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathBuf> {
-    let key = (id.to_owned(), home.to_path_buf());
-    if let Some(path) = FOUND.lock().expect("transcript locations").get(&key) {
-        return Some(path.clone());
-    }
-    let direct = (harness == HarnessKind::Claude)
-        .then(|| claude_project(home, cwd).join(format!("{id}.jsonl")))
-        .filter(|path| path.is_file());
-    let path = direct.or_else(|| super::transcript(harness, home, id))?;
-    FOUND
-        .lock()
-        .expect("transcript locations")
-        .insert(key, path.clone());
-    Some(path)
+    Ok(
+        match super::locate(store, harness, &conversation.thread, cwd)? {
+            super::Located::Found {
+                source: super::Source::File(path),
+                ..
+            } => Some((harness, path)),
+            _ => None,
+        },
+    )
 }
 
 /// Claude keeps a directory's conversations under its absolute path, every
@@ -397,14 +372,8 @@ mod tests {
     }
 
     #[test]
-    fn a_recorded_turn_reads_its_boundaries_and_an_open_one_closes_at_its_recorded_end() {
-        let recorded = |settled_at, status: Option<&str>| RecordedTurn {
-            id: Some("t".into()),
-            started_at: Some(1_794_327_900),
-            settled_at,
-            status: status.map(str::to_owned),
-        };
-        let mut turn = SessionTurn::from_stream(recorded(None, None));
+    fn a_recorded_start_runs_until_its_recorded_end() {
+        let mut turn = SessionTurn::started("t".into(), 1_794_327_900);
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00Z"));
         assert_eq!(turn.describe(1_794_327_900 + 134), "turn running 2m14s");
@@ -413,9 +382,8 @@ mod tests {
         assert_eq!(turn.state, TurnState::Ended);
         assert_eq!(turn.describe(1_794_327_960 + 5), "last turn ended 5s ago");
         assert!(turn.handed_back());
-
-        let interrupted = SessionTurn::from_stream(recorded(Some(2), Some("interrupted")));
-        assert_eq!(interrupted.state, TurnState::Interrupted);
+        turn.close(1_794_327_960, Some("interrupted"));
+        assert_eq!(turn.state, TurnState::Interrupted);
         assert_eq!(
             (tokens(999), tokens(41_200), tokens(3_859_200)),
             ("999".into(), "41.2k".into(), "3.9M".into())

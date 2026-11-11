@@ -35,9 +35,9 @@ fn handed_back(turn: &Option<SessionTurn>) -> bool {
     turn.as_ref().is_some_and(SessionTurn::handed_back)
 }
 
-/// The transcript's last turn, ended where Loopflow recorded the end of the
-/// same turn when the transcript shows none. A harness whose transcript
-/// keeps no turn ends has only the turn Loopflow recorded.
+/// The transcript's last turn, or for a harness whose transcript keeps no
+/// turn ends the turn Loopflow last recorded starting; ended where Loopflow
+/// recorded the end of the same turn when the transcript shows none.
 fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<SessionTurn>> {
     let Some(conversation) = store.current_conversation(session)? else {
         return Ok(None);
@@ -45,14 +45,15 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
     let thread = &conversation.thread;
     let keeps_ends =
         HarnessKind::parse(&conversation.provider).is_some_and(crate::transcript::keeps_turn_ends);
-    if !keeps_ends {
-        return Ok(store
-            .last_recorded_turn(session, thread)?
-            .map(SessionTurn::from_stream));
-    }
-    crate::transcript::live::locate(store, &conversation, cwd)?
-        .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path))
-        .map(|turn| close(store, session, thread, turn))
+    let turn = if keeps_ends {
+        crate::transcript::live::locate(store, &conversation, cwd)?
+            .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path))
+    } else {
+        store
+            .last_started_turn(session, thread)?
+            .map(|(id, at)| SessionTurn::started(id, at))
+    };
+    turn.map(|turn| close(store, session, thread, turn))
         .transpose()
 }
 

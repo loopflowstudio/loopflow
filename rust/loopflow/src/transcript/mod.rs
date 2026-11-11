@@ -20,10 +20,11 @@ pub use session::{
     TurnFacts,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -206,13 +207,40 @@ pub(crate) fn locate(
     let Some(home) = conversation_home(store, provider, id)? else {
         return Ok(Located::Gone(Gap::AccountHomeRemoved));
     };
-    Ok(match transcript(harness, &home, id.as_str()) {
+    Ok(match find(harness, &home, id.as_str(), cwd) {
         Some(path) => Located::Found {
             source: Source::File(path),
             home: Some(home),
         },
         None => Located::Gone(Gap::FileMissing { home }),
     })
+}
+
+/// Where each conversation's transcript was found; a transcript never moves,
+/// though its provider may delete it.
+static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::new(Mutex::default);
+
+/// Conversation `id`'s transcript in `home`, which ran in `cwd`. Claude's is
+/// tried where its directory puts it before the home is walked.
+fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> Option<PathBuf> {
+    let key = (id.to_owned(), home.to_path_buf());
+    let known = FOUND
+        .lock()
+        .expect("transcript locations")
+        .get(&key)
+        .cloned();
+    if let Some(path) = known.filter(|path| path.is_file()) {
+        return Some(path);
+    }
+    let direct = (harness == HarnessKind::Claude)
+        .then(|| live::claude_project(home, cwd).join(format!("{id}.jsonl")))
+        .filter(|path| path.is_file());
+    let path = direct.or_else(|| transcript(harness, home, id))?;
+    FOUND
+        .lock()
+        .expect("transcript locations")
+        .insert(key, path.clone());
+    Some(path)
 }
 
 /// Every turn of a transcript, oldest first.

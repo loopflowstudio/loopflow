@@ -848,13 +848,22 @@
     },
     "BoundaryMoment": {
       "description": "Where in a native conversation a hook fired.",
-      "enum": [
-        "start",
-        "compact",
-        "tool",
-        "stop"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "start",
+            "compact",
+            "tool",
+            "stop"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "event",
+          "description": "A Pi event the extension reports (`callback` is the event): the server\nrecords the turn from it and, while a turn runs, answers steers.",
+          "type": "string"
+        }
+      ]
     },
     "BrowserDetails": {
       "additionalProperties": false,

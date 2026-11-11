@@ -7,7 +7,14 @@ CREATE INDEX steer_deliveries_steer ON steer_deliveries(steer_id);
 CREATE INDEX steer_deliveries_batch ON steer_deliveries(batch_id);
 -- Confirmation and recovery find a Session's prepared and uncertain batches.
 CREATE INDEX steer_batches_session ON steer_batches(session_id, evidence, created_at);
--- Reconcile finds the steers saved for the Session itself and its repository;
--- Task and Wave steers already have their indexes.
-CREATE INDEX steers_session ON steers(session_id);
-CREATE INDEX steers_repo ON steers(repo);
+-- Reconcile finds the steers saved for the Session, its Tasks, its Waves and
+-- its repository. A steer has exactly one owner, so each owner column is
+-- mostly NULL; ANALYZE counts those NULLs as one key and rates a full index
+-- useless. Partial indexes hold only the owned rows, so the planner keeps
+-- them whether or not the store was analyzed.
+CREATE INDEX steers_session ON steers(session_id) WHERE session_id IS NOT NULL;
+CREATE INDEX steers_repo ON steers(repo) WHERE repo IS NOT NULL;
+DROP INDEX steers_task;
+CREATE INDEX steers_task ON steers(task_id, seq) WHERE task_id IS NOT NULL;
+DROP INDEX steers_wave;
+CREATE INDEX steers_wave ON steers(wave_id, seq) WHERE wave_id IS NOT NULL;

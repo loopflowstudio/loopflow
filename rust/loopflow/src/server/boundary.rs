@@ -65,8 +65,12 @@ pub(super) fn answer(
         return Ok((nothing, Some(after)));
     };
     // OpenCode's turn end names no conversation: it records no turn, and
-    // still confirms, refreshes planning and applies a pending move.
-    let thread = callback["session_id"].as_str();
+    // still confirms, refreshes planning and applies a pending move. A Pi
+    // event names its conversation by its session file.
+    let thread = match moment {
+        BoundaryMoment::Event => callback["sessionFile"].as_str(),
+        _ => callback["session_id"].as_str(),
+    };
     let no_thread = || anyhow!("Provider callback names no native conversation");
     let event = callback["hook_event_name"]
         .as_str()
@@ -98,6 +102,23 @@ pub(super) fn answer(
     }
     if let Some(gap) = gap {
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
+    }
+    if *moment == BoundaryMoment::Event {
+        crate::harness::pi::observe_native(store, adapter, callback)?;
+        // Pi takes a steer only while a turn runs; outside one it would be
+        // stored without starting a run, so the event answers none.
+        let running = callback["turn"].is_string() && callback["type"] != "agent_settled";
+        if !running {
+            let waiting =
+                store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
+            return Ok((
+                SessionBoundaryAnswer {
+                    steers: None,
+                    waiting,
+                },
+                None,
+            ));
+        }
     }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
@@ -272,6 +293,17 @@ mod tests {
         SteerAdapter,
         std::path::PathBuf,
     ) {
+        fixture_on("native")
+    }
+
+    fn fixture_on(
+        thread: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteStore,
+        SteerAdapter,
+        std::path::PathBuf,
+    ) {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
@@ -295,7 +327,7 @@ mod tests {
         store
             .with_provider_context(
                 &adapter,
-                "native",
+                thread,
                 NativeBoundary::Activate { source: "startup" },
                 || Ok(()),
             )
@@ -368,6 +400,37 @@ mod tests {
         let (answered, _) = answer(&store, &tool("second", &[steers.batch])).unwrap();
         assert_eq!((answered.steers, answered.waiting), (None, false));
         assert_eq!(evidence(), "emitted");
+    }
+
+    /// A Pi event is recorded, and answers steers only while a turn runs:
+    /// outside one, Pi would store the steer without starting a run.
+    #[test]
+    fn a_pi_event_answers_steers_only_during_a_turn() {
+        let (_home, store, adapter, delivery) = fixture_on("/pi/session.jsonl");
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let event = |callback: serde_json::Value| {
+            let mut callback = callback;
+            callback["sessionFile"] = "/pi/session.jsonl".into();
+            answer(
+                &store,
+                &boundary(BoundaryMoment::Event, &adapter, &delivery, callback),
+            )
+            .unwrap()
+        };
+        let (idle, after) =
+            event(serde_json::json!({"type":"ui_prompt_end","openTools":0,"pendingInput":0}));
+        assert_eq!(
+            (idle.steers, idle.waiting, after.is_none()),
+            (None, false, true)
+        );
+        let (running, _) = event(serde_json::json!({"type":"tool_execution_start",
+            "toolCallId":"tool","turn":"turn","openTools":1,"pendingInput":0}));
+        assert!(running.steers.unwrap().text.contains("KEEP_THE_API_SMALL"));
+        let (settled, _) = event(serde_json::json!({"type":"agent_settled","turn":"turn",
+            "aborted":false,"events":[],"openTools":0,"pendingInput":0}));
+        assert_eq!((settled.steers, settled.waiting), (None, true));
     }
 
     /// A checkout that moved since launch: the server points the delivery
@@ -555,6 +618,199 @@ mod tests {
         let after = after.unwrap();
         assert!(after.repo.ends_with("repo") && after.session.is_none());
         assert!(answer(&store, &stop(BoundaryMoment::Tool)).is_err());
+    }
+
+    static TRACED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 14,698
+    /// Sessions, 10,417 steer batches and 235,713 Session events (November
+    /// 11), for every table a boundary reads except `steers`, which the test
+    /// analyzes itself so its owner indexes are measured as built.
+    const MEASURED: &str = "INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
+         ('agent_sessions','agent_sessions_agent_process','14672 1'),
+         ('agent_sessions','agent_sessions_primary_repository','9 1'),
+         ('agent_sessions','agent_sessions_primary_wave','14 1'),
+         ('agent_sessions','agent_sessions_transport','9512 4'),
+         ('agent_sessions','conversation_task_inventory','14698 32 3 1'),
+         ('agent_sessions','open_sessions','13948 1 1'),
+         ('agent_sessions','session_inventory','14698 7349 21 3 1'),
+         ('agent_sessions','session_repo_inventory','14698 669 475 20 3 1'),
+         ('agent_sessions','sqlite_autoindex_agent_sessions_1','14698 1'),
+         ('agent_sessions','sqlite_autoindex_agent_sessions_2','14698 1'),
+         ('processes','agent_process_attachment','15452 85'),
+         ('processes','agent_process_session','15452 1'),
+         ('processes','processes_parent','160090 7 2 1'),
+         ('processes','processes_receipt_locator','160090 1'),
+         ('processes','processes_recent','160090 2 1'),
+         ('processes','processes_trace','160090 35 2 1'),
+         ('processes','processes_unfinished','741 2 1'),
+         ('processes','sqlite_autoindex_processes_1','160090 1'),
+         ('projects','idx_projects_wave','63 3 1'),
+         ('projects','idx_projects_wave_updated','63 3 2'),
+         ('projects','sqlite_autoindex_projects_1','63 1'),
+         ('projects','sqlite_autoindex_projects_2','63 2'),
+         ('session_activity','sqlite_autoindex_session_activity_1','12922 1'),
+         ('session_events','session_capture_key','14860 1'),
+         ('session_events','session_event_input','18150 2 2'),
+         ('session_events','session_event_receipt','235713 17 9 8 3 1'),
+         ('session_events','session_events_captured_event','166889 12'),
+         ('session_events','session_events_history','235713 17 1'),
+         ('session_events','session_events_process','54078 4 4'),
+         ('session_events','session_events_turn','235713 17 9 8 1'),
+         ('session_events','session_input_membership','14840 1 1 1'),
+         ('session_events','session_observation_receipt','148667 11 1'),
+         ('session_events','session_process_membership','54078 4 4'),
+         ('session_events','session_turn_events','72186 6 6 4 1 1'),
+         ('session_steers','sqlite_autoindex_session_steers_1','41523 6 1'),
+         ('steer_adapters','sqlite_autoindex_steer_adapters_1','11834 1'),
+         ('steer_adapters','sqlite_autoindex_steer_adapters_2','11834 1'),
+         ('steer_batches','sqlite_autoindex_steer_batches_1','10417 1'),
+         ('steer_batches','steer_batches_boundary','10396 2 1'),
+         ('steer_batches','steer_batches_session','10417 2 2 1'),
+         ('steer_deliveries','sqlite_autoindex_steer_deliveries_1','40864 6 1 1'),
+         ('steer_deliveries','steer_deliveries_batch','40864 4'),
+         ('steer_deliveries','steer_deliveries_steer','40864 27'),
+         ('tasks','idx_tasks_issue_identifier','1096 1'),
+         ('tasks','idx_tasks_project','1096 21 2'),
+         ('tasks','idx_tasks_repository','1096 137 19 2'),
+         ('tasks','idx_tasks_updated','1096 2'),
+         ('tasks','idx_tasks_worktree','1096 2'),
+         ('tasks','sqlite_autoindex_tasks_1','1096 1'),
+         ('tasks','sqlite_autoindex_tasks_2','1096 1'),
+         ('tasks','tasks_branch','1096 2'),
+         ('tasks','tasks_ship_process','127 1'),
+         ('waves','idx_waves_active_locator','61 2 2 1'),
+         ('waves','idx_waves_parent','61 61'),
+         ('waves','sqlite_autoindex_waves_1','63 1'),
+         ('waves','waves_project_activation_process','15 1');
+         ANALYZE sqlite_schema";
+
+    /// Every statement a boundary runs looks its rows up by index: a scan of
+    /// a table that grows with every steer, turn or Task slows each turn of
+    /// every Session on the Machine. Machines run unanalyzed today; an
+    /// analyzed store must plan the same way.
+    #[test]
+    fn boundary_statements_never_scan_tables_that_grow_with_use() {
+        const GROWING: [&str; 6] = [
+            "steers",
+            "steer_batches",
+            "steer_deliveries",
+            "session_steers",
+            "session_events",
+            "tasks",
+        ];
+        let (_home, store, adapter, delivery) = fixture();
+        // A Machine's worth of steers for other Sessions. Each steer has one
+        // owner, so its other owner columns are NULL.
+        for other in 0..20 {
+            store.test_session(
+                &format!("other-{other}"),
+                &crate::session_record::new_artifact_key(),
+            );
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO steers(id,session_id,source,revision,author,text,created_at)
+                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<2999)
+                 SELECT lower(hex(randomblob(16))),'other-'||(i%20),'fixture:'||i,'1',
+                     '{\"kind\":\"named\",\"id\":\"Fixture author\"}','OTHER',unixepoch() FROM n",
+            )
+            .unwrap();
+        store
+            .save_session_steer("session", "Fixture author", "TRACED")
+            .unwrap();
+        store.conn.lock().unwrap().trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    TRACED.lock().unwrap().extend(statement.expanded_sql());
+                }
+            }),
+        );
+        let at =
+            |moment, callback: serde_json::Value| boundary(moment, &adapter, &delivery, callback);
+        // A resumed conversation selects again and receives the steer.
+        let printed = answer(
+            &store,
+            &at(
+                BoundaryMoment::Tool,
+                serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
+            ),
+        )
+        .unwrap()
+        .0
+        .steers
+        .unwrap()
+        .batch;
+        let mut prompt = at(
+            BoundaryMoment::Tool,
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                "prompt_id":"p-1","prompt":"go"}),
+        );
+        prompt.printed = vec![printed];
+        answer(&store, &prompt).unwrap();
+        answer(
+            &store,
+            &at(
+                BoundaryMoment::Tool,
+                serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t"}),
+            ),
+        )
+        .unwrap();
+        answer(
+            &store,
+            &at(
+                BoundaryMoment::Stop,
+                serde_json::json!({"session_id":"native","hook_event_name":"Stop","prompt_id":"p-1"}),
+            ),
+        )
+        .unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+        let traced = std::mem::take(&mut *TRACED.lock().unwrap());
+        let scans = |stats: &str| {
+            let mut scans = Vec::new();
+            for sql in &traced {
+                // Plans name a table by its alias: `steers p` scans as `SCAN p`.
+                let words: Vec<&str> = sql
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .filter(|word| !word.is_empty())
+                    .collect();
+                let mut growing: Vec<&str> = GROWING.to_vec();
+                for (at, word) in words.iter().enumerate() {
+                    if GROWING.contains(word) {
+                        let alias = match words.get(at + 1) {
+                            Some(&"AS") => words.get(at + 2),
+                            alias => alias,
+                        };
+                        growing.extend(alias);
+                    }
+                }
+                let mut plan = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+                let details = plan
+                    .query_map([], |row| row.get::<_, String>(3))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                for detail in details {
+                    let table = detail
+                        .strip_prefix("SCAN ")
+                        .and_then(|rest| rest.split_whitespace().next());
+                    if table.is_some_and(|table| growing.contains(&table)) {
+                        scans.push(format!("{stats}: {detail}\n  in {sql}"));
+                    }
+                }
+            }
+            scans
+        };
+        let mut found = scans("unanalyzed");
+        conn.execute_batch("ANALYZE steers").unwrap();
+        conn.execute_batch(MEASURED).unwrap();
+        found.extend(scans("analyzed"));
+        assert!(found.is_empty(), "{}", found.join("\n"));
     }
 
     #[test]

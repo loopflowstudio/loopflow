@@ -137,6 +137,7 @@ deleted when the server's emulator reads status itself.
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs; the turn hooks of bare conversations | |
 | Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); bare headless runs keep only their two context hooks | Store opens inside turn boundaries; turn, tool and Task-update hooks for bare headless runs | |
+| OpenCode and Pi ask the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-ask-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
@@ -155,12 +156,16 @@ conversation command, including those opened by Desktop. A bare `lf` typed insid
 a Task's checkout stays bare and records the Task as its ancestry. The
 command decides: `Cli::names_work` is true for `--task`, `--wave` (a Task or
 Wave conversation passes them), `lf resume --task`/`--wave` and a step of
-`lf task run`, and the launch carries it as `AgentConfig::managed`. Reopening
-a recorded conversation names no Work, so there the Session row decides
-holding and the server check: `WorkSource::is_managed` (`declared` or
-`bound`; a Task, Wave or repository conversation). A child run started by a
-Session's agent, which that agent steers, and plain `lf <skill>` are bare.
-Desktop adds no mark: an agent started from a Desktop shell is bare.
+`lf task run`, and the launch carries it as `AgentConfig::managed`. Beside a
+Session id, `--task`/`--wave` make the resume managed and the id still
+selects: Desktop's Task and Wave workspaces prepare with `lf session resume
+[ID] --task X --prepare`, and the `open_argv` it gets back is `lf session
+resume ID --task X`. Reopening a recorded conversation by id alone names no
+Work, so there the Session row decides holding and the server check:
+`WorkSource::is_managed` (`declared` or `bound`; a Task, Wave or repository
+conversation). A child run started by a Session's agent, which that agent
+steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
+started from a Desktop shell is bare.
 
 Any `lf` run in a Task's checkout counts toward that Task: its usage and time
 roll up into the Task's cost. Design the bare path on the assumption that most

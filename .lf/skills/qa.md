@@ -300,23 +300,62 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
-Only managed launches (`--task`, `--wave`, `resume` of their Sessions) get turn
-hooks and the server check; plain `lf -b <skill>` gets the start and compact
-hooks only, and plain `lf -i` keeps turn hooks without the check. Real OpenCode
+Managed is decided by the command: `--task` or `--wave` gets turn hooks and
+the server check, on a launch or a resume (`lf -i --task <id> resume`,
+`lf session resume <session> --task <id>`, and the `open_argv` that
+`lf session resume --prepare --json --task <id>` returns for Desktop). Plain
+`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and
+`lf -i resume <session>` keep turn hooks without the check, so they never
+start a stopped server. Driver scripts that delete their marker directory
+must do it before waiting on it, or a stale `provider.jsonl` releases a turn
+too early. A managed launch
+with the server down registers it before the agent starts: check
+`launchctl list | grep <label>` after launch, not only the hooks' output. Real OpenCode
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
 The model runs tools in the checkout, so keep it disposable and stop the
-`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model
-key; a private home has none.
+`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model;
+a private home has no key. Both reach a scripted local model instead: a small
+OpenAI-compatible HTTP server (streamed `chat/completions`, scripted `bash`
+calls for Pi, `shell` for OpenCode 2.x, then a reply naming what it saw) named
+in `$HOME/.pi/agent/models.json` (`api: openai-completions`, plus
+`defaultProvider`/`defaultModel` in `settings.json`) and in
+`$HOME/.config/opencode/opencode.json` (`npm: @ai-sdk/openai-compatible`).
+Logging each request body shows whether steers and the context block reached
+the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
+runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
+the scripted tool a few thousand lines of output first, and type the command
+and Enter separately or its autocomplete picks another command.
+
+To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
+that appends its argv to a file and execs the branch binary; plugins run
+`spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
+processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
+stop owners whose argv names the private Task, with their descendants, after
+every run. Freeze the private server by the PID its `nohup` recorded, never by
+`pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers
 `com.loopflow.server.<hash>` for the private home; boot it out with the label in
 `$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
-server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
+server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log` for hooks,
+`$LF_HOME/logs/pi-extension.log` for Pi and
+`$LF_HOME/runs/<xx>/<run>/opencode.stderr.log` for OpenCode;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+A private home that applied an earlier draft of the branch's migration refuses
+to open (checksum mismatch); move it aside and start a fresh one.
+
+Boundary query plans: copy the Machine's store with
+`sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare
+`schema_migrations` with `store/migrations/`, and apply only the branch's
+missing migration SQL to the copy with `sqlite3`. Never open the copy with
+`lf`: recovery acts on the real PIDs and worktrees it records. Dump `TRACED`
+from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
+temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
+on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
 ## Native conversation opening
 

@@ -1,8 +1,9 @@
 # LOO-809: remote attach tickets
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
-This checkout contains the planned contract only. The listener, mobile settings
-and bulk protocol are outside this Task.
+This checkout adds the planned contract only. Its existing local tickets bind
+to Unix peer UID, consume on every attempt, and measure expiry with `Instant`.
+The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
@@ -15,7 +16,7 @@ reservations.
 The server tree is unchanged from the previously inspected
 `f3ff3041d0718ddc16dad51bc9a384c44ab2fe9a`.
 
-At November 11 00:27 UTC, GitHub reports PR #1812 open and unmerged at
+At November 11 01:03 UTC, GitHub reports PR #1812 open and unmerged at
 that revision, with no auto-merge. Freshly fetched main remains
 `454f768944fb4b4aa4ee572beb1ca5418b18df6d`, without `server/mobile.rs`
 or `server/ticket.rs`. LOO-718 remains at `feature`'s `demo` step.

@@ -9,14 +9,16 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At November 11 13:04 UTC, PR #1812 remained open and unmerged at
-`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main remained
-`976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
-`server/ticket.rs`. The PR's ticket, service and mobile modules had no diff
+At November 11 13:41 UTC, PR #1812 remained open and unmerged at
+`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`, with no auto-merge. Fetched main was
+`49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
+`server/ticket.rs` (the 13:07 fetch was
+`976b53db0c5affa519af66bfe9bf58ee83fba347`). At 13:07, the PR's ticket, service
+and mobile modules had no diff
 from the previously inspected `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
-Both Task status reads timed out after 20 seconds; live Graph positions remain
-unverified. The last successful LOO-718 status read, at 12:15 UTC, reported
-`feature` at `demo`, with PR settlement not armed. At 12:19 UTC, the PR description
+The 13:07 LOO-718 status read reported `feature` at `demo`, with PR settlement not
+armed. LOO-809's status read again timed out after 20 seconds at 13:42; its live Graph position
+remains unverified. The PR description still
 stated: “The pull request is published for review; no Task settlement is requested.”
 
 Inspection found both WebSocket paths authenticate with node/user identity,
@@ -27,10 +29,10 @@ are unchanged from `48bd007c13b7198844af56eaaf10fe3a8aac7db9`.
 Mobile admission permits the host's own node with `mobile-same-device`;
 ticket identity remains node/user.
 
-The Graph decision remains stop: implementation, authenticated acceptance checks
-and delivery wait for LOO-718 to land. Reinspect its shared store and endpoints
-then. Landing that PR is outside this Task's scope. Desktop QA status is in
-`questions.md`.
+Implementation and authenticated acceptance checks still require LOO-718's
+unmerged transport. Landing that PR is outside this Task's scope. The shared
+store and endpoints need reinspection after it lands. Desktop QA remains
+deferred in `questions.md`; no product decision is open.
 
 Earlier observations and compared revisions are in
 `496f1f56cd385c5db7f29282c96d69355acaea00:scratch/design.md`; that note links
@@ -51,6 +53,10 @@ the socket peer UID against the server's effective UID. Keep that admission
 model; local/remote separation does not require a second per-ticket UID field.
 
 ## Implementation and acceptance
+
+Read the shipping docs in `docs/server.md` and
+`rust/loopflow/src/server/README.md` before implementing. The remote example
+requires the same authenticated device and account on both connections.
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Test matching node/user success once, different node,

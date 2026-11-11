@@ -574,7 +574,9 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-Planned for [Phone access](../../../../docs/server.md#phone-access).
+Request a ticket, then redeem it on a separate connection to view a Session's
+running terminal. This contract is planned for
+[Phone access](../../../../docs/server.md#phone-access).
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
 owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
@@ -594,8 +596,8 @@ provider. A null `owner_lf_process_id` selects the current terminal owner:
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-Open a separate WebSocket to the same host's `/v1/ticket`
-endpoint and send `attach` first, without `hello`:
+From the same authenticated device and account, open a separate WebSocket to
+the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}

@@ -1,0 +1,5 @@
+# iOS app icon
+
+The installed iOS build has no app-icon entry. Export the existing Desktop icon's 1024px artwork into an opaque iOS asset; keep Desktop's icns as the source and provide a deterministic export command. Verify the generated image, compiled asset catalog and signed bundle metadata. Version/build metadata and App Store registration remain with unstarted LOO-721. No new artwork or visual theme.
+
+November10: sourcef8cac5b95cf6808be9cc1676e62d0d9026762235. Export matches Desktop artwork visually,1024×1024 without alpha; repeat export produced identical SHA256. Signed iPhone build and strict signature verification passed; compiled bundle has AppIcon entries for iPhone/iPad and Assets.car. Installed and launched normally on mobile heart, no fixture arguments. Artifact /Users/jack/.lf-machine/demos/mobile-718-live-f8cac5b95/LoopflowiOS.app; logs reviewroot/app-icon. Physical Home Screen appearance and pairing/input remain unverified. No runtime behavior change; no repeated terminal test suite. Current CI42923084193 remains in progress on prior published head; this commit stays local until that run finishes.

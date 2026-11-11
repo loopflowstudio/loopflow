@@ -1,0 +1,7 @@
+# Machine address editing · November10
+
+Committed locally88e24b7d9233532b34c3bcf3f184376ef4342578. Native UI reproduced the old Connect Machine action remaining active while editing another address. Manual entry now has a compact layout, no prior-endpoint connection action, and Continue/QR alternatives kept above the keyboard. Connection startup sets busy synchronously so double taps cannot orphan cancellation.
+
+Final native MachineOnboardingTests passed through invalid entry, visible validation, confirming one endpoint and changing it to another. Exported screenshots/logs: `/Users/jack/.lf-machine/reviews/mobile-718-20261110/address-editing/`, mobile-address-edit-targeted.log. Inspection showed first-keyboard iOS tutorial also labels a button Continue; earlier label-based test tapped that, not the app. Final test uses the form button identifier. `typeText` inserts arrow glyphs on iOS; text selection uses native Command-A/delete via typeKey. Earlier failed logs retained, not claimed as passing.
+
+Signed device rebuild succeeded and signature verified. Current phone artifact: `/Users/jack/.lf-machine/demos/mobile-718-live-88e24b7d9/LoopflowiOS.app` (build.json, QR and connection page alongside). Not installed/launched. /tmp/mobile-address-phone-build.log. Mac listener remains configured; phone unlock still pending. No physical camera or phone acceptance is established by this test.

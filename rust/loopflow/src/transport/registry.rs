@@ -721,7 +721,7 @@ impl Entry {
             waker.try_clone()?,
             watchers,
         )?;
-        hosted.keep_exit_record(exit_record_file(place, terminal));
+        hosted.keep_in(place.terminal(terminal.as_str()));
         Ok(Self {
             hosted,
             child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
@@ -773,7 +773,9 @@ impl Entry {
 
 /// Where a held terminal keeps the exit record its launcher handed off.
 fn exit_record_file(place: &Place, terminal: &TerminalId) -> PathBuf {
-    place.terminal(terminal.as_str()).join("exit-record.json")
+    place
+        .terminal(terminal.as_str())
+        .join(super::hosted::EXIT_RECORD)
 }
 
 /// Record an ended terminal, then drop its ring and its directory. The
@@ -788,7 +790,7 @@ fn settle(exit: &mut Unsettled) -> bool {
         // An end nobody saw reads as killed.
         let status = exit.code.map_or(libc::SIGKILL, |code| i32::from(code) << 8);
         crate::harness::native_exit::settle(&record, std::process::ExitStatus::from_raw(status));
-        super::hosted::remove_exit_record(&file);
+        super::hosted::remove_kept(&file);
     }
     let recorded = crate::journal::process_ledger()
         .and_then(|store| store.end_terminal(&exit.terminal, exit.code));

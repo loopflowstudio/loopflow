@@ -488,7 +488,11 @@ Before `start` the server writes `<terminal>/meta.json`: the Session, the
 start's `request`, and the control key the child's requests are checked
 against. That is what lets another server instance answer the same child.
 An exit record the launcher hands over is kept beside it in
-`exit-record.json` until it is settled.
+`exit-record.json` until it is settled, and its native client's announcement
+in `native-client.json` until that client ends. A launcher that execs its
+provider never announces it again, so a server that takes the terminal up
+reads it there; without it a Desktop pane would stay **Opening…** after a
+restart.
 
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by

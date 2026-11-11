@@ -287,9 +287,9 @@ pub(super) struct Hosted {
     observed: lifetime::Activity,
     output_told: Option<Instant>,
     exit_record: Option<Box<NativeExit>>,
-    /// Where a held terminal keeps its handed-off exit record, so a server
-    /// that takes it up later can still settle it.
-    exit_record_file: Option<std::path::PathBuf>,
+    /// Where a held terminal keeps what its launcher handed off, so a server
+    /// that takes it up later has it too.
+    kept: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
     planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: Option<crate::terminal_title::OutputTitle>,
@@ -356,7 +356,7 @@ impl Hosted {
             observed: lifetime::Activity::default(),
             output_told: None,
             exit_record: None,
-            exit_record_file: None,
+            kept: None,
             execution_directory_reported: false,
             planning: None,
             title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id, &watchers.titles)),
@@ -385,14 +385,24 @@ impl Hosted {
         Ok(())
     }
 
-    /// Keep the handed-off exit record in `file`, taking up one an earlier
-    /// server kept there.
-    pub fn keep_exit_record(&mut self, file: std::path::PathBuf) {
-        if let Some(record) = read_exit_record(&file) {
+    /// Keep the launcher's exit record and native client in `directory`,
+    /// taking up what an earlier server kept there.
+    pub fn keep_in(&mut self, directory: std::path::PathBuf) {
+        if let Some(record) = read_exit_record(&directory.join(EXIT_RECORD)) {
             self.planning = start_planning(&record.cwd);
             self.exit_record = Some(record);
         }
-        self.exit_record_file = Some(file);
+        if let Some(started) = read_kept::<NativeStarted>(&directory.join(NATIVE_CLIENT)) {
+            self.client = Some(native::NativeClient::new(started.exit, started.detach));
+        }
+        self.kept = Some(directory);
+    }
+
+    /// The native client ended; a later server takes up none.
+    fn forget_client(&self) {
+        if let Some(directory) = &self.kept {
+            remove_kept(&directory.join(NATIVE_CLIENT));
+        }
     }
 
     /// The rows and columns the execution is drawn at.
@@ -444,7 +454,7 @@ impl Hosted {
                 hint_due,
                 attached,
                 exit_record,
-                exit_record_file,
+                kept,
                 execution_directory_reported,
                 planning,
                 ..
@@ -494,6 +504,15 @@ impl Hosted {
                                 *returning = Some(Event::Return {
                                     detach: line.clone(),
                                 });
+                                // A launcher that execs its provider never
+                                // announces it again; a later server reads this.
+                                if let Some(directory) = kept {
+                                    let started = NativeStarted {
+                                        exit: exit.clone(),
+                                        detach: line.clone(),
+                                    };
+                                    keep(&directory.join(NATIVE_CLIENT), &started);
+                                }
                                 *client = Some(native::NativeClient::new(exit, line));
                             }
                             Request::NativeEnded { key } if key == *control_key => {
@@ -524,16 +543,16 @@ impl Hosted {
                                 // The launcher kept its repository's planning in
                                 // sync while it waited; that wait is now ours.
                                 *planning = start_planning(&record.cwd);
-                                if let Some(file) = exit_record_file {
-                                    write_exit_record(file, &record);
+                                if let Some(directory) = kept {
+                                    keep(&directory.join(EXIT_RECORD), &record);
                                 }
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::DropExitRecord { key } if key == *control_key => {
                                 *exit_record = None;
-                                if let Some(file) = exit_record_file {
-                                    remove_exit_record(file);
+                                if let Some(directory) = kept {
+                                    remove_kept(&directory.join(EXIT_RECORD));
                                 }
                                 *planning = None;
                                 viewer.reply(answers, Reply::Accepted);
@@ -886,6 +905,7 @@ impl Hosted {
         {
             self.pending_input.native_ended(&self.id);
             if let Some(ended) = self.client.take() {
+                self.forget_client();
                 self.finish_client(ended, child, answering);
             }
             for viewer in self.viewers.iter_mut() {
@@ -903,6 +923,7 @@ impl Hosted {
             } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = self.client.take().map(native::NativeClient::release) {
+                    self.forget_client();
                     self.deliver(1, &held, answering, Span::Aside { through: None });
                 }
                 self.exit = Some((provider_exit_code(status), Instant::now()));
@@ -914,8 +935,8 @@ impl Hosted {
         });
         if let Some((settled, process)) = delivered {
             // Recorded, or past waiting for: a later server settles it no more.
-            if let Some(file) = &self.exit_record_file {
-                remove_exit_record(file);
+            if let Some(directory) = &self.kept {
+                remove_kept(&directory.join(EXIT_RECORD));
             }
             for line in &settled.lines {
                 self.deliver(
@@ -1151,33 +1172,49 @@ fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::Pl
         .ok()
 }
 
+/// The launcher's handed-off exit record, beside its held terminal.
+pub(super) const EXIT_RECORD: &str = "exit-record.json";
+/// The launcher's native client announcement, beside its held terminal.
+const NATIVE_CLIENT: &str = "native-client.json";
+
+/// What a launcher's `native_started` announced.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct NativeStarted {
+    exit: String,
+    detach: String,
+}
+
 /// The exit record kept in `file`; none when it is absent or unreadable.
 pub(super) fn read_exit_record(file: &std::path::Path) -> Option<Box<NativeExit>> {
+    read_kept(file)
+}
+
+fn read_kept<T: serde::de::DeserializeOwned>(file: &std::path::Path) -> Option<T> {
     let bytes = std::fs::read(file).ok()?;
     serde_json::from_slice(&bytes)
         .inspect_err(
-            |error| tracing::warn!(%error, file = %file.display(), "exit record unreadable"),
+            |error| tracing::warn!(%error, file = %file.display(), "kept handoff unreadable"),
         )
         .ok()
 }
 
-/// A record that cannot be kept is still settled by this server; only a
-/// server that stops before then loses it.
-fn write_exit_record(file: &std::path::Path, record: &NativeExit) {
+/// What cannot be kept is still used by this server; only a server that
+/// stops before then loses it.
+fn keep(file: &std::path::Path, value: &impl serde::Serialize) {
     let draft = file.with_extension("json.draft");
-    let written = serde_json::to_vec(record)
+    let written = serde_json::to_vec(value)
         .map_err(io::Error::from)
         .and_then(|bytes| std::fs::write(&draft, bytes))
         .and_then(|()| std::fs::rename(&draft, file));
     if let Err(error) = written {
-        tracing::warn!(%error, file = %file.display(), "exit record not kept beside its terminal");
+        tracing::warn!(%error, file = %file.display(), "handoff not kept beside its terminal");
     }
 }
 
-pub(super) fn remove_exit_record(file: &std::path::Path) {
+pub(super) fn remove_kept(file: &std::path::Path) {
     if let Err(error) = std::fs::remove_file(file) {
         if error.kind() != io::ErrorKind::NotFound {
-            tracing::warn!(%error, file = %file.display(), "exit record not removed");
+            tracing::warn!(%error, file = %file.display(), "kept handoff not removed");
         }
     }
 }

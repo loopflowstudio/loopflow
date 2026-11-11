@@ -7439,6 +7439,64 @@ fn command_line(pid: libc::pid_t) -> (libc::pid_t, String) {
 }
 
 #[test]
+fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let mut launch = fixture.command(&["-i", "-a", "claude", ":", "held pane"]);
+    launch.env("PATH", &path).env("LF_SERVER", "1");
+    let first = Terminal::spawn_with_placement(launch, Some(true));
+    let launched = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    let session = session_of(&fixture.sql(), &launched);
+    let held = fixture.terminal_of(&session);
+    first.stop();
+    // Desktop's pane: the Session's held terminal, with a native status row.
+    let status = ConnectionStatus::new(fixture.home.path().join("connection.sock"));
+    let mut command = service.command(&[
+        "session",
+        "attach",
+        "--terminal",
+        &held,
+        "--session",
+        &session,
+    ]);
+    command
+        .env("PATH", &path)
+        .env("LF_SERVER", "1")
+        .env("LF_SERVER_STATUS", &status.path);
+    let mut view = Terminal::spawn(command);
+    let ready = |after: u64| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let reading = status.reading();
+            if reading.as_ref().is_some_and(|reading| {
+                reading["state"] == "connected"
+                    && reading["input"] == true
+                    && reading["native_ready"] == true
+                    && reading["generation"].as_u64().unwrap() > after
+            }) {
+                return reading.unwrap()["generation"].as_u64().unwrap();
+            }
+            assert!(Instant::now() < deadline, "not ready: {reading:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let generation = ready(0);
+    service.stop();
+    wait_server_status(&status, "reconnecting", false, generation + 1);
+    service.child = Some(service.launch());
+    service.ready();
+    ready(generation);
+    view.assert_viewing("the held pane");
+    view.stop();
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
+#[test]
 fn held_session_survives_server_restart() {
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);

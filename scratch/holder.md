@@ -717,14 +717,13 @@ Built this pass:
   `RecordingGap` for control requests. Desktop's `session.attach` bridge
   treats another revision at its own entrance as an error (same server).
 - **Managed rule.** `transport::managed` reads `work_source.is_managed()`
-  (`session.rs::WorkSource::is_managed`, identical to LOO-821's, added here
-  so the two agree; whichever lands second keeps one). A resumed Checkout
-  Session is no longer held. `LF_SERVER` (Desktop pane) and `task_run`
-  still hold. Later steer (778081f8): held ≠ managed in general; Desktop
-  shells will be held but bare (LOO-830), not built here.
-- **Server down.** `start_held` → `open_server`: readiness
-  (`lf install server` via the selected installation), then
-  `ServerMissing`. Mirrors LOO-821's `require_server`; collapse on merge.
+  (`session.rs::WorkSource::is_managed`, one definition since the stack
+  merge). A resumed Checkout Session is no longer held; `task_run` still
+  holds (the `LF_SERVER` branch went with the repository answer below).
+  Later steer (778081f8): held ≠ managed in general; Desktop shells will be
+  held but bare (LOO-830), not built here.
+- **Server down.** `start_held` calls LOO-821's `require_server`
+  (readiness, then fail); see Stack merge.
 - **Program Status.** The registry hands each held terminal's changed
   `Records` to one `held-status` thread → `record_held_program_status`
   (stream `held:<terminal>`, new stream on a new provider or server).

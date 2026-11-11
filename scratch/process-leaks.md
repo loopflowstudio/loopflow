@@ -187,29 +187,41 @@ with no checkout and the same parentless-launcher shape. S3 resumed history and
 answered fresh opening input. At 10:41 no process from either private world or
 its drivers remained. `scratch/qa.html` keeps the timeline and limits.
 
+## Publish verification, 2026-11-11
+
+`lf sync` merged `763da5c92f` as `4fec5e787b`, resolving the hook migration
+without restoring native-input recording. Its focused background-work test passed.
+
+- `uv run python scripts/check_migrations.py`: passed; only `owner_close_requests.sql` is unmerged.
+- `scripts/test.py --reuse-passing --rust-filter …`: architecture, test inventory and formatting passed; macOS `syspolicyd` at 281% CPU stopped CLI compilation. No product failure. `/tmp/loo823-publish-gate.log`; 37 sampled descendants, none left.
+- Documented pressure fallback: candidate build, the same filtered nextest plan (573/573), Clippy, packaging, fixture regression, inventory (14/14), website, Swift app build/tests (807 tests, 99 suites) and Swift platform checks passed. `/tmp/loo823-publish-manual.log`; exact commands and phase results in `/tmp/loo823_manual_checks.py` and `/tmp/loo823-manual-results.json`.
+- `cargo test -p loopflow --lib store::sqlite::steers::tests::`: 18/18 passed; the initial filter used the filename instead of this module. `/tmp/loo823-publish-steers.log`; no surviving descendants.
+- `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`: 3/3 passed, including twenty SSH lifecycles; `/tmp/loo823-publish-ssh.log`; none of 452 sampled descendants remained.
+
+The broader census sampled 2,557 descendants and found two `two_people` owners
+with stand-in providers after all checks passed. `Pair` stopped its servers but
+removed both homes without ending the detached conversations. Its Drop now uses
+the shared recorded-process cleanup before the homes go; the existing test also
+checks that both Machines' owners exited. The two leaked owners from this run
+(PIDs 83753 and 94525) were signalled only after matching their recorded start
+times and executable. Both providers and the two defunct children also exited.
+No pre-existing process was signalled.
+
+- `cargo test -p loopflow --test two_people`: passed after repair; none of 74 sampled descendants remained, no new lf process. `/tmp/loo823-publish-two-people.log`.
+- Query plan check: the live store had 1,099 Tasks, 14,807 Sessions and 160,541 Processes. New candidate reads use Session/Process indexes; pending inventory scans Tasks per live conversation. An in-memory schema with 10,000 Tasks and 400 conversations returned 400 candidates in 0.237 s.
+
+The final edit changes only fixture teardown and its assertion; the passing
+product, Swift, website and package checks above still cover the same code.
+Installed Desktop windows, real providers and the scheduled launchd sweep remain
+untried here. The private-world walkthrough used stand-ins and manual cleanup;
+its recorded results and limitations remain above and in `scratch/qa.html`.
+
+- Final `cargo clippy --all-targets -- -D warnings` and `git diff --check`: passed after the fixture repair. `/tmp/loo823-publish-final-clippy.log`.
+- Final audit: 284 lf processes in the opening snapshot and 284 when reads finished; `scratch/process-audit.html`.
+
 ## Remaining
 
-- Gate: affected transport, cleanup/store, native-turn, rollover, config, CLI,
-  parser, server schema, documented-command, context-launch and migration suites;
-  Clippy and `cargo package --locked --allow-dirty -p loopflow`.
-  Store trigger changes also reach `two_people`; shared fixture cleanup needs
-  the `loopflow-test-support` regression. Include architecture, website docs,
-  and headless Swift build/model/view checks for the pipe changes. The
-  `scripts/test.py --list` reading on 2026-11-11 selects architecture, Rust,
-  website and Swift. Reuse only identical tree/plans; earlier Swift results in
-  PR #1877 are historical.
-- Demo: process diff after affected suites and the audit recount (QA did both on
-  the focused suites at 11:00–11:07; gate's broader suites are not yet counted). The direct-
-  signalling S2–S4 walkthrough and repaired S2 repeat are in `scratch/qa.html`.
-  That world used fake providers and manual cleanup passes; it did not exercise
-  Desktop windows, real providers or the installed launchd sweep. Mid-turn
-  retention and retired-checkout closure have focused test results, not live-world
-  walkthrough results.
-- Publish: rewrite PR #1877 around scope-based lifetime, deletion of input
-  retention, direct cleanup signals, no background cap, and fixture/pipe cleanup.
-
-LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) must now remove only
-`processes.native_input`, exporting released data first; shell Close stays. LOO-829 removes the ignored config key after release.
+- LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) removes only `processes.native_input`, exporting released data first; shell Close stays. LOO-829 removes the ignored config key after release.
 
 ## Concept review, 2026-11-11
 

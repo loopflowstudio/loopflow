@@ -1,4 +1,5 @@
 import Foundation
+import Loopflow
 
 /// The repo a wave's on-disk state lives under.
 ///

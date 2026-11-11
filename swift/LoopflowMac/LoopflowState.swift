@@ -1,4 +1,5 @@
 import Foundation
+import Loopflow
 
 public struct LoopflowState: Codable, Equatable {
     public var selectedRepoPath: String?
@@ -72,4 +73,14 @@ private func _escapeYAMLString(_ value: String) -> String {
     value
         .replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+enum LaunchArguments {
+    static func repoURL() -> URL? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--repo"), args.count > index + 1 else {
+            return nil
+        }
+        return URL(fileURLWithPath: args[index + 1])
+    }
 }

@@ -14,16 +14,6 @@ public enum AppRuntime {
     }
 }
 
-public enum LaunchArguments {
-    public static func repoURL() -> URL? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "--repo"), args.count > index + 1 else {
-            return nil
-        }
-        return URL(fileURLWithPath: args[index + 1])
-    }
-}
-
 private final class LoopflowBundleToken {}
 
 extension Bundle {

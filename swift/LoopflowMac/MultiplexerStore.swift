@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Loopflow
 import Observation
 
 /// What ⌘W last closed. ⇧⌘T shows that same occurrence again: a hidden pane,

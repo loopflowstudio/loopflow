@@ -65,6 +65,25 @@ log. `lf session new` keeps the same Session and name: a new provider thread
 starts from that log and current instructions, and the old thread stays in
 `lf session history`.
 
+## Open conversations and history
+
+```bash
+lf session list                      # conversations you can still act on
+lf session list --interactive all    # with the headless runs still working
+lf session history --since 1d        # what finished, every headless run included
+```
+
+Lists show open conversations. A headless conversation (`-b`, a Graph step, a
+review) finishes when its run ends, whatever Task or Wave it belongs to, and
+moves to history. An interactive one finishes when you quit it, unless it is a
+Task's, a Wave's or a scope's ongoing conversation; those stay listed until
+their Work closes. Desktop's sidebar shows the same open set.
+
+A finished conversation can still continue. `lf resume <session>` reopens an
+interactive one. A Graph that corrects its own step's run reopens that run for
+the turn; it lists while the turn runs and returns to history when it ends.
+`lf task status` still shows every conversation a Task had.
+
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
 

@@ -356,8 +356,12 @@ pub(super) fn attach_in(
             params![session,attached.agent_process_id,process,
                 time::OffsetDateTime::now_utc().unix_timestamp()],
         )?;
+        // A new AgentProcess on a finished headless run is working again; its
+        // exit completes the run once more. A moved conversation stays moved.
         tx.execute(
-            "UPDATE agent_sessions SET agent_process_id=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_process_id=?2,
+                completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
+                    THEN NULL ELSE completed_at END WHERE id=?1",
             params![session, attached.agent_process_id],
         )?;
     }
@@ -1436,15 +1440,18 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         // A departure continues the Session elsewhere; only an exit without a
-        // destination retires an ordinary disposable conversation. Primary
-        // conversations, Wave conversations, Task work and Graph reviews stay open.
+        // destination completes it. A headless run is history once it stops
+        // working, whatever Work or Graph it served; attaching a later turn
+        // reopens it. Interactive primary, Wave and Task conversations, and
+        // Graph reviews, stay open.
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
-             AND s.completed_at IS NULL AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND {} IS NULL
+             AND s.completed_at IS NULL AND ?4
              AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
-             AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted') AND ?4",
+             AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
+             ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
+             AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
                 super::sessions::SESSION_GRAPH,
                 super::task_work::session_tasks("s")
             ),

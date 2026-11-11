@@ -139,12 +139,6 @@ kickoff probes above are recorded observations, not tests of these visions.
 These are correctness requirements for every candidate, not optional extras
 to trade against delivery time. Holder restart does not resurrect a process.
 
-### A, B, C — superseded
-
-A moved the owner loops into the server; B modeled the held terminal as a
-registry keyed by `TerminalId`; C added a disk recovery journal. B was taken
-(1b, below); full text at `a18d6a915:scratch/holder.md`.
-
 ### Competitor comparison — November 10, 2026
 
 Jack Heart: "what would rex do? what do t3code / paradev / paseo do?"
@@ -804,4 +798,7 @@ longer prints; corrected. No design change, no open product choice. Waiting on
 other work, not on a choice: sync onto LOO-823 when it lands; LOO-830 for
 shells.
 
-QA's third-pass findings are fixed; what and the checks: qa.html.
+QA's third-pass findings are fixed (qa.html); not yet re-QA'd by hand.
+Remaining: sync onto LOO-821's tip (three commits ahead, incl. e29031de4 on
+steers at Task Session start); then gate.
+Superseded explore candidates A–C: `a18d6a915:scratch/holder.md`.

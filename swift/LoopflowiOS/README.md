@@ -21,13 +21,22 @@ until that Mac opts in with `touch ~/.lf/mobile-same-device`.
 
 ## Tasks
 
-The list shows the Machine's open Tasks in the Machine's order and updates while
-it is on screen. Pull to refresh; search by title or checkout path. **+** opens
-New Task: describe the work, pick a repository, **Create & start**.
+The list shows one repository at a time: tap the title to switch, or pick
+**All repositories** to see each under its name. The filter button chooses what
+to show — **Started** (Desktop's sidebar: Working, then Autonomous), **Ready for
+you**, **Working now**, **Backlog** or **Done** — in the Machine's order. Tasks
+with a conversation come first; started Tasks nobody has opened a conversation
+for fold under "N without a conversation". Search covers title and checkout
+path. Pull to refresh. **+** opens New Task: describe the work, pick a
+repository, **Create & start**.
 
-## Session
+## Task
 
-Opening a Task opens its primary Session and fits the terminal to the phone.
+Opening a Task opens its conversation and fits the terminal to the phone. **⋯**
+opens what Desktop shows beside it: **Brief** (identifier, next move, Graph
+position, pull request, description and comments) and **Changes** (changed
+files, each opening its diff). A Task with no conversation opens on its Brief.
+
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.
 
@@ -50,7 +59,8 @@ ever sent twice: after an uncertain send the app says so and waits.
 | `OwnerStream.swift` | Decoder for the owner protocol in `rust/loopflow/src/transport/wire.rs` |
 | `SessionLink.swift` | The phone's hold on one Session |
 | `SessionTerminal.swift`, `SessionView.swift` | Terminal, reply field and keys |
-| `TaskListView.swift` | Task list |
+| `TaskListView.swift` | Repository, filter, search and the Task list |
+| `TaskWorkspaceView.swift` | A Task's conversation with its Brief and Changes |
 | `MobileTaskCreation.swift`, `MobileNewTaskView.swift` | New Task |
 
 ```sh

@@ -24,10 +24,27 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return saved
     }
 
-    private static let taskQuery = ServedRead.viewSelect(expression: "kind:task state:open")
 
-    func observeTasks() async throws -> RemoteTaskObservation {
-        try await RemoteTaskObservation.open(connection: connection(), query: Self.taskQuery)
+    /// Every repository's Tasks matching `expression`, kept current.
+    func observeTasks(expression: String) async throws -> RemoteTaskObservation {
+        try await RemoteTaskObservation.open(connection: connection(), query: .viewSelect(expression: expression))
+    }
+
+    func repositoryPath(id: String) async throws -> String {
+        try await decode(String.self, read(.repoPath(id: id)))
+    }
+
+    /// A Task's row, Graph position and comments: what Desktop's Brief shows.
+    func status(task: String) async throws -> WorkFrame.TaskStatusReading {
+        try await decode(WorkFrame.TaskStatusReading.self, read(.taskGet(directory: "/", issue: task)))
+    }
+
+    func changes(task: String) async throws -> TaskChangesSnapshot {
+        try await decode(TaskChangesSnapshot.self, read(.taskChanges(issue: task, base: "parent", head: nil)))
+    }
+
+    func diff(task: String, path: String) async throws -> TaskDiffSnapshot {
+        try await decode(TaskDiffSnapshot.self, read(.taskDiff(issue: task, path: path, base: "parent", head: nil, draft: nil)))
     }
 
     func suspend() {

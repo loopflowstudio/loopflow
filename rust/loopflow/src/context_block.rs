@@ -192,14 +192,21 @@ impl ContextDelivery {
         )
     }
 
+    /// Start and compaction name the conversation before its files, so an
+    /// agent never reads its environment to learn who it is.
     pub(crate) fn block_with_prefix(
         &self,
         moment: ContextMoment,
+        identity: Option<&SessionIdentity>,
         prefix: &str,
     ) -> Result<String, CoreError> {
         if matches!(moment, ContextMoment::Tool) {
             return Ok(prefix.to_owned());
         }
+        let prefix = format!(
+            "{prefix}{}",
+            identity.map(SessionIdentity::render).unwrap_or_default()
+        );
         let block = self.block(moment)?;
         if prefix.len() + block.text.len() <= HOOK_CONTEXT_BYTES {
             return Ok(format!("{prefix}{}", block.text));
@@ -295,6 +302,36 @@ pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
     // Native IDs are opaque; never interpret one as a filesystem path.
     home.join("context-deliveries")
         .join(format!("{}.json", hex::encode(Sha256::digest(session))))
+}
+
+/// The conversation's own lf Session and, when it belongs to one, its Task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIdentity {
+    pub session: crate::id::LfSessionId,
+    pub task: Option<TaskName>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskName {
+    pub identifier: String,
+    pub title: String,
+}
+
+impl SessionIdentity {
+    fn render(&self) -> String {
+        let task = self
+            .task
+            .as_ref()
+            .map(|task| {
+                format!(
+                    "This Session's Task: {} {}\n",
+                    task.identifier,
+                    serde_json::to_string(&task.title).expect("title serializes")
+                )
+            })
+            .unwrap_or_default();
+        render_reference(&format!("This Session: {}\n{task}", self.session))
+    }
 }
 
 /// One complete, readable source in the checkout or saved launch references.
@@ -478,7 +515,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        order_documents, render_block, ContextDelivery, ContextMoment, HOOK_CONTEXT_BYTES,
+        order_documents, render_block, ContextDelivery, ContextMoment, SessionIdentity, TaskName,
+        HOOK_CONTEXT_BYTES,
     };
     use crate::prompt::{render_reference, Document, DocumentSource};
 
@@ -727,6 +765,38 @@ mod tests {
         assert!(!block.text.contains("Listed reference, not preloaded"));
         let manifest: Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(manifest["files"].as_array().unwrap().len(), 21);
+    }
+
+    #[test]
+    fn start_and_compaction_name_the_session_and_task_before_files() {
+        let repo = tempdir().unwrap();
+        let identity = SessionIdentity {
+            session: "session_51f67c8cbcc34129977bc6d667513c55".into(),
+            task: Some(TaskName {
+                identifier: "LOO-828".into(),
+                title: "Tell agents who they are".into(),
+            }),
+        };
+        let named = "This Session: session_51f67c8cbcc34129977bc6d667513c55\nThis Session's Task: LOO-828 \"Tell agents who they are\"\n";
+        for moment in [ContextMoment::Start, ContextMoment::Compact] {
+            let text = delivery(repo.path())
+                .block_with_prefix(moment, Some(&identity), "<steer>\n")
+                .unwrap();
+            assert!(text.starts_with(&format!("<steer>\n{named}Current reference context")));
+        }
+        let bare = SessionIdentity {
+            task: None,
+            ..identity.clone()
+        };
+        let text = delivery(repo.path())
+            .block_with_prefix(ContextMoment::Start, Some(&bare), "")
+            .unwrap();
+        assert!(text.starts_with("This Session: session_51f67c8cbcc34129977bc6d667513c55\nCurrent"));
+        // Tool boundaries carry only steers; the conversation already knows itself.
+        let tool = delivery(repo.path())
+            .block_with_prefix(ContextMoment::Tool, Some(&identity), "<steer>\n")
+            .unwrap();
+        assert_eq!(tool, "<steer>\n");
     }
 
     #[test]

@@ -22,8 +22,7 @@ or when the planning procedure calls for it.
 
 `lf task create --title "<outcome>"` files new work wherever you are. `--run`
 starts it; it never picks up existing work. To keep the current conversation,
-pass `--session <id>` from `LF_AGENT_CALLER.session_id` or
-`lf session list --json`. `--worktree <path>` adopts that linked checkout.
+pass `--session <id>` with this Session's ID from the lf context block. `--worktree <path>` adopts that linked checkout.
 
 `lf session bind <id> --task <task>` permanently makes an unfinished interactive
 Session the Task's primary conversation (closed Sessions and headless Runs
@@ -57,6 +56,31 @@ For ongoing supervision, pick `task-operate`, `wave-operate` or `repo-operate`,
 or the matching Session skill. Operators move your Tasks and leave other
 people's Tasks and backlog alone. Contributing to a Task doesn't mean operating
 it.
+
+## Child agents
+
+A child takes one piece of your work: a review, a search, a second opinion on
+another model. Prefer `lf` for it: `lf -b <skill> '<brief>'` runs headless in
+this checkout, can use another harness or model (`-a codex`), records the run
+and counts its cost to the Task. Your harness's own subagent is fine too.
+
+Before briefing a child from scratch, look for a Skill or Graph that fits
+(`lf list`, `lf help <name>`) and run that. When the same kind of child job
+keeps coming up in a repository, write it as a skill under `.lf/skills/` so the
+next child starts from it; `lf skill customize <name>` copies a builtin there
+to edit. Work that ends in its own PR is a Task: `lf task create --run`.
+
+You direct the children you start and answer for what they return; check it
+before you use it. A plain `lf -b` child gets no steers, only its brief, so the
+brief says what to do, what done looks like and where the result goes. To
+continue one after it exits, find it with `lf session list --interactive false`
+and run `lf -b resume <id> --message '<next>'`. Steer a Task with
+`lf task steer <ID>`.
+
+A child does the work itself and starts no children unless its brief says to.
+
+Wait for a child's exit, or `lf task wait <ID>` for a Task. Never wait in a
+sleep loop.
 
 ## Delivery and notes
 

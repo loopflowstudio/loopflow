@@ -419,9 +419,12 @@ fn emit_context(
     adapter: Option<&crate::steer::SteerAdapter>,
 ) -> Result<()> {
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
+    let identity = (moment != crate::context_block::ContextMoment::Tool)
+        .then(|| session_identity(&delivery, adapter))
+        .flatten();
     let render = |prefix: &str| -> crate::store::StoreResult<String> {
         delivery
-            .block_with_prefix(moment, prefix)
+            .block_with_prefix(moment, identity.as_ref(), prefix)
             .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
     };
     let write = |text: &str| -> crate::store::StoreResult<()> {
@@ -446,6 +449,33 @@ fn emit_context(
         let _ = std::fs::remove_file(seen);
     }
     result
+}
+
+/// The Session a hook runs for, from the provider context every native launch
+/// installs, and its Task when it has exactly one. A store it cannot read only
+/// drops the Task line.
+fn session_identity(
+    delivery: &crate::context_block::ContextDelivery,
+    adapter: Option<&crate::steer::SteerAdapter>,
+) -> Option<crate::context_block::SessionIdentity> {
+    let session: crate::id::LfSessionId = adapter?.session.as_str().into();
+    let task = hook_store(&delivery.home).and_then(|store| {
+        match store.session_task_ids(session.as_str())?.as_slice() {
+            [task] => store.task(task),
+            _ => Ok(None),
+        }
+    });
+    let task = task.unwrap_or_else(|error| {
+        tracing::warn!(%error, "Task identity unavailable for the context block");
+        None
+    });
+    Some(crate::context_block::SessionIdentity {
+        session,
+        task: task.map(|task| crate::context_block::TaskName {
+            identifier: task.identifier,
+            title: task.title,
+        }),
+    })
 }
 
 fn deliver_steers(

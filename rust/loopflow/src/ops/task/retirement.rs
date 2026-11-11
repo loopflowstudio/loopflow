@@ -5,9 +5,9 @@ use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
+use crate::store::sqlite::owner_close::CloseRequest;
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
@@ -71,59 +71,34 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
         .map_err(task_error)
 }
 
-/// Owners consume automatic closes between sweeps. The queued phase alone
-/// cannot authorize ending execution after Session viewing has returned.
-pub(crate) fn shell_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
+/// Task cleanup owns closure, including Tasks without a checkout and resumed
+/// conversations whose checkout was already retired.
+pub(crate) fn request_conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
+    let revision = store.close_revision().map_err(task_error)?;
     let now = now();
-    for task in store.shell_retiring_tasks(owner).map_err(task_error)? {
-        match viewer_hold(store, &task, now)? {
-            Some(ViewerHold::Viewed(_)) => continue,
+    let owners = store.task_close_candidates(task, now).map_err(task_error)?;
+    if owners.is_empty() {
+        return Ok(());
+    }
+    let request = if owners[0].1 {
+        CloseRequest::Abandoned
+    } else {
+        match viewer_hold(store, task, now)? {
+            Some(ViewerHold::Viewed(_)) => return Ok(()),
             Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
-                continue;
+                return Ok(())
             }
             _ => {}
         }
-        // Read intent after viewing: a concurrent return revokes this phase,
-        // including a return that has already left again.
-        if store
-            .task_retirement(&task)
-            .map_err(task_error)?
-            .is_some_and(|intent| {
-                intent.phase == "closing" && intent.due_at.is_some_and(|due| due <= now)
-            })
-        {
-            return Ok(true);
+        if unsettled_work(store, task)?.is_some() {
+            return Ok(());
         }
-    }
-    Ok(false)
-}
-
-/// Conversation closure follows the Task, independently of checkout deletion.
-/// Read membership and completion again after viewing so reopening, rebinding or
-/// a newly running Graph invalidates an earlier candidate.
-pub(crate) fn owner_task_completed(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
-    let now = now();
-    for task in store
-        .owner_completed_tasks(owner, now)
-        .map_err(task_error)?
-    {
-        match viewer_hold(store, &task, now)? {
-            Some(ViewerHold::Viewed(_)) => continue,
-            Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
-                continue;
-            }
-            _ => {}
-        }
-        if unsettled_work(store, &task)?.is_none()
-            && store
-                .owner_completed_tasks(owner, now)
-                .map_err(task_error)?
-                .contains(&task)
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+        CloseRequest::Completed
+    };
+    let owners: Vec<_> = owners.into_iter().map(|(owner, _)| owner).collect();
+    store
+        .request_owner_closes(task, &owners, request, revision)
+        .map_err(task_error)
 }
 
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -152,15 +127,13 @@ pub fn run(issue: Option<&str>) -> OpsResult<()> {
 }
 
 async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
-    if tasks.is_empty() {
-        return Ok(());
-    }
     let guard = lock_file("sweep")?;
     match guard.try_lock_exclusive() {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
         Err(error) => return Err(error.into()),
     }
+    crate::desktop::shells::advance_closes(&store.sqlite).map_err(task_error)?;
     let mut failures = Vec::new();
     for id in tasks {
         let result = async {
@@ -196,6 +169,7 @@ async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
 }
 
 async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    request_conversation_closes(&store.sqlite, &task.id)?;
     let Some(intent) = reconcile(&store.sqlite, &task.id)? else {
         return Ok(());
     };
@@ -213,6 +187,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .is_dir()
         .then(|| super::lock_task_pr_mutation(checkout))
         .transpose()?;
+    let revision = store.sqlite.close_revision().map_err(task_error)?;
     if let Some(reason) = unsettled_work(&store.sqlite, &task.id)? {
         store
             .sqlite
@@ -222,14 +197,12 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     }
     if !store
         .sqlite
-        .retirement_progress(&intent, "closing", None)
+        .begin_task_retirement(&task.id, revision)
         .map_err(task_error)?
     {
         return Ok(());
     }
-    crate::desktop::shells::request_retirement(&store.sqlite, &task.id).map_err(task_error)?;
-    // Conversations judge Task completion themselves. Shells consume the closing
-    // intent; both recheck live work and queued input before ending execution.
+    // Owners consume these requests; checkout deletion waits for their exit.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         store

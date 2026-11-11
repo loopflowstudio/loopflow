@@ -6,17 +6,12 @@ idle-ending alternatives. Earlier questions, proposals and readings are in
 
 Jack Heart, 2026-11-11: "nothing ends it but i could be open to allowing soem sort of "idle" state for task and wave/repo sessions on the server, if we ahve some cache limit, as long as only cost is slightly slower spin up time next time youj switch to them"
 
-Resident-limit suspension is deferred. "6a" selects an agent count per Machine
+Resident-limit suspension is deferred; Desktop's `warmConversationLimit` bounds
+views only and remains unchanged. "6a" selects an agent count per Machine
 in config; its default is unnamed. Reading the input line off the server's
 emulator is proposed, not chosen ("no opinion on 5"). No replacement input
 ledger belongs in this PR. Bare-direct launch remains in server-first; existing
 bare owners run until quit in this transition.
-
-Open with that limit, not this PR's: whether the sixteen-conversation cap on
-background Task starts (`BACKGROUND_TASK_CONVERSATIONS`) becomes the same number
-as the per-Machine agent count or stays separate. Nobody has said. It matters
-because the cap is now a steady ceiling: past sixteen running Task
-conversations a new Task's conversation waits for `lf resume` or Desktop.
 
 2026-11-11 coordination, comment `85810cc1-70e3-41da-a5ad-ee29c7867724`,
 Session `9af9d3006a494e3dba19fdd82e01b7a0` for Jack Heart:
@@ -24,8 +19,10 @@ Session `9af9d3006a494e3dba19fdd82e01b7a0` for Jack Heart:
 
 LOO-829 (`task_c118380f31f14d07ba28669499efa395`) removes the ignored
 `session.end_detached_after` parser after LOO-823 ships; Linear sync was confirmed
-2026-11-11. The `processes.native_input` column remains
-until a staged contract migration can remove it; runtime no longer uses it.
+2026-11-11. The released `processes.native_input` and `desktop_shells.close_requested`
+columns remain until a staged contract migration can remove them; runtime no
+longer uses them. Removal Task `task_1ddbd3851a8e424e9ce887fa8f39353b` was filed
+locally on 2026-11-11; Linear sync is pending.
 
 2026-11-11 implementation assumption: a resumed owner that has never had a viewer
 uses its existing Process launch time for the fifteen-minute grace; Task completion
@@ -34,3 +31,12 @@ closed Task without making a finished checkout retirement exempt new execution.
 For a completed Task lacking a completion date, its existing update time supplies
 the lower bound, matching closed-Task ordering; malformed dates cannot authorize
 closure.
+
+2026-11-11 implementation choice: explicit shell Close becomes consumable at
+once when requested work has settled. Otherwise the existing once-per-minute
+cleanup pass retries it, including on open Tasks. No per-owner Task poll remains.
+
+Proposed infrastructure memory correction (read-only in this Task): replace
+`.lf/wave/infrastructure/MEMORY.md`'s "Idle owners end" two-minute rule with
+scope-based lifetime. Typed input holds nothing; resident-limit suspension is
+deferred. This proposal was carried from the earlier design, not a new Wave read.

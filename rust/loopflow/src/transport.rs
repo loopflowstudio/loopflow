@@ -1580,13 +1580,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         // Ready output and viewer changes precede the final ending judgment.
         // A throttled/unconsumed activity report also invalidates the candidate.
-        let viewed = observed.view(viewers.iter().any(|v| v.live()));
-        if observed.hold(viewer_hold(
+        let hold = viewer_hold(
             &viewers,
             observed.hold,
             time::OffsetDateTime::now_utc().unix_timestamp(),
-        )) | viewed
-        {
+        );
+        if hold != observed.hold {
+            observed.hold = hold;
             let _ = activity.send(observed);
         }
         #[cfg(test)]
@@ -1595,7 +1595,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             let event = lifetime::report_result(
                 &mut ending_failure,
                 "Session ending",
-                ending.confirm(&id, observed, !pending_input.is_empty()),
+                ending.consume(&id, observed, !pending_input.is_empty()),
             )
             .flatten();
             if let Some(event) = event {

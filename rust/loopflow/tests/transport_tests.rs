@@ -956,6 +956,7 @@ read -r answer < /dev/tty
             [&owner],
         )
         .unwrap();
+        retire_conversations(&fixture);
         fixture.ends(&owner);
         let (done, phase): (bool, String) = sql.query_row(
             "SELECT t.planning_completed,h.phase FROM tasks t JOIN task_retirements h ON h.task_id=t.id",
@@ -3096,6 +3097,11 @@ fn interactive_graph_settles_each_step_before_starting_the_next() {
     fixture.ends(&owner);
 }
 
+fn retire_conversations(fixture: &Fixture) {
+    let output = fixture.command(&["task", "retire"]).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
 /// Complete a Task without a checkout and advance its viewing grace.
 fn complete_conversation(fixture: &Fixture, owner: &str) -> String {
     fixture.wait_viewed(owner, false);
@@ -3152,6 +3158,7 @@ fn completed_task_without_checkout_ends_a_conversation_with_typed_input() {
     until_out(&mut viewer, "unfinished draft");
     drop(viewer);
     let task = complete_conversation(&fixture, &owner);
+    retire_conversations(&fixture);
     fixture.ends(&owner);
     let (no_checkout, no_retirement): (bool, bool) = fixture.sql().query_row(
         "SELECT worktree IS NULL,NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=tasks.id) FROM tasks WHERE id=?1",
@@ -3618,6 +3625,7 @@ while True:
         complete_conversation(&fixture, &owner);
         owners.push(owner);
     }
+    retire_conversations(&fixture);
     std::thread::sleep(Duration::from_secs(6));
     for owner in &owners {
         assert!(
@@ -3668,6 +3676,7 @@ while True:
         std::fs::write(fixture.home.path().join(format!("{name}-settle")), "").unwrap();
         if background {
             fixture.wait_file(&format!("{name}-scheduled"));
+            retire_conversations(&fixture);
             std::thread::sleep(Duration::from_secs(4));
             assert!(fixture.running(owner), "scheduled native work ended");
             std::fs::write(fixture.home.path().join(format!("{name}-unschedule")), "").unwrap();
@@ -3675,6 +3684,7 @@ while True:
         fixture.wait_file(&format!("{name}-settled"));
     }
     if !background {
+        retire_conversations(&fixture);
         std::thread::sleep(Duration::from_secs(6));
         for owner in &owners {
             assert!(fixture.running(owner), "quiet Graph supervisor ended");
@@ -3685,6 +3695,7 @@ while True:
         }
     }
     // Completed Tasks end once work settles and viewing has expired.
+    retire_conversations(&fixture);
     for owner in &owners {
         fixture.ends(owner);
     }
@@ -5197,19 +5208,19 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
         assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
         let paused = PausedOwner(pid);
         fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;
-            UPDATE desktop_shells SET close_requested=2;").unwrap();
+            UPDATE processes SET close_requested='retired_shell',close_task_id=(SELECT task_id FROM desktop_shells WHERE owner=processes.id) WHERE id IN (SELECT owner FROM desktop_shells);").unwrap();
         let mut passive = fixture.viewer(&session_owner, false);
         wait_hold(&fixture, &session_owner, Some("viewed"));
-        let state: (String, Option<i64>, Option<i64>, i64, i64) = fixture
+        let state: (String, Option<i64>, Option<i64>, i64, Option<String>) = fixture
             .sql()
             .query_row(
-                "SELECT h.phase,h.due_at,h.retry_at,h.failures,s.close_requested
-             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id",
+                "SELECT h.phase,h.due_at,h.retry_at,h.failures,p.close_requested
+             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id JOIN processes p ON p.id=s.owner",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .unwrap();
-        assert_eq!(state, ("waiting".into(), None, None, 0, 0));
+        assert_eq!(state, ("waiting".into(), None, None, 0, None));
         if brief_return {
             passive.request(json!({"kind":"leave"}));
             wait_hold(&fixture, &session_owner, Some("absent"));

@@ -1,13 +1,5 @@
-//! When a Session owner ends itself.
-//!
-//! Conversations stay resident until their scope closes or someone quits them.
-//! Task abandonment ends unviewed conversations even during a turn.
-//! Task completion ends eligible owners after its viewing grace, once live work
-//! settles. Desktop shells end through Close or Task retirement.
-//! `lf resume` and `lf process rollover` can replace an owner explicitly; unsent
-//! input is lost when replacing its provider. Ending saves the screen and
-//! records the exit so the conversation can resume from provider history.
-//! Unreadable store state is retried at the next poll, never treated as closure.
+//! Owners record viewing and obey close requests. Task cleanup owns eligibility.
+//! Store failures never authorize ending; byte forwarding remains independent.
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -18,92 +10,53 @@ use anyhow::Result;
 
 use super::wire::Event;
 use crate::id::LfProcessId;
-use crate::ops::task::retirement::owner_task_completed;
-use crate::store::sqlite::sessions::OwnerRetention;
+use crate::store::sqlite::owner_close::CloseRequest;
 use crate::store::sqlite::ViewerHold;
 use crate::store::RecordingGap;
 
-/// How often an owner records viewing and checks for closure.
 pub(super) const POLL: Duration = Duration::from_secs(2);
 
-/// Activity accepted by the serving owner. Revisions include changes whose
-/// notification is still queued or throttled on its way to the policy.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Activity {
-    pub viewed: bool,
-    pub viewers: u64,
+    /// Output can reveal a turn whose best-effort hook never reached the store.
     pub output: u64,
-    /// Dated viewing evidence; a disconnected viewer enters the absence window.
     pub hold: Option<ViewerHold>,
 }
 
-impl Activity {
-    pub fn view(&mut self, viewed: bool) -> bool {
-        if self.viewed == viewed {
-            return false;
-        }
-        self.viewed = viewed;
-        self.viewers += 1;
-        true
-    }
-
-    pub fn hold(&mut self, hold: Option<ViewerHold>) -> bool {
-        let changed = self.hold != hold;
-        self.hold = hold;
-        changed
-    }
-}
-
-/// An ending candidate carries the activity the policy judged for cleanup.
 #[derive(Debug)]
 pub(super) struct Ending {
     pub activity: Activity,
+    pub request: CloseRequest,
 }
 
 impl Ending {
-    pub fn may_end(&self, activity: Activity, input_queued: bool) -> bool {
-        !input_queued
-            && activity.output == self.activity.output
-            && !activity.viewed
-            && activity.viewers == self.activity.viewers
-    }
-
-    /// Recheck the serving owner's current evidence before preparing its exit.
-    pub fn confirm(
+    pub fn consume(
         &self,
         owner: &LfProcessId,
         activity: Activity,
         input_queued: bool,
     ) -> Result<Option<Event>> {
         let store = crate::journal::process_ledger()?;
-        if let Some(may_close) = crate::desktop::shells::close_allowed(&store, owner, input_queued)?
+        if input_queued
+            || (!self.request.is_shell() && matches!(activity.hold, Some(ViewerHold::Viewed(_))))
         {
-            return Ok(may_close.then_some(Event::Control {
-                held: false,
-                notice: Some("Shell closed".into()),
-            }));
-        }
-        if !activity.viewed && !input_queued && store.owner_task_abandoned(owner)? {
-            return Ok(Some(Event::Control {
-                held: false,
-                notice: Some("Task abandoned".into()),
-            }));
-        }
-        if !self.may_end(activity, input_queued) || store.owner_retention(owner)?.is_some() {
             return Ok(None);
         }
-        if owner_task_completed(&store, owner)? {
-            return Ok(Some(Event::Control {
-                held: false,
-                notice: Some("Task completed".into()),
-            }));
+        if self.request == CloseRequest::Completed && activity != self.activity {
+            return Ok(None);
         }
-        Ok(None)
+        // Read only the request, so a return, reopen or new work can revoke a
+        // queued close without another Task judgment in the serving owner.
+        if store.owner_close_request(owner)? != Some(self.request) {
+            return Ok(None);
+        }
+        Ok(Some(Event::Control {
+            held: false,
+            notice: Some(self.request.notice().into()),
+        }))
     }
 }
 
-/// Record viewing and send cleanup candidates for the serve loop to confirm.
-/// Task abandonment applies only to terminal owners; a pipe owner is a headless Run.
 pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
@@ -115,9 +68,7 @@ pub(super) fn spawn(
     }
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
-    std::thread::spawn(move || {
-        watch(&owner, terminal, &changes, &end, &waker);
-    });
+    std::thread::spawn(move || watch(&owner, terminal, &changes, &end, &waker));
     (activity, ending)
 }
 
@@ -130,24 +81,21 @@ fn watch(
 ) {
     let mut store = None;
     let mut store_failure = RecordingGap::default();
-    // None means no observation has been committed, including initial absence.
     let mut recorded_hold = None;
     let mut hold_failure = RecordingGap::default();
-    let mut shell_failure = RecordingGap::default();
-    let mut retention_failure = RecordingGap::default();
-    let mut abandonment_failure = RecordingGap::default();
-    let mut completion_failure = RecordingGap::default();
-    let mut retained: Option<OwnerRetention> = None;
+    let mut close_failure = RecordingGap::default();
+    let mut cancel_failure = RecordingGap::default();
     let mut next_poll = Instant::now() + POLL;
     let mut activity = Activity::default();
+    // Output after the last observed absence of a request may have arrived
+    // after cleanup's decision, before this poll noticed the request.
+    let mut before_request = Activity::default();
     loop {
         match changes.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
             Ok(changed) => activity = changed,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        // Activity updates the snapshot immediately but never accelerates file or
-        // store work. Output can arrive much faster than the policy's poll.
         if Instant::now() < next_poll {
             continue;
         }
@@ -162,86 +110,58 @@ fn watch(
         let Some(store) = store.as_ref() else {
             continue;
         };
-        let hold = activity.hold;
-        if recorded_hold != Some(hold)
+        if recorded_hold != Some(activity.hold)
             && report_result(
                 &mut hold_failure,
                 "Session viewer hold",
-                store.record_owner_viewer_hold(owner, hold),
+                store.record_owner_viewer_hold(owner, activity.hold),
             )
             .is_some()
         {
-            recorded_hold = Some(hold);
+            recorded_hold = Some(activity.hold);
         }
-        // Stale viewing cannot authorize closure while recording is unavailable.
-        if recorded_hold != Some(hold) {
+        if recorded_hold != Some(activity.hold) {
             continue;
         }
-        // Shell purpose is fixed at creation. Running lf inside an ordinary
-        // shell must keep its Close policy even when it runs nested lf work.
         match report_result(
-            &mut shell_failure,
-            "Shell close request",
-            store.shell_close_request(owner),
+            &mut close_failure,
+            "Owner close request",
+            store.owner_close_request(owner),
         ) {
-            Some(Some(1 | 2)) => {
-                if end.send(Ending { activity }).is_err() {
+            Some(None) => before_request = activity,
+            Some(Some(request)) => {
+                if request == CloseRequest::Completed && activity != before_request {
+                    // Cancellation can wait on a writer; keep it off the byte path.
+                    if report_result(
+                        &mut cancel_failure,
+                        "Cancel owner close request",
+                        store.cancel_owner_close(owner, request),
+                    )
+                    .is_some()
+                    {
+                        before_request = activity;
+                    }
+                    continue;
+                }
+                if request == CloseRequest::Abandoned && !terminal {
+                    continue;
+                }
+                if end
+                    .send(Ending {
+                        activity: before_request,
+                        request,
+                    })
+                    .is_err()
+                {
                     return;
                 }
                 let _ = waker.write_all(&[1]);
-                continue;
             }
-            Some(Some(_)) | None => continue,
-            Some(None) => {}
+            None => {}
         }
-        let abandoned = terminal
-            && !activity.viewed
-            && report_result(
-                &mut abandonment_failure,
-                "Task abandonment",
-                store.owner_task_abandoned(owner),
-            )
-            .unwrap_or(false);
-        // Abandonment ends even live work; only completed-Task closure
-        // needs a retention judgment.
-        if !abandoned {
-            if !report_result(
-                &mut completion_failure,
-                "Task completion",
-                owner_task_completed(store, owner),
-            )
-            .unwrap_or(false)
-            {
-                continue;
-            }
-            let Some(retention) = report_result(
-                &mut retention_failure,
-                "Session retention, retrying",
-                store.owner_retention(owner),
-            ) else {
-                continue;
-            };
-            if retained != retention {
-                if let Some(reason) = retention {
-                    tracing::warn!(%owner, "retaining Session during Task cleanup: {reason}");
-                }
-                retained = retention;
-            }
-            if retention.is_some() {
-                continue;
-            }
-        }
-        if end.send(Ending { activity }).is_err() {
-            return;
-        }
-        let _ = waker.write_all(&[1]);
-        // Input accepted since the judgment can veto it in the serving owner.
-        // Keep judging until that owner exits or drops this channel.
     }
 }
 
-/// Each operation keeps its own gap until that operation succeeds. Other policy
-/// work can succeed during an outage without closing or reopening it.
 pub(super) fn report_result<T>(
     gap: &mut RecordingGap,
     what: &str,
@@ -255,259 +175,115 @@ pub(super) fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
+    use super::{Activity, Ending};
+    use crate::store::sqlite::owner_close::CloseRequest;
     use std::time::Duration;
 
-    use super::{Activity, Ending};
-
     #[test]
-    fn abandonment_ends_background_output_but_keeps_viewed_or_queued_input() {
+    fn output_before_the_owner_reads_a_close_request_still_revokes_it() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
-        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
-        let task = crate::durable::TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,abandoned_at) VALUES(?1,?2,'STOP-1',1,2)", rusqlite::params![task.as_str(), repo.as_str()]).unwrap();
         let owner = store.test_lf_process();
-        store.test_session("background", &crate::session_record::new_artifact_key());
-        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='background'",
-            rusqlite::params![task.as_str(), owner]).unwrap();
-        let candidate = Ending {
-            activity: Activity::default(),
-        };
-        let active = Activity {
+        let db = guard.home().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute(
+            "UPDATE processes SET close_requested='completed' WHERE id=?1",
+            [&owner],
+        )
+        .unwrap();
+        let (activity, changes) = std::sync::mpsc::channel();
+        let (end, ending) = std::sync::mpsc::channel();
+        let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let watched = owner.clone();
+        let watcher = std::thread::spawn(move || {
+            crate::journal::with_test_ledger(db, || {
+                super::watch(&watched, true, &changes, &end, &waker);
+            })
+        });
+        let output = Activity {
             output: 1,
             ..Activity::default()
         };
-        assert!(candidate.confirm(&owner, active, false).unwrap().is_some());
-        assert!(candidate.confirm(&owner, active, true).unwrap().is_none());
-        assert!(candidate
-            .confirm(
-                &owner,
-                Activity {
-                    viewed: true,
-                    ..active
-                },
-                false
-            )
-            .unwrap()
-            .is_none());
-        conn.execute(
-            "UPDATE tasks SET abandoned_at=NULL WHERE id=?1",
-            [task.as_str()],
-        )
-        .unwrap();
-        assert!(candidate.confirm(&owner, active, false).unwrap().is_none());
+        activity.send(output).unwrap();
+        let deadline = std::time::Instant::now() + super::POLL * 3;
+        while store.owner_close_request(&owner).unwrap().is_some()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(activity);
+        watcher.join().unwrap();
+        assert!(ending.try_recv().is_err());
+        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
     }
 
     #[test]
-    fn queued_endings_require_current_output_and_viewer_evidence() {
-        let mut activity = Activity::default();
-        let candidate = Ending { activity };
-        assert!(candidate.may_end(activity, false));
-        activity.view(true);
-        assert!(!candidate.may_end(activity, false));
-        activity.view(false);
-        // A changed viewer invalidates a queued retirement judgment.
-        assert!(!candidate.may_end(activity, false));
-        activity.output += 1;
-        assert!(!candidate.may_end(activity, false));
-        let fresh = Ending { activity };
-        assert!(fresh.may_end(activity, false));
-        assert!(!fresh.may_end(activity, true));
-    }
-
-    #[test]
-    fn completed_task_waits_for_final_work_and_pending_requests() {
-        let guard = crate::journal::TestLedgerGuard::new();
+    fn requests_wait_for_viewers_and_queued_input_and_can_be_revoked() {
+        let _guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let owner = store.test_lf_process();
-        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
-        let task = crate::durable::TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
-        store.test_session("session", &crate::session_record::new_artifact_key());
-        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2,agent_process_id=?2 WHERE id='session'", rusqlite::params![task.as_str(),owner]).unwrap();
-        conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('session',?1,1,1,0,0)", [&owner]).unwrap();
-        // Silent work remains protected past the viewing deadline, including
-        // a queued ending whose activity never saw another output byte.
-        let candidate = Ending {
-            activity: Activity::default(),
-        };
-        for (tools, pending, yielded) in [(1, 0, 0), (0, 1, 1), (0, 0, 0)] {
+        let conn = rusqlite::Connection::open(_guard.home().join("loopflow.db")).unwrap();
+        for request in [
+            CloseRequest::Completed,
+            CloseRequest::Abandoned,
+            CloseRequest::Shell,
+            CloseRequest::RetiredShell,
+        ] {
             conn.execute(
-                "UPDATE session_activity SET open_tools=?1,pending_input=?2,yielded=?3",
-                rusqlite::params![tools, pending, yielded],
+                "UPDATE processes SET close_requested=?2 WHERE id=?1",
+                rusqlite::params![owner, request.as_str()],
             )
             .unwrap();
+            let candidate = Ending {
+                activity: Activity::default(),
+                request,
+            };
             assert!(candidate
-                .confirm(&owner, Activity::default(), false)
+                .consume(&owner, Activity::default(), true)
+                .unwrap()
+                .is_none());
+            let viewed = Activity {
+                hold: Some(crate::store::sqlite::ViewerHold::Viewed(1)),
+                ..Activity::default()
+            };
+            assert_eq!(
+                candidate.consume(&owner, viewed, false).unwrap().is_some(),
+                request.is_shell()
+            );
+            assert!(candidate
+                .consume(&owner, Activity::default(), false)
+                .unwrap()
+                .is_some());
+            store.cancel_owner_close(&owner, request).unwrap();
+            assert!(candidate
+                .consume(&owner, Activity::default(), false)
                 .unwrap()
                 .is_none());
         }
         conn.execute(
-            "UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1",
-            [],
+            "UPDATE processes SET close_requested='completed' WHERE id=?1",
+            [&owner],
         )
         .unwrap();
-        conn.execute(
-            "UPDATE agent_sessions SET interactive=0 WHERE id='session'",
-            [],
-        )
-        .unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let candidate = Ending {
+            activity: Activity::default(),
+            request: CloseRequest::Completed,
+        };
+        let output = Activity {
+            output: 1,
+            ..Activity::default()
+        };
+        assert!(candidate.consume(&owner, output, false).unwrap().is_none());
+        conn.execute_batch("ROLLBACK").unwrap();
+        conn.execute_batch("DROP TABLE processes").unwrap();
+        let candidate = Ending {
+            activity: Activity::default(),
+            request: CloseRequest::Completed,
+        };
         assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
-        conn.execute(
-            "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
-            [],
-        )
-        .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), true)
-            .unwrap()
-            .is_none());
-        // The Task's Graph may run outside this owner's ancestry. A queued
-        // retirement must still wait for it, without affecting explicit rollover.
-        let graph = store.test_lf_process();
-        conn.execute(
-            "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-            VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,1)",
-            rusqlite::params![task.as_str(), graph],
-        )
-        .unwrap();
-        assert_eq!(store.owner_retention(&owner).unwrap(), None);
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
-        conn.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&graph])
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_some());
-        assert!(store.task_retirement(&task).unwrap().is_none());
-        // Another conversation's pending request holds the whole Task, including
-        // when its Session belongs through the checkout instead of a binding.
-        let other = store.test_lf_process();
-        let live = crate::journal::OsProcess::read(std::process::id())
-            .unwrap()
-            .unwrap();
-        conn.execute(
-            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
-            rusqlite::params![other, live.pid, live.started_at],
-        )
-        .unwrap();
-        store.test_session("other", &crate::session_record::new_artifact_key());
-        conn.execute("UPDATE tasks SET worktree='/repo.task',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1", [task.as_str()]).unwrap();
-        conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',interactive=1,transport_lf_process_id=?1,agent_process_id=?1 WHERE id='other'", [&other]).unwrap();
-        conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('other',?1,1,0,1,1)", [&other]).unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_none());
-        conn.execute(
-            "UPDATE agent_sessions SET completed_at=1 WHERE id='other'",
-            [],
-        )
-        .unwrap();
-        assert!(candidate
-            .confirm(&owner, Activity::default(), false)
-            .unwrap()
-            .is_some());
-        // Explicit Close of a shell also respects a nested requested turn.
-        store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap();
-        store.bind_desktop_shell("shell", &owner).unwrap();
-        conn.execute(
-            "UPDATE tasks SET worktree='/repo.task',branch='task' WHERE id=?1",
-            [task.as_str()],
-        )
-        .unwrap();
-        let intent = store
-            .reconcile_task_retirement(&task, 0, None)
-            .unwrap()
-            .unwrap();
-        store.retirement_progress(&intent, "closing", None).unwrap();
-        for close in [1, 2] {
-            conn.execute("UPDATE desktop_shells SET close_requested=?1", [close])
-                .unwrap();
-            // A shell view adds no retention, for explicit or retirement Close.
-            let viewed = Activity {
-                viewed: true,
-                ..Activity::default()
-            };
-            conn.execute("UPDATE session_activity SET open_tools=1,yielded=0", [])
-                .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_none());
-            conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
-                .unwrap();
-            assert!(candidate.confirm(&owner, viewed, false).unwrap().is_some());
-        }
-    }
-
-    #[test]
-    fn completed_task_closure_rechecks_scope_grace_and_store_availability() {
-        let guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::process_ledger().unwrap();
-        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
-        let task = crate::durable::TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
-            VALUES(?1,?2,'CLOSE-2',1,1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
-        let owner = store.test_lf_process();
-        store.test_session("session", &crate::session_record::new_artifact_key());
-        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='session'",
-            rusqlite::params![task.as_str(),owner]).unwrap();
-        let activity = Activity::default();
-        let candidate = Ending { activity };
-        assert!(candidate
-            .confirm(&owner, activity, false)
-            .unwrap()
-            .is_some());
-        for change in [
-            "UPDATE tasks SET planning_completed=0",
-            "UPDATE tasks SET planning_completed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')",
-            "UPDATE agent_sessions SET transport_lf_process_id=NULL",
-            "UPDATE agent_sessions SET primary_scope='repository'",
-            "UPDATE agent_sessions SET primary_scope='wave'",
-            "UPDATE processes SET started_at=unixepoch()",
-            "UPDATE processes SET viewer_hold='absent',viewer_hold_at=unixepoch()",
-        ] {
-            conn.execute_batch(change).unwrap();
-            assert!(
-                candidate
-                    .confirm(&owner, activity, false)
-                    .unwrap()
-                    .is_none(),
-                "{change}"
-            );
-            conn.execute_batch("UPDATE tasks SET planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z';
-                UPDATE agent_sessions SET primary_scope=NULL;
-                UPDATE processes SET started_at=1,viewer_hold=NULL,viewer_hold_at=NULL;").unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET transport_lf_process_id=?1",
-                [&owner],
-            )
-            .unwrap();
-        }
-        conn.execute_batch("UPDATE tasks SET planning_completed_at=NULL,updated_at=unixepoch()")
-            .unwrap();
-        assert!(candidate
-            .confirm(&owner, activity, false)
-            .unwrap()
-            .is_none());
-        conn.execute_batch("UPDATE tasks SET updated_at=1").unwrap();
-        assert!(candidate
-            .confirm(&owner, activity, false)
-            .unwrap()
-            .is_some());
-        assert!(store.task_retirement(&task).unwrap().is_none());
-        // An unreadable store cannot authorize an already queued ending.
-        conn.execute_batch("DROP TABLE task_graphs").unwrap();
-        assert!(candidate.confirm(&owner, activity, false).is_err());
+            .consume(&owner, Activity::default(), false)
+            .is_err());
     }
 
     #[test]
@@ -534,19 +310,22 @@ mod tests {
              BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
         )
         .unwrap();
+        conn.execute(
+            "UPDATE processes SET close_requested='completed' WHERE id=?1",
+            [&owner],
+        )
+        .unwrap();
         let (activity, changes) = std::sync::mpsc::channel();
         let (end, ending) = std::sync::mpsc::channel();
         let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, false, &changes, &end, &waker);
+                super::watch(&watched, true, &changes, &end, &waker);
             });
         });
         activity
             .send(Activity {
-                viewed: false,
-                viewers: 2,
                 output: 0,
                 hold: Some(crate::store::sqlite::ViewerHold::Absent(0)),
             })
@@ -568,91 +347,26 @@ mod tests {
                 .unwrap();
             std::thread::sleep(Duration::from_millis(20));
         }
+        // Recovery records the previously missed viewing change and revokes
+        // the stale close. Cleanup, not the owner, requests closure again.
+        let deadline = std::time::Instant::now() + super::POLL * 3;
+        while store.owner_close_request(&owner).unwrap().is_some()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
+        crate::ops::task::retirement::request_conversation_closes(&store, &task).unwrap();
         let recovered = ending.recv_timeout(super::POLL * 2);
         drop(activity);
         policy.join().unwrap();
         assert!(
             recovered.is_ok(),
-            "closure retries after recording recovers"
+            "cleanup can request closure again after recording recovers"
         );
         assert!(
             !viewed,
             "a recovered store must not retain stale viewer state"
         );
-    }
-
-    #[test]
-    fn automatic_shell_close_rechecks_task_viewing_before_consuming_stale_intent() {
-        let guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::process_ledger().unwrap();
-        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let repo = store.ensure_repository("/repo").unwrap();
-        let task = crate::durable::TaskId::new();
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at) VALUES(?1,?2,'CLOSE-1',1,'/repo.task','task',1,'completed')", rusqlite::params![task.as_str(),repo.as_str()]).unwrap();
-        let shell = store.test_lf_process();
-        store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap();
-        store.bind_desktop_shell("shell", &shell).unwrap();
-        let viewer = store.test_lf_process();
-        let live = crate::journal::OsProcess::read(std::process::id())
-            .unwrap()
-            .unwrap();
-        conn.execute(
-            "UPDATE processes SET pid=?2,started_at=?3,os_started_at=?3 WHERE id=?1",
-            rusqlite::params![viewer, live.pid, live.started_at],
-        )
-        .unwrap();
-        store.test_session("passive", &crate::session_record::new_artifact_key());
-        conn.execute("UPDATE agent_sessions SET task_id=?1,interactive=1,transport_lf_process_id=?2 WHERE id='passive'",
-            rusqlite::params![task.as_str(),viewer]).unwrap();
-        let intent = store
-            .reconcile_task_retirement(&task, 0, None)
-            .unwrap()
-            .unwrap();
-        store.retirement_progress(&intent, "closing", None).unwrap();
-        crate::desktop::shells::request_retirement(&store, &task).unwrap();
-        let candidate = Ending {
-            activity: Activity::default(),
-        };
-        // A shell's own viewer adds no Task retention, and output cannot keep
-        // an ordinary shell past an eligible automatic close.
-        store
-            .record_owner_viewer_hold(
-                &shell,
-                Some(crate::store::sqlite::ViewerHold::Viewed(
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )),
-            )
-            .unwrap();
-        let viewed = Activity {
-            viewed: true,
-            output: 1,
-            ..Activity::default()
-        };
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
-        // Seed stale intent directly: the final check must protect even if a
-        // writer did not atomically cancel it. No sweep runs in this test.
-        for hold in ["viewed", "absent"] {
-            conn.execute(
-                "UPDATE processes SET viewer_hold=?2,viewer_hold_at=unixepoch() WHERE id=?1",
-                rusqlite::params![viewer, hold],
-            )
-            .unwrap();
-            assert!(candidate.confirm(&shell, viewed, false).unwrap().is_none());
-        }
-        store.close_desktop_shell("shell").unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
-        // Unreadable retirement state cannot authorize automatic closure.
-        conn.execute("UPDATE desktop_shells SET close_requested=2", [])
-            .unwrap();
-        conn.execute(
-            "UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1",
-            [&viewer],
-        )
-        .unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).unwrap().is_some());
-        conn.execute_batch("DROP TABLE task_retirements").unwrap();
-        assert!(candidate.confirm(&shell, viewed, false).is_err());
     }
 }

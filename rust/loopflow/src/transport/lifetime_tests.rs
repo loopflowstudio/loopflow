@@ -15,6 +15,7 @@ use super::lifetime::{Activity, Ending};
 use super::output::Output;
 use super::wire::{Incoming, Request, Tag};
 use crate::id::LfProcessId;
+use crate::store::sqlite::ViewerHold;
 
 thread_local! {
     static CASE: RefCell<Option<Case>> = const { RefCell::new(None) };
@@ -34,6 +35,7 @@ impl Case {
         self.end
             .send(Ending {
                 activity: Activity::default(),
+                request: crate::store::sqlite::owner_close::CloseRequest::Completed,
             })
             .unwrap();
     }
@@ -103,7 +105,10 @@ pub(super) fn after_judgment(output: &Output, observed: Activity) -> Result<()> 
     CASE.with_borrow(|case| -> Result<()> {
         let Some(case) = case else { return Ok(()) };
         if case.name == "attach" {
-            assert!(observed.viewed, "queued ending overtook the attach request");
+            assert!(
+                matches!(observed.hold, Some(ViewerHold::Viewed(_))),
+                "queued ending overtook the attach request"
+            );
         } else {
             assert!(output
                 .terminal()
@@ -157,25 +162,16 @@ fn ending_order_fixture() {
     }));
     crate::journal::with_runtime(guard.home(), &["lf".into(), "fixture".into()], || {
         let owner = crate::journal::current_lf_process_id().unwrap();
-        let store = crate::journal::process_ledger()?;
-        store.test_session("session", &crate::session_record::new_artifact_key());
-        rusqlite::Connection::open(guard.home().join("loopflow.db"))?.execute(
-            "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id='session'",
-            [owner.as_str()],
-        )?;
-        assert_eq!(store.owner_retention(&owner)?, None);
-        let task = crate::durable::TaskId::new();
-        let repo = store.ensure_repository("/fixture")?;
         let conn = rusqlite::Connection::open(guard.home().join("loopflow.db"))?;
-        conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,worktree,branch,planning_completed,planning_completed_at)
-            VALUES(?1,?2,'END-1',1,'/fixture.task','task',1,'2000-01-01T00:00:00Z')", rusqlite::params![task.as_str(),repo.as_str()])?;
-        conn.execute("UPDATE agent_sessions SET task_id=?1 WHERE id='session'", [task.as_str()])?;
-        conn.execute("UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1", [owner.as_str()])?;
-        assert!(crate::ops::task::retirement::owner_task_completed(&store, &owner)?);
+        conn.execute(
+            "UPDATE processes SET close_requested='completed' WHERE id=?1",
+            [&owner],
+        )?;
         let result = super::serve(&["/bin/sleep".into(), "30".into()], true);
         assert_eq!(result.unwrap_err().to_string(), "ending candidate vetoed");
         let _ = std::fs::remove_file(super::endpoint(&owner)?);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
     CASE.set(None);
 }

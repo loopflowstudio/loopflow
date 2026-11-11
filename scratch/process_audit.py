@@ -110,12 +110,12 @@ def read_shells(held):
     try:
         conn = sqlite3.connect(f"file:{home / 'loopflow.db'}?mode=ro", uri=True)
         receipts = conn.execute(
-            "SELECT p.pid, t.id, t.issue_identifier, d.checkout, d.close_requested, r.phase, r.reason"
+            "SELECT p.pid, t.id, t.issue_identifier, d.checkout, r.phase, r.reason"
             " FROM desktop_shells d JOIN processes p ON p.id=d.owner JOIN tasks t ON t.id=d.task_id"
             " LEFT JOIN task_retirements r ON r.task_id=t.id WHERE p.completed_at IS NULL"
         ).fetchall()
         shells = {}
-        for pid, task, identifier, checkout, close, phase, reason in receipts:
+        for pid, task, identifier, checkout, phase, reason in receipts:
             # The Task's own conversations: a held one keeps the checkout and its shells.
             owners = [
                 row[0] for row in conn.execute(
@@ -128,7 +128,6 @@ def read_shells(held):
             shells[pid] = {
                 "task": identifier,
                 "checkout": checkout,
-                "close": close,
                 "phase": phase,
                 "reason": reason,
                 "holders": [(o, held[o]) for o in owners if "holds" in held.get(o, "")],

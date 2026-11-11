@@ -19,11 +19,12 @@ The destination caches resources by payload digest under `shell-resources`.
 After literal initial argv finishes, the script sees `LF_SHELL_RESOURCES`,
 `SHELL` and terminal identity. Reattachment ignores all creation inputs.
 
-Task retirement owns completion, absence and Git cleanup policy. It requests
-Desktop shell settlement through this module; renewed Session viewing cancels
-pending automatic closes in the same transaction. Owners recheck that shared
-retirement judgment before closing. Shell tabs add no checkout hold, and Rex
-shells never enter Desktop's execution receipts.
+Task cleanup owns completion, absence and Git cleanup policy. It writes close
+requests on the execution Processes; renewed Session viewing cancels automatic
+requests in the same transaction. Owners consume those requests without judging
+Task state. Explicit Close waits for requested work to settle; the cleanup pass
+retries it while pending. Shell tabs add no checkout hold, and Rex shells never
+enter Desktop's execution receipts.
 
 Tests use the production entry through `transport_tests::desktop_shell_` and
 `transport_tests::ssh_shells::`, including no-replay, same-execution recovery,

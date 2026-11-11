@@ -2,7 +2,7 @@
 //! The shared transport owns the PTY and SSH stream; Session viewers alone hold
 //! Task checkouts. This runtime needs no GUI on either execution Machine.
 mod store;
-pub(crate) use store::{jobs_settled, owners, request_retirement};
+pub(crate) use store::{advance_closes, jobs_settled, owners};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,11 +11,6 @@ use anyhow::{anyhow, ensure, Result};
 use clap::Args;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-
-use crate::durable::TaskId;
-use crate::id::LfProcessId;
-use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
 
 /// Private Desktop launch inputs, also carried verbatim across Machine routing.
 #[derive(Args, Debug)]
@@ -86,6 +81,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     );
     if *close {
         store.close_desktop_shell(id)?;
+        advance_closes(&store)?;
         return Ok(());
     }
 
@@ -152,34 +148,4 @@ fn shell_command(id: &str, initial: &[String], bootstrap: Option<&str>) -> Resul
     ];
     argv.extend_from_slice(initial);
     Ok(argv)
-}
-
-/// Run inside the viewer observation's transaction, including brief return/leave.
-pub(crate) fn cancel_retirement(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE desktop_shells SET close_requested=0 WHERE task_id=?1 AND close_requested=2",
-        [task.as_str()],
-    )?;
-    Ok(())
-}
-
-/// None is an ordinary Session owner; false keeps a Desktop shell alive.
-pub(crate) fn close_allowed(
-    store: &SqliteStore,
-    owner: &LfProcessId,
-    input_queued: bool,
-) -> Result<Option<bool>> {
-    let Some(close) = store.shell_close_request(owner)? else {
-        return Ok(None);
-    };
-    let requested = match close {
-        1 => true,
-        2 => crate::ops::task::retirement::shell_retiring(store, owner)?,
-        _ => false,
-    };
-    Ok(Some(
-        requested
-            && !input_queued
-            && (!store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none()),
-    ))
 }

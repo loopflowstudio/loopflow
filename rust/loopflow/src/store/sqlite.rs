@@ -55,6 +55,7 @@ mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_ownership;
 
+pub(crate) mod owner_close;
 mod steers;
 mod task_comments;
 mod task_content;

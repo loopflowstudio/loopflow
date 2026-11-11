@@ -33,7 +33,7 @@ pub(super) fn leave(owner: &LfProcessId, output: &Output) {
     };
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
-        let session = if store.shell_close_request(owner)?.is_some() {
+        let session = if store.is_shell_owner(owner)? {
             owner.to_string()
         } else if let Some(session) = store.transport_session(owner)? {
             session

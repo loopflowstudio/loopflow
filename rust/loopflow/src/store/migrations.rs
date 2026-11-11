@@ -3078,6 +3078,43 @@ mod tests {
     }
 
     #[test]
+    fn owner_close_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
+        let conn = open();
+        apply_before_migration(&conn, "owner_close_requests");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/owner_close_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+        let mut query = conn
+            .prepare("SELECT id,close_requested FROM processes ORDER BY id")
+            .unwrap();
+        let requests = query
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            requests,
+            vec![
+                ("automatic_owner".into(), None),
+                ("explicit_owner".into(), Some("shell_pending".into()))
+            ]
+        );
+        let closed: bool = conn
+            .query_row(
+                "SELECT jobs_settled FROM desktop_shells WHERE id='unstarted'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(closed);
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn task_workspace_upgrade_preserves_checkout_and_adds_retry_queue() {
         let conn = open();
         apply_before_migration(&conn, "task_workspace_lifetimes");

@@ -77,8 +77,8 @@ even during a turn. Wave, repository and bare conversations run until their
 agent quits.
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
-launch it. Background starts require a configured, installed agent and stop at
-sixteen running Task conversations; past that, `lf resume` starts one as before.
+launch it. Background starts require a configured, installed agent; there is no
+conversation count cap.
 
 Native Claude prompt/stop hooks preserve silent waits, background tasks and
 scheduled wakeups until Claude reports settlement. Terminal status counts only
@@ -97,8 +97,8 @@ Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
 are the person quitting, `lf resume` taking the conversation over, `lf process
 rollover`, Task closure, or an explicit end. Failed store judgments retry at the
-next two-second poll. Repeated unchanged policy errors and retention reasons
-produce one warning until the condition changes; activity launches no helper.
+next two-second poll. Repeated unchanged store errors produce one warning until
+the condition changes; activity launches no helper.
 Policy exit saves the screen, stops the agent and records its exit.
 `lf resume` reopens provider history without starting a turn. Other ended
 Sessions stay stopped.
@@ -355,8 +355,10 @@ pass also reconciles viewed Tasks and uses that same absence window after owner 
 A done Task ends its eligible conversations after fifteen minutes without
 viewing, independently of checkout retirement. The grace starts no earlier than
 completion; a newly resumed, never-viewed owner starts it at launch. A returning
-viewer cancels closure; leaving again starts a new grace. Owners recheck current
-Task membership, completion and viewing before ending. Requested active work,
+viewer cancels closure; leaving again starts a new grace. The cleanup pass checks
+current Task membership, completion and viewing, then requests closure on each
+owner. Owners record viewing and consume these requests; they do not judge Task
+closure. Requested active work,
 pending requests and running Graphs still hold execution; their completion does
 not restart a deadline. Store failures cannot authorize closure. Returning after
 cleanup continues saved provider history without reopening the Task, and the same
@@ -368,7 +370,8 @@ without waiting for a sweep. Explicit Close remains effective. Completion and PR
 landing schedule one retirement pinned to the completion, checkout and branch;
 reopen or changed placement revokes it.
 Installation provisions a separate launchd/cron job running `lf task retire` once
-a minute. Each pass reads the local retirement queue, reconciles viewers, attempts
+a minute. Each pass finds closed Tasks with running conversations as well as the local
+retirement queue, reconciles viewers, attempts
 eligible cleanup and exits. No Task owns a waiting cleanup process. Eligibility
 normally reaches a pass in 15–16 minutes while awake; wall-clock deadlines survive
 sleep and reboot. Destination owners confirm shell job settlement before deletion;

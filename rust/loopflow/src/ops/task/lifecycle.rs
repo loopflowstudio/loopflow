@@ -137,6 +137,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
         .await
         .map_err(task_error)?;
+    super::retirement::request_conversation_closes(&store.sqlite, &task.id)?;
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),

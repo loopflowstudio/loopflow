@@ -2459,7 +2459,7 @@
       "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
     },
     "DesktopTaskPane": {
-      "description": "`lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,\nwhich keeps the pane current after the Task leaves the plan.",
+      "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
         "comments": {
           "anyOf": [

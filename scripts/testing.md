@@ -13,6 +13,11 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
+also run `cargo test -p loopflow --test integration documented_commands::`.
+It checks command examples and maintained copy, including design documents;
+include `test(documented_commands::)` in the gate's Rust filter.
+
 After syncing, rerun affected tests when main changed APIs they call, even if
 Git merged cleanly. A passing check from before the sync does not cover that
 combination; renamed enum variants can leave new branch tests uncompilable.
@@ -25,6 +30,11 @@ Commands with an optional positional Wave or `--wave` also run
 there so the matrix covers ambient context, explicit overrides and no Wave.
 Session command changes also run
 `cargo test -p loopflow --test integration session_cli_tests::session_cli_uses_one_truthful_resolution_contract`.
+
+Changes to server protocol types or their doc comments also run
+`cargo test -p loopflow --lib server::schema::tests::`. Doc comments appear in
+the generated schema; regenerate its checked-in fixture using the command in
+[the server README](../rust/loopflow/src/server/README.md) when it changes.
 
 Creation receipt changes also run `test(local_planning::)`,
 `test(context_launch_tests::)`, `test(settings_launch_tests::)` and

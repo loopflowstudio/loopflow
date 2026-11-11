@@ -33,7 +33,8 @@ Jack Heart, word for word:
 
 ## Current implementation
 
-At `89181c49ac`, the direct-signalling changes and both QA repairs are built.
+At `89181c49ac`, the direct-signalling changes and both QA repairs are built;
+bare-direct launch followed in `59fdcdaee0` (see the demo review section).
 `ops/task/retirement.rs::close_conversations` uses
 `ops/human_session.rs::end_owner`, shared with rollover. The migration has no
 Process close columns or automatic cancellation triggers;
@@ -45,12 +46,15 @@ AgentProcess as well as ancestry.
 The earlier feedback's “Next implement” list is covered by these changes and the
 focused checks below. The direct-signalling walkthrough passed S2–S4 after the
 launcher repair. Those results do not replace gate or the broader suite process
-census. No product decision remains for this scope.
+census. No product decision remains for this scope; the Rex icon demo is owed.
 
 ## Implementation contract
 
-Open Task, Wave, repository and bare conversations remain running until quit or
-explicit replacement. A done Task's conversations end after fifteen minutes
+Open Task, Wave and repository conversations (a scope's ongoing conversation)
+remain running until quit or explicit replacement; closing their terminal or
+detaching ends neither. Every other interactive launch is bare: no owner, the
+provider is the terminal's foreground process-group leader, and it ends as that
+provider would when its terminal goes, mid-turn included. A done Task's conversations end after fifteen minutes
 without viewing once live work settles, on a cleanup pass. Completion and a new
 owner's launch are lower bounds on that grace. This applies without a checkout
 and after checkout retirement. Abandonment ends unviewed terminal conversations
@@ -225,8 +229,8 @@ its recorded results and limitations remain above and in `scratch/qa.html`.
 
 ## Concept review, 2026-11-11
 
-Outcome for loop-or-next: nothing to change and no open product choice in this
-scope; advance. The direct-signal implementation follows answer "1b". Conversation
+At that review there was nothing to change; the later demo review (below)
+added bare-direct. The direct-signal implementation follows answer "1b". Conversation
 closure needs no stored intent; explicit shell Close and checkout retirement
 still do, because the request and unfinished deletion must survive a restart.
 Keep the return-between-decision-and-signal counterexample above. Resume restores
@@ -259,15 +263,11 @@ later, existing bare owners run until quit" was wrong: nothing holds a bare
 owner, so it ends when its last viewer leaves.
 - Asked whether closing a bare terminal mid-turn ends the agent: "for a bare session, it jsut does whatever claude or codex would do"
 
-Superseded direction (replaced by "1b" below): a bare owner ends when its terminal goes, as the
-provider would, mid-turn included. Detach (Ctrl+]) of a bare conversation ends it
-per "agian, just behaves like the underlying harness woudl": bare adds no lf
-detach or lifetime of its own; keys and terminal close behave as the provider's.
-`lf resume` continues its history. Managed conversations: "if its a managed task
-session, then neither ends the session" (terminal close or detach). Wave and
-repository conversations keep the same lifetime as open Tasks. The PR body
-leads with closed Tasks ending, bare ending with its terminal, and the removed
-two-minute rule; "Task sessions held while open" is not new behavior.
+Managed conversations: "if its a managed task session, then neither ends the
+session" (terminal close or detach). The PR body leads with closed Tasks ending,
+bare ending with its terminal, and the removed two-minute rule; "Task sessions
+held while open" is not new behavior. An interim "bare owner ends with its
+terminal" direction was replaced by "1b" below.
 
 Bare-direct, built after "1b"/"2a": `bin/lf.rs::bare_conversation` skips
 delegation for plain `lf`, inline prompts and skill targets typed at a terminal;
@@ -292,8 +292,8 @@ is deleted: a nested bare run "ends with its parent" (server-first).
 - Compress (bare-direct): SAFETY comments per `unsafe` in `foreground.rs`, single wait loop in the bare test. `transport_tests bare_lf_runs_its_provider…` passed, clippy `--all-targets` clean; `/tmp/loo823-compress-bare.log`.
 Demo still owed: bare `lf` with Claude and with Codex in Rex shows the provider icon.
 
-Open (concept review, scratch/concept-review.html): every interactive launch
-spawns `lf session serve` via `transport::delegate`, bare included. (1) Tie a
+Answered (concept review, scratch/concept-review.html): before bare-direct every interactive launch
+spawned `lf session serve` via `transport::delegate`, bare included. (1) Tie a
 bare owner's life to its terminal now, or launch bare with no owner in this PR
 (server-first's "Bare launches go direct"). (2) Is "managed" a scope's ongoing
 conversation only, or any interactive Session naming a Task/Wave (e.g. a skill

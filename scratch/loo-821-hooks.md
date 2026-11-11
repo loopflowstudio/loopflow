@@ -44,8 +44,7 @@ Looked at and left alone:
   rereads it; changing that is another Task.
 - Pi's bash guard (`--moment tool-group`) stays on bare launches: it does not
   record, it joins the tool's process group to the watchdog that ends it with
-  its provider (`agent_process::guard_tool_lifeline`). The comment above it in
-  `context_pi.mjs` ("records the tool boundary") is stale.
+  its provider (`agent_process::guard_tool_lifeline`).
 
 Concept review with a person, November 11 (`scratch/concept-review.html`).
 All three are answered below.

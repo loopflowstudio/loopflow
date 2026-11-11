@@ -22,8 +22,8 @@ async function guardBashTools(pi, ctx) {
         // RDWR opens without waiting for the shell's reader. OS exit also
         // closes this writer, even when Pi cannot run any shutdown handlers.
         writer = openSync(path, constants.O_RDWR);
-        // The guard records the tool boundary; a store it cannot reach is a
-        // logged gap, never a failed tool. The command runs either way.
+        // The guard joins the tool's process group to the watchdog that ends
+        // it with its provider. It records nothing; the command runs either way.
         const guard = `${quote(spec.executable)} __context-block --moment tool-group --lifeline ${quote(path)} --provider-pid ${process.pid}`;
         return await local.exec(`${guard}\n${command}`, cwd, options);
       } finally {

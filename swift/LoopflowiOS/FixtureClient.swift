@@ -58,6 +58,7 @@ final class FixtureAttachment: MobileAttachment {
     let terminal: FixtureTerminal
     private var controlling = false
     private var closed = false
+    private var output: Task<Void, Never>?
     private(set) var sizes: [(Int, Int)] = []
 
     init(sessionID: String, terminal: FixtureTerminal) {
@@ -67,6 +68,22 @@ final class FixtureAttachment: MobileAttachment {
         continuation.yield(.geometry(columns: terminal.columns, rows: terminal.rows))
         continuation.yield(.snapshot(Data(terminal.screen.utf8)))
         continuation.yield(.control(input: false, geometry: false))
+        // Native gesture tests append peer output only after reaching a reading
+        // position. This source exists only in the explicit offline fixture.
+        if let path = ProcessInfo.processInfo.environment["LOOPFLOW_FIXTURE_OUTPUT"] {
+            let url = URL(fileURLWithPath: path)
+            output = Task { [weak self] in
+                var consumed = 0
+                while !Task.isCancelled {
+                    guard let continuation = self?.continuation else { return }
+                    if let data = try? Data(contentsOf: url), data.count > consumed {
+                        continuation.yield(.output(Data(data.dropFirst(consumed))))
+                        consumed = data.count
+                    }
+                    do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                }
+            }
+        }
     }
 
     func requestControl(size: TerminalGeometry) throws {
@@ -108,6 +125,8 @@ final class FixtureAttachment: MobileAttachment {
 
     func close() {
         closed = true
+        output?.cancel()
+        output = nil
         controlling = false
         continuation.finish()
     }

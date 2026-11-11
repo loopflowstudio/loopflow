@@ -55,6 +55,17 @@ final class SessionTerminalView: TerminalView {
         super.deleteBackward()
     }
 
+    func synchronizeReadingPosition() {
+        guard canScroll else { return }
+        let cellHeight = getOptimalFrameSize().height / CGFloat(getTerminal().rows)
+        let row = Int(max(0, contentOffset.y) / cellHeight)
+        if row != getTerminal().buffer.yDisp {
+            // Native scrolling can leave SwiftTerm's logical row behind. Its
+            // public scroll API also stops new output from following the tail.
+            scrollTo(row: row, notifyAccessibility: false)
+        }
+    }
+
     func setFontPreservingGrid(_ font: UIFont) {
         // SwiftTerm's font setter otherwise reflows the grid against the old
         // pixel frame. An observer must retain even an alternate screen's cells.
@@ -140,6 +151,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     private var displayedSessionID: String?
     private var snapshotSessionID: String?
     private var revealLatestAfterLayout = false
+    private var readingHistory = false
 
     init(workspace: MobileWorkspace) {
         self.workspace = workspace
@@ -175,12 +187,15 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         workspace.render = { [weak self] bytes, reset in
             guard let self else { return }
             if reset {
+                readingHistory = false
                 if bytes.isEmpty {
                     snapshotSessionID = nil
                     revealLatestAfterLayout = false
                 }
                 terminal.clearSearch()
                 terminal.feed(text: "\u{1b}c")
+            } else if readingHistory {
+                terminal.synchronizeReadingPosition()
             }
             terminal.feed(byteArray: Array(bytes)[...])
             if reset, !bytes.isEmpty, snapshotSessionID != workspace.sessionID {
@@ -644,6 +659,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
     }
 
     private func showLatest() {
+        readingHistory = false
         terminal.scroll(toPosition: 1)
         // A UIKit swipe can move the visible content without changing SwiftTerm's
         // logical row. scrollTo also aligns the view when that row is unchanged.
@@ -653,7 +669,13 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         updateLatestButton()
     }
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) { updateLatestButton() }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView === terminal,
+           scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
+            readingHistory = scrollView.contentOffset.y + scrollView.bounds.height < scrollView.contentSize.height - 1
+        }
+        updateLatestButton()
+    }
 
     private func toggleKeyboard() {
         keyboardHidden.toggle()

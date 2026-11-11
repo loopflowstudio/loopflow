@@ -4,6 +4,55 @@ import XCTest
 /// Network/owner acceptance lives in MachineConnectionIntegrationTests.
 @MainActor
 final class SessionLifecycleTests: XCTestCase {
+    func testStreamingOutputKeepsTheSwipedReadingPosition() throws {
+        let output = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).terminal")
+        try Data().write(to: output)
+        defer { try? FileManager.default.removeItem(at: output) }
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture"]
+        app.launchEnvironment["LOOPFLOW_FIXTURE_OUTPUT"] = output.path
+        app.launch()
+        defer { app.terminate() }
+        let task = app.staticTexts["Session input study"]
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        task.tap()
+        let keyboard = app.buttons["Use keyboard"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        app.typeText("history\n")
+        app.buttons["Hide keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let viewport = app.descendants(matching: .any).matching(identifier: "terminal-viewport").firstMatch
+        viewport.swipeDown()
+        let latest = app.buttons["terminal-latest"]
+        capture(app, "session-stream-swiped")
+        guard latest.waitForExistence(timeout: 5) else {
+            return XCTFail("Output must not pull a swipe back to the prompt")
+        }
+        let terminal = app.textViews["session-terminal"]
+        let scrollBar = terminal.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Vertical scroll bar")).firstMatch
+        let before = try scrollPercentage(scrollBar)
+        let previousPages = scrollBar.label
+        try Data((1...80).map { "\r\nStreamed output \($0)" }.joined().utf8).write(to: output, options: .atomic)
+        let outputArrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label != %@", previousPages), object: scrollBar)
+        XCTAssertEqual(XCTWaiter.wait(for: [outputArrived], timeout: 5), .completed,
+                       "The new output must reach the rendered scrollback before checking retention")
+        XCTAssertTrue(latest.exists)
+        XCTAssertLessThanOrEqual(try scrollPercentage(scrollBar), before,
+                                 "Appending output can reduce the scroll percentage, but must not advance the reader")
+        capture(app, "session-stream-retained")
+        app.buttons["Find in Session"].tap()
+        let query = app.textFields["terminal-find-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        query.typeText("Streamed output")
+        XCTAssertTrue(app.staticTexts["Match found"].waitForExistence(timeout: 5))
+    }
+
+    private func scrollPercentage(_ bar: XCUIElement) throws -> Int {
+        let value = try XCTUnwrap(bar.value as? String)
+        return try XCTUnwrap(Int(value.filter(\.isNumber)), "Missing scroll percentage: \(value)")
+    }
+
     func testSwipeReadsScrollbackAndLatestReturnsToThePrompt() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture"]

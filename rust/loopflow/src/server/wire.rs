@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 4: one connection per client,
+//! Carrier-independent server protocol, revision 5: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only. Each carrier delimits messages its own way; the Unix socket
 //! carries one JSON object per line.
@@ -10,9 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 4;
+pub const REVISION: u32 = 5;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 4;
+pub const MIN_REVISION: u32 = 5;
 pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
@@ -375,6 +375,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/response.json"),
             include_str!("../../../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../../../tests/fixtures/dto/server/bridged.json"),
+            include_str!("../../../../tests/fixtures/dto/server/bridged_terminal.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_started.json"),
             include_str!("../../../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../../../tests/fixtures/dto/server/event_shipped.json"),
@@ -416,7 +417,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":4,"min_revision":4}"#
+            r#"{"type":"hello","revision":5,"min_revision":5}"#
         )
         .is_err());
         assert!(

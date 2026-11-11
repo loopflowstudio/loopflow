@@ -497,7 +497,7 @@ extension Mutex where Value == Int {
     func increment() -> Int { lock.withLock { value += 1; return value } }
 }
 
-/// One same-account peer speaking revision 4. Each `serve` accepts one
+/// One same-account peer speaking this build's revision. Each `serve` accepts one
 /// connection, welcomes it, then runs `handle` for every client message on a
 /// reader thread until the handler closes it or the client disconnects.
 private final class ServerPeer: @unchecked Sendable {
@@ -543,7 +543,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": 4, "server_revision": 4, "min_revision": 4, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 33_554_432, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

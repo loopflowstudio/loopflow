@@ -1,7 +1,7 @@
 //! A conversation's per-turn usage and completion, written to the store from
-//! its transcript in the shape the live stream's receipts have. Transcripts
-//! expire; these rows are what cost and history read afterwards. A turn
-//! Loopflow already recorded while it ran is left alone.
+//! its transcript in the shape the live stream's receipts have, so a launch
+//! with no live stream still counts toward its Task. A turn Loopflow already
+//! recorded while it ran is left alone.
 //!
 //! A transcript gives no cost: Claude's `cost-state` row is a total, not a
 //! turn's. Rows from here carry `"source":"transcript"` and no `cost_usd`.

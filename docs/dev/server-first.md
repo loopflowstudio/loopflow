@@ -147,16 +147,18 @@ the newest transcript written in their directory since they started
 executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
 
-Provider transcripts expire, and the cost-per-PR work (LOO-732) reads per-turn
-`usage` and `completed` rows from the store, so a transcript read also writes
-them (`transcript/facts.rs`): when a provider lf launched exits, each finished
+A bare run in a Task's checkout counts toward that Task, and the cost-per-PR
+work (LOO-732) reads per-turn `usage` and `completed` rows from the store, so
+a transcript read also writes them (`transcript/facts.rs`): when a provider lf launched exits, each finished
 run the store holds no completion for gets both rows, dated when the run
 ended, in the live stream's payload shape plus `"source":"transcript"`. A run
 is already recorded when a completion carries its id (Claude's request row,
 Codex's turn, the same ids the live stream uses) or was observed while it
 ran, since the live recording folds queued input into one turn. These rows
-carry no `cost_usd`. Not written: a run cut off with no end in the transcript,
-and anything for a raw conversation, which has no Session to hold rows. What
+carry no `cost_usd`: tokens come first, input, cache read, cache write and
+output kept apart, and dollar accounting is later work. Not written: a run cut
+off with no end in the transcript, and anything for a raw conversation, which
+is listed but not tracked. What
 each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
 0.167.0):
 
@@ -215,10 +217,10 @@ run ends with its parent.
 - Whether Claude and Codex repaint fully on a size nudge.
 - When a run's checkout and its calling Session belong to different Tasks,
   which one its cost counts toward.
-- Where a transcript-read Claude turn gets its cost: the `cost-state` total
-  on a run's last turn, or none.
-- Whether a raw conversation's turns reach the store, which holds turns only
-  for a Session.
+- Whether a bare run outside every Task and Wave checkout gets usage rows.
+  The exit read writes them for any provider lf launched.
+- How long the store keeps turn rows once the provider's transcript is the
+  record: as long as today, expired, or sent elsewhere.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

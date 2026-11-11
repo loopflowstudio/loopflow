@@ -63,8 +63,8 @@ lf install                         # terminal two, mid-turn
 
 The turn keeps streaming. The terminal showing it waits, drawing nothing and
 discarding what is typed, while the server is replaced; a Desktop pane on the
-same conversation says **Reconnecting…**. Each then repaints the current
-screen. Nothing is resent to the agent.
+same conversation says **Reconnecting…**. Each then continues where it left
+off, showing what the agent printed meanwhile. Nothing is resent to the agent.
 
 A Task or Wave conversation's agent runs in a holder: one `lf holder run`
 process beside the server that keeps the terminals and agents of every such
@@ -87,8 +87,8 @@ its last conversation ends.
 
 | When | Agents | Open views | A view opened afterward |
 |---|---|---|---|
-| `lf install` | keep running | pause, then repaint the current screen | the current screen; older scrollback may be missing |
-| the server crashes or is killed | keep running | pause until the OS restarts the server, then repaint | the current screen; older scrollback may be missing |
+| `lf install` | keep running | pause, then continue with what was printed meanwhile | the current screen; older scrollback may be missing |
+| the server crashes or is killed | keep running | pause until the OS restarts the server, then continue | the current screen; older scrollback may be missing |
 | a holder is killed | end, with the conversations it held | say the process is gone and offer resume | `lf resume` continues from provider history |
 | logout or reboot | end | close | [resume from saved history](#after-a-crash-or-reboot) |
 
@@ -98,7 +98,8 @@ rebuilds each screen from that output, then asks the agent to redraw by
 changing the terminal's width by one column and back: the visible screen is
 exact and scrollback reaches as far back as the kept output. A view in a
 terminal waits without drawing anything, discards what is typed meanwhile,
-and repaints when the server is back; Ctrl+] closes it.
+and continues when the server is back; Ctrl+] closes it. A view away longer
+than the kept output covers repaints the current screen instead.
 
 A conversation that ends while the server is away is recorded with its real
 exit when the server returns; until then `lf session list` shows what it last

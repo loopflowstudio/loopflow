@@ -198,6 +198,7 @@ impl Source {
                         stream: 1,
                         bytes,
                         raw: self.raw,
+                        end: Some(self.at),
                     });
                 }
                 Frame::Mode(mode) => self.raw = mode.raw,
@@ -361,6 +362,22 @@ impl Source {
         }
     }
 
+    /// A second read of this terminal from `from`, for a view that already
+    /// shows the screen up to there. `None` when the holder cannot serve it:
+    /// the view is painted afresh instead.
+    pub fn catch_up(&self, from: u64) -> Option<CatchUp> {
+        let output = Client::connect_within(&self.place, CONNECT)
+            .ok()?
+            .read(self.terminal.as_str(), from)
+            .ok()?;
+        output.socket.set_nonblocking(true).ok()?;
+        Some(CatchUp {
+            socket: output.socket,
+            decoder: output.decoder,
+            at: from,
+        })
+    }
+
     /// End the child and everything in its process group.
     pub fn retire(&self) {
         if self.ended.is_none() {
@@ -388,6 +405,59 @@ impl Source {
             };
             fds.push(pollfd(socket.as_raw_fd(), events));
         }
+    }
+}
+
+/// The PTY output a view missed, read from the holder's ring on a connection
+/// of its own, so the registry keeps no second ring.
+#[derive(Debug)]
+pub(super) struct CatchUp {
+    socket: UnixStream,
+    decoder: Decoder,
+    /// The next PTY byte this read returns.
+    at: u64,
+}
+
+impl CatchUp {
+    /// The bytes from where the view stands up to `until`, the position the
+    /// live stream has reached; what lies beyond comes live. An error means
+    /// the view cannot continue: the ring no longer holds its position or
+    /// the holder went away.
+    pub fn read(&mut self, until: u64) -> io::Result<Vec<u8>> {
+        let mut caught = Vec::new();
+        loop {
+            while let Some(frame) = self.decoder.frame()? {
+                match frame {
+                    Frame::Out(bytes) => {
+                        let wanted = until.saturating_sub(self.at).min(bytes.len() as u64);
+                        caught.extend_from_slice(&bytes[..wanted as usize]);
+                        self.at += bytes.len() as u64;
+                    }
+                    Frame::Mode(_) => {}
+                    Frame::Gap(_) => {
+                        return Err(io::Error::other(
+                            "the ring no longer holds this view's position",
+                        ))
+                    }
+                    Frame::Exit(_) => return Ok(caught),
+                }
+                if self.at >= until {
+                    return Ok(caught);
+                }
+            }
+            let mut bytes = [0; 16384];
+            match self.socket.read(&mut bytes) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => self.decoder.extend(&bytes[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(caught),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    pub fn fd(&self) -> RawFd {
+        self.socket.as_raw_fd()
     }
 }
 

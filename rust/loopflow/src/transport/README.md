@@ -205,6 +205,8 @@ message is a frame: `tag u8 · len u32 BE · payload`. Stream frames carry at mo
 | `0x02` snapshot | owner → viewer | the terminal snapshot a fresh stream begins with |
 | `0x03` out | owner → viewer | stream 1: PTY output, or stdout of a piped command |
 | `0x04` err | owner → viewer | stream 2: stderr of a piped command |
+| `0x05` position | server → viewer | a held terminal's PTY position the stream stands at, u64 BE |
+| `0x06` aside | server → viewer | lf's reports and events for a held terminal's view; not PTY bytes |
 | `0x11` request | viewer → owner | JSON with `id` and `kind` |
 | `0x12` input | viewer → owner | keystrokes from the connection holding input control |
 
@@ -230,7 +232,7 @@ per viewer, and every reply carries the `seq` of the last event queued when it
 was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
 `owner {viewer,name,held}`, `control {held,notice}` (input control left this
 connection), `child_exited {code}`, `detached`, `hint {text}` and
-`return {detach}`. A viewer that receives `control` with `held: false` restores
+`return {detach}` and `live`. A viewer that receives `control` with `held: false` restores
 its terminal, prints the notice and leaves.
 
 A connection that ends without a `leave` request keeps its stream for 60 s.
@@ -441,13 +443,44 @@ same entrance; `LF_TRANSPORT_HELD` names its terminal the way
 `lf session attach --terminal TERMINAL` is the relay for a held terminal.
 When its connection drops it connects again on its own, with backoff, until a
 server hosts the terminal or says it has ended. It draws nothing while it
-waits; typing is discarded and Ctrl+] closes the view. On reconnecting it
-attaches afresh and paints the screen the server holds. Clients that speak
+waits; typing is discarded and Ctrl+] closes the view. Clients that speak
 only the server protocol reach the same terminals with a `session.attach`
 ticket (`server/README.md`).
 
-A view's stream is still counted in bytes sent to that viewer, so a view that
-outlives a server is repainted rather than continued by position.
+A held terminal's view counts PTY bytes, not bytes sent to it. Its `out`
+frames are exactly the PTY's output; a `position` frame follows a snapshot
+and any stretch it skipped (output the ring dropped before the server read
+it, or a native client's exit text lf replaced); lf's reports and events
+travel in `aside` frames, which it writes and does not count. The server
+keeps no spool for it.
+
+A view that reconnects attaches with `from`, the position its screen shows:
+
+```json
+{"id":1,"kind":"attach","control":true,"replace":false,"own":"request","rows":40,"cols":120,"name":null,"moved":null,"from":48213}
+```
+
+The server answers a new viewer identity, reads the PTY bytes from `from`
+out of the holder's ring on a connection of its own, and sends them as `out`
+frames until the view reaches the live stream; this works after a server
+restart too, since nothing about the view is kept in the server. Then it
+sends the current state again (size, owner, theme, directory, title and
+program status, a child exit) and a `live` event. A `from` the ring no
+longer holds, or past what the PTY printed, gets a snapshot and `position`
+instead, then `live`. Until it has caught up the view receives no reports or
+events, and its terminal's answers do not count as the controller's: the
+retained screen answers the agent's live queries meanwhile.
+
+The replayed bytes contain queries the agent asked long ago, and the view's
+terminal answers them again. The relay discards everything it reads from
+its terminal until the stream is live, then writes a status report query
+(`CSI 5 n`) and keeps discarding until the terminal's answer to it: answers
+come in order, so every late one has arrived by then (one second at most if
+a terminal never answers). Anything the relay itself prints into the screen
+(a reconnect notice, an input hint, an ownership change) makes its next
+reconnect a fresh attach that repaints instead. The replayed stretch is the
+raw PTY output, including a native client's exit text that live views see
+replaced.
 
 ### Server restart
 
@@ -462,7 +495,8 @@ narrower for 0.4 s, and back) asks the agent to repaint what the ring no
 longer holds. The same nudge follows a gap, when the ring passed output the
 server had not read. Scrollback reaches only as far back as the ring, and a
 terminal mode set before the ring's start is known only if the agent sets it
-again when resized.
+again when resized. Replayed output answers none of its queries: they were
+answered when it was printed, or went unanswered while no server ran.
 
 ### Exit and settlement
 

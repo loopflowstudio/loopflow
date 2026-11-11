@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use super::super::wire::{frame, Decoder, Incoming, Own, Request, Tag};
+use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
 use super::{connect, Registry, Start};
 use crate::holder::{serve, Place};
 use crate::id::{LfSessionId, TerminalId};
@@ -43,10 +43,20 @@ struct View {
     socket: UnixStream,
     decoder: Decoder,
     seen: Vec<u8>,
+    /// Every frame tag received, in order.
+    tags: Vec<Tag>,
+    /// The PTY output received in out frames after the last position.
+    out: Vec<u8>,
+    /// The PTY position the screen shows.
+    position: Option<u64>,
 }
 
 impl View {
     fn attach(terminal: &TerminalId) -> Self {
+        Self::attach_from(terminal, None)
+    }
+
+    fn attach_from(terminal: &TerminalId, from: Option<u64>) -> Self {
         let mut socket = connect(terminal).unwrap();
         let attach = Incoming {
             id: 1,
@@ -58,6 +68,7 @@ impl View {
                 cols: 80,
                 name: None,
                 moved: None,
+                from,
             },
         };
         socket
@@ -70,6 +81,9 @@ impl View {
             socket,
             decoder: Decoder::default(),
             seen: Vec::new(),
+            tags: Vec::new(),
+            out: Vec::new(),
+            position: from,
         }
     }
 
@@ -96,7 +110,22 @@ impl View {
                 Err(_) => continue,
             }
             while let Some((tag, payload)) = self.decoder.next().unwrap() {
-                if matches!(tag, Tag::Snapshot | Tag::Out) {
+                self.tags.push(tag);
+                match tag {
+                    Tag::Position => {
+                        self.position = Some(parse_position(&payload).unwrap());
+                        self.out.clear();
+                    }
+                    Tag::Out => {
+                        self.out.extend(&payload);
+                        *self
+                            .position
+                            .as_mut()
+                            .expect("out frames follow a position") += payload.len() as u64;
+                    }
+                    _ => {}
+                }
+                if matches!(tag, Tag::Snapshot | Tag::Out | Tag::Aside) {
                     self.seen.extend(payload);
                 }
             }
@@ -222,4 +251,159 @@ fn an_exit_with_no_server_running_is_settled_by_the_next_one() {
     });
     assert!(connect(&terminal).is_err());
     second.close();
+}
+
+/// A shell printing a counter line every 50 ms until it is killed.
+const COUNTER: &str = "i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.05; done";
+
+/// The PTY bytes the holder keeps for `terminal` from `from` up to `until`.
+fn ring(place: &Place, terminal: &TerminalId, from: u64, until: u64) -> Vec<u8> {
+    let mut output = crate::holder::client::Client::connect(place)
+        .unwrap()
+        .read(terminal.as_str(), from)
+        .unwrap();
+    let mut bytes = Vec::new();
+    while from + (bytes.len() as u64) < until {
+        match output.frame().unwrap() {
+            crate::holder::wire::Frame::Out(out) => bytes.extend(out),
+            crate::holder::wire::Frame::Mode(_) => {}
+            other => panic!("unexpected holder frame {other:?}"),
+        }
+    }
+    bytes.truncate((until - from) as usize);
+    bytes
+}
+
+fn kill(place: &Place, terminal: &TerminalId) {
+    let held = crate::holder::client::Client::connect(place)
+        .unwrap()
+        .list()
+        .unwrap();
+    crate::os_process::kill_process_group(
+        held.iter()
+            .find(|held| held.terminal == terminal.as_str())
+            .unwrap()
+            .pid,
+    );
+}
+
+const LIVE: &str = "\"type\":\"live\"";
+
+#[test]
+fn a_view_continues_from_its_position_after_the_server_restarts() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let first = Registry::open(BUILD).unwrap();
+    let terminal = first.start(shell(None, "request-1", COUNTER)).unwrap();
+    let mut view = View::attach(&terminal);
+    view.wait_for("tick:3");
+    assert_eq!(
+        view.tags
+            .iter()
+            .filter(|tag| **tag == Tag::Snapshot)
+            .count(),
+        1
+    );
+    let left = view.position.expect("a held view is told its position");
+
+    // The server goes; the agent keeps printing into the holder's ring.
+    first.close();
+    drop(view);
+    std::thread::sleep(Duration::from_millis(500));
+
+    let second = Registry::open(BUILD).unwrap();
+    let mut view = View::attach_from(&terminal, Some(left));
+    view.wait_for(LIVE);
+    assert!(
+        !view.tags.contains(&Tag::Snapshot) && !view.tags.contains(&Tag::Position),
+        "a continued view is neither repainted nor moved: {:?}",
+        view.tags
+    );
+    // Its stream is exactly the PTY output since it left, including what
+    // was printed while no server ran.
+    let reached = view.position.unwrap();
+    assert_eq!(view.out, ring(&place, &terminal, left, reached));
+    let printed = String::from_utf8_lossy(&view.out).matches("tick:").count();
+    assert!(printed >= 5, "{:?}", String::from_utf8_lossy(&view.out));
+    // Then it follows the live stream.
+    let ticks = String::from_utf8_lossy(&ring(&place, &terminal, 0, reached))
+        .matches("tick:")
+        .count();
+    view.wait_for(&format!("tick:{}", ticks + 2));
+    assert_eq!(
+        view.out,
+        ring(&place, &terminal, left, view.position.unwrap())
+    );
+    second.close();
+    kill(&place, &terminal);
+}
+
+#[test]
+fn a_view_the_ring_no_longer_reaches_is_painted_afresh() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let registry = Registry::open(BUILD).unwrap();
+    let terminal = registry
+        .start(shell(
+            None,
+            "request-1",
+            "head -c 3000000 /dev/zero | tr '\\0' x; printf 'end\\n'; read line",
+        ))
+        .unwrap();
+    wait_until("the ring to pass its start", || {
+        crate::holder::client::Client::connect(&place)
+            .unwrap()
+            .list()
+            .unwrap()
+            .iter()
+            .any(|held| held.ring_start > 0 && held.written > 3_000_000)
+    });
+    let mut view = View::attach_from(&terminal, Some(1));
+    view.wait_for(LIVE);
+    assert!(view.tags.contains(&Tag::Snapshot), "{:?}", view.tags);
+    let at = view.position.unwrap();
+    let ring_start = crate::holder::client::Client::connect(&place)
+        .unwrap()
+        .list()
+        .unwrap()[0]
+        .ring_start;
+    assert!(
+        at >= ring_start,
+        "the snapshot's position {at} is inside the ring"
+    );
+    // A position past anything the PTY printed is painted afresh too.
+    let mut view = View::attach_from(&terminal, Some(u64::MAX / 2));
+    view.wait_for(LIVE);
+    assert!(view.tags.contains(&Tag::Snapshot), "{:?}", view.tags);
+    registry.close();
+    kill(&place, &terminal);
+}
+
+#[test]
+fn queries_replayed_from_the_ring_are_not_answered_again() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let answers = tempfile::tempdir().unwrap();
+    let file = answers.path().join("answers");
+    let first = Registry::open(BUILD).unwrap();
+    // A program asks for the cursor once and keeps everything it is sent.
+    let script = format!(
+        "stty raw -echo; printf 'asked\\033[6n'; exec cat > {}",
+        file.display()
+    );
+    let terminal = first.start(shell(None, "request-1", &script)).unwrap();
+    let read = || std::fs::read(&file).unwrap_or_default();
+    // No view is attached: the retained screen answers.
+    wait_until("the screen to answer", || read().ends_with(b"R"));
+    let answered = read();
+    first.close();
+
+    let second = Registry::open(BUILD).unwrap();
+    // The rebuilt screen has replayed the question and holds it.
+    let mut view = View::attach(&terminal);
+    view.wait_for("asked");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(read(), answered, "a replayed query was answered again");
+    second.close();
+    kill(&place, &terminal);
 }

@@ -715,6 +715,15 @@ struct Viewer {
     /// The `native_ended` request awaiting its acknowledgement.
     ending: Option<u64>,
     input_hint: Option<String>,
+    /// A held terminal's PTY position this viewer's stream has reached. An
+    /// owner's viewer has none: its stream is counted in its own bytes.
+    position: Option<u64>,
+    /// The position an attachment asked to continue from.
+    from: Option<u64>,
+    /// Behind or ahead of the live stream: it receives only the PTY bytes
+    /// that bring it to the live position, then the current state again.
+    catching_up: bool,
+    catch_up: Option<held::CatchUp>,
 }
 
 impl Viewer {
@@ -740,6 +749,10 @@ impl Viewer {
             resuming: None,
             ending: None,
             input_hint: None,
+            position: None,
+            from: None,
+            catching_up: false,
+            catch_up: None,
         }
     }
 
@@ -753,10 +766,13 @@ impl Viewer {
         }
     }
 
-    /// Append `bytes` to this viewer's stream; a dropped viewer only spools them.
+    /// Append `bytes` to this viewer's stream; a dropped viewer only spools
+    /// them. A held terminal's viewer resumes from the holder's ring instead.
     fn stream(&mut self, tag: Tag, bytes: &[u8]) -> io::Result<()> {
         for chunk in bytes.chunks(wire::CHUNK) {
-            self.spool.push(tag, chunk);
+            if self.position.is_none() {
+                self.spool.push(tag, chunk);
+            }
             if self.connection.is_open() {
                 wire::encode(tag, chunk, &mut self.output);
             }
@@ -774,10 +790,35 @@ impl Viewer {
 
     /// Place queued events on the stream.
     fn flush_events(&mut self) -> io::Result<()> {
+        let tag = self.lf_tag();
         for bytes in std::mem::take(&mut self.events) {
-            self.stream(Tag::Out, &bytes)?;
+            self.stream(tag, &bytes)?;
         }
         Ok(())
+    }
+
+    /// The frame lf's own reports and events travel in: outside a held
+    /// terminal's PTY positions, inside an owner's counted stream.
+    fn lf_tag(&self) -> Tag {
+        if self.position.is_some() {
+            Tag::Aside
+        } else {
+            Tag::Out
+        }
+    }
+
+    /// Tell a held terminal's viewer its stream now stands at PTY byte `at`.
+    fn place(&mut self, at: u64) {
+        self.position = Some(at);
+        if self.connection.is_open() {
+            wire::encode(Tag::Position, &wire::position(at), &mut self.output);
+        }
+    }
+
+    /// Whether lf's reports and events may reach this viewer now. One
+    /// catching up receives them once it reaches the live stream.
+    fn current(&self) -> bool {
+        self.attached && !self.catching_up
     }
 
     fn reply(&mut self, answers: u64, reply: Reply) {
@@ -1264,8 +1305,8 @@ fn end_viewers(viewers: &mut [Viewer], event: Event) {
 fn publish_reports(output: &mut output::Output, viewers: &mut Vec<Viewer>) {
     if let Some(reports) = output.take_reports() {
         viewers.retain_mut(|viewer| {
-            !viewer.attached || {
-                let written = viewer.stream(Tag::Out, &reports);
+            !viewer.current() || {
+                let written = viewer.stream(viewer.lf_tag(), &reports);
                 keep(viewer, written)
             }
         });
@@ -1288,36 +1329,69 @@ fn place_events(output: &output::Output, viewers: &mut Vec<Viewer>, announced: b
         if viewer.output.len() + viewer.events.iter().map(Vec::len).sum::<usize>() > LIMIT {
             return false;
         }
-        !ready || viewer.events.is_empty() || {
+        !ready || viewer.catching_up || viewer.events.is_empty() || {
             let written = viewer.flush_events().and_then(|()| viewer.flush());
             keep(viewer, written)
         }
     });
 }
 
+/// Where delivered bytes stand in a held terminal's PTY stream. An owner's
+/// viewers count every byte and ignore it.
+#[derive(Debug, Clone, Copy)]
+enum Span {
+    /// Exactly the PTY's output from `start` to `end`.
+    Pty { start: u64, end: u64 },
+    /// lf's own bytes, after which viewers stand at `through` when it is set:
+    /// a native client's replacement for output it withheld, settled lines.
+    Aside { through: Option<u64> },
+}
+
+/// Feed `bytes` to the retained screen and every current viewer. `answering`
+/// says the screen answers the program's queries: no viewer's terminal
+/// receiving this output will.
 fn deliver(
     output: &mut output::Output,
     viewers: &mut Vec<Viewer>,
     pending_input: &mut PendingInput,
     stream: u8,
     bytes: &[u8],
-    detached: bool,
+    answering: bool,
+    span: Span,
 ) {
     if bytes.is_empty() {
         return;
     }
-    let replies = output.process(stream, bytes, detached);
+    let replies = output.process(stream, bytes, answering);
     pending_input.push(&replies);
     let reports = output.take_reports();
     viewers.retain_mut(|viewer| {
-        !viewer.attached || {
-            let written = viewer
-                .stream(Tag::stream(stream), bytes)
-                .and_then(|()| match &reports {
-                    Some(reports) => viewer.stream(Tag::Out, reports),
-                    None => Ok(()),
-                })
-                .and_then(|()| viewer.flush());
+        !viewer.current() || {
+            let written = (|| {
+                match (viewer.position, span) {
+                    (None, _) => viewer.stream(Tag::stream(stream), bytes)?,
+                    (Some(at), Span::Pty { start, end }) => {
+                        // Output the ring dropped before this server read it
+                        // never reaches the viewer; its program is asked to
+                        // repaint.
+                        if at != start {
+                            viewer.place(start);
+                        }
+                        viewer.stream(Tag::Out, bytes)?;
+                        viewer.position = Some(end);
+                    }
+                    (Some(at), Span::Aside { through }) => {
+                        viewer.stream(Tag::Aside, bytes)?;
+                        if let Some(through) = through.filter(|through| *through != at) {
+                            viewer.place(through);
+                        }
+                    }
+                }
+                if let Some(reports) = &reports {
+                    viewer.stream(viewer.lf_tag(), reports)?;
+                }
+                viewer.flush()
+            })();
             keep(viewer, written)
         }
     });
@@ -1682,13 +1756,24 @@ pub fn relay(id: &Host, session: Option<&LfSessionId>, moved: Option<String>) ->
 #[derive(Default)]
 struct RelayOutput {
     reconnect: Option<String>,
+    /// Bytes of an owner's stream received, or the held terminal's PTY
+    /// position the screen shows.
     received: u64,
     scanner: Option<Scanner>,
     replayed_claims_through: Option<u64>,
+    /// A held terminal's stream said which PTY position it stands at, and
+    /// the screen has shown nothing since but that stream.
+    positioned: bool,
+    /// The attachment in flight continues the screen from `received`.
+    continuing: bool,
 }
 
 impl RelayOutput {
-    fn recover(&mut self, terminal: bool) -> Request {
+    fn recover(&mut self, terminal: bool, held: bool) -> Request {
+        // A held terminal's screen continues from the PTY position it shows.
+        if held && self.positioned {
+            return self.continuation(true);
+        }
         // A fresh terminal screen restores parser state even if the bridge
         // interrupted an escape sequence; byte streams continue at their offset.
         if !terminal {
@@ -1709,6 +1794,26 @@ impl RelayOutput {
 
     fn fresh_attachment(&mut self, control: bool) -> Request {
         *self = Self::default();
+        self.attachment(control, None)
+    }
+
+    /// Attach as a new viewer whose screen already shows the held terminal
+    /// up to `received`.
+    fn continuation(&mut self, control: bool) -> Request {
+        self.continuing = true;
+        self.attachment(control, Some(self.received))
+    }
+
+    /// Attach passively after a recovery found input held elsewhere.
+    fn passive(&mut self) -> Request {
+        if self.continuing {
+            self.continuation(false)
+        } else {
+            self.fresh_attachment(false)
+        }
+    }
+
+    fn attachment(&self, control: bool, from: Option<u64>) -> Request {
         let (rows, cols) = size();
         Request::Attach {
             control,
@@ -1718,15 +1823,79 @@ impl RelayOutput {
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved: None,
+            from,
         }
     }
 
-    fn attached(&mut self, reconnect: String, nonce: &str, sequence: u64) {
+    /// Whether this acknowledgement continues the screen from a position.
+    fn attached(&mut self, reconnect: String, nonce: &str, sequence: u64) -> bool {
         self.replayed_claims_through = self.reconnect.as_ref().map(|_| sequence);
-        if self.reconnect.is_none() {
-            self.scanner = Some(Scanner::new(nonce));
+        let continued = std::mem::take(&mut self.continuing);
+        match &mut self.scanner {
+            // A continuation is a new viewer with its own nonce.
+            Some(scanner) if continued => scanner.renonce(nonce),
+            Some(_) => {}
+            None => self.scanner = Some(Scanner::new(nonce)),
         }
         self.reconnect = Some(reconnect);
+        continued
+    }
+
+    /// The relay drew into the screen itself: it no longer shows a PTY
+    /// position, so the next recovery repaints it.
+    fn drew(&mut self) {
+        self.positioned = false;
+    }
+}
+
+/// Terminals answer queries in order, so once a terminal answers this
+/// status report every answer it owed replayed output has arrived.
+const FENCE: &[u8] = b"\x1b[5n";
+const FENCE_ANSWER: &[u8] = b"\x1b[0n";
+/// How long a terminal that never answers `FENCE` holds input back.
+const FENCE_WAIT: Duration = Duration::from_secs(1);
+
+/// A view catching up from a position replays output whose queries were
+/// answered long ago; its terminal answers them again. Nothing it reads
+/// reaches the agent until that is over.
+#[derive(Debug)]
+enum CatchingUp {
+    /// Replayed output is still arriving.
+    Replaying,
+    /// The stream is live; the terminal's answers end with `FENCE_ANSWER`.
+    Fenced { matched: usize, until: Instant },
+}
+
+impl CatchingUp {
+    fn fenced() -> Self {
+        Self::Fenced {
+            matched: 0,
+            until: Instant::now() + FENCE_WAIT,
+        }
+    }
+
+    /// What of `bytes` read from the terminal may reach the agent: nothing
+    /// before the fence's answer, everything after it. `None` while catching
+    /// up continues.
+    fn pass<'a>(&mut self, bytes: &'a [u8]) -> Option<&'a [u8]> {
+        let Self::Fenced { matched, .. } = self else {
+            return None;
+        };
+        for (i, byte) in bytes.iter().enumerate() {
+            if *byte == FENCE_ANSWER[*matched] {
+                *matched += 1;
+                if *matched == FENCE_ANSWER.len() {
+                    return Some(&bytes[i + 1..]);
+                }
+            } else {
+                *matched = usize::from(*byte == FENCE_ANSWER[0]);
+            }
+        }
+        None
+    }
+
+    fn expired(&self) -> bool {
+        matches!(self, Self::Fenced { until, .. } if Instant::now() >= *until)
     }
 }
 
@@ -1850,8 +2019,9 @@ fn view(
     let mut acknowledgement_deadline = Some(Instant::now() + attach_timeout);
     let (rows, cols) = size();
     let mut output = RelayOutput::default();
+    let held = matches!(id, Some(Host::Terminal(_)));
     let attachment = if recovery.is_some() {
-        output.recover(terminal.is_some())
+        output.recover(terminal.is_some(), held)
     } else {
         Request::Attach {
             control: true,
@@ -1861,6 +2031,7 @@ fn view(
             cols,
             name: tty_name(libc::STDIN_FILENO),
             moved,
+            from: None,
         }
     };
     let initial = send(&mut socket, attachment);
@@ -1878,7 +2049,11 @@ fn view(
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
     let mut heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
     let mut last_response = Instant::now();
+    let mut catching_up: Option<CatchingUp> = None;
     'relay: loop {
+        if catching_up.as_ref().is_some_and(CatchingUp::expired) {
+            catching_up = None;
+        }
         let mut can_reconnect = server
             || (id.is_some()
                 && terminal.is_some()
@@ -1920,7 +2095,7 @@ fn view(
             controlled = false;
             owned = false;
             recovery = Some(Recovery::Reconnect);
-            if let Err(error) = send(&mut socket, output.recover(terminal.is_some())) {
+            if let Err(error) = send(&mut socket, output.recover(terminal.is_some(), held)) {
                 interrupted = Some(error.to_string());
                 continue;
             }
@@ -1987,8 +2162,18 @@ fn view(
             last_response = Instant::now();
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
-                if tag != Tag::Reply {
-                    output.received += payload.len() as u64;
+                match tag {
+                    Tag::Reply | Tag::Aside => {}
+                    Tag::Position => {
+                        output.received = wire::parse_position(&payload)?;
+                        output.positioned = true;
+                        continue;
+                    }
+                    Tag::Snapshot => {
+                        output.received += payload.len() as u64;
+                        output.positioned = false;
+                    }
+                    _ => output.received += payload.len() as u64,
                 }
                 let pieces = match tag {
                     Tag::Reply => {
@@ -2021,12 +2206,15 @@ fn view(
                                     // this connection's cumulative resume offset.
                                     output.scanner = Some(Scanner::new(&nonce));
                                 }
-                                output.attached(token, &nonce, reply.seq);
+                                let continued = output.attached(token, &nonce, reply.seq);
+                                catching_up = continued.then_some(CatchingUp::Replaying);
                                 if recovered.is_some() || status.is_some() {
                                     discard_reconnect_input()?;
                                     fds[1].revents = 0;
                                 }
-                                if recovered.is_some() && status.is_none() {
+                                // A continued screen shows the agent's output and nothing else.
+                                if recovered.is_some() && status.is_none() && !(continued && controlled) {
+                                    output.drew();
                                     write_output(&mut terminal, 2, if controlled {
                                         b"\r\nReconnected to the same Session.\r\n"
                                     } else if server {
@@ -2051,7 +2239,7 @@ fn view(
                             Reply::Busy if recovery.is_some() => {
                                 // A fresh screen cannot atomically ask for optional
                                 // input. On Busy, attach passively to the same owner.
-                                if let Err(error) = send(&mut socket, output.fresh_attachment(false)) {
+                                if let Err(error) = send(&mut socket, output.passive()) {
                                     interrupted = Some(error.to_string());
                                     continue 'relay;
                                 }
@@ -2085,13 +2273,15 @@ fn view(
                             .write(1, &payload)?;
                         continue;
                     }
-                    Tag::Snapshot | Tag::Out => output
+                    Tag::Snapshot | Tag::Out | Tag::Aside => output
                         .scanner
                         .as_mut()
                         .context("Execution owner streamed before acknowledging attachment")?
                         .scan(&payload),
                     Tag::Err => vec![wire::Piece::Bytes(payload)],
-                    Tag::Request | Tag::Input => anyhow::bail!("unexpected transport frame"),
+                    Tag::Request | Tag::Input | Tag::Position => {
+                        anyhow::bail!("unexpected transport frame")
+                    }
                 };
                 let stream = if tag == Tag::Err { 2 } else { 1 };
                 for piece in pieces {
@@ -2125,6 +2315,7 @@ fn view(
                             if status.is_none() && owned && !held {
                                 let who =
                                     name.or(viewer).unwrap_or_else(|| "another viewer".into());
+                                output.drew();
                                 write_output(
                                     &mut terminal,
                                     2,
@@ -2172,8 +2363,21 @@ fn view(
                                 write_output(&mut terminal, 1, b"\x1b]2;loopflow:input-ready\x07")?;
                             }
                         }
+                        Event::Live => {
+                            // The terminal's answer to the fence comes after
+                            // every answer it owes the replayed output.
+                            if matches!(catching_up, Some(CatchingUp::Replaying)) {
+                                catching_up = if terminal.is_some() {
+                                    write_output(&mut terminal, 1, FENCE)?;
+                                    Some(CatchingUp::fenced())
+                                } else {
+                                    None
+                                };
+                            }
+                        }
                         Event::Hint { text } => {
                             if let Some(terminal) = &mut terminal {
+                                output.drew();
                                 terminal.write(2, format!("\r\n{text}\r\n").as_bytes())?;
                             } else {
                                 eprintln!("{text}");
@@ -2210,6 +2414,7 @@ fn view(
                     cols,
                     name: tty_name(libc::STDIN_FILENO),
                     moved: None,
+                    from: None,
                 };
                 if let Err(error) = send(&mut socket, request) {
                     interrupted = Some(error.to_string());
@@ -2242,7 +2447,21 @@ fn view(
                 }
                 return Ok(());
             } else if controlled {
-                if let Err(error) = send_frame(&mut socket, Tag::Input, &bytes[..n]) {
+                let typed = match &mut catching_up {
+                    None => &bytes[..n],
+                    Some(catching) => match catching.pass(&bytes[..n]) {
+                        Some(rest) => {
+                            catching_up = None;
+                            rest
+                        }
+                        None => &[],
+                    },
+                };
+                let sent = match typed {
+                    [] => Ok(()),
+                    typed => send_frame(&mut socket, Tag::Input, typed),
+                };
+                if let Err(error) = sent {
                     if !can_reconnect {
                         return Err(error);
                     }
@@ -2708,10 +2927,25 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        carry_across_exec, output, place_events, wire, Event, Handoff, Own, Ownership, Viewer,
-        CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
+        carry_across_exec, output, place_events, wire, CatchingUp, Event, Handoff, Own, Ownership,
+        Viewer, CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
+
+    #[test]
+    fn a_catching_up_views_terminal_answers_never_reach_the_agent() {
+        // Replayed output is still arriving: whatever the terminal says waits.
+        let mut catching = CatchingUp::Replaying;
+        assert_eq!(catching.pass(b"\x1b[12;1R"), None);
+        // Late answers to replayed queries, then the fence's answer split
+        // across reads, then the first key typed after it.
+        let mut catching = CatchingUp::fenced();
+        assert_eq!(catching.pass(b"\x1b[3;1R\x1b[?62;22c\x1b"), None);
+        assert_eq!(catching.pass(b"[0"), None);
+        assert_eq!(catching.pass(b"nls\r"), Some(&b"ls\r"[..]));
+        let mut catching = CatchingUp::fenced();
+        assert_eq!(catching.pass(b"\x1b\x1b[0n"), Some(&b""[..]));
+    }
 
     #[test]
     fn heartbeat_requires_thirty_seconds_of_uptime() {

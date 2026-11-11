@@ -492,7 +492,7 @@ impl Registry {
             meta.control_key,
             waker,
         )?;
-        entry.hosted.restore_size(held.rows, held.cols)?;
+        entry.hosted.take_up(held.rows, held.cols, held.written)?;
         // The screen is rebuilt from the ring, then the program repaints what
         // the ring no longer holds of the visible screen.
         entry.nudge = Some(Nudge::Replaying {

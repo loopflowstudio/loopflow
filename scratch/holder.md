@@ -80,9 +80,9 @@ terminals". Risks, Forbidden and the gate test below still apply.
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(holder::) | test(transport::) | test(server::)'
 ```
 
-Integration test `held_session_survives_server_restart` (not written; in
-`tests/integration.rs`, isolated `LF_HOME`, fake agent script printing a
-counter every 100 ms):
+Integration test `held_session_survives_server_restart` (in
+`tests/transport_tests.rs` beside the other server fixtures, isolated
+`LF_HOME`, fake agent script printing a counter every 100 ms):
 
 1. Start a server fixture; `session.start` the fake agent; attach a viewer;
    see counter lines. `ps` of the fixture's process group: one server, one
@@ -446,12 +446,14 @@ where several typing views make it necessary; telling a query reply from a
 keystroke in a view's input, and what color queries return, are designed
 there. `docs/dev/server-first.md` records it under that piece.
 
-Status: position identity is built and tested
-(`holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`,
-`transport::registry_tests::an_ended_terminal_is_settled_and_never_answers_again`).
-The plain relay draws nothing while reconnecting and discards input; with
-4a unbuilt every reconnect is a fresh attach that repaints, so the
-print-then-refresh rule holds trivially. The catch-up discard comes with 4a.
+Status: all three built. Position identity:
+`holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`,
+`transport::registry::tests::an_ended_terminal_is_settled_and_never_answers_again`.
+The catch-up discard: the relay drops terminal input until `live`, then
+writes `CSI 5 n` and drops input until the terminal's `CSI 0 n` (1 s cap);
+`transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`.
+Print-then-refresh: anything the relay prints clears its position, so the
+next reconnect is a fresh attach.
 
 ## Implementation — November 10, 2026
 
@@ -554,14 +556,41 @@ left undecoded until more output came (fixed in `Source::read`). A test
 holder idles out in 2 s, too short beside a slow store open; fixtures set
 `holder::TEST_IDLE` on the holder thread.
 
+**Built: position resume (4a).** Viewer frames `position` (0x05) and
+`aside` (0x06), `attach.from`, `live` event; `transport/held.rs` `CatchUp`
+reads the holder's ring on its own connection up to the live position;
+`Hosted::catch_up` resends state (`Output::state`) then `live`. What it
+does is in `transport/README.md` "Views".
+
+- Found on the way: a rebuilt screen answered the queries in the replayed
+  ring, sending stale replies into the agent's PTY after every restart.
+  `Hosted::take_up` now marks the replay; nothing answers it
+  (`queries_replayed_from_the_ring_are_not_answered_again`, fails without).
+- A catching-up controller does not count as the answering view: the
+  retained screen answers live queries until it is live.
+- A view continuing from a position gets no input hint again.
+
+Checks:
+
+- `cargo test -p loopflow --lib transport::registry transport::tests::a_catching`:
+  7 passed, including `a_view_continues_from_its_position_after_the_server_restarts`
+  (no snapshot, no position frame, out bytes equal the ring from `from`) and
+  `a_view_the_ring_no_longer_reaches_is_painted_afresh` (`from` before
+  `ring_start` and past `written`).
+- `cargo test -p loopflow --test transport_tests held_session_survives_server_restart`:
+  passes; with continuation disabled it fails showing the repaint.
+- `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session terminal_title`: 129 passed.
+- `cargo test -p loopflow --test transport_tests`: 107 of 109; the two
+  build-replacement failures (`resume_takes_over_an_owner_from_another_build`,
+  `unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn`)
+  pass alone, as in the earlier pass (load timing). Gate reruns them.
+- `documented_commands::`: 4 passed. Clippy clean.
+
 **Not as planned, still open:**
 
-- Resume is a fresh attach that repaints. `position`/`aside` frames and ring
-  catch-up (4a) are not built; the viewer protocol is unchanged. With them:
-  the relay discards terminal input until a catch-up reaches the live
-  position, and any text it prints into the screen is followed by a refresh.
-- The gate test `held_session_survives_server_restart` and the 4a
-  acceptance items are not written.
+- The gate test's `ps` step checks the agent's parent is `lf holder run`,
+  not a whole-process-group count; ten-terminal thread/socket counts and
+  `lf ps --json` holder rows are not automated.
 - No snapshot file on graceful stop; rebuild is ring replay plus nudge.
 - A held terminal still gets its own lifetime watcher and title worker
   thread (`lifetime::spawn`), not one for all.

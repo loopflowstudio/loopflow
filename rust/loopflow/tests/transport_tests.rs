@@ -7386,3 +7386,184 @@ fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
     newer.input("done\n");
     newer.finish();
 }
+
+/// Ends a process the test cannot otherwise reach, including on panic.
+struct KillOnDrop(libc::pid_t);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        // SAFETY: the pid was read from this test's own agent or holder.
+        unsafe { libc::kill(self.0, libc::SIGKILL) };
+    }
+}
+
+fn alive(pid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn command_line(pid: libc::pid_t) -> (libc::pid_t, String) {
+    let output = Command::new("ps")
+        .args(["-o", "ppid=,command=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let line = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let (parent, command) = line.split_once(' ').unwrap_or((&line, ""));
+    (
+        parent.trim().parse().unwrap_or(0),
+        command.trim().to_owned(),
+    )
+}
+
+#[test]
+fn held_session_survives_server_restart() {
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let home = fixture.home.path();
+    let script = format!(
+        "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done; exit 3",
+        home = home.display()
+    );
+    let started = service
+        .connect()
+        .request(loopflow::server::wire::Operation::Server(
+            loopflow::server::wire::ServerOperation::SessionStart {
+                session: None,
+                request: "held-restart".into(),
+                argv: vec!["/bin/sh".into(), "-c".into(), script],
+                cwd: home.to_path_buf(),
+                env: vec![
+                    ("PATH".into(), "/usr/bin:/bin".into()),
+                    ("HOME".into(), home.display().to_string()),
+                ],
+                rows: 24,
+                cols: 80,
+            },
+        ))
+        .unwrap();
+    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let agent: libc::pid_t = {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(pid) = std::fs::read_to_string(home.join("agent.pid"))
+                .ok()
+                .and_then(|pid| pid.trim().parse().ok())
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "the agent never started");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let _agent = KillOnDrop(agent);
+    // The agent's parent is the holder, not the server or an owner process.
+    let (holder, _) = command_line(agent);
+    let (_, holder_command) = command_line(holder);
+    let _holder = KillOnDrop(holder);
+    assert!(holder_command.contains("holder run"), "{holder_command}");
+    assert!(
+        !holder_command.contains("session serve"),
+        "{holder_command}"
+    );
+
+    let mut view =
+        Terminal::spawn(service.command(&["session", "attach", "--terminal", &terminal]));
+    view.wait_text("tick:3");
+
+    // SIGTERM the server: the agent keeps printing into the holder's ring.
+    let server = service.child.take().unwrap();
+    // SAFETY: the fixture's own server process.
+    unsafe { libc::kill(server.id() as libc::pid_t, libc::SIGTERM) };
+    let mut server = server;
+    server.wait().unwrap();
+    let stopped = view.screen.lock().unwrap().len();
+    let last_seen = |screen: &[u8]| {
+        String::from_utf8_lossy(screen)
+            .split("tick:")
+            .filter_map(|tick| {
+                tick.split(|c: char| !c.is_ascii_digit())
+                    .next()?
+                    .parse::<u32>()
+                    .ok()
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let before = last_seen(&view.screen.lock().unwrap());
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(alive(agent), "the agent ended with its server");
+    view.assert_viewing("the view of a stopped server");
+
+    // A new server: the view continues from its position, with no repaint,
+    // and shows what was printed while no server ran.
+    service.child = Some(service.launch());
+    service.ready();
+    view.wait_text(&format!("tick:{}", before + 12));
+    let screen = view.screen.lock().unwrap().clone();
+    let after = &screen[stopped..];
+    let text = String::from_utf8_lossy(after);
+    assert!(
+        !text.contains("\x1b[?1047l\x1b[?47l"),
+        "the view was repainted: {text:?}"
+    );
+    assert!(
+        text.contains("\x1b[5n"),
+        "the view did not continue: {text:?}"
+    );
+    let ticks: Vec<u32> = text
+        .split("tick:")
+        .skip(1)
+        .filter_map(|tick| {
+            tick.split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect();
+    assert_eq!(ticks.first(), Some(&(before + 1)), "{text:?}");
+    assert!(
+        ticks.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "the stream skipped or repeated output: {ticks:?}"
+    );
+
+    // SIGKILL the server; the agent exits 3 while none runs.
+    service.stop();
+    std::fs::write(home.join("stop"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while alive(agent) {
+        assert!(Instant::now() < deadline, "the agent did not exit");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    service.child = Some(service.launch());
+    service.ready();
+    let ended = || {
+        fixture
+            .sql()
+            .query_row(
+                "SELECT ended_at IS NOT NULL, exit_code FROM held_terminals WHERE id=?1",
+                [&terminal],
+                |r| Ok((r.get::<_, bool>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+            .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !ended().0 {
+        assert!(Instant::now() < deadline, "the exit was never recorded");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(ended(), (true, Some(3)));
+    let holders = home.join("holders");
+    let receipts: Vec<_> = std::fs::read_dir(&holders)
+        .unwrap()
+        .flatten()
+        .flat_map(|build| std::fs::read_dir(build.path()).unwrap().flatten())
+        .map(|entry| entry.file_name())
+        .collect();
+    assert!(
+        !receipts
+            .iter()
+            .any(|name| name.to_string_lossy() == terminal),
+        "the terminal's directory outlived its settlement: {receipts:?}"
+    );
+    assert!(!view.wait_exit().success());
+}

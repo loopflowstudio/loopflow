@@ -117,19 +117,25 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             id,
             terminal,
             agent_process,
+            stream,
+            sequence,
+            json,
         } => {
-            let store = open_shared_store().await?;
-            let agent_process = agent_process
-                .as_deref()
-                .map(crate::id::AgentProcessId::parse)
-                .transpose()?;
-            crate::ops::human_session::observe_program_status(
-                &store,
+            let records = serde_json::from_reader(std::io::stdin().lock())
+                .context("invalid Program Status snapshot")?;
+            let recorded = status_recorded(
                 id,
                 terminal,
-                agent_process.as_ref(),
+                agent_process.as_deref(),
+                stream,
+                *sequence,
+                &records,
             )
-            .await
+            .await?;
+            if *json {
+                println!("{}", serde_json::to_string(&recorded)?);
+            }
+            Ok(())
         }
         SessionCommand::History { id: None, .. } => {
             unreachable!("the history feed and its commands return before any runtime")
@@ -408,6 +414,43 @@ pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
         &[name.to_owned()],
         SessionTitleSource::Human,
     ))
+}
+
+/// The snapshot a Session's Program Status now holds.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct StatusRecorded {
+    pub stream: String,
+    pub sequence: i64,
+}
+
+/// `lf session observe-status <id> --terminal <terminal> --stream <stream>
+/// --sequence <n>`, the snapshot on stdin.
+pub(crate) async fn status_recorded(
+    id: &str,
+    terminal: &str,
+    agent_process: Option<&str>,
+    stream: &str,
+    sequence: i64,
+    records: &crate::program_status::Records,
+) -> anyhow::Result<StatusRecorded> {
+    let store = open_shared_store().await?;
+    let agent_process = agent_process
+        .map(crate::id::AgentProcessId::parse)
+        .transpose()?;
+    crate::ops::human_session::record_program_status(
+        &store,
+        id,
+        terminal,
+        agent_process.as_ref(),
+        stream,
+        sequence,
+        records,
+    )
+    .await?;
+    Ok(StatusRecorded {
+        stream: stream.to_owned(),
+        sequence,
+    })
 }
 
 // The bound Session, or the Task a preview would assign.

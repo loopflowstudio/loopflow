@@ -236,9 +236,10 @@ or 120 seconds of silence without an unresolved tool call means Available.
 No current reading is unknown; replacement providers need fresh observations.
 
 Desktop consumes the embedded Ghostty action for every retained surface. Shell
-panes keep local records; Session panes publish bounded snapshots through
-`lf session observe-status` with the current terminal receipt and the
-reading's AgentProcess. Stream identity and increasing sequence fence replacements in SQLite.
+panes keep local records; Session panes send each bounded snapshot to the
+server as one `session.status` write with the current terminal receipt and the
+reading's AgentProcess, on the connection Desktop already holds. No process
+runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
 An unchanged provider keeps reports across attachment handoff. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
 Graph or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and

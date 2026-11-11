@@ -140,13 +140,15 @@ executable path (`…/claude/versions/<version>`) identifies it. User docs:
 
 ## Pieces
 
-Each is one Task and one PR. The first five do not depend on each other.
+Each is one Task and one PR. The first four do not depend on each other.
+Desktop already sends pane status as `session.status` writes on its server
+connection, with no process per pane. That operation is temporary: it is
+deleted when the server's emulator reads status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs | |
 | Hooks call the server, not the store | Store opens inside turn boundaries | |
-| Desktop sends pane status on its server connection | One `session observe-status` per pane | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |
@@ -165,9 +167,20 @@ A launch is managed when it comes through a Task or Wave command or from
 Desktop. A bare `lf` typed inside a Task's checkout stays bare and records the
 Task as its ancestry. One function answers this for every launch path.
 
+Any `lf` run in a Task's checkout counts toward that Task: its usage and time
+roll up into the Task's cost. Design the bare path on the assumption that most
+bare runs are subagents started by a Task's agent, not a person at a prompt:
+nobody is watching, the caller waits on the exit and reads the output, and the
+run ends with its parent.
+
 ## Open
 
 - Whether Claude and Codex repaint fully on a size nudge.
+- When a run's checkout and its calling Session belong to different Tasks,
+  which one its cost counts toward.
+- Which per-turn facts (cost, model time, stop reason) each harness's
+  transcript carries. The cost-per-PR work (LOO-732) reads them from the
+  store, so a bare run must write them at exit.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

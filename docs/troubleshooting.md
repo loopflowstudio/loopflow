@@ -302,26 +302,23 @@ lf process list                              # live call trees lf recorded
 lf process rollover --dry-run                # why each owner is still running
 ```
 
-Most resident processes belong to one conversation each. An `observe-status`
-line names its Session in its arguments; `lf process list` and
-`lf process rollover --dry-run` name a `session serve` owner by its PID.
+Most resident processes belong to one conversation each. `lf process list`
+and `lf process rollover --dry-run` name a `session serve` owner by its PID.
 
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
 | `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
-| `lf session observe-status <ID>` | Reads "working" or "waiting on you" from one terminal | That status until the conversation is shown again |
+| `lf session observe-status <ID>` | Records one "working" or "waiting on you" reading; it exits once written | Nothing; one that keeps running is from an older Desktop, whose observers stay until their client is gone |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
 | `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
 | `lf server run` | The Machine server | Desktop's connection until the server is started again |
 
-An observer ends when Desktop closes or replaces it. One left from an older
-Desktop, whose client is gone, serves nothing. An owner whose conversation is
-settled and unviewed ends on its own after `session.end_detached_after`; one
-that is days old and still running is held by something: `native input` is
-typing the agent never received as a prompt (a draft, an edit, an arrow key),
-which stopping it loses. Open it with `lf resume <ID>` and send or clear what
-is there.
+An owner whose conversation is settled and unviewed ends on its own after
+`session.end_detached_after`; one that is days old and still running is held
+by something: `native input` is typing the agent never received as a prompt (a
+draft, an edit, an arrow key), which stopping it loses. Open it with
+`lf resume <ID>` and send or clear what is there.
 
 A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from

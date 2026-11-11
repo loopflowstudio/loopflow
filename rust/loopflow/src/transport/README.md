@@ -96,8 +96,9 @@ waiting on a locked or refused store finish in the background or are lost, logge
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
 are the person quitting, `lf resume` taking the conversation over, `lf process
-rollover`, Task closure, or an explicit end. Failed store judgments retry at the
-next two-second poll. Repeated unchanged store errors produce one warning until
+rollover`, Task closure, or an explicit end. Owners retry failed viewing writes
+and close-request reads at the next two-second poll; Task cleanup decides closure
+on its scheduled pass. Repeated unchanged store errors produce one warning until
 the condition changes; activity launches no helper.
 Policy exit saves the screen, stops the agent and records its exit.
 `lf resume` reopens provider history without starting a turn. Other ended

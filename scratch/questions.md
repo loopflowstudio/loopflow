@@ -21,8 +21,8 @@ LOO-829 (`task_c118380f31f14d07ba28669499efa395`) removes the ignored
 `session.end_detached_after` parser after LOO-823 ships; Linear sync was confirmed
 2026-11-11. The released `processes.native_input` and `desktop_shells.close_requested`
 columns remain until a staged contract migration can remove them; runtime no
-longer uses them. Removal Task `task_1ddbd3851a8e424e9ce887fa8f39353b` was filed
-locally on 2026-11-11; Linear sync is pending.
+longer uses them. Removal Task `task_1ddbd3851a8e424e9ce887fa8f39353b` resolved
+as LOO-840 in the 2026-11-11 realign status read.
 
 2026-11-11 implementation assumption: a resumed owner that has never had a viewer
 uses its existing Process launch time for the fifteen-minute grace; Task completion

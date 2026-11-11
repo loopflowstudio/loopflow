@@ -63,16 +63,27 @@ Runtime cuts are complete: idle ending; native-input ledger and retries;
 `BACKGROUND_TASK_CONVERSATIONS` and its count/skip path; owner-side Task and
 retention polls; the second Task judgment at consumption; runtime reads of
 `desktop_shells.close_requested`. Released columns remain for staged removal
-in `task_1ddbd3851a8e424e9ce887fa8f39353b`; the ignored config key goes in LOO-829.
+in LOO-840; the ignored config key goes in LOO-829.
 
-The dated `ViewerHold` also supplies current viewing; no separate `Activity.viewed`
-flag or setters remain. Close writes test the revision in their SQL predicate,
-without a separate read transaction. Checkout hold cancellation stays beside
-its transaction, with no Desktop forwarding helper. Descriptor-order tests need
-only an owner and close request, not Task policy fixtures. SSH and local fixtures
-share `end_recorded_processes` before removing their homes; completion receipts
-can precede final screen writes. The audit no longer reads the unused shell-close
-column. Upgrade fixtures wait on atomic startup receipts before attaching.
+## Concept review, 2026-11-11
+
+No further design change or open product choice for this PR. The earlier review
+page's resume and cap questions are answered by "1a 2b"; old-build replacement
+can discard a draft, and background starts have no count cap. Resident-limit
+suspension remains deferred, not a condition for shipping this change.
+
+The model is one Session's history, one Process's execution and viewing, and a
+close request from Task cleanup. Checkout retirement remains separate: an
+unmerged checkout must survive even when its closed Task's conversation ends.
+Returning, reopening or starting work can revoke completion cleanup; abandonment
+still ends an unviewed terminal mid-turn. An unavailable store leaves execution
+running, with failed viewing writes retried before closure. Output that races a
+completion request cancels it without putting a write in the input path.
+
+Next: gate and the private-Machine demo already listed below. Show return before
+closure, return after closure with history but no editor, and store recovery with
+input still flowing. The page at `scratch/concept-review.html` now shows this
+model rather than the superseded proposals. No code changed in this review.
 
 ## Readings that cannot be recovered
 
@@ -104,8 +115,11 @@ wrapper was removed.
 
 The previous publish gate stopped before suites at resource preflight (16.8
 GiB free, 32 GiB reserve); log `/tmp/loo823-publish-gate.log`. No product failure
-or process-cleanup result follows from that attempt. PR #1877's published copy
-still describes the earlier input-retention design.
+or process-cleanup result follows from that attempt.
+
+2026-11-11 realign: remote main remained `49037487d`, already merged here.
+PR #1877 still says "Native-input retention is unchanged"; its validation predates
+the close-request design. That description needs replacement at publish.
 
 ## Focused checks, 2026-11-11
 
@@ -130,13 +144,17 @@ cases. Both preceded compression. Existing compact-unwind linker warning only.
 - Gate: affected transport, cleanup/store, native-turn, rollover, config, CLI,
   parser, server schema, documented-command, context-launch and migration suites;
   Clippy and `cargo package --locked --allow-dirty -p loopflow`.
-  Store trigger changes also reach `two_people`. Reuse only identical tree/plans.
+  Store trigger changes also reach `two_people`; shared fixture cleanup needs
+  the `loopflow-test-support` regression. Include architecture, website docs,
+  and headless Swift build/model/view checks for the pipe changes. The
+  `scripts/test.py --list` reading on 2026-11-11 selects architecture, Rust,
+  website and Swift. Reuse only identical tree/plans; earlier Swift results in
+  PR #1877 are historical.
 - Demo: process diff after affected suites and corrected audit recount. Walk the
   draft/return/close cases again with cleanup as the close-request producer.
 - Publish: rewrite PR #1877 around scope-based lifetime, deletion of input
   retention, central close requests, no background cap, and fixture/pipe cleanup.
 
-Staged column removal filed locally as `task_1ddbd3851a8e424e9ce887fa8f39353b`
-on 2026-11-11; Linear sync pending. It removes `processes.native_input` and
+LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) removes `processes.native_input` and
 `desktop_shells.close_requested` after the migration's staging window, exporting
 released data first. LOO-829 removes the ignored config key after release.

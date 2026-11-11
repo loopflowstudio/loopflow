@@ -3,91 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-823 concept review</title>
+<title>LOO-823 · Conversation closure review</title>
 <style>
-  :root { --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6a665f; --rule:#dedad2; --panel:#f2efe8; --accent:#0b6b57; --accent-bg:#e6f2ee; --warn:#a13a1e; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#e8e6e1; --muted:#9a968d; --rule:#34343a; --panel:#202024; --accent:#6fd0b6; --accent-bg:#18302b; --warn:#f0906f; } }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-  main { max-width:44rem; margin:0 auto; padding:2.5rem 1rem 5rem; }
-  h1 { font-size:1.65rem; line-height:1.2; margin:0 0 .5rem; text-wrap:balance; }
-  h2 { font-size:1.15rem; margin:2.4rem 0 .6rem; }
-  h3 { font-size:1rem; margin:1.6rem 0 .3rem; }
-  .meta { color:var(--muted); font-size:.9rem; }
-  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.87em; }
-  pre { background:var(--panel); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; font-size:.85rem; line-height:1.45; }
-  .lead { font-size:1.08rem; }
-  .proposed { border-left:3px solid var(--accent); background:var(--accent-bg); padding:.6rem 1rem; border-radius:0 6px 6px 0; margin:1rem 0; }
-  .built { border-left:3px solid var(--rule); padding:.1rem 1rem; margin:1rem 0; }
-  .proposed > :first-child, .built > :first-child { margin-top:0; }
-  .tag { color:var(--accent); font-weight:600; }
-  .bad { color:var(--warn); font-weight:600; }
-  .scroll { overflow-x:auto; }
-  table { border-collapse:collapse; width:100%; font-size:.93rem; }
-  th, td { text-align:left; vertical-align:top; padding:.45rem .7rem .45rem 0; border-bottom:1px solid var(--rule); }
-  th { font-weight:600; }
-  ol.steps { padding-left:1.3rem; } ol.steps li { margin:.45rem 0; }
-  dl.q { margin:.4rem 0 1.4rem; }
-  dl.q dt { float:left; clear:left; width:2.4rem; font-weight:600; font-family:ui-monospace,Menlo,monospace; font-size:.9rem; padding-top:.1rem; }
-  dl.q dd { margin:0 0 .45rem 2.4rem; }
+:root { color-scheme:light dark; --bg:#faf9f5; --ink:#222622; --muted:#62665f; --line:#c9cec5; --accent:#17664e; }
+@media(prefers-color-scheme:dark) { :root { --bg:#191c1b; --ink:#eceee8; --muted:#b0b7ac; --line:#454e46; --accent:#8ed8b5; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
+main { max-width:49rem; margin:auto; padding:2rem 1rem 3rem; }
+h1 { font-size:1.8rem; line-height:1.2; margin:.7rem 0; }
+h2 { font-size:1.1rem; margin:1.5rem 0 .5rem; }
+p { margin:.6rem 0; }
+.meta { color:var(--muted); font-size:.8rem; overflow-wrap:anywhere; }
+code { font: .85em ui-monospace,monospace; overflow-wrap:anywhere; }
+.outcome { border-left:3px solid var(--accent); padding-left:1rem; }
+table { border-collapse:collapse; width:100%; font-size:.88rem; }
+th,td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+th:first-child { width:24%; }
+ol { padding-left:1.3rem; }
+li { margin:.5rem 0; }
+@media(max-width:480px) { main { padding-top:1rem; } table { font-size:.78rem; } }
 </style>
 </head>
-<body>
-<main>
-<p class="meta">LOO-823 · concept review at the demo step · 2026-11-11 · PR #1877 at <code>c3932878a</code><br>
-Built from <code>transport/lifetime.rs</code>, <code>ops/human_session.rs</code> (<code>attaches</code>), <code>ops/human_session/primary.rs</code>, <code>ops/task/retirement.rs</code>, <code>docs/sessions.md</code>, <code>scratch/process-leaks.md</code>.</p>
-
-<h1>Two places the branch makes switching cost more than a slower start</h1>
-
-<p class="lead">The lifetime rule is built as stated: open conversations keep running, and a closed Task ends its own. Two older pieces still assume conversations end on their own, and they now work against your condition: "as long as only cost is slightly slower spin up time next time youj switch to them" (Jack Heart).</p>
-
-<h2>What is built</h2>
-<div class="built">
-<div class="scroll"><table>
-  <tr><th>Conversation</th><th>Runs until</th></tr>
-  <tr><td>Open Task, Wave, repository, bare</td><td>You quit its agent. No idle ending; <code>session.end_detached_after</code> is read and ignored.</td></tr>
-  <tr><td>Done Task</td><td>Fifteen minutes unviewed, once live work settles; checkout or none, and again if resumed after cleanup.</td></tr>
-  <tr><td>Abandoned Task</td><td>At once, even mid-turn, if unviewed.</td></tr>
-</table></div>
-<p>Typed input is no longer recorded or consulted anywhere.</p>
-</div>
-
-<h2>1 · Resume after an install drops your draft</h2>
-<ol class="steps">
-  <li>You type half a prompt in LOO-900's conversation and switch to another Task.</li>
-  <li><code>lf install</code> runs (you, or the dev stream).</li>
-  <li>You come back: <code>lf resume --task LOO-900</code>, or click it in Desktop.</li>
-  <li><span class="bad">The draft is gone.</span> The conversation's owner runs the old build and nothing is in flight, so resume replaces it and continues from history.</li>
+<body><main>
+<header>
+<p class="meta">LOO-823 · concept-review · 2026-11-11 · branch at <code>11a00b559</code> plus working notes<br>
+Sources: <code>scratch/process-leaks.md</code>, <code>scratch/questions.md</code>, <code>docs/sessions.md</code>, <code>transport/lifetime.rs</code>, <code>transport/input.rs</code>, <code>ops/task/retirement.rs</code>, <code>store/sqlite/owner_close.rs</code>, <code>store/migrations/owner_close_requests.sql</code>, <code>desktop/shells/store.rs</code>, <code>ops/human_session/primary.rs</code>.</p>
+<h1>No further product decision needed</h1>
+<p class="outcome">The branch implements the review answers. Advance to gate and demo. No new implementation direction; resident-limit suspension remains deferred.</p>
+</header>
+<h2>Actions → concepts → APIs, built in this branch</h2>
+<table>
+<thead><tr><th>Action</th><th>What survives or ends</th><th>Who changes state</th></tr></thead>
+<tbody>
+<tr><td>Switch away, then return</td><td>An open Task, Wave, repository or bare conversation keeps its provider running.</td><td><code>record_owner_viewer_hold</code> records viewing; <code>lf resume</code> attaches or replaces an eligible owner.</td></tr>
+<tr><td>Complete a Task</td><td>After 15 minutes unviewed and settled work, conversations end even without a checkout. Completion and a new owner launch bound the grace.</td><td><code>lf task retire</code> → <code>request_conversation_closes</code> → Process close request → <code>Ending::consume</code>.</td></tr>
+<tr><td>Abandon a Task</td><td>An unviewed terminal conversation ends on cleanup, even mid-turn. Headless Runs keep their existing lifetime.</td><td>Cleanup writes an abandonment request; the terminal owner consumes it.</td></tr>
+<tr><td>Return or reopen before closure</td><td>Viewing or reopening revokes completion cleanup. New work also revokes it.</td><td>Viewer recording and store triggers cancel the request.</td></tr>
+<tr><td>Close a Desktop shell</td><td>Requested work settles before Close takes effect. Viewing does not cancel explicit Close.</td><td><code>close_desktop_shell</code> → <code>advance_closes</code> → the same Process request path.</td></tr>
+</tbody></table>
+<h2>The mismatch removed</h2>
+<p><strong>Before:</strong> owners interpreted Task state, an input ledger retained execution, and a count of sixteen skipped new background starts. <strong>Now:</strong> cleanup decides Task closure; owners report viewing and obey revocable requests. Input is a bounded byte queue. Every eligible Task background start proceeds.</p>
+<p>A Session keeps history; its Process owns execution. Checkout retirement is separate: an unmerged checkout can remain after its conversation ends. No new lifecycle record is needed.</p>
+<h2>One interaction, including recovery</h2>
+<p>Leave a draft on an open Task and return: the same provider keeps it. Complete the Task, leave, and let work settle: cleanup can end it after the viewing grace. Return afterward: provider history and the saved screen come back; the editor does not, and the Task stays closed.</p>
+<p>If the store fails, input continues and failure cannot authorize closure. Viewing writes retry before consuming a request. Output racing a completion request cancels it off the input path. A returning viewer or new work revokes the queued close; cleanup decides again.</p>
+<p><strong>Next demo:</strong> return before and after closure, recover from a store failure while typing, then count new fixture processes. Earlier test results and demo readings remain historical; this review ran no suites.</p>
+<h2>Review questions resolved</h2>
+<p>Jack Heart: “1a 2b”. The later direction says: “owners obey a close request instead of judging Task closure”.</p>
+<ol>
+<li><strong>What happens on resume after an install? 1a:</strong> an idle owner on another build may be replaced. History continues; an unsent draft can be lost. Attaching forever to old builds is no longer proposed.</li>
+<li><strong>What happens at sixteen conversations? 2b:</strong> there is no background conversation cap. Per-Machine suspension is deferred; editor detection remains unchosen and outside this PR.</li>
 </ol>
-<pre>// human_session.rs, attaches()
-An idle owner that is superseded or does not answer gives way to native continuation.</pre>
-<p>Before this branch, the input record kept such a conversation on its old owner, so the draft survived. With the record deleted, every idle conversation qualifies. Resume can attach to an owner on another build; <code>resume_takes_over_an_owner_from_another_build</code> tests it.</p>
-<div class="proposed"><p><span class="tag">Proposed.</span> Resume attaches to a live owner on any build that answers. Only <code>lf process rollover</code>, which you run deliberately, replaces one. Switching back never loses anything; old-build owners stay until rollover or Task close.</p></div>
-
-<h2>2 · The warm-start cap keeps the oldest and starts the newest cold</h2>
-<p><code>lf task run</code> starts the Task's conversation in the background so opening it is instant, unless 16 Task conversations already run. Before, idle ending kept that count low. Now open Tasks' conversations never end, and 63 were running at the 01:40 read.</p>
-<div class="scroll"><table>
-  <tr><th></th><th>A cache would</th><th>The branch does</th></tr>
-  <tr><td>At the limit</td><td>Stop the conversation viewed longest ago</td><td>Skip starting the new one</td></tr>
-  <tr><td>Who pays the slow start</td><td>The Task you haven't opened in days</td><td>The Task you just started</td></tr>
-</table></div>
-<p>Stopping one safely needs to know its editor is empty; that waits for LOO-824's emulator (question 5 earlier, "no opinion on 5").</p>
-
-<h2>Not a product question</h2>
-<p>The publish step's gate stopped before any suite ran: 16.8 GiB free against a 32 GiB reserve. <code>df</code> shows 53 GiB free now. PR #1877's description still describes the input hold; it is rewritten at the next publish.</p>
-
-<h2>Questions</h2>
-<h3>1. What does resume do with an idle conversation on an older build?</h3>
-<dl class="q">
-  <dt>1a</dt><dd>Replace it, as built: history continues, an unsent draft is lost.</dd>
-  <dt>1b</dt><dd>Attach to the old owner while it answers; only rollover replaces it.</dd>
-  <dt>1c</dt><dd>Ask in the terminal or Desktop: "runs on an older lf; restart it? unsent input is lost."</dd>
-</dl>
-<h3>2. What does the warm-start cap do now?</h3>
-<dl class="q">
-  <dt>2a</dt><dd>Keep it as built; new Tasks start cold past 16 until suspension lands with LOO-824.</dd>
-  <dt>2b</dt><dd>Drop the cap: every <code>lf task run</code> starts its conversation, and the count grows until suspension lands.</dd>
-</dl>
-</main>
-</body>
-</html>
+</main></body></html>

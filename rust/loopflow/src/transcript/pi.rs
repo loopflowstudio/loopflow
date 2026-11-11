@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::{text_of, unix_seconds, Launch, RequestSource, Turn, Turns};
+use super::{text_of, Launch, RequestSource, Turn, Turns};
 
 pub(super) fn turns(rows: &[Value]) -> Vec<Turn> {
     let by_id: HashMap<&str, &Value> = rows
@@ -42,7 +42,7 @@ pub(super) fn turns(rows: &[Value]) -> Vec<Turn> {
                 } else {
                     RequestSource::Person
                 };
-                turns.request(unix_seconds(&entry["timestamp"]), text, from);
+                turns.ask(entry["timestamp"].as_str().map(str::to_owned), text, from);
             }
             Some("assistant") => {
                 for part in message["content"].as_array().into_iter().flatten() {
@@ -68,7 +68,7 @@ pub(super) fn turns(rows: &[Value]) -> Vec<Turn> {
             _ => {}
         }
     }
-    turns.0
+    turns.finish()
 }
 
 #[cfg(test)]
@@ -121,12 +121,14 @@ mod tests {
         ];
         let turns = turns(&rows);
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].request.as_ref().unwrap().text, "List files");
-        assert!(matches!(&turns[0].items[1],
+        assert_eq!(turns[0].requests().next().unwrap().text, "List files");
+        assert_eq!(turns[0].state, None);
+        let said = turns[0].agent().collect::<Vec<_>>();
+        assert!(matches!(said[1],
             ConversationItem::Tool { status: Lifecycle::Failed, output: Some(output), .. } if output == "denied"));
         assert!(
-            matches!(&turns[0].items[2], ConversationItem::Message { text, .. } if text == "ls was denied")
+            matches!(said[2], ConversationItem::Message { text, .. } if text == "ls was denied")
         );
-        assert_eq!(turns[0].items.len(), 3);
+        assert_eq!(said.len(), 3);
     }
 }

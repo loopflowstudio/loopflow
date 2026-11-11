@@ -305,15 +305,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A conversation's current or last turn, from the provider's live stream
-/// or its transcript.
+/// A conversation's current or last turn, as its provider's transcript shows it.
 public struct SessionTurn: Codable, Sendable, Hashable {
     public enum State: String, Codable, Sendable, Hashable {
-        case running, asking, ended, interrupted
-    }
-
-    public enum Source: String, Codable, Sendable, Hashable {
-        case stream, transcript
+        case running, ended, interrupted
     }
 
     public struct Usage: Codable, Sendable, Hashable {
@@ -329,23 +324,24 @@ public struct SessionTurn: Codable, Sendable, Hashable {
         }
     }
 
+    /// The provider's name for the turn.
+    public let id: String?
     public let state: State
-    public let source: Source
     public let startedAt: String?
     public let endedAt: String?
     public let model: String?
     public let usage: Usage?
 
     enum CodingKeys: String, CodingKey {
-        case state, source, model, usage
+        case id, state, model, usage
         case startedAt = "started_at"
         case endedAt = "ended_at"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String?.self, forKey: .id)
         state = try values.decode(State.self, forKey: .state)
-        source = try values.decode(Source.self, forKey: .source)
         startedAt = try values.decode(String?.self, forKey: .startedAt)
         endedAt = try values.decode(String?.self, forKey: .endedAt)
         model = try values.decode(String?.self, forKey: .model)

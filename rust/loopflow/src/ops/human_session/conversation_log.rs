@@ -12,7 +12,7 @@ use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::harness::HarnessKind;
 use crate::session::LfSession;
 use crate::store::sqlite::SqliteStore;
-use crate::transcript::{self, RequestSource, Turn};
+use crate::transcript::{self, RequestSource, Turn, TurnItem};
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;
@@ -79,51 +79,48 @@ fn excerpt(log: &str) -> String {
 /// agent said, one line per tool call, and the tail of each failure.
 fn render(turns: &[Turn]) -> String {
     let mut markdown = String::new();
-    for turn in turns {
-        let request = turn
-            .request
-            .as_ref()
-            .and_then(|request| match request.from {
-                RequestSource::Person => Some(request.text.clone()),
-                RequestSource::Injected => {
-                    transcript::Launch::parse(&request.text).map(|launch| launch.text())
-                }
-            });
-        if let Some(text) = request {
-            markdown.push_str(&format!("## user\n\n{}\n\n", text.trim()));
-        }
-        for item in &turn.items {
-            match item {
-                ConversationItem::Message { text, .. } => {
-                    markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
-                }
-                ConversationItem::Tool {
-                    name,
-                    status,
-                    input,
-                    output,
-                    ..
-                } => {
-                    let input = match input {
-                        Some(Value::String(input)) => input.clone(),
-                        Some(input) => input.to_string(),
-                        None => String::new(),
-                    };
-                    let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
-                    markdown.push_str(&format!(
-                        "- tool: {name} {}\n",
-                        head(&input, TOOL_INPUT_CHARS)
-                    ));
-                    if *status == Lifecycle::Failed {
-                        markdown.push_str(&format!(
-                            "  failed: {}\n",
-                            failure(output.as_deref().unwrap_or_default())
-                        ));
+    for item in turns.iter().flat_map(|turn| &turn.items) {
+        match item {
+            TurnItem::Request(request) => {
+                let text = match request.from {
+                    RequestSource::Person => Some(request.text.clone()),
+                    RequestSource::Injected => {
+                        transcript::Launch::parse(&request.text).map(|launch| launch.text())
                     }
-                    markdown.push('\n');
+                };
+                if let Some(text) = text {
+                    markdown.push_str(&format!("## user\n\n{}\n\n", text.trim()));
                 }
-                _ => {}
             }
+            TurnItem::Agent(ConversationItem::Message { text, .. }) => {
+                markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
+            }
+            TurnItem::Agent(ConversationItem::Tool {
+                name,
+                status,
+                input,
+                output,
+                ..
+            }) => {
+                let input = match input {
+                    Some(Value::String(input)) => input.clone(),
+                    Some(input) => input.to_string(),
+                    None => String::new(),
+                };
+                let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
+                markdown.push_str(&format!(
+                    "- tool: {name} {}\n",
+                    head(&input, TOOL_INPUT_CHARS)
+                ));
+                if *status == Lifecycle::Failed {
+                    markdown.push_str(&format!(
+                        "  failed: {}\n",
+                        failure(output.as_deref().unwrap_or_default())
+                    ));
+                }
+                markdown.push('\n');
+            }
+            TurnItem::Agent(_) => {}
         }
     }
     markdown

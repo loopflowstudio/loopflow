@@ -4,14 +4,13 @@
 use serde_json::{json, Map, Value};
 
 use super::live::{TurnState, TurnUsage};
-use super::{text_of, unix_seconds, RequestSource, Runs, Transcript, Turns};
+use super::{text_of, RequestSource, Turn, Turns};
 
-/// Runs are marked by `task_started`, `task_complete` and `turn_aborted`
+/// Turns are marked by `task_started`, `task_complete` and `turn_aborted`
 /// events and named by their `turn_id`. `token_count` reports the
-/// conversation's running total; a run's usage is the total's growth across it.
-pub(super) fn read(rows: &[Value]) -> Transcript {
+/// conversation's running total; a turn's usage is the total's growth across it.
+pub(super) fn read(rows: &[Value]) -> Vec<Turn> {
     let mut turns = Turns::default();
-    let mut runs = Runs::default();
     let mut tally = Tally::default();
     for row in rows {
         let payload = &row["payload"];
@@ -19,12 +18,12 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
         match (row["type"].as_str(), payload["type"].as_str()) {
             (Some("response_item"), _) => item(&mut turns, row),
             (Some("event_msg"), Some("task_started")) => {
-                runs.start(payload["turn_id"].as_str().map(str::to_owned), stamp());
+                turns.start(payload["turn_id"].as_str().map(str::to_owned), stamp());
                 tally.start();
             }
             (Some("turn_context"), _) => {
-                if let (Some(model), Some(run)) = (payload["model"].as_str(), runs.open()) {
-                    run.model = Some(model.to_owned());
+                if let (Some(model), Some(turn)) = (payload["model"].as_str(), turns.open()) {
+                    turn.model = Some(model.to_owned());
                 }
             }
             (Some("event_msg"), Some("token_count")) => {
@@ -32,14 +31,16 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
                 if !info["total_token_usage"].is_object() {
                     continue;
                 }
-                // A report after a run ended moves only the running total.
-                if runs.open().is_none() && !runs.runs.is_empty() {
+                // A report after a turn ended moves only the running total.
+                if turns.open().is_none() && !turns.turns.is_empty() {
                     tally.count(info, true);
                     continue;
                 }
-                let run = runs.current();
-                tally.count(info, run.started_at.is_some());
-                (run.usage, run.receipt) = tally.usage();
+                let turn = turns.current();
+                tally.count(info, turn.started_at.is_some());
+                let (usage, receipt) = tally.usage();
+                turn.usage = Some(usage);
+                turn.receipt.usage = receipt;
             }
             (Some("event_msg"), Some(end @ ("task_complete" | "turn_aborted"))) => {
                 let state = if end == "task_complete" {
@@ -47,24 +48,21 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
                 } else {
                     TurnState::Interrupted
                 };
-                runs.end(state, stamp());
-                if let Some(run) = runs.runs.last_mut() {
-                    run.duration_ms = payload["duration_ms"].as_u64();
+                turns.end(state, stamp());
+                if let Some(turn) = turns.turns.last_mut() {
+                    turn.receipt.duration_ms = payload["duration_ms"].as_u64();
                 }
             }
             _ => {}
         }
     }
-    Transcript {
-        turns: turns.0,
-        runs: runs.runs,
-    }
+    turns.finish()
 }
 
-/// The conversation's running token total, and where the current run began.
+/// The conversation's running token total, and where the current turn began.
 #[derive(Debug, Default)]
 struct Tally {
-    /// The total when the run started; absent until one is known.
+    /// The total when the turn started; absent until one is known.
     before: Option<Value>,
     total: Value,
     last: Value,
@@ -78,7 +76,7 @@ impl Tally {
         self.peak = 0;
     }
 
-    /// `started` is whether the run's start was among the rows read; one
+    /// `started` is whether the turn's start was among the rows read; one
     /// begun before them counts from its first report.
     fn count(&mut self, info: &Value, started: bool) {
         let total = &info["total_token_usage"];
@@ -94,8 +92,8 @@ impl Tally {
         self.window = info["model_context_window"].clone();
     }
 
-    /// The run's usage so far, and the same as the live stream's receipt:
-    /// Codex's app-server names these counters in camel case.
+    /// The turn's usage so far, and the same as its store row, which names
+    /// these counters in camel case as Codex's app-server does.
     fn usage(&self) -> (TurnUsage, Value) {
         let total = &self.total;
         let before = self.before.as_ref().unwrap_or(&Value::Null);
@@ -171,7 +169,7 @@ fn item(turns: &mut Turns, row: &Value) {
                     } else {
                         RequestSource::Person
                     };
-                    turns.request(unix_seconds(&row["timestamp"]), text, from);
+                    turns.request(row["timestamp"].as_str().map(str::to_owned), text, from);
                 }
                 Some("assistant") => turns.message(id, &text),
                 _ => {}

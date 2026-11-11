@@ -942,6 +942,7 @@ mod tests {
         assert_eq!(
             events[2].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
+                "cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
@@ -1254,11 +1255,16 @@ mod tests {
                 hear(&mut decoder, &mut writer_for(&current), message);
             }
             assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
-            hear(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}}),
-            );
+            // The turn's usage row comes from its rollout, under the same id.
+            store
+                .record_turn_usage(
+                    "conversation",
+                    &"thread".into(),
+                    "late",
+                    0,
+                    &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
+                )
+                .unwrap();
             hear(
                 &mut decoder,
                 &mut writer_for(&first),

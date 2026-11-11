@@ -53,7 +53,7 @@ enum Answer {
     Bool(bool),
     Time(i64),
     Process(Result<Option<OsProcess>, Failure>),
-    Turn(Option<crate::transcript::live::TranscriptRun>),
+    Turn(Option<crate::transcript::live::SessionTurn>),
     Raw(Vec<crate::transcript::raw::RawConversation>),
 }
 
@@ -146,7 +146,7 @@ impl Fact {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
             Self::Turn(harness, path) => {
-                Answer::Turn(crate::transcript::live::read_run(*harness, path))
+                Answer::Turn(crate::transcript::live::read_turn(*harness, path))
             }
             Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
@@ -441,11 +441,11 @@ pub(crate) fn process(pid: u32) -> io::Result<Option<OsProcess>> {
     restored(answer)
 }
 
-/// The current or last run of the transcript at `path`.
-pub(crate) fn transcript_run(
+/// The current or last turn of the transcript at `path`.
+pub(crate) fn transcript_turn(
     harness: crate::harness::HarnessKind,
     path: &Path,
-) -> Option<crate::transcript::live::TranscriptRun> {
+) -> Option<crate::transcript::live::SessionTurn> {
     let Answer::Turn(answer) = read(Fact::Turn(harness, absolute(path))) else {
         unreachable!("a transcript returns its turn")
     };

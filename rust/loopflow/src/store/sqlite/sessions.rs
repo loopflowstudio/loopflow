@@ -916,6 +916,19 @@ impl SqliteStore {
         session_summaries_in(&conn, filter, now, &live_agents)
     }
 
+    /// Whether `session`'s current AgentProcess has reported what it is doing:
+    /// a hook, its live stream or its terminal's status.
+    pub(crate) fn session_reports_status(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_activity act
+                JOIN agent_sessions s ON s.id=act.session_id
+                WHERE s.id=?1 AND act.agent_process_id IS s.agent_process_id)",
+            [session],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn session_summary(
         &self,
         id: &str,

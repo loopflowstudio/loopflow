@@ -75,7 +75,6 @@ impl ClaudeDecoder {
                 }
             }
         }
-        let start = out.len();
         let ended = process_line(&value, turn_id, &mut out, &mut self.state);
         // Backgrounded tasks still running: Claude starts its own turn when
         // they finish, and that turn's result answers the last request.
@@ -93,27 +92,6 @@ impl ClaudeDecoder {
                 out.push(output_fact(turn, json!({"text": text})));
             }
         }
-        // The turn's one usage row carries the numbers the live view showed:
-        // each assistant response updates it, and the result makes it final.
-        let usage = out[start..].iter().find_map(|decoded| match decoded {
-            Decoded::Display(ConversationEvent::UsageCheckpoint {
-                usage,
-                final_receipt,
-                ..
-            }) => Some((usage.clone(), *final_receipt)),
-            _ => None,
-        });
-        if let (Some((usage, final_receipt)), Some(owner)) =
-            (usage, turn.as_ref().or(self.pending.front()))
-        {
-            out.push(
-                ProviderFact::Usage {
-                    turn: owner.clone(),
-                    receipt: json!({"provider":"claude","usage":usage,"final":final_receipt}),
-                }
-                .into(),
-            );
-        }
         if deferred {
             self.state = ReaderState::default();
         } else if result || ended.is_some() {
@@ -127,6 +105,9 @@ impl ClaudeDecoder {
                         "result_id": value["uuid"],
                         "errors": value["errors"],
                         "subtype": value["subtype"],
+                        // The process's running cost: the transcript, which
+                        // writes the turn's usage row, gives none.
+                        "cost_usd": value["total_cost_usd"],
                     }),
                 }
                 .into(),
@@ -995,58 +976,45 @@ mod tests {
                 "Activity Working",
                 "Activity Yielded(true)",
                 r#"Output sess_claude_normal/request {"text":"done"}"#,
-                "Usage sess_claude_normal/request",
                 "TurnCompleted sess_claude_normal/request Completed",
             ]
         );
     }
 
     #[test]
-    fn each_turn_usage_fact_matches_the_live_receipt() {
+    fn a_turn_leaves_its_usage_row_to_the_transcript_and_keeps_its_cost() {
         let mut decoder = ClaudeDecoder::default();
         decoder.outbound("request");
         let lines = [
             json!({"type":"user","uuid":"request","session_id":"thread"}),
             json!({"type":"assistant","session_id":"thread","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],
                 "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}),
-            json!({"type":"assistant","session_id":"thread","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],
-                "usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}),
             json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","result":"done",
                 "model":"claude-sonnet-4","total_cost_usd":0.25,
-                "usage":{"input_tokens":13,"output_tokens":6,"cache_read_input_tokens":20,"cache_creation_input_tokens":5},
+                "usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20},
                 "modelUsage":{"claude-sonnet-4":{"contextWindow":200000}}}),
         ];
         let decoded: Vec<_> = lines
             .iter()
             .flat_map(|line| decoder.decode(&line.to_string(), "turn").unwrap())
             .collect();
-        let receipts: Vec<_> = decoded
+        let facts: Vec<_> = decoded.iter().filter_map(Decoded::fact).collect();
+        assert!(!facts
             .iter()
-            .filter_map(|decoded| match decoded.fact() {
-                Some(ProviderFact::Usage { turn, receipt }) => {
-                    assert_eq!(turn.turn, "request");
-                    Some(receipt.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        let live = decoded.iter().rev().find_map(|decoded| match decoded {
-            Decoded::Display(ConversationEvent::UsageCheckpoint {
-                usage,
-                final_receipt: true,
-                ..
-            }) => Some(usage.clone()),
+            .any(|fact| matches!(fact, ProviderFact::Usage { .. })));
+        let cost = facts.iter().find_map(|fact| match fact {
+            ProviderFact::TurnCompleted { detail, .. } => Some(detail["cost_usd"].clone()),
             _ => None,
         });
-        assert_eq!(receipts.len(), 3);
-        assert_eq!(receipts[1]["final"], false);
-        assert_eq!(receipts[1]["usage"]["total_input_tokens"], 38);
-        assert_eq!(receipts[2]["final"], true);
-        let recorded: TurnUsage = serde_json::from_value(receipts[2]["usage"].clone()).unwrap();
-        assert_eq!(Some(&recorded), live.as_ref());
-        assert_eq!(recorded.cost_usd, Some(0.25));
-        assert_eq!(recorded.peak_input_tokens, Some(30));
-        assert_eq!(recorded.context_window_tokens, Some(200000));
+        assert_eq!(cost, Some(json!(0.25)));
+        // The live view still shows the turn's numbers.
+        assert!(decoded.iter().any(|decoded| matches!(
+            decoded,
+            Decoded::Display(ConversationEvent::UsageCheckpoint {
+                final_receipt: true,
+                ..
+            })
+        )));
     }
 
     #[test]
@@ -1494,18 +1462,10 @@ mod tests {
                     turn: turn("request"),
                     answer: json!({"value": value})
                 },
-                ProviderFact::Usage {
-                    turn: turn("request"),
-                    receipt: json!({
-                        "provider":"claude",
-                        "usage":{"input_tokens":1,"total_input_tokens":1},
-                        "final":true
-                    })
-                },
                 ProviderFact::TurnCompleted {
                     turn: Some(turn("request")),
                     status: Lifecycle::Completed,
-                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success"})
+                    detail: json!({"status":"completed","result_id":"result","errors":null,"subtype":"success","cost_usd":null})
                 },
             ]
         );

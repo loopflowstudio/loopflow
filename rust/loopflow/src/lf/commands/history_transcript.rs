@@ -13,7 +13,8 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
 use crate::transcript::summary::{summarize, RetentionSummary};
 use crate::transcript::{
-    self, Conversation, Located, RequestSource, RetentionState, SessionTranscript, Source, Turn,
+    self, Conversation, Located, Request, RequestSource, RetentionState, SessionTranscript, Source,
+    Turn, TurnItem,
 };
 
 const SNIPPET_CHARS: usize = 80;
@@ -133,65 +134,91 @@ fn render_facts(out: &mut String, conversation: &Conversation) {
     }
 }
 
+/// One line for the turn (when it began, how it ended, its model and
+/// tokens), then its requests and what the agent did, in order.
 fn render_turn(out: &mut String, turn: &Turn) {
-    let at = turn.at.map(minute);
-    if let Some(request) = &turn.request {
-        let from = match request.from {
-            RequestSource::Person => "you",
-            RequestSource::Injected => "injected",
-        };
-        out.push_str(&format!(
-            "\n── {}{from}\n",
-            at.map(|at| format!("{at} · ")).unwrap_or_default()
-        ));
-        match request.from {
-            RequestSource::Person => out.push_str(&format!("{}\n", request.text.trim())),
-            RequestSource::Injected => match transcript::Launch::parse(&request.text) {
-                Some(launch) => {
-                    if let Some((skill, _)) = &launch.skill {
-                        out.push_str(&format!("Skill {skill}\n"));
-                    }
-                    if let Some(message) = launch.message.filter(|m| !m.is_empty()) {
-                        out.push_str(&format!("{message}\n"));
-                    }
-                }
-                None => out.push_str(&format!(
-                    "({} characters of context)\n",
-                    request.text.chars().count()
-                )),
-            },
-        }
-    }
+    out.push_str(&format!("\n── {}\n", turn_line(turn)));
     for item in &turn.items {
         match item {
-            ConversationItem::Message { text, .. } => {
-                out.push_str(&format!("\n{}\n", text.trim()));
-            }
-            ConversationItem::Thought { text, .. } => {
-                out.push_str(&format!("  thinking: {}\n", clip(text, SNIPPET_CHARS)));
-            }
-            ConversationItem::Tool {
-                name,
-                status,
-                input,
-                output,
-                ..
-            } => {
-                let input = match input {
-                    Some(serde_json::Value::String(input)) => input.clone(),
-                    Some(input) => input.to_string(),
-                    None => String::new(),
-                };
-                out.push_str(&format!("  · {name} {}\n", clip(&input, SNIPPET_CHARS)));
-                if *status == Lifecycle::Failed {
-                    out.push_str(&format!(
-                        "    failed: {}\n",
-                        clip(output.as_deref().unwrap_or_default(), SNIPPET_CHARS)
-                    ));
+            TurnItem::Request(request) => render_request(out, request),
+            TurnItem::Agent(item) => render_item(out, item),
+        }
+    }
+}
+
+fn turn_line(turn: &Turn) -> String {
+    use transcript::live::TurnState;
+    let at = |at: &Option<String>| transcript::seconds(at).map(minute);
+    let ended = at(&turn.ended_at).map(|at| format!(" {at}"));
+    let state = match turn.state {
+        Some(TurnState::Running) => Some("running".to_owned()),
+        Some(TurnState::Ended) => Some(format!("ended{}", ended.unwrap_or_default())),
+        Some(TurnState::Interrupted) => Some(format!("interrupted{}", ended.unwrap_or_default())),
+        None => None,
+    };
+    [
+        Some(turn.at().map_or_else(|| "turn".to_owned(), minute)),
+        state,
+        turn.model.clone(),
+        turn.usage.map(|usage| usage.describe()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
+fn render_request(out: &mut String, request: &Request) {
+    match request.from {
+        RequestSource::Person => out.push_str(&format!("\nyou: {}\n", request.text.trim())),
+        RequestSource::Injected => match transcript::Launch::parse(&request.text) {
+            Some(launch) => {
+                out.push_str("\ninjected:");
+                if let Some((skill, _)) = &launch.skill {
+                    out.push_str(&format!(" Skill {skill}"));
+                }
+                out.push('\n');
+                if let Some(message) = launch.message.filter(|m| !m.is_empty()) {
+                    out.push_str(&format!("{message}\n"));
                 }
             }
-            _ => {}
+            None => out.push_str(&format!(
+                "\ninjected: ({} characters of context)\n",
+                request.text.chars().count()
+            )),
+        },
+    }
+}
+
+fn render_item(out: &mut String, item: &ConversationItem) {
+    match item {
+        ConversationItem::Message { text, .. } => {
+            out.push_str(&format!("\n{}\n", text.trim()));
         }
+        ConversationItem::Thought { text, .. } => {
+            out.push_str(&format!("  thinking: {}\n", clip(text, SNIPPET_CHARS)));
+        }
+        ConversationItem::Tool {
+            name,
+            status,
+            input,
+            output,
+            ..
+        } => {
+            let input = match input {
+                Some(serde_json::Value::String(input)) => input.clone(),
+                Some(input) => input.to_string(),
+                None => String::new(),
+            };
+            out.push_str(&format!("  · {name} {}\n", clip(&input, SNIPPET_CHARS)));
+            if *status == Lifecycle::Failed {
+                out.push_str(&format!(
+                    "    failed: {}\n",
+                    clip(output.as_deref().unwrap_or_default(), SNIPPET_CHARS)
+                ));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -363,7 +390,7 @@ pub(crate) fn search(
                                 session_id: session.clone(),
                                 harness: harness.as_str().to_owned(),
                                 agent_session: thread.facts.thread.as_str().to_owned(),
-                                at: turn.at,
+                                at: turn.at(),
                                 snippet,
                             });
                             if results.hits.len() >= limit {
@@ -397,21 +424,19 @@ pub(crate) fn search(
     Ok(())
 }
 
-/// The searchable text of a turn: its request, messages and tool calls.
+/// The searchable text of a turn: its requests, messages and tool calls.
 fn texts(turn: &Turn) -> Vec<&str> {
     let mut texts = Vec::new();
-    if let Some(request) = &turn.request {
-        texts.push(request.text.as_str());
-    }
     for item in &turn.items {
         match item {
-            ConversationItem::Message { text, .. } | ConversationItem::Thought { text, .. } => {
-                texts.push(text)
-            }
-            ConversationItem::Tool { output, .. } => {
+            TurnItem::Request(request) => texts.push(request.text.as_str()),
+            TurnItem::Agent(
+                ConversationItem::Message { text, .. } | ConversationItem::Thought { text, .. },
+            ) => texts.push(text),
+            TurnItem::Agent(ConversationItem::Tool { output, .. }) => {
                 texts.extend(output.as_deref());
             }
-            _ => {}
+            TurnItem::Agent(_) => {}
         }
     }
     texts
@@ -485,5 +510,33 @@ mod tests {
         assert!(claude.contains("removed after") && claude.contains("cleanupPeriodDays"));
         let codex = facts_only(HarnessKind::Codex, "missing at codex");
         assert!(!codex.contains("removed after") && !codex.contains("cleanupPeriodDays"));
+    }
+
+    #[test]
+    fn a_turn_prints_one_line_then_its_requests_and_what_the_agent_did() {
+        let turn: Turn = serde_json::from_value(serde_json::json!({
+            "id": "u1",
+            "state": "ended",
+            "started_at": "2026-11-10T16:25:37Z",
+            "ended_at": "2026-11-10T16:27:51Z",
+            "model": "claude-opus-5-5",
+            "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100},
+            "items": [
+                {"request": {"at": "2026-11-10T16:25:37Z", "text": "Explain the build", "from": "person"}},
+                {"agent": {"type": "message", "id": "a", "text": "It builds with cargo.", "phase": null}},
+                {"request": {"at": null, "text": "<system-reminder>x", "from": "injected"}},
+            ],
+        }))
+        .unwrap();
+        let mut out = String::new();
+        render_turn(&mut out, &turn);
+        assert_eq!(
+            out,
+            "\n── 2026-11-10 16:25 UTC · ended 2026-11-10 16:27 UTC · claude-opus-5-5 · \
+             41.2k in (38.0k cached) · 1.1k out\n\
+             \nyou: Explain the build\n\
+             \nIt builds with cargo.\n\
+             \ninjected: (18 characters of context)\n"
+        );
     }
 }

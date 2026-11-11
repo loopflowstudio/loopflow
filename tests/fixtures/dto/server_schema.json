@@ -10785,10 +10785,17 @@
       "type": "string"
     },
     "SessionTurn": {
-      "description": "A conversation's current or last turn.",
+      "description": "A conversation's current or last turn: a transcript `Turn` without what\nwas said in it.",
       "properties": {
         "ended_at": {
           "description": "RFC 3339; absent while it runs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The provider's name for the turn.",
           "type": [
             "string",
             "null"
@@ -10799,9 +10806,6 @@
             "string",
             "null"
           ]
-        },
-        "source": {
-          "$ref": "#/$defs/TurnSource"
         },
         "started_at": {
           "description": "RFC 3339; absent when the turn began before what was read.",
@@ -10822,12 +10826,12 @@
               "type": "null"
             }
           ],
-          "description": "Tokens across the turn's model calls; absent while it runs."
+          "description": "Tokens across the turn's model calls so far; absent when nothing\nreports them."
         }
       },
       "required": [
+        "id",
         "state",
-        "source",
         "started_at",
         "ended_at",
         "model",
@@ -14571,26 +14575,9 @@
       ],
       "type": "string"
     },
-    "TurnSource": {
-      "description": "Where a turn reading came from.",
-      "oneOf": [
-        {
-          "const": "stream",
-          "description": "A turn boundary Loopflow recorded from the provider's live stream.",
-          "type": "string"
-        },
-        {
-          "const": "transcript",
-          "description": "The provider's own transcript.",
-          "type": "string"
-        }
-      ]
-    },
     "TurnState": {
-      "description": "`asking` is a turn stopped on a question the agent put to the person.",
       "enum": [
         "running",
-        "asking",
         "ended",
         "interrupted"
       ],

@@ -13,11 +13,9 @@ use super::SqliteStore;
 pub(crate) struct CurrentConversation {
     pub provider: String,
     pub thread: AgentSessionId,
-    /// The last turn Loopflow recorded in it from the provider's live stream.
-    pub turn: Option<RecordedTurn>,
 }
 
-/// One turn's recorded boundaries, in Unix seconds.
+/// One turn's boundaries as Loopflow recorded them, in Unix seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RecordedTurn {
     /// The provider's name for the turn.
@@ -154,31 +152,39 @@ impl SqliteStore {
         Ok(threads)
     }
 
-    /// `session`'s current provider conversation and the last turn Loopflow
-    /// recorded in it while it ran; `None` when it has none. Turns written
-    /// later from the transcript say nothing about what runs now.
+    /// `session`'s current provider conversation; `None` when it has none.
     pub(crate) fn current_conversation(
         &self,
         session: &str,
     ) -> StoreResult<Option<CurrentConversation>> {
-        let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let conn = connection.savepoint()?;
-        let Some((provider, thread)) = conn
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
             .query_row(
                 "SELECT provider,provider_thread FROM agent_sessions
                  WHERE id=?1 AND provider IS NOT NULL AND provider_thread IS NOT NULL",
                 [session],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, AgentSessionId>(1)?)),
+                |row| {
+                    Ok(CurrentConversation {
+                        provider: row.get(0)?,
+                        thread: row.get(1)?,
+                    })
+                },
             )
-            .optional()?
-        else {
-            return Ok(None);
-        };
+            .optional()?)
+    }
+
+    /// The last turn recorded in `thread`, by its latest start or completion.
+    pub(crate) fn last_recorded_turn(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+    ) -> StoreResult<Option<RecordedTurn>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let latest = conn
             .query_row(
                 "SELECT provider_turn,kind,observed_at,payload FROM session_events
                  WHERE session_id=?1 AND provider_thread=?2 AND kind IN ('started','completed')
-                   AND json_extract(payload,'$.source') IS NOT 'transcript'
                  ORDER BY seq DESC LIMIT 1",
                 params![session, thread],
                 |row| {
@@ -191,7 +197,7 @@ impl SqliteStore {
                 },
             )
             .optional()?;
-        let turn = match latest {
+        Ok(match latest {
             None => None,
             Some((turn, kind, at, _)) if kind == "started" => Some(RecordedTurn {
                 id: turn,
@@ -218,29 +224,52 @@ impl SqliteStore {
                     status: payload["status"].as_str().map(str::to_owned),
                 })
             }
-        };
-        Ok(Some(CurrentConversation {
-            provider,
-            thread,
-            turn,
-        }))
+        })
     }
 
-    /// Which of `threads` are some Session's current provider conversation.
-    pub(crate) fn recorded_provider_threads(
+    /// When turn `turn` of `thread` was recorded complete, and its status.
+    pub(crate) fn recorded_turn_end(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+    ) -> StoreResult<Option<(i64, Option<String>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let end = conn
+            .query_row(
+                "SELECT observed_at,payload FROM session_events
+                 WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
+                   AND kind='completed'
+                 ORDER BY seq DESC LIMIT 1",
+                params![session, thread, turn],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        end.map(|(at, payload)| {
+            let payload: Value = serde_json::from_str(&payload)?;
+            Ok((at, payload["status"].as_str().map(str::to_owned)))
+        })
+        .transpose()
+    }
+
+    /// The newest Session whose current provider conversation each of
+    /// `threads` is.
+    pub(crate) fn sessions_of_provider_threads(
         &self,
         threads: &[String],
-    ) -> StoreResult<std::collections::HashSet<String>> {
+    ) -> StoreResult<std::collections::HashMap<String, String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare_cached("SELECT 1 FROM agent_sessions WHERE provider_thread=?1 LIMIT 1")?;
-        let mut recorded = std::collections::HashSet::new();
+        let mut query = conn.prepare_cached(
+            "SELECT id FROM agent_sessions WHERE provider_thread=?1
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut sessions = std::collections::HashMap::new();
         for thread in threads {
-            if query.exists([thread])? {
-                recorded.insert(thread.clone());
+            if let Some(session) = query.query_row([thread], |row| row.get(0)).optional()? {
+                sessions.insert(thread.clone(), session);
             }
         }
-        Ok(recorded)
+        Ok(sessions)
     }
 
     /// Every Session with its current provider conversation and the account
@@ -588,40 +617,57 @@ impl SqliteStore {
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
-    /// Record a turn's usage and completion as its provider's transcript
-    /// shows them, dated `at`, when the turn ended.
-    pub(crate) fn record_transcript_turn(
+    /// Record `turn`'s usage as its provider's transcript shows it, dated
+    /// `at`. A turn keeps the usage row it has; returns whether one was written.
+    pub(crate) fn record_turn_usage(
         &self,
         session: &str,
         thread: &AgentSessionId,
         turn: &str,
         at: i64,
-        usage: Option<&Value>,
+        usage: &Value,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let written = conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             SELECT ?1,?2,?3,'usage',?4,?5,?6 WHERE NOT EXISTS(
+                SELECT 1 FROM session_events
+                WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind='usage')",
+            params![
+                session,
+                thread,
+                turn,
+                crate::session_record::native_usage_key(usage),
+                at,
+                serde_json::to_string(usage)?
+            ],
+        )?;
+        Ok(written > 0)
+    }
+
+    /// Record `turn`'s completion as its provider's transcript shows it,
+    /// dated `at`, when the turn ended.
+    pub(crate) fn record_turn_completion(
+        &self,
+        session: &str,
+        thread: &AgentSessionId,
+        turn: &str,
+        at: i64,
         completed: &Value,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let rows = [
-            (SessionEventKind::Usage, usage),
-            (SessionEventKind::Completed, Some(completed)),
-        ];
-        for (kind, payload) in rows {
-            if let Some(payload) = payload {
-                tx.execute(
-                    INSERT_NATIVE_EVENT,
-                    params![
-                        session,
-                        thread,
-                        turn,
-                        kind.as_str(),
-                        "",
-                        at,
-                        serde_json::to_string(payload)?
-                    ],
-                )?;
-            }
-        }
-        tx.commit()?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            INSERT_NATIVE_EVENT,
+            params![
+                session,
+                thread,
+                turn,
+                SessionEventKind::Completed.as_str(),
+                "",
+                at,
+                serde_json::to_string(completed)?
+            ],
+        )?;
         Ok(())
     }
 

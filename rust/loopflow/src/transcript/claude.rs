@@ -4,14 +4,15 @@
 use serde_json::{json, Value};
 
 use super::live::{TurnState, TurnUsage};
-use super::{text_of, unix_seconds, RequestSource, Runs, Transcript, Turns};
+use super::{text_of, RequestSource, Turn, Turns};
 
-/// A run ends with an assistant message whose `stop_reason` is `end_turn`,
-/// usually followed by a `turn_duration` system row. A run's id is the `uuid`
-/// of the request row that started it.
-pub(super) fn read(rows: &[Value]) -> Transcript {
+/// A turn ends with an assistant message whose `stop_reason` is `end_turn`,
+/// usually followed by a `turn_duration` system row. A turn's id is the `uuid`
+/// of the row that started it. A question the agent asked, or a tool waiting
+/// on a permission prompt, reads as running: Claude writes the call's row
+/// only with its result.
+pub(super) fn read(rows: &[Value]) -> Vec<Turn> {
     let mut turns = Turns::default();
-    let mut runs = Runs::default();
     let mut tally = Tally::default();
     for row in rows {
         if row["isSidechain"].as_bool() == Some(true) {
@@ -23,114 +24,92 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
         let stamp = || row["timestamp"].as_str().map(str::to_owned);
         match row["type"].as_str() {
             Some("user") => {
-                let at = unix_seconds(&row["timestamp"]);
                 if is_user_input(row) {
-                    turns.request(at, text_of(content), RequestSource::Person);
-                    tally.asked.clear();
-                    runs.start(request(), stamp());
+                    turns.start(request(), stamp());
+                    turns.request(stamp(), text_of(content), RequestSource::Person);
                     continue;
                 }
                 let text = text_of(content);
                 if row["isMeta"].as_bool() != Some(true) && !text.trim().is_empty() {
-                    turns.request(at, text, RequestSource::Injected);
+                    turns.request(stamp(), text, RequestSource::Injected);
                 }
                 let mut answered = false;
                 for block in content.as_array().into_iter().flatten() {
                     if block["type"] == "tool_result" {
                         answered = true;
-                        let call = block["tool_use_id"].as_str().unwrap_or_default();
-                        tally.asked.retain(|asked| asked != call);
                         turns.resolve(
-                            call,
+                            block["tool_use_id"].as_str().unwrap_or_default(),
                             block["is_error"].as_bool() == Some(true),
                             text_of(&block["content"]),
                         );
                     }
                 }
                 if is_interruption(row) {
-                    tally.asked.clear();
-                    runs.end(TurnState::Interrupted, stamp());
+                    turns.end(TurnState::Interrupted, stamp());
                 } else if answered {
-                    runs.current().state = tally.state();
+                    turns.current();
                 } else {
-                    runs.wake(request(), stamp());
+                    turns.wake(request(), stamp());
                 }
             }
             Some("assistant") => {
                 let message = &row["message"];
+                turns.current();
                 for block in content.as_array().into_iter().flatten() {
                     match block["type"].as_str() {
                         Some("text") => turns.message(id, block["text"].as_str().unwrap_or("")),
                         Some("thinking") => {
                             turns.thought(id, block["thinking"].as_str().unwrap_or(""))
                         }
-                        Some("tool_use") => {
-                            if block["name"] == QUESTION {
-                                tally.asked.extend(block["id"].as_str().map(str::to_owned));
-                            }
-                            turns.tool(
-                                block["id"].as_str(),
-                                block["name"].as_str(),
-                                block["input"].clone(),
-                            )
-                        }
+                        Some("tool_use") => turns.tool(
+                            block["id"].as_str(),
+                            block["name"].as_str(),
+                            block["input"].clone(),
+                        ),
                         _ => {}
                     }
                 }
-                runs.current();
-                let at = runs.runs.len();
-                let run = runs.runs.last_mut().expect("the current run");
-                tally.count(at, message);
-                (run.usage, run.receipt) = tally.usage();
-                run.model = tally.model.clone();
+                tally.count(turns.turns.len(), message);
+                let turn = turns.current();
+                let (usage, receipt) = tally.usage();
+                turn.usage = Some(usage);
+                turn.receipt.usage = receipt;
+                turn.model = tally.model.clone();
                 if message["stop_reason"] == "end_turn" {
-                    tally.asked.clear();
-                    run.state = TurnState::Ended;
-                    run.ended_at = stamp();
-                } else {
-                    run.state = tally.state();
-                    run.ended_at = None;
+                    turn.state = Some(TurnState::Ended);
+                    turn.ended_at = stamp();
                 }
             }
-            Some("system") => match (row["subtype"].as_str(), runs.runs.last_mut()) {
-                (Some("turn_duration"), Some(run)) if run.state == TurnState::Ended => {
-                    run.duration_ms = row["durationMs"].as_u64();
+            Some("system") => match (row["subtype"].as_str(), turns.turns.last_mut()) {
+                (Some("turn_duration"), Some(turn)) if turn.state == Some(TurnState::Ended) => {
+                    turn.receipt.duration_ms = row["durationMs"].as_u64();
                 }
-                (Some("api_error"), Some(run)) if run.ended_at.is_none() => {
-                    run.errors.push(row["error"].clone());
+                (Some("api_error"), Some(turn)) if turn.ended_at.is_none() => {
+                    turn.receipt.errors.push(row["error"].clone());
                 }
                 _ => {}
             },
             _ => {}
         }
     }
-    Transcript {
-        turns: turns.0,
-        runs: runs.runs,
-    }
+    turns.finish()
 }
 
-/// The tool Claude asks a person a question with. Its call stays without a
-/// result until they answer.
-const QUESTION: &str = "AskUserQuestion";
-
-/// One run's model calls and open questions.
+/// One turn's model calls.
 #[derive(Debug, Default)]
 struct Tally {
-    /// Which run the calls belong to, by its position.
-    run: usize,
+    /// Which turn the calls belong to, by its position.
+    turn: usize,
     /// Usage by message id: rows repeat one message for each content block.
     calls: Vec<(String, [u64; 4])>,
     model: Option<String>,
-    asked: Vec<String>,
 }
 
 impl Tally {
-    fn count(&mut self, run: usize, message: &Value) {
-        if self.run != run {
+    fn count(&mut self, turn: usize, message: &Value) {
+        if self.turn != turn {
             *self = Self {
-                run,
-                asked: std::mem::take(&mut self.asked),
+                turn,
                 ..Self::default()
             };
         }
@@ -152,15 +131,7 @@ impl Tally {
         }
     }
 
-    fn state(&self) -> TurnState {
-        if self.asked.is_empty() {
-            TurnState::Running
-        } else {
-            TurnState::Asking
-        }
-    }
-
-    /// The run's usage so far, and the same as the live stream's receipt.
+    /// The turn's usage so far, and the same as its store row.
     fn usage(&self) -> (TurnUsage, Value) {
         let [input, cache_read, cache_write, output] =
             self.calls.iter().fold([0; 4], |sum, (_, call)| {
@@ -173,7 +144,7 @@ impl Tally {
                 cached_input_tokens: cache_read,
                 output_tokens: output,
             },
-            json!({"provider": "claude", "usage": {
+            json!({"provider": "claude", "final": true, "usage": {
                 "input_tokens": input,
                 "output_tokens": output,
                 "total_input_tokens": total,
@@ -250,37 +221,7 @@ pub(crate) fn is_user_input(row: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::chat::types::{ConversationItem, Lifecycle};
-
-    #[test]
-    fn a_claude_transcript_pairs_tool_results_and_separates_injected_requests() {
-        let rows = [
-            serde_json::json!({"type":"user","userType":"external","timestamp":"2026-10-26T10:00:00Z","message":{"content":"<lf:message>\nFix it\n</lf:message>"}}),
-            serde_json::json!({"type":"assistant","uuid":"a1","message":{"content":[
-                {"type":"thinking","thinking":"plan"},
-                {"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}),
-            serde_json::json!({"type":"user","userType":"external","toolUseResult":"ok","message":{"content":[
-                {"type":"tool_result","tool_use_id":"t1","content":"Cargo.toml"}]}}),
-            serde_json::json!({"type":"user","userType":"external","isSidechain":true,"message":{"content":"subagent"}}),
-            serde_json::json!({"type":"user","userType":"external","timestamp":"2026-10-26T10:05:00Z","message":{"content":"Now ship"}}),
-        ];
-        let turns = read(&rows).turns;
-        assert_eq!(turns.len(), 2);
-        assert_eq!(
-            turns[0].request.as_ref().unwrap().from,
-            RequestSource::Injected
-        );
-        assert!(
-            matches!(&turns[0].items[0], ConversationItem::Thought { text, .. } if text == "plan")
-        );
-        assert!(matches!(&turns[0].items[1],
-            ConversationItem::Tool { status: Lifecycle::Completed, output: Some(output), .. } if output == "Cargo.toml"));
-        let person = turns[1].request.as_ref().unwrap();
-        assert_eq!(
-            (person.text.as_str(), person.from),
-            ("Now ship", RequestSource::Person)
-        );
-        assert_eq!(turns[1].at, Some(1_793_009_100));
-    }
+    use crate::transcript::TurnItem;
 
     fn user(uuid: &str, at: &str, content: Value) -> Value {
         serde_json::json!({"type":"user","userType":"external","uuid":uuid,
@@ -288,35 +229,78 @@ mod tests {
     }
 
     fn assistant(message: &str, at: &str, stop: &str, content: Value) -> Value {
-        serde_json::json!({"type":"assistant","timestamp":format!("2026-11-10T16:{at}Z"),
+        serde_json::json!({"type":"assistant","uuid":message,
+            "timestamp":format!("2026-11-10T16:{at}Z"),
             "message":{"id":message,"model":"claude-opus-5-5","stop_reason":stop,"content":content,
                 "usage":{"input_tokens":1,"output_tokens":10}}})
     }
 
-    #[test]
-    fn an_unanswered_question_reads_as_asking_until_its_answer_arrives() {
-        let question =
-            serde_json::json!([{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{}}]);
-        let mut rows = vec![
-            user("u1", "00:00", "Pick a color".into()),
-            assistant("m1", "00:05", "tool_use", question),
-        ];
-        assert_eq!(read(&rows).runs[0].state, TurnState::Asking);
-
-        let mut answer = user(
-            "u2",
-            "03:00",
-            serde_json::json!([{"type":"tool_result","tool_use_id":"q1","content":"blue"}]),
-        );
-        answer["toolUseResult"] = "blue".into();
-        rows.push(answer);
-        let runs = read(&rows).runs;
-        assert_eq!((runs.len(), runs[0].state), (1, TurnState::Running));
+    fn text(text: &str) -> Value {
+        serde_json::json!([{"type":"text","text":text}])
     }
 
     #[test]
-    fn a_run_starts_at_what_woke_the_agent_and_holds_input_queued_before_it_ends() {
-        let text = |text: &str| serde_json::json!([{"type":"text","text":text}]);
+    fn a_turn_holds_its_requests_and_pairs_tool_results() {
+        let mut result = user(
+            "r1",
+            "00:07",
+            serde_json::json!([{"type":"tool_result","tool_use_id":"t1","content":"Cargo.toml"}]),
+        );
+        result["toolUseResult"] = "ok".into();
+        let mut side = user("s1", "00:08", "subagent".into());
+        side["isSidechain"] = true.into();
+        let rows = [
+            user("u1", "00:00", "<lf:message>\nFix it\n</lf:message>".into()),
+            assistant(
+                "a1",
+                "00:05",
+                "tool_use",
+                serde_json::json!([
+                    {"type":"thinking","thinking":"plan"},
+                    {"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]),
+            ),
+            result,
+            side,
+            assistant("a2", "00:09", "end_turn", text("Fixed.")),
+            user("u2", "05:00", "Now ship".into()),
+        ];
+        let turns = read(&rows);
+        assert_eq!(turns.len(), 2);
+        // The launch message woke the agent and is the turn's first item.
+        assert_eq!(turns[0].id.as_deref(), Some("u1"));
+        assert_eq!(turns[0].state, Some(TurnState::Ended));
+        let TurnItem::Request(launch) = &turns[0].items[0] else {
+            panic!("{:?}", turns[0].items[0]);
+        };
+        assert_eq!(launch.from, RequestSource::Injected);
+        let said = turns[0].agent().collect::<Vec<_>>();
+        assert!(matches!(said[0], ConversationItem::Thought { text, .. } if text == "plan"));
+        assert!(matches!(said[1],
+            ConversationItem::Tool { status: Lifecycle::Completed, output: Some(output), .. } if output == "Cargo.toml"));
+        assert_eq!(said.len(), 3);
+
+        let person = turns[1].requests().next().unwrap();
+        assert_eq!(
+            (person.text.as_str(), person.from),
+            ("Now ship", RequestSource::Person)
+        );
+        assert_eq!(turns[1].at(), Some(1_794_326_700));
+        assert_eq!(turns[1].state, Some(TurnState::Running));
+    }
+
+    #[test]
+    fn a_question_the_agent_asked_reads_as_running_until_the_turn_ends() {
+        let question =
+            serde_json::json!([{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{}}]);
+        let rows = [
+            user("u1", "00:00", "Pick a color".into()),
+            assistant("m1", "00:05", "tool_use", question),
+        ];
+        assert_eq!(read(&rows)[0].state, Some(TurnState::Running));
+    }
+
+    #[test]
+    fn a_turn_starts_at_what_woke_the_agent_and_holds_input_queued_before_it_ends() {
         let mut caveat = user("c1", "02:00", "<local-command-caveat>ran /model".into());
         caveat["isMeta"] = true.into();
         let rows = [
@@ -327,27 +311,42 @@ mod tests {
             caveat,
             user("n1", "05:00", "<task-notification>build finished".into()),
         ];
-        let runs = read(&rows).runs;
-        // The launch message woke the agent; typing over it ended that run.
+        let turns = read(&rows);
+        // The launch message woke the agent; typing over it ended that turn.
         assert_eq!(
-            runs.iter()
-                .map(|run| (run.id.as_deref(), run.state, run.usage.output_tokens))
+            turns
+                .iter()
+                .map(|turn| (
+                    turn.id.as_deref(),
+                    turn.state.unwrap(),
+                    turn.usage.unwrap().output_tokens
+                ))
                 .collect::<Vec<_>>(),
             [
                 (Some("u1"), TurnState::Interrupted, 10),
                 (Some("u2"), TurnState::Ended, 10),
             ]
         );
-        assert_eq!(runs[0].ended_at.as_deref(), Some("2026-11-10T16:00:30Z"));
+        assert_eq!(turns[0].ended_at.as_deref(), Some("2026-11-10T16:00:30Z"));
+        // A notification no model call follows starts nothing: it stays with
+        // the turn before it.
+        assert_eq!(turns[1].requests().count(), 2);
 
-        // Rows no model call follows start nothing; the notification's does.
+        // Once the agent answers it, it is the first item of a turn of its own.
         let mut rows = rows.to_vec();
         rows.push(assistant("m3", "05:02", "tool_use", text("looking")));
-        let runs = read(&rows).runs;
+        let turns = read(&rows);
         assert_eq!(
-            (runs.len(), runs[2].id.as_deref(), runs[2].state),
-            (3, Some("n1"), TurnState::Running)
+            (turns.len(), turns[2].id.as_deref(), turns[2].state),
+            (3, Some("n1"), Some(TurnState::Running))
         );
-        assert_eq!(runs[2].started_at.as_deref(), Some("2026-11-10T16:05:00Z"));
+        assert_eq!(turns[2].started_at.as_deref(), Some("2026-11-10T16:05:00Z"));
+        assert_eq!(turns[1].requests().count(), 1);
+        assert!(turns[2]
+            .requests()
+            .next()
+            .unwrap()
+            .text
+            .contains("build finished"));
     }
 }

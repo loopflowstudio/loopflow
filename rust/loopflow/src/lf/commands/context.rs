@@ -319,6 +319,18 @@ pub fn emit_block(
         if let Err(error) = recorded {
             gap.note("turn evidence", &error);
         }
+        // The transcript is the only writer of Claude and Codex usage rows;
+        // the exit read writes any turn this misses.
+        if yielded {
+            match hook_store(&delivery.home) {
+                Ok(store) => crate::transcript::facts::record_session(
+                    &store,
+                    &adapter.session,
+                    crate::transcript::facts::Moment::TurnEnd,
+                ),
+                Err(error) => gap.note("turn usage", &error),
+            }
+        }
     }
     if moment == crate::context_block::ContextMoment::Stop {
         if let Err(error) = acquire_planning(&delivery) {

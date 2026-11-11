@@ -1,7 +1,8 @@
 //! A conversation's current or last turn, read from the end of its provider's
 //! transcript at the moment someone asks. Only Claude and Codex keep turn
-//! boundaries there. A transcript shows a question the agent asked and not a
-//! permission prompt, so a turn waiting on one of those reads as running.
+//! ends there. A transcript shows neither a question the agent asked nor a
+//! permission prompt until it is answered, so a turn waiting on one reads as
+//! running.
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,8 +13,7 @@ use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::facts::{seconds, LAG};
-use super::{unix_seconds, Run};
+use super::{rfc3339, seconds, Turn};
 use crate::harness::HarnessKind;
 use crate::store::sqlite::{CurrentConversation, RecordedTurn, SqliteStore};
 
@@ -33,11 +33,14 @@ const MARKERS: [&[u8]; 5] = [
     b"\"type\":\"turn_context\"",
 ];
 
-/// A conversation's current or last turn.
+/// A conversation's current or last turn: a transcript `Turn` without what
+/// was said in it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionTurn {
+    /// The provider's name for the turn.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub id: Option<String>,
     pub state: TurnState,
-    pub source: TurnSource,
     /// RFC 3339; absent when the turn began before what was read.
     #[serde(deserialize_with = "Option::deserialize")]
     pub started_at: Option<String>,
@@ -46,37 +49,18 @@ pub struct SessionTurn {
     pub ended_at: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     pub model: Option<String>,
-    /// Tokens across the turn's model calls; absent while it runs.
+    /// Tokens across the turn's model calls so far; absent when nothing
+    /// reports them.
     #[serde(deserialize_with = "Option::deserialize")]
     pub usage: Option<TurnUsage>,
 }
 
-/// A transcript's current or last run as a turn, with the provider's name for
-/// it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TranscriptRun {
-    pub id: Option<String>,
-    pub turn: SessionTurn,
-}
-
-/// `asking` is a turn stopped on a question the agent put to the person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnState {
     Running,
-    Asking,
     Ended,
     Interrupted,
-}
-
-/// Where a turn reading came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnSource {
-    /// A turn boundary Loopflow recorded from the provider's live stream.
-    Stream,
-    /// The provider's own transcript.
-    Transcript,
 }
 
 /// `input_tokens` counts every input token, cached ones included.
@@ -90,143 +74,79 @@ pub struct TurnUsage {
 }
 
 impl SessionTurn {
-    /// What `lf session list` prints for it.
+    /// What `lf session list` and `lf history show` print for it.
     pub(crate) fn describe(&self, now: i64) -> String {
-        let since = |at: &Option<String>| {
-            at.as_deref()
-                .and_then(|at| unix_seconds(&Value::String(at.to_owned())))
-                .map(|at| duration(now.saturating_sub(at)))
-        };
-        match self.state {
+        let since = |at: &Option<String>| seconds(at).map(|at| duration(now.saturating_sub(at)));
+        let mut line = match self.state {
             TurnState::Running => match since(&self.started_at) {
-                Some(running) => format!("turn running {running}"),
-                None => "turn running".into(),
+                Some(running) => return format!("turn running {running}"),
+                None => return "turn running".into(),
             },
-            TurnState::Asking => "asked a question".into(),
-            TurnState::Ended | TurnState::Interrupted => {
-                let what = if self.state == TurnState::Ended {
-                    "last turn ended"
-                } else {
-                    "last turn interrupted"
-                };
-                let mut line = match since(&self.ended_at) {
-                    Some(ago) => format!("{what} {ago} ago"),
-                    None => what.into(),
-                };
-                if let Some(usage) = self.usage {
-                    line.push_str(&format!(
-                        " · {} in ({} cached) · {} out",
-                        tokens(usage.input_tokens),
-                        tokens(usage.cached_input_tokens),
-                        tokens(usage.output_tokens)
-                    ));
-                }
-                line
-            }
-        }
-    }
-
-    fn from_run(run: Run) -> TranscriptRun {
-        let turn = Self {
-            state: run.state,
-            source: TurnSource::Transcript,
-            started_at: run.started_at,
-            usage: run.ended_at.is_some().then_some(run.usage),
-            ended_at: run.ended_at,
-            model: run.model,
+            TurnState::Ended => "last turn ended".to_owned(),
+            TurnState::Interrupted => "last turn interrupted".to_owned(),
         };
-        TranscriptRun { id: run.id, turn }
+        if let Some(ago) = since(&self.ended_at) {
+            line.push_str(&format!(" {ago} ago"));
+        }
+        if let Some(usage) = self.usage {
+            line.push_str(&format!(" · {}", usage.describe()));
+        }
+        line
     }
 
-    /// Whether the conversation waits on a person: the agent handed back, or
-    /// asked a question.
-    pub(crate) fn waits(&self) -> bool {
+    /// Whether the agent handed back.
+    pub(crate) fn handed_back(&self) -> bool {
         self.state != TurnState::Running
     }
 
+    /// `None` for a turn of a transcript that keeps no turn ends.
+    fn of(turn: Turn) -> Option<Self> {
+        Some(Self {
+            id: turn.id,
+            state: turn.state?,
+            started_at: turn.started_at,
+            ended_at: turn.ended_at,
+            model: turn.model,
+            usage: turn.usage,
+        })
+    }
+
     /// A turn as Loopflow recorded its boundaries from the provider's live
-    /// stream, in Unix seconds.
-    pub(crate) fn from_stream(
-        started_at: Option<i64>,
-        settled_at: Option<i64>,
-        status: Option<&str>,
-    ) -> Self {
-        let state = match (settled_at, status) {
-            (None, _) => TurnState::Running,
-            (Some(_), Some(status)) if status.contains("interrupt") => TurnState::Interrupted,
-            (Some(_), _) => TurnState::Ended,
-        };
-        Self {
-            state,
-            source: TurnSource::Stream,
-            started_at: started_at.and_then(rfc3339),
-            ended_at: settled_at.and_then(rfc3339),
+    /// stream: all there is for a harness whose transcript keeps no turn ends.
+    pub(crate) fn from_stream(stream: RecordedTurn) -> Self {
+        let mut turn = Self {
+            id: stream.id,
+            state: TurnState::Running,
+            started_at: stream.started_at.and_then(rfc3339),
+            ended_at: None,
             model: None,
             usage: None,
+        };
+        if let Some(at) = stream.settled_at {
+            turn.close(at, stream.status.as_deref());
         }
+        turn
+    }
+
+    /// End a turn the transcript left open at the end Loopflow recorded for
+    /// it, in Unix seconds.
+    pub(crate) fn close(&mut self, at: i64, status: Option<&str>) {
+        self.state = match status {
+            Some(status) if status.contains("interrupt") => TurnState::Interrupted,
+            _ => TurnState::Ended,
+        };
+        self.ended_at = rfc3339(at);
     }
 }
 
-/// The current turn of a conversation whose last turn Loopflow recorded from
-/// the live stream as `stream`, given its transcript's last run, at `now` in
-/// Unix seconds. The stream keeps the state of a run it recorded, which takes
-/// its model and usage from the transcript, until the transcript shows that
-/// run asked or ended more than `LAG` ago; a run it never saw, after its
-/// turn, is the reading on its own; a transcript behind it leaves it as it is.
-pub(crate) fn combine(stream: &RecordedTurn, run: Option<TranscriptRun>, now: i64) -> SessionTurn {
-    let mut turn = SessionTurn::from_stream(
-        stream.started_at,
-        stream.settled_at,
-        stream.status.as_deref(),
-    );
-    let Some(run) = run else {
-        return turn;
-    };
-    match Order::of(stream, &run) {
-        // A completion folds a prompt dequeued after `end_turn` into the same
-        // stream turn, so a run that ended just now is not yet a hand-back.
-        Order::Same
-            if turn.state == TurnState::Running
-                && (run.turn.state == TurnState::Asking
-                    || seconds(&run.turn.ended_at).is_some_and(|end| end + LAG < now)) =>
-        {
-            run.turn
-        }
-        Order::Same => {
-            turn.model = run.turn.model;
-            turn.usage = run.turn.usage;
-            turn
-        }
-        Order::After => run.turn,
-        Order::Behind => turn,
-    }
-}
-
-/// Where a transcript's last run stands against the stream's last turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Order {
-    /// The stream recorded it: one completion can fold several runs, every
-    /// run from the stream turn's start until its completion was observed.
-    Same,
-    After,
-    Behind,
-}
-
-impl Order {
-    fn of(stream: &RecordedTurn, run: &TranscriptRun) -> Self {
-        if run.id.is_some() && run.id == stream.id {
-            return Self::Same;
-        }
-        let start = seconds(&run.turn.started_at);
-        let end = seconds(&run.turn.ended_at);
-        let older = |at: Option<i64>, from: i64| at.is_some_and(|at| at + LAG < from);
-        match (stream.started_at, stream.settled_at) {
-            (_, Some(at)) if end.is_some_and(|end| end > at + LAG) => Self::After,
-            (Some(from), _) if older(start.or(end), from) => Self::Behind,
-            (None, Some(at)) if older(end.or(start), at) => Self::Behind,
-            (_, Some(_)) if end.is_none() => Self::After,
-            _ => Self::Same,
-        }
+impl TurnUsage {
+    pub(crate) fn describe(&self) -> String {
+        format!(
+            "{} in ({} cached) · {} out",
+            tokens(self.input_tokens),
+            tokens(self.cached_input_tokens),
+            tokens(self.output_tokens)
+        )
     }
 }
 
@@ -248,23 +168,26 @@ fn tokens(count: u64) -> String {
     }
 }
 
-fn rfc3339(at: i64) -> Option<String> {
-    time::OffsetDateTime::from_unix_timestamp(at)
-        .ok()?
-        .format(&time::format_description::well_known::Rfc3339)
-        .ok()
+/// The current or last turn of the transcript at `path`; `None` when it
+/// shows none, keeps no turn ends, or cannot be read.
+pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<SessionTurn> {
+    last_turns(harness, path).pop().and_then(SessionTurn::of)
 }
 
-/// The current or last run of the transcript at `path`; `None` when it shows
-/// none or cannot be read.
-pub(crate) fn read_run(harness: HarnessKind, path: &Path) -> Option<TranscriptRun> {
-    let read = super::run_reader(harness)?;
+/// The turns at the end of the transcript at `path`, through its last one:
+/// as few as the window that holds that turn's start shows.
+pub(super) fn last_turns(harness: HarnessKind, path: &Path) -> Vec<Turn> {
+    let Some(read) = super::ended_reader(harness) else {
+        return Vec::new();
+    };
     let mut limit = FIRST;
     loop {
-        let (rows, whole) = tail(path, limit).ok()?;
-        let turn = read(&rows).runs.pop().map(SessionTurn::from_run);
-        if whole || limit >= TAIL || turn.as_ref().is_some_and(|t| t.turn.started_at.is_some()) {
-            return turn;
+        let Ok((rows, whole)) = tail(path, limit) else {
+            return Vec::new();
+        };
+        let turns = read(&rows);
+        if whole || limit >= TAIL || turns.last().is_some_and(|t| t.started_at.is_some()) {
+            return turns;
         }
         limit *= 4;
     }
@@ -381,14 +304,12 @@ mod tests {
 
     #[test]
     fn a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message() {
-        let turn = read_run(HarnessKind::Claude, &fixture("claude_turn.jsonl"))
-            .unwrap()
-            .turn;
+        let turn = read_turn(HarnessKind::Claude, &fixture("claude_turn.jsonl")).unwrap();
         assert_eq!(
             turn,
             SessionTurn {
+                id: Some("u1".into()),
                 state: TurnState::Ended,
-                source: TurnSource::Transcript,
                 started_at: Some("2026-11-10T16:25:37.000Z".into()),
                 ended_at: Some("2026-11-10T16:27:51.000Z".into()),
                 model: Some("claude-opus-5-5".into()),
@@ -409,11 +330,12 @@ mod tests {
     fn a_claude_turn_waiting_on_a_tool_runs_even_with_its_last_line_half_written() {
         // Through the tool result, then half of the final answer's row.
         let file = cut("claude_turn.jsonl", 6, 120);
-        let turn = read_run(HarnessKind::Claude, file.path()).unwrap().turn;
+        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:37.000Z"));
-        assert_eq!((turn.ended_at, turn.usage), (None, None));
+        assert_eq!(turn.ended_at, None);
         assert_eq!(turn.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(turn.describe(1_794_327_937 + 8), "turn running 8s");
     }
 
     #[test]
@@ -423,16 +345,15 @@ mod tests {
         text.push_str(r#"{"type":"user","userType":"external","timestamp":"2026-11-10T16:26:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#);
         text.push('\n');
         fs::write(file.path(), text).unwrap();
-        let turn = read_run(HarnessKind::Claude, file.path()).unwrap().turn;
+        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap();
         assert_eq!(turn.state, TurnState::Interrupted);
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:26:00.000Z"));
     }
 
     #[test]
     fn a_codex_turn_counts_the_growth_of_its_running_total() {
-        let turn = read_run(HarnessKind::Codex, &fixture("codex_rollout.jsonl"))
-            .unwrap()
-            .turn;
+        let turn = read_turn(HarnessKind::Codex, &fixture("codex_rollout.jsonl")).unwrap();
+        assert_eq!(turn.id.as_deref(), Some("turn-2"));
         assert_eq!(turn.state, TurnState::Ended);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:25:09.000Z"));
@@ -450,10 +371,10 @@ mod tests {
     #[test]
     fn a_codex_turn_with_its_last_line_half_written_is_running() {
         let file = cut("codex_rollout.jsonl", 9, 40);
-        let turn = read_run(HarnessKind::Codex, file.path()).unwrap().turn;
+        let turn = read_turn(HarnessKind::Codex, file.path()).unwrap();
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
-        assert_eq!(turn.usage, None);
+        assert_eq!(turn.usage.unwrap().input_tokens, 25000);
     }
 
     #[test]
@@ -462,29 +383,42 @@ mod tests {
         // Start inside the second turn's first token report.
         let from = text.find("\"total_tokens\":45900").unwrap();
         let (rows, _) = tail(&fixture("codex_rollout.jsonl"), (text.len() - from) as u64).unwrap();
-        let run = super::super::codex::read(&rows).runs.pop().unwrap();
-        assert_eq!(run.started_at, None);
-        assert_eq!(run.state, TurnState::Ended);
-        assert_eq!(run.usage.input_tokens, 25000);
+        let turn = super::super::codex::read(&rows).pop().unwrap();
+        assert_eq!(turn.started_at, None);
+        assert_eq!(turn.state, Some(TurnState::Ended));
+        assert_eq!(turn.usage.unwrap().input_tokens, 25000);
     }
 
     #[test]
-    fn stream_turns_read_their_boundaries() {
-        let turn = SessionTurn::from_stream(Some(1_794_327_900), None, None);
+    fn a_transcript_with_no_turn_ends_gives_no_current_turn() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), "{\"type\":\"message\",\"id\":\"a\"}\n").unwrap();
+        assert_eq!(read_turn(HarnessKind::Pi, file.path()), None);
+    }
+
+    #[test]
+    fn a_recorded_turn_reads_its_boundaries_and_an_open_one_closes_at_its_recorded_end() {
+        let recorded = |settled_at, status: Option<&str>| RecordedTurn {
+            id: Some("t".into()),
+            started_at: Some(1_794_327_900),
+            settled_at,
+            status: status.map(str::to_owned),
+        };
+        let mut turn = SessionTurn::from_stream(recorded(None, None));
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00Z"));
         assert_eq!(turn.describe(1_794_327_900 + 134), "turn running 2m14s");
+        assert!(!turn.handed_back());
+        turn.close(1_794_327_960, Some("completed"));
+        assert_eq!(turn.state, TurnState::Ended);
+        assert_eq!(turn.describe(1_794_327_960 + 5), "last turn ended 5s ago");
+        assert!(turn.handed_back());
+
+        let interrupted = SessionTurn::from_stream(recorded(Some(2), Some("interrupted")));
+        assert_eq!(interrupted.state, TurnState::Interrupted);
         assert_eq!(
             (tokens(999), tokens(41_200), tokens(3_859_200)),
             ("999".into(), "41.2k".into(), "3.9M".into())
         );
-        let asking = SessionTurn {
-            state: TurnState::Asking,
-            ..turn.clone()
-        };
-        assert_eq!(asking.describe(0), "asked a question");
-        assert!(asking.waits() && !turn.waits());
-        let ended = SessionTurn::from_stream(Some(1), Some(2), Some("interrupted"));
-        assert_eq!(ended.state, TurnState::Interrupted);
     }
 }

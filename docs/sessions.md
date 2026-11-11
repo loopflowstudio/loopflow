@@ -124,7 +124,9 @@ A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
 
 From its first message until it closes, it shows up in `lf session list` for
 its checkout under its provider ID, marked `raw`, with its current turn
-(below). Listing it creates no Session.
+(below). Listing it creates no Session. A conversation a Session recorded,
+picked up again with plain `claude --resume` or `codex resume` after that
+Session ended, lists the same way under the Session's title.
 
 ```bash
 lf session list --no-raw           # only conversations lf started
@@ -149,8 +151,9 @@ This works for every conversation on the Machine: a Task's, one a bare
 lf reads the end of the provider's own transcript at the moment you ask:
 Claude's under `~/.claude/projects`, Codex's rollout files under
 `~/.codex/sessions`. Nothing runs between questions, and lf never writes into
-those directories. A conversation lf launched shows its model and tokens from
-the transcript too, and a turn lf missed recording still reads as running.
+those directories. The turn is the transcript's last one for a conversation lf
+launched too; when the transcript leaves that turn open and lf recorded its
+end, lf's record closes it.
 
 The Machine server (`lf server run`, or Desktop) watches each provider's home
 once for all conversations and refreshes these readings as transcripts grow,
@@ -164,12 +167,12 @@ filesystem event is caught by a periodic reread.
 | when the last turn ended, or that it was interrupted | a turn you stopped with Esc before Claude replied, until your next message |
 | the last turn's input, cached and output tokens, and its model | a turn cut off by a crash, until the provider process is gone |
 
-A conversation read this way is available for you when its turn ended or was
-interrupted; `lf session list --available` lists it. A turn stopped on a
-permission prompt or a question still reads as `turn running`: Claude Code
-writes a question to its transcript only once you answer it, and Codex never
-does. lf doesn't guess otherwise. Sessions lf manages also get that state from
-the agent's own status reports.
+A conversation whose agent reports no status to lf is available for you when
+its turn ended or was interrupted; `lf session list --available` lists it. A
+turn stopped on a permission prompt or a question still reads as
+`turn running`: Claude Code writes a question to its transcript only once you
+answer it, and Codex never does. lf doesn't guess otherwise. When a Session's
+agent does report its status, that report decides.
 
 A raw conversation open in a Task's checkout lists under that Task:
 `lf session list --task <task>` includes it.

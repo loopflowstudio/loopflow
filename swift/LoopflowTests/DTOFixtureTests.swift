@@ -19,6 +19,7 @@ struct DTOFixtureTests {
         #expect(card.controlHolder == nil)
         #expect(card.lastLine == nil)
         #expect(card.session.turn?.state == .ended)
+        #expect(card.session.turn?.id == "u1")
         #expect(card.session.turn?.usage?.cachedInputTokens == 38000)
         #expect(card.session.raw == false)
     }

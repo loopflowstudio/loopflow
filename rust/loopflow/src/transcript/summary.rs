@@ -386,7 +386,7 @@ mod tests {
             Some("claude")
         );
         assert_eq!(
-            conversation.turns[0].request.as_ref().unwrap().text,
+            conversation.turns[0].requests().next().unwrap().text,
             "Fix the parser"
         );
 

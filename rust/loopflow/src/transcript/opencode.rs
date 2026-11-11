@@ -31,13 +31,16 @@ pub(crate) fn turns(export: &Value) -> Vec<Turn> {
         let id = message["id"].as_str().unwrap_or_default();
         if message["type"] == "user" {
             let text = message["text"].as_str().unwrap_or_default();
-            let at = message["time"]["created"].as_i64().map(|ms| ms / 1000);
+            let at = || {
+                let created = message["time"]["created"].as_i64()?;
+                super::rfc3339(created / 1000)
+            };
             if Launch::parse(text).is_some() {
-                turns.request(at, text.to_owned(), RequestSource::Injected);
+                turns.ask(at(), text.to_owned(), RequestSource::Injected);
             } else {
                 let typed = text.split("<lf:").next().unwrap_or_default();
                 if !typed.trim().is_empty() {
-                    turns.request(at, typed.to_owned(), RequestSource::Person);
+                    turns.ask(at(), typed.to_owned(), RequestSource::Person);
                 }
             }
         }
@@ -68,5 +71,5 @@ pub(crate) fn turns(export: &Value) -> Vec<Turn> {
             }
         }
     }
-    turns.0
+    turns.finish()
 }

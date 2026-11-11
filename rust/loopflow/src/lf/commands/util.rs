@@ -430,6 +430,11 @@ fn session_command_status_with_env(
                     tracing::warn!(%error, %session, "cannot record the Session attachment's end")
                 }
             }
+            crate::transcript::facts::record_session(
+                &store,
+                &session,
+                crate::transcript::facts::Moment::Exit,
+            );
         }
         if let Some(capture) = capture {
             if let Err(error) = capture.finish(outcome) {

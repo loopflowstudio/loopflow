@@ -136,17 +136,19 @@ so `end_turn` with nothing after it is the signal and `turn_duration` a
 confirmation.
 
 One reader per harness (`transcript/claude.rs`, `transcript/codex.rs`) turns a
-transcript's rows into the turns `lf history show` prints and the runs those
-turns belong to: one run from what woke the agent until it hands back, with
-its model, usage, and whether it stopped on a question. On demand,
-`lf session list` and `lf session card` give that reader the transcript's tail
-for every live conversation (`transcript/live.rs`). Where lf also recorded the
-turn from the provider's live stream (`harness/fact_writer.rs`), the stream
-keeps the state of a run it recorded, matched by id or by its start and
-completion times, until the transcript shows it asked or ended, and that
-run's model and usage come from the transcript; a
-run started after the stream's last turn and never recorded is the reading on
-its own; a transcript behind the stream leaves the stream's turn. Watched, the
+transcript's rows into `Turn`s, for `lf history show` and the live reading
+alike: one turn from what woke the agent until it hands back, with its id,
+state, model and usage, and the requests and agent work inside it as items.
+Pi and OpenCode transcripts keep no turn ends, so their turns open at each
+request and have no state. On demand, `lf session list` and `lf session card`
+give that reader the transcript's tail for every live conversation
+(`transcript/live.rs`): the conversation's turn is the transcript's last one.
+When the transcript leaves that turn open and lf recorded a completion under
+the same id, the recorded end closes it. Ids are the only match. Known and
+left wrong: a prompt lf's live recording folded into an earlier turn, then
+stopped with Esc before any reply, reads as running until the next message.
+A Session is available from its agent's status reports when it has them, else
+when its turn ended or was interrupted. Watched, the
 server keeps one filesystem watch per provider home (`transcript/watch.rs`),
 as does a CLI `lf session list --subscribe`, which reads in its own process;
 an event makes the shared observation cache read that transcript within a
@@ -154,26 +156,35 @@ second, a thirty-second reconcile catches a missed one, and every
 subscription reading it shares the one reading. Raw conversations are
 `claude` or `codex` processes with no `lf` or provider ancestor, paired with
 the newest transcript written in their directory since they started
-(`transcript/raw.rs`). Claude's kernel process name is its version, so its
+(`transcript/raw.rs`); one whose conversation an ended Session recorded lists
+under that Session's title. Claude's kernel process name is its version, so its
 executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
 
 A bare run in a Task's checkout counts toward that Task, and the cost-per-PR
-work (LOO-732) reads per-turn `usage` and `completed` rows from the store, so
-a transcript read also writes them (`transcript/facts.rs`): when a provider lf launched exits, each
-run the store holds no completion for gets both rows, dated when the run
-ended, in the live stream's payload shape plus `"source":"transcript"`. A
-last run the transcript leaves open was cut off, since its provider is gone:
-it is written `interrupted`, ended at the transcript's last row, and a later
-resume ends the same run under the same id, so it is not written again. A run
-is already recorded when a completion carries its id (Claude's request row,
+work (LOO-732) reads per-turn `usage` and `completed` rows from the store.
+For Claude and Codex the transcript is the only writer of `usage` rows
+(`transcript/facts.rs`): one row per turn id, holding that turn's tokens and
+model, not a running total. It is written when a Stop hook fires, for each
+ended turn at the transcript's end, and again when the provider exits, for
+every turn; a turn that has a row keeps it. When a hook fires before the
+transcript shows the turn's end (not measured for either provider), that
+turn's row lands at the next turn's end or at exit. The live stream (`harness/fact_writer.rs`) writes
+`started` and `completed` and no longer `usage` for these two; Pi and
+OpenCode keep the stream's `usage` rows. At exit, each turn the store holds
+no completion for also gets a `completed` row, dated when the turn ended. A
+last turn the transcript leaves open was cut off, since its provider is gone:
+it is written `interrupted`, ended at the transcript's last row. A turn's
+completion is already recorded when one carries its id (Claude's request row,
 Codex's turn, the same ids the live stream uses) or was observed while it
-ran, since the live recording folds queued input into one turn. These rows
+ran, since the live recording folds queued input into one turn; that second
+test is by time and is the one place times still match turns. Usage rows
 carry no `cost_usd`: tokens come first, input, cache read, cache write and
-output kept apart, and dollar accounting is later work. Not written:
-anything for a raw conversation, which is listed but not tracked. What
-each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
-0.167.0):
+output kept apart, and dollar accounting is later work. The live `result`'s
+`total_cost_usd` is kept on Claude's stream-written `completed` row as
+`cost_usd`, the process's running total. Not written: anything for a raw
+conversation, which is listed but not tracked. What each transcript carried
+on November 10, 2026 (Claude Code 2.1.322, Codex 0.167.0):
 
 | Fact | Claude | Codex |
 | --- | --- | --- |
@@ -187,8 +198,8 @@ each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
 Claude's `cost-state` row holds `totalCostUSD`, `totalAPIDuration` and
 per-model usage and cost. It was the last row of 24 of the 60 newest
 transcripts and absent from 35; a resumed one held six. What it totals and
-when Claude writes it are not established. Per-turn `cost_usd` and
-`duration_api_ms` come only from the live `result`.
+when Claude writes it are not established. Cost and `duration_api_ms` come
+only from the live `result`; of the two, lf keeps the cost.
 
 ## Pieces
 

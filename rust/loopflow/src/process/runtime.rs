@@ -502,6 +502,11 @@ impl RuntimeState {
                     tracing::warn!(%error, %session, "cannot record the Session attachment's end")
                 }
             }
+            crate::transcript::facts::record_session(
+                &store,
+                &session,
+                crate::transcript::facts::Moment::Exit,
+            );
         }
         self.recorder.finish(outcome)
     }

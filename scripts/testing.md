@@ -31,6 +31,11 @@ there so the matrix covers ambient context, explicit overrides and no Wave.
 Session command changes also run
 `cargo test -p loopflow --test integration session_cli_tests::session_cli_uses_one_truthful_resolution_contract`.
 
+Changes to server protocol types or their doc comments also run
+`cargo test -p loopflow --lib server::schema::tests::`. Doc comments appear in
+the generated schema; regenerate its checked-in fixture using the command in
+[the server README](../rust/loopflow/src/server/README.md) when it changes.
+
 Creation receipt changes also run `test(local_planning::)`,
 `test(context_launch_tests::)`, `test(settings_launch_tests::)` and
 `binary(session_lifecycle_tests)`. Served-write changes run

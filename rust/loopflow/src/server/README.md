@@ -576,8 +576,10 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 Planned for [Phone access](../../../../docs/server.md#phone-access).
 
-Both WebSockets must authenticate as the same Tailscale node stable ID and
-user ID; another device on the same account does not match. Neither the ticket,
+Both WebSocket endpoints authenticate before upgrade and admit only the host
+owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
+binds the two connections to the same Tailscale node stable ID and user ID, so
+another device on the same account cannot redeem it. Neither a ticket,
 client-supplied identity nor a proxy's Unix UID substitutes for authentication.
 Local and remote tickets are not interchangeable.
 

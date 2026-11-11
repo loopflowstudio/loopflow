@@ -14,19 +14,10 @@ At November 11 13:04 UTC, PR #1812 remained open and unmerged at
 `976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
 `server/ticket.rs`. The PR's ticket, service and mobile modules had no diff
 from the previously inspected `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
-Both Task status reads again timed out after 20 seconds; live Graph positions
-remain unverified. The Graph decision remains stop for the missing LOO-718
-transport; implementation and publication cannot proceed on the local-only store.
-
-At November 11 12:19 UTC, PR #1812 was open and unmerged
-at `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`. Fetched main was
-`976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
-`server/ticket.rs`. The PR description still states: “The pull request is
-published for review; no Task settlement is requested.” At 12:15 UTC,
-`lf task status LOO-718 --json` reported `feature` at `demo`, with PR
-settlement not armed. At 12:19 UTC, fresh `lf task status LOO-718 --json`
-and `lf task status LOO-809 --json` reads each timed out after 20 seconds
-without a status response. Their live Graph positions were not verified.
+Both Task status reads timed out after 20 seconds; live Graph positions remain
+unverified. The last successful LOO-718 status read, at 12:15 UTC, reported
+`feature` at `demo`, with PR settlement not armed. At 12:19 UTC, the PR description
+stated: “The pull request is published for review; no Task settlement is requested.”
 
 Inspection found both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and ticket expiry uses
@@ -36,14 +27,15 @@ are unchanged from `48bd007c13b7198844af56eaaf10fe3a8aac7db9`.
 Mobile admission permits the host's own node with `mobile-same-device`;
 ticket identity remains node/user.
 
-Implementation, authenticated acceptance checks and delivery wait for LOO-718
-to land; reinspect its shared store and endpoints then. Landing that PR is
-outside this Task's scope. Desktop QA status is in `questions.md`.
+The Graph decision remains stop: implementation, authenticated acceptance checks
+and delivery wait for LOO-718 to land. Reinspect its shared store and endpoints
+then. Landing that PR is outside this Task's scope. Desktop QA status is in
+`questions.md`.
 
-Earlier observations, compared revisions and the conflicting 19:35 UTC status
-reference remain in
-`ad8ceb4f4d8948d2b3887c757382713abbbf1141:scratch/design.md`.
-This compression keeps the latest dependency report here and prior reports in Git.
+Earlier observations and compared revisions are in
+`496f1f56cd385c5db7f29282c96d69355acaea00:scratch/design.md`; that note links
+the older, conflicting 19:35 UTC status report. Keep the latest dependency result
+here and repeated observations in Git.
 
 ## Delete — do not maintain
 
@@ -81,13 +73,8 @@ another request. Leave unrelated throttles on `Instant` and retain watch resumpt
 After integration, remove planned/local-only wording from `docs/server.md`
 and `rust/loopflow/src/server/README.md`; describe local/remote admission binding
 and update the remote example's revision 4 anchor to revision 5.
-Keep connection steps and Desktop controls in the client guide; protocol details
-and shared exact-owner recovery belong in the server README. Keep authentication
-before the two-connection example, with the running-owner prerequisite and
-missing-owner error beside it, so neither steps nor retries repeat the rules.
-
-Shipping docs are in `docs/server.md` and `rust/loopflow/src/server/README.md`.
-The remote contract distinguishes rejection before WebSocket upgrade from a
-ticket redemption attempt; use these in-place docs during implementation.
+Keep Desktop controls in the client guide and protocol details in the server
+README. The remote example keeps authentication and owner prerequisites beside
+the connection steps and links shared exact-owner recovery instead of repeating it.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

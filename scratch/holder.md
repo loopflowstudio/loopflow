@@ -332,4 +332,9 @@ upgrade filters 22 ok, incl. `task_cleanup_ends_an_abandoned_tasks_held_terminal
 store::sqlite::sessions desktop::shells` 258 ok; clippy `--all-targets` and
 `documented_commands::` clean. Left for gate: the full affected suites.
 
+Not yet merged: LOO-823 moved on to `d06dcc782` (`59fdcdaee` checkpoint,
+then main `1570bef61`, already here). `git merge-tree` conflicts in
+`bin/lf.rs`, `transport.rs`, `transport/README.md` and three scratch files;
+the next sync takes it, then `merge-base --stat` for reverted main changes.
+
 Compress (Nov 11): `cargo test -p loopflow --lib holder::` 10 passed; `cargo clippy --all-targets -D warnings` clean.

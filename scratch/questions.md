@@ -40,7 +40,8 @@ already names its Task or Wave (LOO-821 on main); a Session link opens by id.
 ## Stack parent not recorded
 
 `lf pr publish` retargets #1887 to `main` each time; after each publish set
-`gh pr edit 1887 --base jack/loo-823-find-what-leaks-lf-processes-and-fix-the-tests`.
+`gh pr edit 1887 --base jack/loo-823-find-what-leaks-lf-processes-and-fix-the-tests`
+(found on `main` and reset at realign, Nov 11).
 
 ## Stack on LOO-823 (November 11)
 

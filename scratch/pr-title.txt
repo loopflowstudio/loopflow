@@ -1,1 +1,0 @@
-Make crates.io packages build without the repository checkout

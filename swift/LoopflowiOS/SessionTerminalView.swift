@@ -56,7 +56,7 @@ final class SessionTerminalView: TerminalView {
     }
 
     func synchronizeReadingPosition() {
-        guard canScroll else { return }
+        guard canScroll, contentOffset.y + bounds.height < contentSize.height - 1 else { return }
         let cellHeight = getOptimalFrameSize().height / CGFloat(getTerminal().rows)
         let row = Int(max(0, contentOffset.y) / cellHeight)
         if row != getTerminal().buffer.yDisp {
@@ -195,7 +195,10 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
                 terminal.clearSearch()
                 terminal.feed(text: "\u{1b}c")
             } else if readingHistory {
-                terminal.synchronizeReadingPosition()
+                // Native typing returns to the caret. Once both views are at
+                // the bottom, let the reply follow output again.
+                readingHistory = isReadingEarlierOutput
+                if readingHistory { terminal.synchronizeReadingPosition() }
             }
             let readingRow = readingHistory ? terminal.getTerminal().buffer.yDisp : nil
             terminal.feed(byteArray: Array(bytes)[...])
@@ -472,10 +475,13 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         findFeedback.textColor = UIColor(theme.palette.textSecondary)
     }
 
+    private var isReadingEarlierOutput: Bool {
+        terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
+            || viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
+    }
+
     private func updateLatestButton() {
-        let readingHistory = terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
-        let aboveBottom = viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
-        latestButton.isHidden = finding || !(readingHistory || aboveBottom)
+        latestButton.isHidden = finding || !isReadingEarlierOutput
     }
 
     private func updateBar() {
@@ -677,8 +683,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         if scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
-            readingHistory = terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
-                || viewport.contentOffset.y + viewport.bounds.height < viewport.contentSize.height - 1
+            readingHistory = isReadingEarlierOutput
         }
         updateLatestButton()
     }

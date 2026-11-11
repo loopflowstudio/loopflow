@@ -133,6 +133,14 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertTrue(latest.waitForNonExistence(timeout: 5))
         capture(app, "session-scrollback-latest")
         XCTAssertTrue(app.buttons["Show keyboard"].isHittable)
+        viewport.swipeDown()
+        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        app.buttons["Show keyboard"].tap()
+        app.typeText("history\n")
+        app.buttons["Hide keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        capture(app, "session-scrollback-after-reply")
+        XCTAssertFalse(latest.exists, "Replying from scrollback should return to following the prompt")
     }
 
     func testNavigationKeysEditWithoutSubmittingOrHidingTheKeyboard() throws {

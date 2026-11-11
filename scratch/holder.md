@@ -728,3 +728,10 @@ match the design that follows from 4a, and are settled here:
   LfProcess per build and no owner row per held terminal. Gate automates both.
 
 No open product choice.
+
+## QA — November 11, 2026
+
+`scratch/qa.html`. Fixed: a continuing held view was cleared by the relay's
+`handoff()`; the restart test now refuses `ESC[2J`. Open: no holder LfProcess
+row (README and gate acceptance claim one); a view whose agent exited while
+the server was down ends with an attach-style error.

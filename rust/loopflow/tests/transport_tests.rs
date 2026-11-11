@@ -7655,7 +7655,7 @@ fn held_session_survives_server_restart() {
     let after = &screen[stopped..];
     let text = String::from_utf8_lossy(after);
     assert!(
-        !text.contains("\x1b[?1047l\x1b[?47l"),
+        !text.contains("\x1b[?1047l\x1b[?47l") && !text.contains("\x1b[2J"),
         "the view was repainted: {text:?}"
     );
     assert!(

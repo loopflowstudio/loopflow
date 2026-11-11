@@ -2240,8 +2240,12 @@ fn view(
                                         b"\r\nReconnected as a viewer; input remains elsewhere. Attach again to take control.\r\n"
                                     })?;
                                 }
-                                if let Some(terminal) = &mut terminal {
-                                    terminal.handoff()?;
+                                // A continued screen already shows the agent's modes
+                                // and output up to its position; clearing it repaints.
+                                if !continued {
+                                    if let Some(terminal) = &mut terminal {
+                                        terminal.handoff()?;
+                                    }
                                 }
                                 if is_terminal {
                                     if terminal.is_none() {

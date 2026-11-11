@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-824 QA — held terminals</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px}
+td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
+table{border-collapse:collapse} .bad{color:#a12} .ok{color:#185}
+</style>
+<h1>LOO-824 QA: held terminals, November 11 2026</h1>
+<p>Branch build <code>lf 0.15.3+09b58ab55</code> (then the fix below). Private Machine:
+<code>HOME</code>, <code>LF_HOME</code>, <code>CODEX_HOME</code> under <code>/tmp/lfqa824</code>, inherited <code>LF_*</code> cleared,
+a Git repo with a local bare origin and <code>default_agent: codex</code>. Foreground <code>lf server run</code>.
+Views were real <code>lf resume --task</code> and <code>lf session attach --terminal</code> processes on PTYs (a Python driver
+recording every byte and answering <code>ESC[6n</code>). Codex 0.167.0, unauthenticated, so each agent sits at its sign-in screen.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>Ten Task Sessions via <code>lf resume --task</code></td><td class="ok">OS <code>ps</code>: one <code>lf server run</code>, one <code>lf holder run</code> (parent of all ten codex agents), no <code>lf session serve</code>. Each view drew codex's sign-in screen.</td></tr>
+<tr><td>Server threads, 1 → 10 terminals</td><td>28 → 56, stable after a minute. By name: one <code>held-terminals</code>, one <code>lifetime</code>, 10 <code>planning-sync</code> (one per Task checkout, existing behavior, not this branch), 37 idle <code>tokio-rt-worker</code>. No per-terminal thread from the holder work.</td></tr>
+<tr><td><code>session.start</code> over the socket, repeated with the same <code>request</code> and a different argv</td><td class="ok">Same <code>terminal_id</code>; the second argv never ran.</td></tr>
+<tr><td>SIGTERM server, 6 s down, restart (same build)</td><td>Agents alive; counter kept advancing in the ring (relay received 0 bytes while down); after restart the relay got exactly ticks 34… onward, nothing skipped or repeated. <span class="bad">But first a mode reset and <code>ESC[H ESC[2J</code>: the screen was wiped.</span> Fixed, below.</td></tr>
+<tr><td>Same, after the fix, with a rebuilt <code>lf</code> (new build hash: a new server taking up an old build's holder, as after <code>lf install</code>)</td><td class="ok">Relay output after restart: <code>tick:838\r\ntick:839…</code> with the catch-up <code>ESC[5n</code> probe and nothing else; last tick before the stop was 837. The new server hosted the old holder's eleven terminals.</td></tr>
+<tr><td>Codex views across that restart</td><td>Old-build relays (started before the fix) cleared, then codex repainted from the rehost nudge; they stayed connected.</td></tr>
+<tr><td>Attach a well-formed unknown terminal id</td><td class="ok"><code>Error: terminal 0000… is not running; nothing was started and no input replayed</code>, exit 1, immediately.</td></tr>
+<tr><td>Attach a malformed id (<code>--terminal not-a-uuid</code>)</td><td class="bad"><code>error: unrecognized subcommand 'attach'</code> (the relay is matched before Clap; the owner form has the same behavior). Not changed.</td></tr>
+<tr><td><code>lf resume --task</code> with the server stopped</td><td class="ok"><code>Error: Loopflow server is not running; run lf server status</code>; no owner started.</td></tr>
+<tr><td>SIGKILL server, agent exits 3 while none runs, restart</td><td class="ok">Holder wrote <code>exit.json {"code":3,…}</code>; the next server recorded <code>held_terminals.exit_code = 3</code> and removed the terminal's directory. The open relay ended with "terminal … is not running; nothing was started and no input replayed".</td></tr>
+<tr><td><code>lf ps</code></td><td class="bad">Relays, launchers and codex rows; no holder row. The transport README says "<code>lf process list</code> shows it once" and the plan's gate acceptance counts holder LfProcess rows; nothing records one.</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>A held view continuing from its PTY position still ran the relay's <code>handoff()</code> on the <code>Attached</code> reply:
+mode reset plus clear screen. The bytes after it were right, but the person saw an empty screen with only the output since the stop.
+<code>transport.rs</code> now skips the handoff when the attachment continues. <code>held_session_survives_server_restart</code>
+checked only for the snapshot's <code>?1047l</code> prefix; it now also refuses <code>ESC[2J</code>, and fails without the fix:</p>
+<pre>the view was repainted: "\u{1b}[&lt;65535u\u{1b}[&gt;4;0m … \u{1b}]8;;\u{1b}\\\u{1b}[H\u{1b}[2Jtick:…"</pre>
+<p>Checks: <code>cargo test -p loopflow --test transport_tests -- held_ a_held</code> 4 passed;
+<code>cargo test -p loopflow --lib -- transport:: holder::</code> 85 passed; clippy clean.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>Desktop windows: headless run, no Desktop launched. Swift and Desktop suites stay with gate.</li>
+<li>Authenticated Claude or Codex turns: none signed in here; a turn streaming across a restart was checked with a shell counter only.</li>
+<li>launchd/systemd replacement of the service (<code>lf install</code>) itself: simulated with SIGTERM plus a rebuilt binary in a foreground server.</li>
+<li>Linux.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>No holder LfProcess is recorded, so <code>lf ps</code> never shows a holder, contrary to the transport README and the gate acceptance.</li>
+<li>A view whose agent exited while the server was down ends with "is not running; nothing was started and no input replayed", which reads as an attach failure rather than "the agent exited with 3".</li>
+<li><code>lf session attach --terminal &lt;malformed&gt;</code> reports "unrecognized subcommand 'attach'".</li>
+<li>A leaked holder from an earlier step of this Task (older build, cwd a deleted temp dir, child <code>/bin/sh</code> printing ticks every 0.2 s for over an hour) was still running; its script is in no committed test. Killed by PID.</li>
+</ol>

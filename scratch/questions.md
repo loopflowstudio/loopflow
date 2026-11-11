@@ -49,3 +49,11 @@ for the parent plan after its obsolete scratch plans were removed.
   provisional targets for the indexed-Task-lookup experiment, not a promise
   or permission to change outputs. Keep the smaller query fixes separately
   measurable; leave the unreproduced 75 s stall open.
+
+- Optimization measurement, 2026-11-11: freeze wall-clock time with a private
+  DYLD interposer, leaving monotonic clocks alone, so board timestamps and
+  availability deadlines participate in full-JSON comparisons. Use the same
+  executable/home paths for all sides, a separate migrated copy per commit,
+  and a discarded warm-up before each timed CLI or served checkpoint. Copy
+  provider transcript directories and the OpenCode database without credentials;
+  ambient OS processes remain live and are a stated limit on attribution.

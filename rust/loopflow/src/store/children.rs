@@ -132,18 +132,6 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn list_repository_tasks(
-        &self,
-        repository: &crate::durable::RepositoryId,
-        include_closed: bool,
-    ) -> StoreResult<Vec<Task>> {
-        let repository = repository.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_repository_tasks(&repository, include_closed)
-        })
-        .await
-    }
-
     pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
         let task = task.clone();
         let parent = parent.clone();

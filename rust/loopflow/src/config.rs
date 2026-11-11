@@ -689,7 +689,7 @@ pub fn config_layers(
     config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
 }
 
-fn config_layers_with(
+pub(crate) fn config_layers_with(
     repo_root: Option<&Path>,
     wave: Option<&str>,
     personal_values: &PersonalSettings,

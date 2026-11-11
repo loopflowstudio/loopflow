@@ -52,6 +52,14 @@ public enum WaveOrigin {
         return cache[key] ?? repoPath
     }
 
+    /// Whether `repoPath` was resolved already, so asking again reads no files.
+    public static func isKnown(_ repoPath: String) -> Bool {
+        let key = cacheKey(repoPath)
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[key] != nil
+    }
+
     /// Record a path already known to be its own origin, so resolving it runs no `git`.
     public static func remember(origin: String) {
         lock.lock()

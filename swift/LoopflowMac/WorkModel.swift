@@ -2821,9 +2821,14 @@ final class WorkModel {
         return identity
     }
 
-    private nonisolated static func resolveRepoOrigins(_ paths: [String]) async {
+    /// Resolve the origins of paths not seen before. Readings arrive often and
+    /// name the same repositories, so a reading with nothing new stays on the
+    /// main actor instead of waiting for a background thread and back.
+    private static func resolveRepoOrigins(_ paths: [String]) async {
+        let unknown = Set(paths.map(\.normalizedFilePath)).filter { !WaveOrigin.isKnown($0) }
+        guard !unknown.isEmpty else { return }
         await Task.detached {
-            for path in Set(paths.map(\.normalizedFilePath)) {
+            for path in unknown {
                 _ = WaveOrigin.resolve(path)
             }
         }.value

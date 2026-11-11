@@ -1054,8 +1054,7 @@ pub(crate) async fn open(
     if resume {
         if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::transport::current().and_then(crate::transport::Host::owner)
-                    != Some(&owner)
+                if crate::transport::current() != Some(&owner)
                     && attaches(&store.sqlite, session, &owner)?
                 {
                     // This viewer takes control, so the conversation is now
@@ -1151,10 +1150,9 @@ pub(crate) async fn open_without_replacing(
     }
     let mut record = surface(store, &session).await?;
     let owner = store.sqlite.session_transport(id)?;
-    let attachable = owner.as_ref().filter(|owner| {
-        crate::transport::current().and_then(crate::transport::Host::owner) != Some(*owner)
-            && answering(owner)
-    });
+    let attachable = owner
+        .as_ref()
+        .filter(|owner| crate::transport::current() != Some(*owner) && answering(owner));
     let native = session
         .artifact_key
         .as_deref()
@@ -1594,8 +1592,14 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 fn attaches(
     store: &SqliteStore,
     session: &LfSession,
-    owner: &crate::id::LfProcessId,
+    host: &crate::transport::Host,
 ) -> Result<bool> {
+    let owner = match host {
+        crate::transport::Host::Owner(owner) => owner,
+        // A held terminal is attached while its child runs, answering or
+        // not: a stopped server never means a second agent for the Session.
+        crate::transport::Host::Terminal(terminal) => return Ok(store.terminal_running(terminal)?),
+    };
     if !owner_running(store, owner)? {
         return Ok(false);
     }
@@ -1617,9 +1621,9 @@ fn attaches(
         .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
         .filter(|(_, executable)| crate::installation::superseded(executable));
     let Some((pid, executable)) = superseded else {
-        return Ok(answering(owner));
+        return Ok(answering(host));
     };
-    if unknown && answering(owner) {
+    if unknown && answering(host) {
         return Ok(true);
     }
     end_owner(store, owner, pid).with_context(|| {
@@ -1663,7 +1667,7 @@ pub(crate) fn end_owner(
 
 /// Whether a running owner answers its socket. This observes reachability,
 /// not whether its provider can safely be replaced.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
+fn answering(owner: &crate::transport::Host) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {

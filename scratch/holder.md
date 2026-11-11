@@ -668,29 +668,46 @@ there. `docs/dev/server-first.md` records it under that piece.
 - The lifetime policy runs one watcher thread per owner (`lifetime::spawn`);
   the registry needs one for all terminals.
 
-**Built since (uncommitted until the focused suites pass):**
+**Built since** (commits a8a4223f8 and the one after):
 
-- `transport/hosted.rs`: `Hosted` + `Child::{Local, Held}`; `transport/held.rs`
+- `transport/hosted.rs` `Hosted` + `Child::{Local, Held}`; `transport/held.rs`
   `Source` reads a terminal from a PTY position, reconnects with backoff and
   settles from `exit.json` when the holder is gone.
-- `TerminalId`; store names are `held_terminals` and `held_terminal_id`
+- `TerminalId`; store names `held_terminals` / `held_terminal_id`
   (`processes.terminal_id` already means Desktop pane placement). Store reads
-  take `Transport::{Owner, Terminal}`; `transport::Host` is the same choice
-  in the transport, and the child handoff carries it (`LF_TRANSPORT_HELD`).
-- `transport/registry.rs`: one thread hosts every held terminal. Entrance
-  `<private dir>/held.sock`: first line `{"terminal":ID}`, answer
-  `{"hosted":bool}`, then the viewer protocol. `start` writes `meta.json`
-  (session, request, control key), records the terminal, reconciles a lost
-  start reply against `list`. A new registry re-hosts what holders list
-  (screen rebuilt by ring replay, then a one-column nudge) and settles exits
-  that happened with no server. The terminal's directory is removed only
-  after the store has the exit.
-- Server: `session.start`; `session.attach` prefers a Session's held terminal
-  and takes `terminal_id`; tickets and `bridged` carry `owner_lf_process_id`
-  or `terminal_id`, the other null.
-- `cargo test -p loopflow --lib transport::registry`: 3 passed (restart keeps
-  the child and its screen; ended and unknown terminals are refused; an exit
-  with no server is settled by the next).
+  take `Transport::{Owner, Terminal}`; `transport::Host` is the same choice in
+  the transport, the child handoff carries it (`LF_TRANSPORT_HELD`), and
+  `session_transport` answers it.
+- `transport/registry.rs`: one thread hosts every held terminal behind
+  `<private dir>/held.sock` (first line `{"terminal":ID}`, answer
+  `{"hosted":bool}`, then the viewer protocol). `meta.json`, lost-start
+  reconciliation, re-hosting from holder `list` with ring replay and a
+  one-column nudge, settlement with the directory as receipt.
+- Server: `session.start`; `session.attach` prefers a held terminal and takes
+  `terminal_id`; tickets and `bridged` carry an owner or a terminal.
+- Relay by `Host`: `lf session attach --terminal ID`; a held view reconnects
+  through the entrance by itself, draws nothing, discards input meanwhile.
+- `transport::managed` in `delegate`: a viewed launch is held when it is
+  `lf task run`, has `LF_SERVER`, or its Session belongs to a Task or Wave.
+  `start_held` is the client of `session.start`; the Task primary
+  conversation and `restore` use it. With no server a viewed launch fails;
+  the unviewed Task background conversation goes unstarted.
+
+Checks:
+
+- `cargo test -p loopflow --lib transport::registry`: 3 passed.
+- `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session
+  ops::task::retirement terminal_title`: 130 passed.
+- `cargo test -p loopflow --test transport_tests`: 105 of 107 before the
+  test below was updated; the other failure passed alone (timing).
+- `transport_tests resumed_session_completes_turns_after_build_replacement_and_viewer_return`:
+  passes with real binaries. A Task conversation moves to a held terminal,
+  the server is killed and started again mid-conversation, a new view
+  types the next turn into the same agent, and its exit is settled.
+- `cargo clippy -p loopflow --all-targets -- -D warnings`: clean.
+- Not run here: Swift tests (`ServerProtocol.swift` now encodes
+  `terminal_id: null` in `session.attach`), `session_lifecycle_tests`,
+  Desktop suites, the full matrix. Gate/CI.
 
 Found on the way: frames arriving with the holder's `reading` answer were
 left undecoded until more output came (fixed in `Source::read`). A test
@@ -699,32 +716,24 @@ holder idles out in 2 s, too short beside a slow store open; fixtures set
 
 **Not as planned, still open:**
 
-- A held terminal still gets a lifetime watcher thread and a title worker
-  each (`lifetime::spawn`), not one for all.
+- Resume is a fresh attach that repaints. `position`/`aside` frames and ring
+  catch-up (4a) are not built; the viewer protocol is unchanged.
+- No snapshot file on graceful stop; rebuild is ring replay plus nudge.
+- A held terminal still gets its own lifetime watcher and title worker
+  thread (`lifetime::spawn`), not one for all.
+- An exit record a launcher handed to a server that then stopped is lost
+  (`exit-record.json` not built); the terminal's end is still recorded.
 - An end nobody saw (holder gone, no `exit.json`) reaches viewers as a
   SIGKILL status and the store as a null exit code.
 - A held start does not carry pane placement (`LF_TERMINAL_ID`, the TTY).
-- Resume is a fresh attach with the rebuilt screen. `position`/`aside`
-  frames and ring catch-up (4a) are not built; nothing in the viewer
-  protocol changed.
-- No snapshot file on graceful stop; rebuild is ring replay plus nudge only.
-- SIGTERM does not close the registry; the process ending is enough for the
-  holders, and viewers reconnect.
-
-**Remaining, in order:**
-
-1. Relay by `Host`: `lf session attach --terminal ID`, `view`/`relay`/
-   `stream::bridge`/`connection::Status` take a `Host`; a held view
-   reconnects through the entrance on its own, draws nothing, discards
-   terminal input until attached; `session_transport` answers a `Host` so
-   `attaches`/`answering`/`viewed_summary`/retirement see held Sessions.
-2. `transport::managed` and `start_held` (client `session.start`), callers
-   `delegate`, `primary.rs:200`, `restore.rs:73`. Integration fixtures that
-   run `lf task run` with no server need one first; that is most of the cost.
-3. Position resume (`position`, `aside`, ring catch-up), snapshot on stop.
-4. One policy watcher and title worker for all terminals.
-5. Swift `ServerProtocol` (`bridged`, ticket fields), `server_schema.json`,
-   DTO fixtures (`attached.json`, a `started.json`), revision 5, docs
-   corrected to the build, an integration `held_session_survives_server_restart`
-   that kills a real server process.
-6. Slice 0 mode probe (does not gate).
+- `require_settled_work` excuses processes under an owner; nothing is
+  excused under a held terminal, so a launcher that stays beside its
+  provider there may block retirement. Untested.
+- `attaches` for a held terminal is "its child runs": a superseded build in
+  a holder is never moved onto the installed lf by `lf resume`.
+- `lf ship` interactive steps and Wave session commands are held only
+  through the Session rule (Task/Wave bound) or `LF_SERVER`; no separate
+  call site was needed. Desktop panes with `LF_SERVER` are held; Desktop
+  itself was not run against this build.
+- Revision 5, Swift decoding of a terminal `bridged`, the Desktop overlay
+  wording, slice 0 mode probe.

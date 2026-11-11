@@ -61,17 +61,16 @@ lf resume --task LOO-12            # terminal one: a turn is streaming
 lf install                         # terminal two, mid-turn
 ```
 
-The turn keeps streaming. The terminal showing it, and any Desktop pane on the
-same conversation, says **Reconnecting…** and pauses typing while the server
-is replaced, then carries on from the byte where it stopped. Nothing redraws
-and nothing is resent.
+The turn keeps streaming. The terminal showing it waits, drawing nothing and
+discarding what is typed, while the server is replaced; a Desktop pane on the
+same conversation says **Reconnecting…**. Each then repaints the current
+screen. Nothing is resent to the agent.
 
 A Task or Wave conversation's agent runs in a holder: one `lf holder run`
 process beside the server that keeps the terminals and agents of every such
 conversation. The server restarts on every install; a holder is never
 restarted for one. With ten Task conversations open, `ps` shows one
-`lf server run`, one `lf holder run` and ten agents, and `lf process list`
-shows the holder once.
+`lf server run`, one `lf holder run` and ten agents.
 
 | Opened with | Runs in |
 |---|---|
@@ -88,19 +87,18 @@ its last conversation ends.
 
 | When | Agents | Open views | A view opened afterward |
 |---|---|---|---|
-| `lf install` | keep running | pause, then continue without redrawing | the saved screen and history |
-| the server crashes or is killed | keep running | pause until the OS restarts the server, then continue | the current screen; older scrollback may be missing |
+| `lf install` | keep running | pause, then repaint the current screen | the current screen; older scrollback may be missing |
+| the server crashes or is killed | keep running | pause until the OS restarts the server, then repaint | the current screen; older scrollback may be missing |
 | a holder is killed | end, with the conversations it held | say the process is gone and offer resume | `lf resume` continues from provider history |
 | logout or reboot | end | close | [resume from saved history](#after-a-crash-or-reboot) |
 
 While the server is away a holder keeps the newest 2 MiB of each
-conversation's output, and the agent never waits on it. A view that returns
-within that range continues exactly; one that fell further behind gets a
-fresh screen. After a crash the server has no saved screen, so it asks the
-agent to redraw by changing the terminal's width by one column and back:
-the visible screen is exact and scrollback reaches as far back as the kept
-output. An update that changes the terminal emulator's revision recovers the
-same way.
+conversation's output, and the agent never waits on it. A new server
+rebuilds each screen from that output, then asks the agent to redraw by
+changing the terminal's width by one column and back: the visible screen is
+exact and scrollback reaches as far back as the kept output. A view in a
+terminal waits without drawing anything, discards what is typed meanwhile,
+and repaints when the server is back; Ctrl+] closes it.
 
 A conversation that ends while the server is away is recorded with its real
 exit when the server returns; until then `lf session list` shows what it last

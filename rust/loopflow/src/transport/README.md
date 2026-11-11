@@ -326,7 +326,7 @@ terminal with "the server" in place of "the owner", except where this section
 says otherwise. Owners remain for bare launches, piped and `-b` executions
 and Desktop Task shells.
 
-`transport::managed(&Launch)` is the one place that decides:
+`transport::managed` is the one place that decides:
 
 | Launch | Managed |
 |---|---|
@@ -338,7 +338,9 @@ and Desktop Task shells.
 
 A managed launch calls `session.start` and becomes a view of the returned
 terminal. With the server unreachable it fails with `Loopflow server is not
-running; run lf server status`. It never falls back to a local owner.
+running; run lf server status`. It never falls back to a local owner. The
+one launch nobody views, a Task's background conversation, goes unstarted
+instead and its Graph runs on.
 
 ### Identity
 
@@ -416,65 +418,54 @@ frame or an `exit.json`. A `start` whose answer was lost is reconciled with
 terminal missing from `list` with no `exit.json` has an unknown outcome and is
 reported as such, never given an invented exit code.
 
-### Positions and resume
+### Views
 
-A held terminal's viewer stream is counted in PTY bytes, the holder's
-`written`, not in bytes sent to that viewer. The `snapshot` frame names the
-position it covers; `out` frames continue from it. Events (`resize`, `theme`,
-`owner`, `control`, `child_exited`, `hint`, `return`, `directory`) travel in
-their own frame tag for held terminals, so they never shift a position.
+Every connection to a held terminal enters the server at
+`<private dir>/held.sock`: a first line `{"terminal":ID}`, the answer
+`{"hosted":true}`, then the viewer protocol above, unchanged. `{"hosted":false}`
+means no server hosts that terminal: it ended or never started, and the
+connection is refused as `not_found`. Attaching never starts anything. The
+child's own control requests (`status`, `directory`, `exit_record`, …) use the
+same entrance; `LF_TRANSPORT_HELD` names its terminal the way
+`LF_TRANSPORT_OWNER` names an owner.
 
-`{"kind":"resume","terminal":…,"from":N}` continues at byte `N` from the
-ring with no snapshot. When `N` is older than `ring_start` the answer is a
-fresh snapshot at a position inside the ring. There is no per-viewer spool
-for a held terminal, and a server restart does not invalidate a viewer's
-position. Input control and geometry claims are asked for again on resume, as
-for owners.
+`lf session attach --terminal TERMINAL` is the relay for a held terminal.
+When its connection drops it connects again on its own, with backoff, until a
+server hosts the terminal or says it has ended. It draws nothing while it
+waits; typing is discarded and Ctrl+] closes the view. On reconnecting it
+attaches afresh and paints the screen the server holds. Clients that speak
+only the server protocol reach the same terminals with a `session.attach`
+ticket (`server/README.md`).
 
-Views of a held terminal always take the server route (a `session.attach`
-ticket), including `lf resume --task` in a terminal. The direct socket route
-is for owners.
+A view's stream is still counted in bytes sent to that viewer, so a view that
+outlives a server is repainted rather than continued by position.
 
 ### Server restart
 
 Before `start` the server writes `<terminal>/meta.json`: the Session, the
-control key the child's requests are checked against, the last size. That is
-what lets another server instance answer the same child.
+start's `request`, and the control key the child's requests are checked
+against. That is what lets another server instance answer the same child.
 
-On a graceful stop (the SIGTERM an install sends) the server writes
-`<terminal>/screen.ghostsnp` for each held terminal: the snapshot format
-above, with the PTY position it covers in the header.
-
-On startup the server greets every `holder-*.sock`, lists it, and registers
-each live terminal under its existing `TerminalId`:
-
-| Found | Emulator rebuilt from |
-|---|---|
-| A snapshot of this Ghostty revision whose position is still inside the ring | The snapshot, then the ring from that position: screen, scrollback and modes are exact |
-| No snapshot, another revision, or a position the ring has passed | The ring, then one size nudge (one column narrower for 0.4 s, and back) so the agent repaints the visible screen |
-
-After a nudge the visible screen and cursor are exact (Claude Code 2.1.322 and
-codex-cli 0.167.0, November 10, 2026). Scrollback reaches only as far back as
-the ring, and a terminal mode set before the ring's start is known only if
-the agent sets it again when resized.
-
-Open views do not wait for any of this to matter: they resume by position
-from the ring and are not repainted.
+On startup the server greets every `holder-*.sock`, lists it, and hosts each
+running terminal under its existing `TerminalId`. The screen is rebuilt by
+replaying the holder's ring from its start, then one size nudge (one column
+narrower for 0.4 s, and back) asks the agent to repaint what the ring no
+longer holds. The same nudge follows a gap, when the ring passed output the
+server had not read. Scrollback reaches only as far back as the ring, and a
+terminal mode set before the ring's start is known only if the agent sets it
+again when resized.
 
 ### Exit and settlement
 
-An accepted `ExitRecord` from a launcher is written to
-`<terminal>/exit-record.json` before the launcher is told it was accepted.
-With the server down the hand-over fails, and the launcher stays beside the
-provider and settles its own exit, as it does under a busy owner.
-
-When a terminal's `exit` arrives the server settles it (`native_exit::settle`
-with the stored record, else a plain Process end). The terminal's directory is
-the receipt: it is deleted only after the store and capture writes are
-confirmed, so a store outage at exit leaves the receipt and settlement is
-tried again. A server that was down when the child exited finds `exit.json`
-at startup and settles the same way. Settling twice changes nothing, starts
-nothing and closes no newer attachment.
+When a terminal's `exit` arrives the server records it (`native_exit::settle`
+with a record the launcher handed over, and the terminal's end in
+`held_terminals`), asks the holder to `forget` the ring and deletes the
+terminal's directory. The directory is the receipt: it is deleted only after
+the store has the exit, so a store outage leaves it and settlement is tried
+again every two seconds. A server that starts after a child exited finds the
+exit in the holder's `list`, or in `exit.json` when the holder is gone too,
+and records it the same way. An exit record a launcher handed to a server
+that then stopped is not kept across the restart.
 
 ## Task shells and completed workspaces
 

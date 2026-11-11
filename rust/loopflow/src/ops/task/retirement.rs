@@ -1,4 +1,5 @@
 //! The completion and landing callers share this durable retirement operation.
+use crate::transport::Host;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -269,17 +270,19 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
         if session.completed_at.is_some() {
             continue;
         }
-        if let Some(owner) = store
+        if let Some(host) = store
             .sqlite
             .session_transport(session.id.as_str())
             .map_err(task_error)?
         {
-            if crate::journal::lf_evidence(&store.sqlite, &owner) == ProcessIdentityEvidence::Dead {
+            if host.owner().is_some_and(|owner| {
+                crate::journal::lf_evidence(&store.sqlite, owner) == ProcessIdentityEvidence::Dead
+            }) {
                 continue;
             }
             if store
                 .sqlite
-                .owner_retention(&owner)
+                .owner_retention(host.transport())
                 .map_err(task_error)?
                 .is_some()
             {
@@ -287,7 +290,10 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
                     "Requested work, a draft or a pending request still holds this Task",
                 ));
             }
-            allowed.insert(owner);
+            // A held terminal is no process: nothing beneath it is excused.
+            if let Host::Owner(owner) = host {
+                allowed.insert(owner);
+            }
         }
     }
     let processes = store

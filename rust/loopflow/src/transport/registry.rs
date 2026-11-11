@@ -630,7 +630,11 @@ fn run(
             }));
             match pass {
                 Ok(Ok(Pass::Continue)) => {}
-                Ok(Ok(Pass::Ended(code, _settling))) => {
+                Ok(Ok(Pass::Ended(code, settling))) => {
+                    // Exit records still being written finish off this loop.
+                    if let Some(settling) = settling {
+                        std::thread::spawn(move || settling.linger());
+                    }
                     let code = match &entry.child {
                         Child::Held(source) if source.outcome_unknown() => None,
                         _ => Some(code),

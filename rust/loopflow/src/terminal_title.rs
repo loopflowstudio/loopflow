@@ -277,11 +277,11 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(owner: &crate::id::LfProcessId) -> Option<Self> {
+    fn viewing(owner: &crate::transport::Host) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
             let store =
                 SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
-            let Some(id) = store.transport_session(owner)? else {
+            let Some(id) = store.transport_session(owner.transport())? else {
                 return Ok(None);
             };
             let Some(session) = store.session(&id)? else {
@@ -389,7 +389,7 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    owner: crate::id::LfProcessId,
+    owner: crate::transport::Host,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
@@ -474,7 +474,7 @@ fn output_title(
 }
 
 impl ViewerTitle {
-    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+    pub(crate) fn new(owner: &crate::transport::Host) -> Self {
         Self {
             owner: owner.clone(),
             title: None,

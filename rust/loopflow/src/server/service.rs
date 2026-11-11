@@ -747,7 +747,10 @@ async fn attached_owner(
                 Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
                     .with(serde_json::json!({ "resource": "machine_registry" }))
             })?;
-            Ok(registry.sqlite.session_transport(session.as_str())?)
+            Ok(registry
+                .sqlite
+                .session_transport(session.as_str())?
+                .and_then(|host| host.owner().cloned()))
         }
     })
     .await

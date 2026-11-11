@@ -645,23 +645,34 @@ impl SqliteStore {
         })
     }
 
+    /// What hosts the Session's running agent: its owner process, or the
+    /// terminal a holder keeps for it.
     pub(crate) fn session_transport(
         &self,
         session: &str,
-    ) -> StoreResult<Option<crate::id::LfProcessId>> {
+    ) -> StoreResult<Option<crate::transport::Host>> {
+        use crate::transport::Host;
         let canonical = crate::id::canonical_session(session);
         let session = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let id: Option<String> = conn
+        let ids: Option<(Option<String>, Option<String>)> = conn
             .query_row(
-                "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.completed_at IS NULL",
+                "SELECT s.transport_lf_process_id,
+                        (SELECT t.id FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.ended_at IS NULL)
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.completed_at IS NULL",
                 [session],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?
-            .flatten();
-        id.map(|id| crate::id::LfProcessId::parse(&id).map_err(invalid))
-            .transpose()
+            .optional()?;
+        Ok(match ids {
+            Some((_, Some(terminal))) => Some(Host::Terminal(
+                crate::id::TerminalId::parse(&terminal).map_err(invalid)?,
+            )),
+            Some((Some(owner), None)) => Some(Host::Owner(
+                crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
+            )),
+            _ => None,
+        })
     }
 
     /// The Session an execution host runs, for its viewers.

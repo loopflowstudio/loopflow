@@ -9,8 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use super::{endpoint, nonblocking, LIMIT};
-use crate::id::LfProcessId;
+use super::{nonblocking, LIMIT};
 
 #[derive(Debug)]
 pub(super) struct Stream {
@@ -174,9 +173,10 @@ fn flush(output: &mut impl Write, pending: &mut VecDeque<u8>) -> io::Result<()> 
     }
 }
 
-pub(super) fn bridge(id: &LfProcessId) -> Result<()> {
-    let mut socket = UnixStream::connect(endpoint(id)?)
-        .context("Execution owner is unavailable; no execution was restarted")?;
+pub(super) fn bridge(id: &super::Host) -> Result<()> {
+    let mut socket = id
+        .connect()
+        .context("Execution is unavailable; nothing was restarted")?;
     socket.set_nonblocking(true)?;
     let _input_flags = BorrowedFlags::new(0)?;
     let _output_flags = BorrowedFlags::new(1)?;

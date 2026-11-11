@@ -152,7 +152,7 @@ static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 /// What hosts an execution and relays it to viewers: an owner process, or a
 /// terminal a holder keeps for the Machine server.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Host {
+pub enum Host {
     Owner(LfProcessId),
     Terminal(crate::id::TerminalId),
 }
@@ -255,8 +255,12 @@ pub(crate) fn current() -> Option<&'static Host> {
 
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
-pub fn delegate_current(batch: bool) -> Result<bool> {
-    delegate_session(batch, None, None, true)
+///
+/// `task_run` says the command starts a Task's Graph, whose conversation is
+/// held for the Machine server when a terminal views it.
+pub fn delegate_current(batch: bool, task_run: bool) -> Result<bool> {
+    let argv: Vec<String> = std::env::args().collect();
+    delegate(batch, None, None, argv, true, task_run)
 }
 
 pub(crate) fn delegate_session(
@@ -270,7 +274,7 @@ pub(crate) fn delegate_session(
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(batch, json_session, preview_session, argv, replace)
+    delegate(batch, json_session, preview_session, argv, replace, false)
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
@@ -282,6 +286,7 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
         true,
+        false,
     )
 }
 
@@ -291,6 +296,7 @@ fn delegate(
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
+    task_run: bool,
 ) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
@@ -298,7 +304,14 @@ fn delegate(
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = (batch, json_session, preview_session, &mut argv, replace);
+        let _ = (
+            batch,
+            json_session,
+            preview_session,
+            &mut argv,
+            replace,
+            task_run,
+        );
         Ok(false)
     }
     #[cfg(not(test))]
@@ -323,8 +336,17 @@ fn delegate(
         } else {
             ViewerTerminal::preview(preview_session)?
         };
-        let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
         let session = preview_session.map(LfSessionId::from);
+        let cwd = std::env::current_dir()?;
+        let owner = if managed(
+            terminal && !batch,
+            task_run,
+            preview_session.or(json_session),
+        ) {
+            start_held(&argv, &cwd, session.as_ref(), &|_| {})?
+        } else {
+            Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
+        };
         relay_with_preview(
             &owner,
             session.as_ref(),
@@ -335,6 +357,76 @@ fn delegate(
         )?;
         Ok(true)
     }
+}
+
+/// Whether a launch's agent runs in a terminal a holder keeps for the Machine
+/// server, so that it outlives every lf process that views it. Task and Wave
+/// conversations and Desktop panes are; a bare launch, a piped or `-b`
+/// execution and a Desktop Task shell keep an owner process of their own.
+#[cfg_attr(test, allow(dead_code))]
+fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
+    if !viewed {
+        return false;
+    }
+    if task_run || std::env::var_os("LF_SERVER").is_some() {
+        return true;
+    }
+    let Some(session) = session else {
+        return false;
+    };
+    // An unreadable store leaves the launch as it was before holders.
+    crate::journal::process_ledger()
+        .and_then(|store| store.session(session))
+        .ok()
+        .flatten()
+        .is_some_and(|session| session.task_id.is_some() || session.wave_id.is_some())
+}
+
+/// A held launch found no Machine server; nothing started.
+#[derive(Debug, thiserror::Error)]
+#[error("Loopflow server is not running; run lf server status")]
+pub(crate) struct ServerMissing;
+
+/// Start `argv` in a terminal this build's holder keeps, through the Machine
+/// server. `inherit` edits the caller's environment for it. With no server it
+/// fails; it never falls back to an owner process.
+pub(crate) fn start_held(
+    argv: &[String],
+    cwd: &Path,
+    session: Option<&LfSessionId>,
+    inherit: &dyn Fn(&mut Command),
+) -> Result<Host> {
+    use crate::server::wire::{Operation, ServerOperation, SessionStarted};
+    let mut edits = Command::new(&argv[0]);
+    inherit(&mut edits);
+    let mut env: std::collections::BTreeMap<_, _> = std::env::vars_os().collect();
+    for (name, value) in edits.get_envs() {
+        match value {
+            Some(value) => env.insert(name.to_owned(), value.to_owned()),
+            None => env.remove(name),
+        };
+    }
+    let env = env
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect();
+    let (rows, cols) = size();
+    let mut server = crate::server::client::Connection::open().map_err(|error| {
+        tracing::debug!(%error, "held start found no Machine server");
+        ServerMissing
+    })?;
+    let answer = server.request(Operation::Server(ServerOperation::SessionStart {
+        session: session.cloned(),
+        request: uuid::Uuid::new_v4().to_string(),
+        argv: argv.to_vec(),
+        cwd: cwd.to_path_buf(),
+        env,
+        rows,
+        cols,
+    }))?;
+    let started: SessionStarted = serde_json::from_value(answer.result)
+        .context("Loopflow server answered session.start without a terminal")?;
+    Ok(Host::Terminal(started.terminal_id))
 }
 
 pub(crate) fn start(
@@ -1400,7 +1492,7 @@ fn tty_name(fd: RawFd) -> Option<String> {
 /// tree and often a runtime; none of that serves a relay. It carries its
 /// Process receipt into the relay, which opens no store until it returns.
 pub(crate) fn attach(
-    id: &LfProcessId,
+    id: &Host,
     session: Option<&LfSessionId>,
     moved: Option<String>,
     json_session: Option<&str>,
@@ -1408,7 +1500,7 @@ pub(crate) fn attach(
     relay_with_preview(id, session, moved, json_session, None, true)
 }
 
-pub(crate) fn attach_existing(id: &LfProcessId, session: &str, json: bool) -> Result<()> {
+pub(crate) fn attach_existing(id: &Host, session: &str, json: bool) -> Result<()> {
     std::env::set_var("LF_RELAY_SESSION", session);
     relay_with_preview(
         id,
@@ -1421,7 +1513,7 @@ pub(crate) fn attach_existing(id: &LfProcessId, session: &str, json: bool) -> Re
 }
 
 fn relay_with_preview(
-    id: &LfProcessId,
+    id: &Host,
     session: Option<&LfSessionId>,
     moved: Option<String>,
     json_session: Option<&str>,
@@ -1449,7 +1541,11 @@ fn relay_with_preview(
             },
         );
     }
-    command.args([RELAY_COMMAND[0], RELAY_COMMAND[1], id.as_str()]);
+    command.args(RELAY_COMMAND);
+    match id {
+        Host::Owner(owner) => command.arg(owner.as_str()),
+        Host::Terminal(terminal) => command.args([RELAY_TERMINAL_FLAG, terminal.as_str()]),
+    };
     if let Some(session) = session {
         command.args([RELAY_SESSION_FLAG, session.as_str()]);
     }
@@ -1467,30 +1563,38 @@ fn relay_with_preview(
 
 const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
 const RELAY_COMMAND: [&str; 2] = ["session", "attach"];
+const RELAY_TERMINAL_FLAG: &str = "--terminal";
 const RELAY_SESSION_FLAG: &str = "--session";
 const RELAY_MOVED_FLAG: &str = "--moved";
 const RELAY_JSON_FLAG: &str = "--session-json";
 
-/// What a relay invocation names: `lf session attach OWNER [--session SESSION]
-/// [--moved TEXT] [--session-json SESSION]`, the exact owner, the Session a
-/// server bridge attaches by, and the notice it prints. Recognized before
-/// command parsing.
+/// What a relay invocation names: `lf session attach OWNER|--terminal TERMINAL
+/// [--session SESSION] [--moved TEXT] [--session-json SESSION]`, the exact
+/// owner or held terminal, the Session a server bridge attaches by, and the
+/// notice it prints. Recognized before command parsing.
 #[derive(Debug)]
 pub struct Relay {
-    pub owner: LfProcessId,
+    pub owner: Host,
     pub session: Option<LfSessionId>,
     pub moved: Option<String>,
     pub json_session: Option<String>,
 }
 
 pub fn relay_args(args: &[String]) -> Option<Relay> {
-    let [_, command, subcommand, owner, rest @ ..] = args else {
+    let [_, command, subcommand, rest @ ..] = args else {
         return None;
     };
     if command != RELAY_COMMAND[0] || subcommand != RELAY_COMMAND[1] {
         return None;
     }
-    let owner = LfProcessId::parse(owner).ok()?;
+    let (owner, rest) = match rest {
+        [flag, terminal, rest @ ..] if flag == RELAY_TERMINAL_FLAG => (
+            Host::Terminal(crate::id::TerminalId::parse(terminal).ok()?),
+            rest,
+        ),
+        [owner, rest @ ..] => (Host::Owner(LfProcessId::parse(owner).ok()?), rest),
+        [] => return None,
+    };
     let mut session = None;
     let mut moved = None;
     let mut json_session = None;
@@ -1529,7 +1633,7 @@ pub(crate) fn shell_history(owner: &LfProcessId) -> Result<()> {
 }
 
 /// Relay this terminal to the execution owner: socket in, terminal out.
-pub fn relay(id: &LfProcessId, session: Option<&LfSessionId>, moved: Option<String>) -> Result<()> {
+pub fn relay(id: &Host, session: Option<&LfSessionId>, moved: Option<String>) -> Result<()> {
     if std::env::var_os(STREAM_ENV).is_some() {
         return stream::bridge(id);
     }
@@ -1612,13 +1716,14 @@ enum Recovery {
 }
 
 fn attach_with_terminal(
-    id: &LfProcessId,
+    id: &Host,
     session: Option<&LfSessionId>,
     moved: Option<String>,
     terminal: Option<ViewerTerminal>,
     replace: bool,
 ) -> Result<()> {
-    let server = std::env::var_os("LF_SERVER").is_some();
+    // A view of a held terminal always outlives its server connection.
+    let server = matches!(id, Host::Terminal(_)) || std::env::var_os("LF_SERVER").is_some();
     let mut status = connection::Status::from_env();
     let bridged = || bridged_session(session);
     let mut recovery = None;
@@ -1628,12 +1733,14 @@ fn attach_with_terminal(
         };
         recovery = recovered.then_some(Recovery::Reconnect);
         socket
-    } else if server {
-        crate::server::client::bridge(bridged()?, id)?
     } else {
-        UnixStream::connect(endpoint(id)?).context(
-            "Execution owner is unavailable; no provider was restarted and no input was replayed",
-        )?
+        match id {
+            Host::Terminal(_) => id.connect()?,
+            Host::Owner(owner) if server => crate::server::client::bridge(bridged()?, owner)?,
+            Host::Owner(owner) => UnixStream::connect(endpoint(owner)?).context(
+                "Execution owner is unavailable; no provider was restarted and no input was replayed",
+            )?,
+        }
     };
     view(
         stream::Stream::socket(socket)?,
@@ -1708,7 +1815,7 @@ fn bridged_session(session: Option<&LfSessionId>) -> Result<&LfSessionId> {
 
 fn view(
     mut socket: stream::Stream,
-    id: Option<&LfProcessId>,
+    id: Option<&Host>,
     route: Option<ServerRoute<'_>>,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
@@ -1758,13 +1865,17 @@ fn view(
             // Close the old bridge before asking the owner for its free claims.
             socket.shutdown();
             let owner = id.context("only a known owner reconnects")?;
-            let session = bridged_session(session)?;
             let next = if let Some(status) = &mut status {
                 status
-                    .connect(owner, session, false)?
+                    .connect(owner, bridged_session(session)?, false)?
                     .map(|(socket, _)| socket)
             } else {
-                reconnect_server(owner, session, &mut terminal, &reason)?
+                match owner {
+                    Host::Terminal(_) => reconnect_held(owner)?,
+                    Host::Owner(owner) => {
+                        reconnect_server(owner, bridged_session(session)?, &mut terminal, &reason)?
+                    }
+                }
             };
             let Some(next) = next else {
                 return Ok(());
@@ -2168,6 +2279,54 @@ fn reconnect_server(
     }
 }
 
+/// Wait for a server to host the terminal again. Nothing is drawn: the
+/// screen stays as the agent left it, and the server that takes the terminal
+/// up paints its own. What is typed meanwhile is discarded; Ctrl+] closes.
+fn reconnect_held(host: &Host) -> Result<Option<UnixStream>> {
+    let mut wait = Duration::from_millis(100);
+    loop {
+        match host.connect() {
+            Ok(socket) => {
+                discard_reconnect_input()?;
+                return Ok(Some(socket));
+            }
+            // A server answered: the terminal has ended.
+            Err(error) if error.is::<crate::engine::Error>() => return Err(error),
+            Err(_) => {}
+        }
+        let until = Instant::now() + wait;
+        while let Some(left) = until.checked_duration_since(Instant::now()) {
+            let mut fd = libc::pollfd {
+                fd: 0,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            wait_for_activity(std::slice::from_mut(&mut fd), Some(left));
+            if fd.revents == 0 {
+                continue;
+            }
+            let mut bytes = [0; 8192];
+            match io::stdin().read(&mut bytes) {
+                Ok(0) => return Ok(None),
+                Ok(n) if bytes[..n].contains(&0x1d) => return Ok(None),
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        wait = (wait * 2).min(Duration::from_secs(2));
+    }
+}
+
+/// A bridge to `host` for a view that reconnects: an owner through the
+/// server's ticket, a held terminal through the server's entrance.
+fn open_bridge(host: &Host, session: &LfSessionId) -> Result<UnixStream> {
+    match host {
+        Host::Owner(owner) => crate::server::client::bridge_existing(session, owner),
+        Host::Terminal(_) => host.connect(),
+    }
+}
+
 fn discard_reconnect_input() -> io::Result<()> {
     let mut fd = libc::pollfd {
         fd: 0,
@@ -2189,7 +2348,7 @@ fn discard_reconnect_input() -> io::Result<()> {
 }
 
 /// A passive reveal records its terminal only after acquiring input control.
-fn record_relay_terminal(owner: &LfProcessId) -> Result<()> {
+fn record_relay_terminal(owner: &Host) -> Result<()> {
     let Some(session) = std::env::var_os("LF_RELAY_SESSION") else {
         return Ok(());
     };
@@ -2275,8 +2434,8 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 
 /// Whether a viewer of this execution holds input control. A closed terminal
 /// leaves its execution running with none, ready for the next viewer.
-pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
-    let mut socket = UnixStream::connect(endpoint(id)?)?;
+pub(crate) fn controlled(id: &Host) -> Result<bool> {
+    let mut socket = id.connect()?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     send(&mut socket, Request::Controlled)?;

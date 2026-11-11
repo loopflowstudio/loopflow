@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::owner_running;
 use crate::store::SharedStore;
 
 /// How long one owner may take to bind before it is reported as still starting.
@@ -53,7 +52,7 @@ pub(crate) async fn resume(
     })
 }
 
-/// Start `lf resume <id>` in its own owner and wait until it holds the conversation.
+/// Start `lf resume <id>` in a held terminal and wait until it holds the conversation.
 async fn start(
     store: &SharedStore,
     session: &crate::session::LfSession,
@@ -70,14 +69,17 @@ async fn start(
         "resume".into(),
         session.id.as_str().to_owned(),
     ];
-    let owner = crate::transport::start(&argv, true, &session.cwd, &|_| {})
-        .context("start its execution owner")?;
+    let host = crate::transport::start_held(&argv, &session.cwd, Some(&session.id), &|_| {})
+        .context("start its terminal")?;
+    let crate::transport::Host::Terminal(terminal) = &host else {
+        anyhow::bail!("a held start answered an owner process");
+    };
     let deadline = Instant::now() + BIND_TIMEOUT;
     loop {
-        if store.sqlite.session_transport(&session.id)?.as_ref() == Some(&owner) {
+        if store.sqlite.session_transport(&session.id)?.as_ref() == Some(&host) {
             return Ok(ResumeOutcome::Resumed);
         }
-        if !owner_running(&store.sqlite, &owner)? {
+        if !store.sqlite.terminal_running(terminal)? {
             return Ok(ResumeOutcome::Failed {
                 reason: format!(
                     "it stopped while resuming; `lf resume {}` shows why",

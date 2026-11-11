@@ -352,6 +352,69 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
+    /// The held terminal that hosts `session`.
+    fn terminal_of(&self, session: &str) -> String {
+        self.sql()
+            .query_row(
+                "SELECT held_terminal_id FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    /// Wait until a viewer holds input control of a held terminal, asking
+    /// through the server's entrance as every view does.
+    fn wait_held_controlled(&self, terminal: &str) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut socket = UnixStream::connect(self.endpoint("held")).unwrap();
+            socket
+                .write_all(format!("{}\n", json!({ "terminal": terminal })).as_bytes())
+                .unwrap();
+            let mut answer = Vec::new();
+            let mut byte = [0];
+            while socket.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
+                answer.push(byte[0]);
+            }
+            assert_eq!(
+                serde_json::from_slice::<Value>(&answer).unwrap()["hosted"],
+                true,
+                "{terminal} is not hosted"
+            );
+            socket
+                .write_all(&frame(
+                    REQUEST,
+                    json!({"id":1,"kind":"controlled"}).to_string().as_bytes(),
+                ))
+                .unwrap();
+            let (tag, payload) = read_frame(&mut socket).unwrap();
+            assert_eq!(tag, REPLY);
+            if serde_json::from_slice::<Value>(&payload).unwrap()["held"] == true {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{terminal} never had a controlling viewer"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    /// Wait until a held terminal's exit is recorded.
+    fn held_ends(&self, terminal: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !self
+            .sql()
+            .query_row(
+                "SELECT ended_at IS NOT NULL FROM held_terminals WHERE id=?1",
+                [terminal],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            assert!(Instant::now() < deadline, "{terminal} never ended");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     fn owner_of(&self, session: &str) -> String {
         self.sql()
             .query_row(
@@ -3451,6 +3514,9 @@ while True:
         "reconnect must retain the draft's provider"
     );
     assert_eq!(continuity(), original);
+    // The conversation belongs to a Task, so the launch that moves it onto
+    // the installed lf starts it in a held terminal, which needs the server.
+    let mut service = (!unanswering).then(|| ServerProof::start(&fixture, false));
     let (replacement, after, continued) = if unanswering {
         std::fs::write(fixture.home.path().join("release-turn"), "").unwrap();
         assert_eq!(fixture.wait_file("completed-2"), "retained draft");
@@ -3463,7 +3529,7 @@ while True:
         terminal.input(b"\r");
         assert_eq!(fixture.wait_file("completed-3"), "pending draft");
         assert_eq!(attachment(), before);
-        (owner.clone(), before, "pending draft")
+        (Host::Owner(owner.clone()), before, "pending draft")
     } else {
         terminal.input(b"\r");
         assert_eq!(fixture.wait_file("completed-2"), "retained draft");
@@ -3476,23 +3542,31 @@ while True:
         terminal = resume();
         fixture.wait_file("ready-2");
         fixture.ends(&owner);
-        let replacement = fixture.owner_of(&session);
-        assert_ne!(replacement, owner);
-        fixture.wait_controlled(&replacement);
+        let replacement = fixture.terminal_of(&session);
+        fixture.wait_held_controlled(&replacement);
         let after = attachment();
         assert_ne!(after.agent_process_id, before.agent_process_id);
         assert_ne!(after.token, before.token);
         terminal.input(b"after upgrade\r");
         assert_eq!(fixture.wait_file("completed-3"), "after upgrade");
-        (replacement, after, "after upgrade")
+        (Host::Held(replacement), after, "after upgrade")
     };
     assert_eq!(continuity(), original);
+    // Killing the server ends nothing it hosted: the agent stays with its
+    // holder, and the next server takes the same terminal up.
+    if let Some(service) = &mut service {
+        service.restart();
+        service.ready();
+    }
     terminal.input(b"\x1d");
     let status = terminal.wait_exit();
     assert!(status.success(), "{status:?}");
 
     let mut returned = resume();
-    fixture.wait_controlled(&replacement);
+    match &replacement {
+        Host::Owner(owner) => fixture.wait_controlled(owner),
+        Host::Held(terminal) => fixture.wait_held_controlled(terminal),
+    }
     returned.input(b"after return\r");
     assert_eq!(fixture.wait_file("completed-4"), "after return");
     assert_eq!(
@@ -3514,7 +3588,17 @@ while True:
     returned.input(b"\x04");
     let status = returned.wait_exit();
     assert!(status.success(), "{status:?}");
-    fixture.ends(&replacement);
+    match &replacement {
+        Host::Owner(owner) => fixture.ends(owner),
+        Host::Held(terminal) => fixture.held_ends(terminal),
+    }
+}
+
+/// What hosts a conversation in these tests: an owner process, or a terminal
+/// a holder keeps for the Machine server.
+enum Host {
+    Owner(String),
+    Held(String),
 }
 
 /// Native start/stop callbacks preserve silent work across both deadlines.

@@ -125,7 +125,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&owner, None, None, preview, true).unwrap();
+    attach_with_terminal(&super::Host::Owner(owner), None, None, preview, true).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,

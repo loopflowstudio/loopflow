@@ -45,6 +45,7 @@ fn shell(terminal: &str, request: &str, script: &str) -> Start {
         env: vec![("PATH".into(), "/usr/bin:/bin".into())],
         rows: 24,
         cols: 80,
+        placement: None,
     }
 }
 

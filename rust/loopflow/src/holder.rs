@@ -566,6 +566,13 @@ impl Holder<'_> {
             .stdin(slave.try_clone()?)
             .stdout(slave.try_clone()?)
             .stderr(slave.try_clone()?);
+        if let Some(placement) = &start.placement {
+            if let Some(tty) = crate::transport::tty_name(slave.as_raw_fd()) {
+                command
+                    .env("LF_TERMINAL_ID", placement)
+                    .env("LF_TERMINAL_TTY", tty);
+            }
+        }
         // SAFETY: these syscalls only affect the child; fd 0 is the slave PTY after dup2.
         unsafe {
             command.pre_exec(|| {

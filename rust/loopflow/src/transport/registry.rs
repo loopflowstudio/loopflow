@@ -81,6 +81,8 @@ pub(crate) struct Start {
     pub env: Vec<(String, String)>,
     pub rows: u16,
     pub cols: u16,
+    /// The Desktop pane the caller's terminal was validated as.
+    pub placement: Option<String>,
 }
 
 /// Where connections to held terminals enter the server.
@@ -337,6 +339,7 @@ impl Registry {
             env,
             rows,
             cols,
+            placement: start.placement,
         };
         let pid = match client.start(request) {
             Ok(pid) => pid,

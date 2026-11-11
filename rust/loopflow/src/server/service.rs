@@ -602,14 +602,14 @@ async fn session(
                         send(&mut lines, &error(Some(id), ErrorCode::Invalid, "select applies to reads")).await?;
                         continue;
                     }
-                    Admission::Request(Operation::Server(ServerOperation::SessionStart { session, request, argv, cwd, env, rows, cols }), None) => {
+                    Admission::Request(Operation::Server(ServerOperation::SessionStart { session, request, argv, cwd, env, rows, cols, placement }), None) => {
                         let Some(terminals) = terminals.cloned() else {
                             send(&mut lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
                                 "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
                             ).with(serde_json::json!({ "resource": "held_terminals" })))).await?;
                             continue;
                         };
-                        let start = crate::transport::registry::Start { session, request, argv, cwd, env, rows, cols };
+                        let start = crate::transport::registry::Start { session, request, argv, cwd, env, rows, cols, placement };
                         // Starting a holder can take seconds; nothing else on
                         // this connection waits on it but its own requests.
                         let started = tokio::task::spawn_blocking(move || terminals.start(start)).await;

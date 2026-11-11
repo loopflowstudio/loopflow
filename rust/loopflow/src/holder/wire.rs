@@ -62,6 +62,10 @@ pub struct Start {
     pub env: Vec<(String, String)>,
     pub rows: u16,
     pub cols: u16,
+    /// A Desktop pane the child continues: it gets `LF_TERMINAL_ID` and its
+    /// PTY's name as `LF_TERMINAL_TTY`, so native admission links its first
+    /// Session to the pane.
+    pub placement: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -422,6 +422,7 @@ pub(crate) fn start_held(
         env,
         rows,
         cols,
+        placement: crate::session_record::current_terminal_id(),
     }))?;
     let started: SessionStarted = serde_json::from_value(answer.result)
         .context("Loopflow server answered session.start without a terminal")?;
@@ -1573,7 +1574,7 @@ fn send_frame(socket: &mut impl Write, tag: Tag, payload: &[u8]) -> Result<()> {
 }
 
 /// This viewer's terminal device, named to others when it takes ownership.
-fn tty_name(fd: RawFd) -> Option<String> {
+pub(crate) fn tty_name(fd: RawFd) -> Option<String> {
     // SAFETY: ttyname returns null or a pointer to a static NUL-terminated name.
     unsafe {
         let name = libc::ttyname(fd);

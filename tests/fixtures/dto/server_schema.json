@@ -10116,6 +10116,7 @@
                 ]
               ],
               "kind": "session.start",
+              "placement": "desktop-shell",
               "request": "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
               "rows": 24,
               "session": "session_5e55105e000040008000000000000001"
@@ -10157,6 +10158,13 @@
               "const": "session.start",
               "type": "string"
             },
+            "placement": {
+              "description": "The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was\nvalidated as; the held child continues it on its PTY. Null outside\na pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "request": {
               "type": "string"
             },
@@ -10185,7 +10193,8 @@
             "cwd",
             "env",
             "rows",
-            "cols"
+            "cols",
+            "placement"
           ],
           "type": "object",
           "x-result": {

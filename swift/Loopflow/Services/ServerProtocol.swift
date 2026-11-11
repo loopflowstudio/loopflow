@@ -133,11 +133,12 @@ public enum ServerOperation: Encodable, Sendable {
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
     /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
-    /// Repeating `request` answers the same terminal and starts nothing.
-    case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int)
+    /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
+    /// pane (`LF_TERMINAL_ID`) the child continues.
+    case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
 
     private enum Keys: String, CodingKey {
-        case kind, session, request, argv, cwd, env, rows, cols, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
+        case kind, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
@@ -152,7 +153,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(owner, forKey: .ownerLfProcessID)
             // Desktop attaches to owners; a held terminal is named by `terminal_id`.
             try box.encodeNil(forKey: .terminalID)
-        case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols):
+        case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols, let placement):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.start", forKey: .kind)
             try box.encode(session, forKey: .session)
@@ -162,6 +163,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(env.map { [$0.0, $0.1] }, forKey: .env)
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
+            try box.encode(placement, forKey: .placement)
         }
     }
 }

@@ -1858,6 +1858,29 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
 }
 
 #[test]
+fn held_desktop_launch_links_its_session_to_the_pane() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held placement"]);
+    command.env("PATH", path).env("LF_SERVER", "1");
+    let terminal = Terminal::spawn_with_placement(command, Some(true));
+    let launch = fixture.launches(1).pop().unwrap();
+    let session = session_of(&fixture.sql(), &launch);
+    let held = fixture.terminal_of(&session);
+    let placement: Option<String> = fixture.sql().query_row(
+        "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+        [&session], |row| row.get(0),
+    ).unwrap();
+    terminal.stop();
+    let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+    assert_eq!(placement.as_deref(), Some("desktop-shell"));
+}
+
+#[test]
 fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
     let fixture = Fixture::new();
     let path = fixture.provider(
@@ -7438,6 +7461,7 @@ fn held_session_survives_server_restart() {
                 ],
                 rows: 24,
                 cols: 80,
+                placement: None,
             },
         ))
         .unwrap();

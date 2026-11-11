@@ -123,6 +123,11 @@ pub enum ServerOperation {
         env: Vec<(String, String)>,
         rows: u16,
         cols: u16,
+        /// The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was
+        /// validated as; the held child continues it on its PTY. Null outside
+        /// a pane.
+        #[serde(deserialize_with = "Option::deserialize")]
+        placement: Option<String>,
     },
 }
 

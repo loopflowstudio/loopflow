@@ -3078,11 +3078,11 @@ mod tests {
     }
 
     #[test]
-    fn owner_close_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
+    fn closed_task_cleanup_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
         let conn = open();
-        apply_before_migration(&conn, "owner_close_requests");
+        apply_before_migration(&conn, "closed_task_cleanup");
         conn.execute_batch(include_str!(
-            "../../tests/fixtures/migrations/owner_close_released.sql"
+            "../../tests/fixtures/migrations/closed_task_cleanup_released.sql"
         ))
         .unwrap();
         apply_pending_migrations(&conn);

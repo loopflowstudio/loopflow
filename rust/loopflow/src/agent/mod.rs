@@ -75,7 +75,10 @@ fn interrupt_hooks() -> &'static Mutex<Vec<Box<dyn Fn() + Send>>> {
 }
 
 /// Register a cleanup to run on interrupt (SIGINT/SIGTERM/SIGHUP), before
-/// the process exits.
+/// the process exits. Cleanups run in reverse registration order, as
+/// destructors would: the Process record registered at startup completes
+/// only after later work (a shell's jobs, a Session attachment) has settled,
+/// so whoever waits for the Process to end reads settled state.
 pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
     interrupt_hooks()
         .lock()
@@ -88,7 +91,7 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
 pub fn exit_on_interrupt() -> ! {
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
     if let Some(hooks) = &hooks {
-        for hook in hooks.iter() {
+        for hook in hooks.iter().rev() {
             hook();
         }
     }
@@ -190,7 +193,7 @@ pub struct AgentConfig {
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
     /// Whether a Task or Wave command launched this (`Cli::names_work`): it
     /// needs the Machine server, and a headless run gets every hook. A native
-    /// terminal launch gets every hook either way.
+    /// terminal launch an owner holds gets every hook either way.
     pub managed: bool,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
@@ -1898,7 +1901,7 @@ fn spawn_agent_child(
 }
 
 fn run_interactive(
-    cmd: Command,
+    mut cmd: Command,
     timeout: Option<Duration>,
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
@@ -1906,13 +1909,18 @@ fn run_interactive(
     managed: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
+    let foreground = crate::os_process::foreground::hand_to(&mut cmd);
     let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, managed)?;
-    let _pid_guard = ChildPidGuard::new(child.id());
+    let pid = child.id();
+    let _pid_guard = ChildPidGuard::new(pid);
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = title.as_mut() {
             title.refresh();
         }

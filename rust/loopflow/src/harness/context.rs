@@ -124,12 +124,14 @@ pub(crate) fn add_opencode_context(
     Ok(())
 }
 
-/// A native terminal launch is a conversation an owner holds: it gets every
-/// hook, whatever named its Work.
+/// A native terminal launch an owner holds gets every hook, whatever named its
+/// Work: they say when it can take a reply. A bare one in the terminal's
+/// foreground gets only the context hooks.
 pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
+    let held = crate::transport::current().is_some();
     match (harness, context) {
-        ("claude", Some(context)) => claude_args(context, true),
-        ("pi", context) => pi_args(context, true, true),
+        ("claude", Some(context)) => claude_args(context, held),
+        ("pi", context) => pi_args(context, true, held),
         _ => Ok(Vec::new()),
     }
 }

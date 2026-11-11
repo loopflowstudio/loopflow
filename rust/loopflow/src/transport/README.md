@@ -73,9 +73,19 @@ the command's output.
 Conversations stay running while their scope is open, whether an owner or a
 held terminal hosts them. Completed Tasks end their conversations after the
 viewing grace, with or without a checkout; abandonment ends unviewed Task
-conversations, even during a turn. Wave, repository and bare conversations run
+conversations, even during a turn. Wave and repository conversations run
 until their agent quits. Task cleanup signals an owner after its notice; a held
 terminal has no process to signal, so the server ends it on the notice.
+
+Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of
+an unmanaged Session) start no owner: the provider runs as the terminal's
+foreground process-group leader with only the context hooks, and closing the
+terminal ends it. `os_process::foreground` hands the terminal over before exec
+and takes it back after; a provider stopped with Ctrl+Z stops lf too, and `fg`
+continues both. Commands naming Work and reopens of managed Sessions keep the
+holder. Headless runs, bare Graphs, and Desktop surfaces waiting for a relay
+keep their host.
+
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
 launch it. Background starts require a configured, installed agent; there is no

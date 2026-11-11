@@ -728,8 +728,11 @@ impl CodexHarness {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] =
-                super::context::codex_hooks(context, session_hooks, native || launch.managed)?;
+            config["hooks"] = super::context::codex_hooks(
+                context,
+                session_hooks,
+                (native && crate::transport::current().is_some()) || launch.managed,
+            )?;
         }
         Ok(config)
     }

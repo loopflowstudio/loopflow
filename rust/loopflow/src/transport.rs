@@ -272,6 +272,19 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
     }
 }
 
+/// Whether a bare conversation runs as this terminal's foreground program, as
+/// `claude` or `codex` would: no owner holds it, so closing the terminal ends
+/// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
+/// launches without a terminal on stdin, which need the owner's PTY, and a
+/// Desktop surface waiting for a relay to acknowledge it.
+pub fn runs_in_terminal(batch: bool) -> bool {
+    !batch
+        && current().is_none()
+        && io::stdin().is_terminal()
+        && std::env::var_os("LF_SERVER_STATUS").is_none()
+        && std::env::var_os(STREAM_ENV).is_none()
+}
+
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 ///
@@ -386,7 +399,8 @@ fn delegate(
 /// conversation recorded as Task, Wave or repository work
 /// (`WorkSource::is_managed`), wherever it is opened. A bare launch, one
 /// attributed only by its checkout, a piped or `-b` execution and a Desktop
-/// Task shell keep an owner process of their own.
+/// Task shell do not use the holder. Bare terminal launches run directly;
+/// piped, headless and Desktop shell launches keep their own owner.
 #[cfg_attr(test, allow(dead_code))]
 fn held(viewed: bool, managed: bool, session: Option<&str>) -> bool {
     if !viewed {

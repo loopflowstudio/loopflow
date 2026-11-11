@@ -62,3 +62,10 @@ emulator before suspending). An earlier LOO-824 steer (8606000f) says
 suspension is not in this Task. Undecided: here or its own Task.
 Asked here, own Task / in LOO-824 after this demo / backlog; Jack Heart:
 "1b" (in LOO-824, after this demo).
+
+## LOO-823 sync resolution (November 11)
+
+Keep LOO-824’s review and open choices; LOO-823’s historical notes remain in
+`ed74fefaa:scratch/process-leaks.md`. Bare-direct applies only when neither
+the command nor the reopened Session names managed work. Existing ongoing
+conversations still keep their host when their older row has no WorkSource.

@@ -55,7 +55,18 @@ whether or not the Task has a checkout. Returning before cleanup keeps it runnin
 a return that races the cleanup signal sees “Task completed”. Returning afterward
 continues from saved history; it does not reopen the Task. Checkout deletion is
 separate. Abandonment ends unviewed conversations even during a turn.
-Wave, repository and bare conversations stay running until you quit their agent.
+Wave and repository conversations stay running until you quit their agent.
+
+```bash
+lf                                 # a bare conversation, in this terminal
+lf implement                       # a skill typed here is bare too, even in a Task's checkout
+```
+
+Any other conversation is bare. Its agent runs in your terminal exactly as
+`claude` or `codex` would: Ctrl+C, Ctrl+Z and Ctrl+] reach the agent, the
+terminal shows the agent's own name, and closing the terminal ends it, even
+mid-turn. No lf process stays behind. `lf resume <session>` continues its
+history in whichever terminal you run it from.
 
 `lf process rollover` moves idle owners to the selected lf. It discards unsent
 input when it replaces the provider. Saved history and screens cannot restore

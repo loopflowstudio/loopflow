@@ -1108,12 +1108,14 @@ pub(crate) async fn open(
                 }
             }
         }
-        if crate::transport::delegate_session(
-            false,
-            json.then_some(session.id.as_str()),
-            session.interactive.then_some(session.id.as_str()),
-            true,
-        )? {
+        if !opens_bare(&store.sqlite, &session.id, managed)
+            && crate::transport::delegate_session(
+                false,
+                json.then_some(session.id.as_str()),
+                session.interactive.then_some(session.id.as_str()),
+                true,
+            )?
+        {
             return surface(store, session).await;
         }
     }
@@ -1154,6 +1156,22 @@ pub(crate) async fn open(
         )?;
     }
     Ok(result)
+}
+
+/// Managed commands and recorded managed Sessions keep their host on reopen.
+/// Other Sessions outside an ongoing conversation run in the terminal; failed
+/// reads keep the host.
+fn opens_bare(store: &SqliteStore, id: &str, managed: bool) -> bool {
+    !managed
+        && crate::transport::runs_in_terminal(false)
+        && store.session(id).is_ok_and(|session| {
+            session.is_some_and(|session| {
+                !session
+                    .work_source
+                    .is_some_and(crate::session::WorkSource::is_managed)
+            })
+        })
+        && store.primary_scope(id).is_ok_and(|scope| scope.is_none())
 }
 
 /// Open without replacing a client. Start may initialize a first thread, but
@@ -1234,7 +1252,7 @@ pub(crate) async fn open_without_replacing(
         return Ok(record);
     }
     // A new transport re-executes this same intent and acquires the lock again.
-    if crate::transport::current().is_none() {
+    if crate::transport::current().is_none() && !opens_bare(&store.sqlite, id, managed) {
         drop(lock);
         if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
             return Ok(record);

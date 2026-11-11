@@ -4,6 +4,10 @@ Status: implemented. One rule in `rust/loopflow/src/ops/task.rs`: `select_stack_
 
 Why kickoff-placed Tasks had no row: `place_task_in` (`store/sqlite/children.rs`) inserts the placement PR only when `publication.is_some()`, i.e. when a GitHub PR already exists for the branch. Every fresh placement behaves this way, not only `feature`-graph ones; 821–828 had rows because they had published. Placement is unchanged; recording a `Working` row at every placement would change board and snapshot phases far outside this Task. Say so in the PR.
 
+Known limit: when origin's parent branch has diverged from the local one, nothing is pushed and the child bases on origin's version. A stale remote-tracking ref surfaces as git's non-fast-forward push error.
+
+Remaining: gate; PR body states the placement finding above.
+
 Checks:
 - `cargo test -p loopflow --lib stack`: pass
 - `cargo test -p loopflow --test integration sync_tests::stack`: pass (new `stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it`)

@@ -70,7 +70,11 @@ again.
 
 Open, from the concept review (November 11):
 
-1. Do steers wake an idle managed conversation? Built as (a), reversible
+1. Settled by the design in concept review 2 as (a): the steer keeps idle
+   waking "as today", and today a Task comment wakes an idle conversation;
+   with one delivery per comment it arrives as a steer, so only (a) or (c)
+   keep that, and (c) adds a distinction people learn for no benefit. Still
+   reversible. Earlier text: Do steers wake an idle managed conversation? Built as (a), reversible
    (November 11 implement pass): the wake carries the pending steer batch
    with the Task update; "A steer starts no turn" is gone from the docs.
    Before that pass: "A steer starts no turn"; Task updates did. Today a person's Task comment
@@ -85,8 +89,16 @@ Open, from the concept review (November 11):
    Why it matters: whether typing direction at a Task makes an idle agent act
    on it now is the product, not plumbing. The wake path serves (a) at no
    extra cost.
-2. Bare conversations (above): get nothing, as built and as the brief says, or
-   next-boundary updates, as the steer's words say?
+2. Bare conversations (above): get nothing, as built, or next-boundary
+   updates, as the steer's words say? The brief's "Bare Sessions get none of
+   this" can be read as no registration or push, which fits either answer.
+   The conflict is with LOO-821's rule that bare hooks ask no server, and
+   with "basically anything that doesnt touch the work model" working without
+   one. A middle option: a bare Session whose `work_source` names a Task asks
+   the server best-effort at its prompt boundary and logs nothing when none
+   answers. Why it matters: whether plain `lf <skill>` in a Task checkout
+   hears that Task's progress.
+   a. nothing (built). b. next-boundary updates, best-effort server ask.
 
 ## Inherited from LOO-821
 

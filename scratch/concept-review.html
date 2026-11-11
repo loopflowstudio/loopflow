@@ -52,54 +52,64 @@
 </head>
 <body>
 <main>
-<h1>Does direction wake an idle agent, or only progress?</h1>
-<p class="meta">LOO-826 · concept review after implement · November 11, 2026<br>
+<h1>Does an idle conversation stay woken after the server restarts?</h1>
+<p class="meta">LOO-826 · concept review 2, after realign · November 11, 2026<br>
 Built from <code>scratch/loo-826.md</code>, <code>scratch/questions.md</code>,
 <code>docs/sessions.md</code>, <code>server/wake.rs</code>, <code>server/boundary.rs</code>,
-<code>harness/task_updates.rs</code>, <code>harness/context.rs</code>,
-<code>store/sqlite/task_comments.rs</code></p>
+<code>lf/commands/context.rs</code>, <code>store/sqlite/processes.rs</code>,
+<code>~/.claude/sessions/*.json</code> on this Machine</p>
 
-<p class="lead">The server now wakes idle managed conversations with Task updates and
-leaves steers for the next turn. A person's Task comment is both, so it arrives twice
-under two names. Question 1 decides which one wakes.</p>
+<p class="lead">The server wakes idle managed conversations, but who to wake lives only in
+its memory. <code>lf install</code> restarts the server, and every idle conversation goes
+deaf until someone types in it. The observers this branch deletes outlived a restart.
+The fix is a deletion: read registrations from what is already recorded.</p>
 
 <h2>What people do, and what happens</h2>
 <div class="scroll"><table>
-<tr><th>Action</th><th>Built on this branch</th><th>Proposed</th></tr>
-<tr><td>A Graph step settles on the Task</td><td>Idle conversation wakes: "Loopflow worker progress"</td><td>Same</td></tr>
-<tr><td>Jack comments "use the staging bucket" on the Task</td>
-<td class="no">Wakes now as worker progress ("New comment from jack: …"), then again as a steer at the next turn</td>
-<td>Delivered once, as a steer. Whether it wakes: question 1</td></tr>
-<tr><td><code>lf task steer LOO-826 '…'</code></td><td>Waits for the next turn ("A steer starts no turn")</td><td>Question 1</td></tr>
-<tr><td>Bare <code>claude</code> opened by <code>lf</code> in a terminal</td>
-<td class="no">Launched with <code>crossSessionInbound: accept</code>; never registered, never woken</td>
-<td>No <code>accept</code>: it follows registration</td></tr>
+<tr><th>Action</th><th>Built</th><th>Proposed</th></tr>
+<tr><td>Graph step settles; conversation idle</td><td>woken</td><td>woken</td></tr>
+<tr><td>Comment on the Task; conversation idle</td><td>woken, once, as a steer</td><td>same</td></tr>
+<tr><td><code>lf install</code>, then a step settles</td><td class="no">not woken until the person types</td><td>woken</td></tr>
+<tr><td>Server down when the step settles</td><td>next turn hears it</td><td>next turn hears it</td></tr>
+<tr><td>Plain <code>lf &lt;skill&gt;</code> in the Task checkout</td><td>no Task updates</td><td>open, question 2</td></tr>
 </table></div>
 
 <h2>Concepts</h2>
-<div class="built"><p><span class="tag">Built.</span> Steer = direction, delivered at a
-boundary. Task update = progress, delivered at a boundary or pushed by the server's
-wake. A direction comment is saved as a steer <em>and</em> read as a Task update.</p></div>
-<div class="prop"><p><span class="tag">Proposed.</span> Each thing a person or Graph does
-has one kind. Comments with a steer are direction only; Task updates are runs, steps and
-non-direction comments. The wake delivers whatever the conversation has pending.</p></div>
+<div class="built"><p><span class="tag">Built.</span> A <em>registration</em>: an in-memory
+map entry the boundary hook writes (adapter, thread, delivery, Claude inbox or Codex
+endpoint, idle flag). Lost on restart; dropped on a failed send.</p></div>
+<div class="prop"><p><span class="tag">Proposed.</span> No registration concept. A wake
+target is a managed Session with a live AgentProcess whose recorded turn state is idle.
+Reach is recorded on the AgentProcess: Codex's <code>endpoint</code> (already there),
+Claude's inbox key path, saved at its first managed boundary. The key path names the
+config dir and pid; <code>&lt;pid&gt;.json</code> holds <code>messagingSocketPath</code>
+and Claude's own <code>status</code>:</p>
+<pre><code>10838 idle interactive cli
+15357 busy interactive cli
+21323 shell interactive cli</code></pre></div>
 
 <h2>APIs that change</h2>
-<pre><code>// task_updates::read: skip comments whose id has a steer (comment:&lt;id&gt;)
-// harness/context.rs
-claude_args(context, hooks: Every|Context, work_managed: bool)
-//   crossSessionInbound: accept only when work_managed
-// wake::wake (only with 1a): claim steers beside the update, one message</code></pre>
+<div class="prop"><p><span class="tag">Proposed.</span> <code>wake::register</code>,
+<code>Registration</code>, <code>REGISTRATIONS</code> and the idle flag go. The watcher
+asks the store for candidates on each revision. A sent wake records the conversation as
+in a turn, so a second revision doesn't start a second Codex turn. The boundary's
+<code>inbox</code> field stays; it now writes a record.</p></div>
+
+<h2>Settled by the design</h2>
+<p>Steers wake (question 1 (a) from the first review). Idle waking "as today" includes a
+Task comment, which now arrives only as a steer; (c) would split comments from
+<code>lf task steer</code> for no benefit.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Do steers wake an idle managed conversation?
-<ol><li>Yes, through the same server path; a comment wakes as direction. <code>docs/sessions.md</code> drops "A steer starts no turn".</li>
-<li>No; a comment on an idle Task conversation waits for its next turn (less waking than before this branch).</li>
-<li>Task comments wake; <code>lf session steer</code> and <code>lf task steer</code> wait.</li></ol></li>
-<li>Bare conversations: the steer says "Deliver at the next boundary only for bare or unreachable conversations"; the brief says "Bare Sessions get none of this".
+<li>Bare conversations. The steer: "Deliver at the next boundary only for bare or
+unreachable conversations." LOO-821: bare hooks ask no server.
 <ol><li>Bare get nothing (built).</li>
-<li>Bare get next-boundary updates; their hooks ask the server again.</li></ol></li>
+<li>A bare Session whose checkout names a Task asks the server best-effort at its prompt
+boundary, silent when none answers, and hears Task updates there.</li></ol></li>
+<li>Claude's inbox record: reuse <code>processes.endpoint</code>, or a new column
+(a migration)?
+<ol><li>Reuse <code>endpoint</code>.</li><li>New column.</li></ol></li>
 </ol>
 </main>
 </body>

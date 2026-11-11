@@ -104,21 +104,23 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         // news for its next boundary.
         let reach = match reach {
             IdleReach::Claude(key) => match open_inbox(key, thread)? {
-                Some(inbox) => Reach::Inbox(inbox),
+                Some((socket, token)) => Reach::Inbox(socket, token),
                 None => return Ok(()),
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
         };
         let steers = super::boundary::wake_steers(store, cwd, adapter, thread)?;
         let update = crate::harness::task_updates::claim(store, adapter, thread)?;
-        let text = match (&steers, &update) {
-            (None, None) => return Ok(()),
-            (Some(steers), Some(update)) => format!("{}{update}", steers.text),
-            (Some(steers), None) => steers.text.clone(),
-            (None, Some(update)) => update.clone(),
-        };
+        let text: String = steers
+            .iter()
+            .map(|steers| steers.text.as_str())
+            .chain(update.as_deref())
+            .collect();
+        if text.is_empty() {
+            return Ok(());
+        }
         match reach {
-            Reach::Inbox((mut socket, token)) => send_inbox(&mut socket, &token, thread, &text)?,
+            Reach::Inbox(mut socket, token) => send_inbox(&mut socket, &token, thread, &text)?,
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &text)?,
         }
         store.record_woken(adapter)?;
@@ -137,14 +139,15 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
 }
 
 enum Reach<'a> {
-    Inbox((UnixStream, String)),
+    Inbox(UnixStream, String),
     Codex(&'a Path),
 }
 
 /// Claude's inbox socket and key for `thread`, from the key it publishes
 /// beside its session record, `<config>/sessions/<pid>.<sha256 of socket>.key`;
 /// `<pid>.json` names the socket. `None` once that Claude exited or moved to
-/// another conversation, whose own boundary records it.
+/// another conversation, whose own boundary records it. Its `status` is not
+/// read: a Stop hook can run before it says `idle`.
 fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> {
     let pid = key
         .file_name()

@@ -171,11 +171,11 @@ lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake 
 lf process list       # one lf server, no process per conversation
 ```
 
-Leave Task conversations open while their Graphs run. Each managed
-conversation, one opened through a Task or Wave command or from Desktop, is
-known to this Machine's lf server, through restarts. When a Graph step settles, the Graph
-moves, a comment arrives on its Task or a steer is saved for it, the server
-wakes the conversation if it is waiting for you: Claude takes the news as a
+Leave Task conversations open while their Graphs run. When a Graph step
+settles, the Graph moves, a comment arrives on its Task or a steer is saved for
+it, this Machine's lf server wakes each managed conversation on it that is
+waiting for you, one opened through a Task or Wave command or from Desktop,
+even if the server restarted since its last turn. Claude takes the news as a
 message from `loopflow`, Codex as a turn of its own. A comment with direction
 arrives once, as a steer; other comments arrive as Task updates. A
 conversation in the middle of a turn hears it when that turn ends. Ten idle
@@ -189,8 +189,7 @@ Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. An update that
 lands while the server is down, or one the server cannot reach a conversation
 with, waits for that conversation's next turn, and lf records the gap in
-`logs/lf.log`. Each update
-reaches a conversation once.
+`logs/lf.log`. Each update reaches a conversation once.
 
 ## One more headless turn
 

@@ -465,15 +465,15 @@ The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A managed Session is idle when its last recorded native turn yielded
 (`session_activity`) and its AgentProcess is live, and reachable through its
 Codex app-server (`processes.endpoint`) or the Claude inbox key its first
-managed boundary saved (`processes.inbox`). Claude must also report itself
-`idle` in `sessions/<pid>.json` beside that key, which names the socket. One
+managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
+key names the socket and must still name the conversation. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer; when either moves, every idle
 conversation with news gets its pending steer batch and its Task update in one
 message, and is recorded as in a turn until its next Stop. A turn end checks
-its own conversation the same way. The update is recorded as delivered first; the steer batch is
-confirmed once the message is sent, so a failed send answers it again at the
-next boundary:
+its own conversation the same way. The update is recorded as delivered first;
+the steer batch is confirmed once the message is sent, so a failed send answers
+it again at the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -484,8 +484,9 @@ next boundary:
   is the message.
 
 A server that restarts reads the same conversations again. One it cannot
-reach keeps its news for its next boundary. Bare Sessions are never woken. No process or clock runs per Session: the watcher's only clock is
-the change signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+reach keeps its news for its next boundary. Bare Sessions are never woken. No
+process or clock runs per Session: the watcher's only clock is the change
+signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

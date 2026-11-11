@@ -192,71 +192,59 @@ impl SqliteStore {
         &self,
         session: Option<&str>,
     ) -> StoreResult<Vec<IdleConversation>> {
-        type Row = (
-            SteerAdapter,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            (Option<i64>, Option<u32>, Option<i64>),
-        );
-        let rows: Vec<Row> = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut statement = conn.prepare(
-                "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,s.work_source,
-                    CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
-                    p.completed_at,p.pid,p.os_started_at
-                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-                 JOIN steer_adapters a ON a.agent_process_id=p.id
-                 JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
-                 WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
-                   AND (?1 IS NULL OR s.id=?1)",
-            )?;
-            let rows = statement.query_map([session], |row| {
-                Ok((
-                    SteerAdapter {
-                        session: row.get(0)?,
-                        agent_process_id: row.get(1)?,
-                        capability: row.get(2)?,
-                    },
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    (row.get(8)?, row.get(9)?, row.get(10)?),
-                ))
-            })?;
-            rows.collect::<Result<_, _>>()?
-        };
-        let mut idle = Vec::new();
-        for (adapter, thread, cwd, source, endpoint, inbox, (completed, pid, start)) in rows {
-            let source: Option<crate::session::WorkSource> = source
-                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                .transpose()?;
-            let reach = match (endpoint, inbox) {
-                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
-                (None, Some(inbox)) => IdleReach::Claude(inbox.into()),
-                (None, None) => continue,
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
+                CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
+                s.work_source,p.pid,p.os_started_at
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             JOIN steer_adapters a ON a.agent_process_id=p.id
+             JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
+             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+               AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
+               AND (?1 IS NULL OR s.id=?1)",
+        )?;
+        let rows = statement.query_map([session], |row| {
+            let reach = match row.get::<_, Option<String>>(5)? {
+                Some(endpoint) => IdleReach::Codex(endpoint.into()),
+                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
             };
-            let live = crate::journal::agent_process_evidence(
-                completed,
-                pid,
-                start,
-                None,
-                crate::journal::process_identity_evidence,
-            ) == crate::journal::ProcessIdentityEvidence::Live;
-            if live && source.is_some_and(crate::session::WorkSource::is_managed) {
-                idle.push(IdleConversation {
-                    adapter,
-                    thread,
-                    cwd: cwd.into(),
-                    reach,
+            let source: Option<crate::session::WorkSource> = row
+                .get::<_, Option<String>>(7)?
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            let live = row
+                .get::<_, Option<u32>>(8)?
+                .zip(row.get::<_, Option<i64>>(9)?)
+                .is_some_and(|(pid, start)| {
+                    crate::journal::process_identity_evidence(pid, start)
+                        == crate::journal::ProcessIdentityEvidence::Live
                 });
-            }
-        }
-        Ok(idle)
+            let conversation = IdleConversation {
+                adapter: SteerAdapter {
+                    session: row.get(0)?,
+                    agent_process_id: row.get(1)?,
+                    capability: row.get(2)?,
+                },
+                thread: row.get(3)?,
+                cwd: row.get::<_, String>(4)?.into(),
+                reach,
+            };
+            Ok(
+                (live && source.is_some_and(crate::session::WorkSource::is_managed))
+                    .then_some(conversation),
+            )
+        })?;
+        Ok(rows
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?)
     }
 
     /// A woken conversation is in a turn until its next Stop says otherwise.

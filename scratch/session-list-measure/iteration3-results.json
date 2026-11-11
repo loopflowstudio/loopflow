@@ -1,0 +1,3344 @@
+{
+  "manifest": {
+    "commits": {
+      "before": "0f39f7be21",
+      "after1": "d1f1caa3f7",
+      "after2": "a835f03e6f"
+    },
+    "harness_sha256": {
+      "iteration2.py": "d1531fba7fae2ba64474d859f1c2ddea5efea1aed10384a3b130be489a063d56",
+      "compare.py": "284a20854a0432b173f98051859c2c2499c779c5e765a75be62c922b5c14a8c4",
+      "planning_compare.py": "f68e21d39cb528b7912f87fbfbb81a0aa6c0addbc3410cffff176406dcb3a34f",
+      "run.py": "3b6fb306d852388f19a2b471d42d547e0b9f8fdd5c782824a738348c5d93df7f",
+      "freeze_clock.c": "a6649056b90531ef72757e3a6b97d7529dbdd95d3a79c5645ac6ec2f4579f94c"
+    },
+    "epoch": "1794418996",
+    "source_store_sha256": "008de9790b603e47f5f01bcf61a49cdb9829283a195641d9bd779391fb0e650f",
+    "counts": {
+      "agent_sessions": 14759,
+      "session_events": 236791,
+      "session_activity": 12983,
+      "processes": 160314,
+      "tasks": 1099,
+      "provider_accounts": 6
+    },
+    "environment": {
+      "rust": "1.98.1",
+      "cargo": "1.98.1",
+      "macos": "26.0.1",
+      "architecture": "arm64",
+      "logical_cpus": 16,
+      "memory_bytes": 137438953472,
+      "build_command": "cargo build --release -p loopflow --bin lf",
+      "provenance": "development; exact git archives without git metadata"
+    },
+    "builds": {
+      "before": {
+        "commit": "0f39f7be21",
+        "sha256": "a2e808aa590210e6583b8a400c2f0820e618056d497227426c0e1de87261bc05"
+      },
+      "after1": {
+        "commit": "d1f1caa3f7",
+        "sha256": "3e8e907e7af5686c836f1a5897b88ee8a1853fc8265e0d8c4f3b4b3d619c7063"
+      },
+      "after2": {
+        "commit": "a835f03e6f",
+        "sha256": "99df8c1eec3f2e33a8827ab409c35ec63837209d007aefc7f9370bcf560aee02"
+      },
+      "after1-trace": {
+        "commit": "d1f1caa3f7",
+        "sha256": "998327a5768be87e4a6bf8a77b14fb56fded7a104b85638ef4367f6a6c7e4fed",
+        "instrumentation": "repository_scope, check_scope and RepoId::discover wall guards; optional bound-SQL trace"
+      },
+      "after2-trace": {
+        "commit": "a835f03e6f",
+        "sha256": "a5433ff7a1e6fb85a7c65f558c6b4cec590f487c45da48c959fe4b0727ff7653",
+        "instrumentation": "repository_scope, check_scope and RepoId::discover wall guards; optional bound-SQL trace"
+      }
+    },
+    "store_sha256": {
+      "before": "008de9790b603e47f5f01bcf61a49cdb9829283a195641d9bd779391fb0e650f",
+      "after1": "008de9790b603e47f5f01bcf61a49cdb9829283a195641d9bd779391fb0e650f",
+      "after2": "008de9790b603e47f5f01bcf61a49cdb9829283a195641d9bd779391fb0e650f"
+    },
+    "protected_loo822_sha256": "9fa3c881be1a35dc784f5a0a0ae96a15671b0cad3459855c896eb46f39e70cbd",
+    "claim": "Each repeated-read removal reduces network-denied Task-status latency beyond noise with identical full JSON.",
+    "plan": {
+      "workloads": [
+        "task",
+        "cli",
+        "waves",
+        "board"
+      ],
+      "pairs": 5,
+      "comparisons": [
+        [
+          "before",
+          "after1"
+        ],
+        [
+          "after1",
+          "after2"
+        ]
+      ]
+    },
+    "attribution_sha256": {
+      "iteration3.py": "679860829c8cdceb9008bf0a089d1f2deed7dbb79eb61bf5a1862a0ce852fe72",
+      "profile_iteration3.py": "3446531cda70bede882b723c7dce8b1c6e9f26a6599294d49ea8e2dd2bb0c941",
+      "attribute_iteration3.py": "257defb4ca91d4ac03dadb143c71fd8789a7d854287a17321b261475be4391ea",
+      "count_security.c": "743208c1399b88d46d26cc079c0cdad62e020013db9c5339d7ae382a2c1a8ede",
+      "trace_bound.rs": "4f6ead0c1c982e49aacf551480f3b4d332a0a2f698ba41deca87e092adffb0d2"
+    },
+    "count_security_dylib_sha256": "7d23bfd8077e1383d149cf0c5dbb417e2ff499fdf318275f383dfc277f77a0a2"
+  },
+  "cohorts": {
+    "before-after1-task": {
+      "sides": {
+        "before": {
+          "n": 5,
+          "median_ms": 7285.576457856223,
+          "range_ms": [
+            6957.524667028338,
+            8583.13529100269
+          ],
+          "rows": 1,
+          "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+          "errors": 0
+        },
+        "after1": {
+          "n": 5,
+          "median_ms": 2982.7287499792874,
+          "range_ms": [
+            2733.2941670902073,
+            3222.426790976897
+          ],
+          "rows": 1,
+          "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+          "errors": 0
+        }
+      },
+      "verdict": "better",
+      "reduction_pct": 59.05981129656618
+    },
+    "before-after1-cli": {
+      "sides": {
+        "before": {
+          "n": 5,
+          "median_ms": 441.68295804411173,
+          "range_ms": [
+            440.42870798148215,
+            451.775792054832
+          ],
+          "rows": 100,
+          "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+          "errors": 0
+        },
+        "after1": {
+          "n": 5,
+          "median_ms": 440.56704198010266,
+          "range_ms": [
+            427.89450008422136,
+            449.68491699546576
+          ],
+          "rows": 100,
+          "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": 0.25265092159105773
+    },
+    "before-after1-waves": {
+      "sides": {
+        "before": {
+          "n": 5,
+          "median_ms": 277.7346249204129,
+          "range_ms": [
+            264.41787485964596,
+            281.59783291630447
+          ],
+          "rows": 7,
+          "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+          "errors": 0
+        },
+        "after1": {
+          "n": 5,
+          "median_ms": 269.0448339562863,
+          "range_ms": [
+            266.1055000498891,
+            271.86274994164705
+          ],
+          "rows": 7,
+          "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": 3.128810808741156
+    },
+    "before-after1-board": {
+      "sides": {
+        "before": {
+          "n": 5,
+          "median_ms": 859.4906248617917,
+          "range_ms": [
+            835.9042908996344,
+            878.7164581008255
+          ],
+          "rows": 183,
+          "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+          "errors": 0
+        },
+        "after1": {
+          "n": 5,
+          "median_ms": 870.5415411386639,
+          "range_ms": [
+            849.0513341967016,
+            899.4419157970697
+          ],
+          "rows": 183,
+          "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": -1.2857518112718402
+    },
+    "after1-after2-task": {
+      "sides": {
+        "after1": {
+          "n": 5,
+          "median_ms": 3225.761041045189,
+          "range_ms": [
+            3155.878165969625,
+            3311.530416831374
+          ],
+          "rows": 1,
+          "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+          "errors": 0
+        },
+        "after2": {
+          "n": 5,
+          "median_ms": 1243.095292011276,
+          "range_ms": [
+            1230.7644579559565,
+            1269.1545418929309
+          ],
+          "rows": 1,
+          "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+          "errors": 0
+        }
+      },
+      "verdict": "better",
+      "reduction_pct": 61.46350345875289
+    },
+    "after1-after2-cli": {
+      "sides": {
+        "after1": {
+          "n": 5,
+          "median_ms": 440.49216713756323,
+          "range_ms": [
+            431.19074986316264,
+            450.56112483143806
+          ],
+          "rows": 100,
+          "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+          "errors": 0
+        },
+        "after2": {
+          "n": 5,
+          "median_ms": 440.4309580568224,
+          "range_ms": [
+            432.8129580244422,
+            450.4323329310864
+          ],
+          "rows": 100,
+          "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": 0.013895611615200032
+    },
+    "after1-after2-waves": {
+      "sides": {
+        "after1": {
+          "n": 5,
+          "median_ms": 274.5744998101145,
+          "range_ms": [
+            268.22283305227757,
+            281.42825001850724
+          ],
+          "rows": 7,
+          "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+          "errors": 0
+        },
+        "after2": {
+          "n": 5,
+          "median_ms": 269.6587089449167,
+          "range_ms": [
+            262.7482919488102,
+            271.7182917986065
+          ],
+          "rows": 7,
+          "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": 1.7903304453244395
+    },
+    "after1-after2-board": {
+      "sides": {
+        "after1": {
+          "n": 5,
+          "median_ms": 852.2323339711875,
+          "range_ms": [
+            828.3483749255538,
+            889.0700410120189
+          ],
+          "rows": 183,
+          "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+          "errors": 0
+        },
+        "after2": {
+          "n": 5,
+          "median_ms": 835.5227911379188,
+          "range_ms": [
+            826.6770830377936,
+            886.729208054021
+          ],
+          "rows": 183,
+          "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+          "errors": 0
+        }
+      },
+      "verdict": "no measurable difference",
+      "reduction_pct": 1.9606792851201038
+    }
+  },
+  "trials": [
+    {
+      "side": "before",
+      "workload": "easy",
+      "label": "calibration-0-easy",
+      "errors": 0,
+      "load_average": [
+        34.47412109375,
+        27.244140625,
+        21.6865234375
+      ],
+      "warmup": {
+        "ms": 2852.4974999018013,
+        "rows": 1,
+        "raw": 0,
+        "turns": 0,
+        "digest": "a99558cdba845a65878998201be58d58b76db017f404bb43a279acfafca7ecb7",
+        "full_digest": "476e965f432ed52cfa877c949a29d494e402332b5d2ab50525c3a181cf39cce6"
+      },
+      "ms": 269.3034578114748,
+      "rows": 1,
+      "raw": 0,
+      "turns": 0,
+      "digest": "a99558cdba845a65878998201be58d58b76db017f404bb43a279acfafca7ecb7",
+      "full_digest": "476e965f432ed52cfa877c949a29d494e402332b5d2ab50525c3a181cf39cce6",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "calibration-0-cli",
+      "errors": 0,
+      "load_average": [
+        32.99462890625,
+        27.05712890625,
+        21.65283203125
+      ],
+      "warmup": {
+        "ms": 1246.2467919103801,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 435.47016591764987,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "calibration-1-cli",
+      "errors": 0,
+      "load_average": [
+        32.99462890625,
+        27.05712890625,
+        21.65283203125
+      ],
+      "warmup": {
+        "ms": 1198.877332964912,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 448.10320786200464,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "easy",
+      "label": "calibration-1-easy",
+      "errors": 0,
+      "load_average": [
+        31.07275390625,
+        26.75732421875,
+        21.57861328125
+      ],
+      "warmup": {
+        "ms": 850.4104581661522,
+        "rows": 1,
+        "raw": 0,
+        "turns": 0,
+        "digest": "a99558cdba845a65878998201be58d58b76db017f404bb43a279acfafca7ecb7",
+        "full_digest": "476e965f432ed52cfa877c949a29d494e402332b5d2ab50525c3a181cf39cce6"
+      },
+      "ms": 265.762000111863,
+      "rows": 1,
+      "raw": 0,
+      "turns": 0,
+      "digest": "a99558cdba845a65878998201be58d58b76db017f404bb43a279acfafca7ecb7",
+      "full_digest": "476e965f432ed52cfa877c949a29d494e402332b5d2ab50525c3a181cf39cce6",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-0-before",
+      "errors": 0,
+      "load_average": [
+        26.61376953125,
+        25.984375,
+        21.39306640625
+      ],
+      "warmup": {
+        "ms": 9411.378958960995,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 6957.524667028338,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-0-after1",
+      "errors": 0,
+      "load_average": [
+        23.06298828125,
+        25.232421875,
+        21.20458984375
+      ],
+      "warmup": {
+        "ms": 5971.493207849562,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 2829.9630000256,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-1-after1",
+      "errors": 0,
+      "load_average": [
+        20.97412109375,
+        24.7138671875,
+        21.0673828125
+      ],
+      "warmup": {
+        "ms": 5053.693457972258,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 2733.2941670902073,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-1-before",
+      "errors": 0,
+      "load_average": [
+        19.07177734375,
+        24.18017578125,
+        20.92041015625
+      ],
+      "warmup": {
+        "ms": 10049.61658315733,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 8583.13529100269,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-2-before",
+      "errors": 0,
+      "load_average": [
+        16.5283203125,
+        23.26171875,
+        20.66552734375
+      ],
+      "warmup": {
+        "ms": 9666.180707979947,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 8518.24887492694,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-2-after1",
+      "errors": 0,
+      "load_average": [
+        15.0126953125,
+        22.595703125,
+        20.47265625
+      ],
+      "warmup": {
+        "ms": 5806.318582966924,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3200.899332994595,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-3-after1",
+      "errors": 0,
+      "load_average": [
+        13.98828125,
+        22.1298828125,
+        20.33203125
+      ],
+      "warmup": {
+        "ms": 5176.290707895532,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3222.426790976897,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-3-before",
+      "errors": 0,
+      "load_average": [
+        13.29443359375,
+        21.71337890625,
+        20.205078125
+      ],
+      "warmup": {
+        "ms": 10238.932374864817,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 7285.576457856223,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-4-before",
+      "errors": 0,
+      "load_average": [
+        13.412109375,
+        21.31982421875,
+        20.09033203125
+      ],
+      "warmup": {
+        "ms": 9586.182666011155,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 7167.858249973506,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-before-after1-task-4-after1",
+      "errors": 0,
+      "load_average": [
+        12.25341796875,
+        20.55126953125,
+        19.8427734375
+      ],
+      "warmup": {
+        "ms": 5830.62916691415,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 2982.7287499792874,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-0-before",
+      "errors": 0,
+      "load_average": [
+        11.99267578125,
+        20.359375,
+        19.77880859375
+      ],
+      "warmup": {
+        "ms": 2325.52329194732,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 451.775792054832,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-0-after1",
+      "errors": 0,
+      "load_average": [
+        12.2333984375,
+        20.27001953125,
+        19.75048828125
+      ],
+      "warmup": {
+        "ms": 1845.422999933362,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 427.89450008422136,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-1-after1",
+      "errors": 0,
+      "load_average": [
+        12.2333984375,
+        20.27001953125,
+        19.75048828125
+      ],
+      "warmup": {
+        "ms": 1242.429249919951,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 439.0514581464231,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-1-before",
+      "errors": 0,
+      "load_average": [
+        12.21435546875,
+        20.13232421875,
+        19.70458984375
+      ],
+      "warmup": {
+        "ms": 1868.3474590070546,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 443.0726249702275,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-2-before",
+      "errors": 0,
+      "load_average": [
+        12.21435546875,
+        20.13232421875,
+        19.70458984375
+      ],
+      "warmup": {
+        "ms": 1249.393125064671,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 440.42870798148215,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-2-after1",
+      "errors": 0,
+      "load_average": [
+        12.21435546875,
+        20.13232421875,
+        19.70458984375
+      ],
+      "warmup": {
+        "ms": 1852.97583299689,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 449.68491699546576,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-3-after1",
+      "errors": 0,
+      "load_average": [
+        12.43701171875,
+        20.046875,
+        19.6767578125
+      ],
+      "warmup": {
+        "ms": 1273.0987078975886,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 442.07545812241733,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-3-before",
+      "errors": 0,
+      "load_average": [
+        12.43701171875,
+        20.046875,
+        19.6767578125
+      ],
+      "warmup": {
+        "ms": 1867.0367919839919,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 441.0554999485612,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-4-before",
+      "errors": 0,
+      "load_average": [
+        12.40185546875,
+        19.9130859375,
+        19.63134765625
+      ],
+      "warmup": {
+        "ms": 1205.9905407950282,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 441.68295804411173,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-before-after1-cli-4-after1",
+      "errors": 0,
+      "load_average": [
+        12.40185546875,
+        19.9130859375,
+        19.63134765625
+      ],
+      "warmup": {
+        "ms": 1787.2400002088398,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 440.56704198010266,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-0-before",
+      "errors": 0,
+      "load_average": [
+        12.28955078125,
+        19.7646484375,
+        19.58056640625
+      ],
+      "warmup": {
+        "ms": 1943.2046248111874,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 271.0240001324564,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-0-after1",
+      "errors": 0,
+      "load_average": [
+        12.28955078125,
+        19.7646484375,
+        19.58056640625
+      ],
+      "warmup": {
+        "ms": 1861.5184579975903,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 266.5735420305282,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-1-after1",
+      "errors": 0,
+      "load_average": [
+        12.28955078125,
+        19.7646484375,
+        19.58056640625
+      ],
+      "warmup": {
+        "ms": 1259.0909160207957,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 266.1055000498891,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-1-before",
+      "errors": 0,
+      "load_average": [
+        11.78564453125,
+        19.5361328125,
+        19.5009765625
+      ],
+      "warmup": {
+        "ms": 1968.1285829283297,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 264.41787485964596,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-2-before",
+      "errors": 0,
+      "load_average": [
+        11.78564453125,
+        19.5361328125,
+        19.5009765625
+      ],
+      "warmup": {
+        "ms": 1241.9693749397993,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 281.59783291630447,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-2-after1",
+      "errors": 0,
+      "load_average": [
+        11.78564453125,
+        19.5361328125,
+        19.5009765625
+      ],
+      "warmup": {
+        "ms": 1869.5081670302898,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 271.86274994164705,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-3-after1",
+      "errors": 0,
+      "load_average": [
+        12.68359375,
+        19.59326171875,
+        19.52099609375
+      ],
+      "warmup": {
+        "ms": 1266.5820000693202,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 269.69379209913313,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-3-before",
+      "errors": 0,
+      "load_average": [
+        12.68359375,
+        19.59326171875,
+        19.52099609375
+      ],
+      "warmup": {
+        "ms": 1913.7893330771476,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 277.7346249204129,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-4-before",
+      "errors": 0,
+      "load_average": [
+        12.22802734375,
+        19.3837890625,
+        19.447265625
+      ],
+      "warmup": {
+        "ms": 1250.2069170586765,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 279.30383291095495,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-before-after1-waves-4-after1",
+      "errors": 0,
+      "load_average": [
+        12.22802734375,
+        19.3837890625,
+        19.447265625
+      ],
+      "warmup": {
+        "ms": 1865.5815420206636,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 269.0448339562863,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-0-before",
+      "errors": 0,
+      "load_average": [
+        12.22802734375,
+        19.3837890625,
+        19.447265625
+      ],
+      "warmup": {
+        "ms": 3558.9871660340577,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 835.9042908996344,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-0-after1",
+      "errors": 0,
+      "load_average": [
+        12.12939453125,
+        19.244140625,
+        19.3974609375
+      ],
+      "warmup": {
+        "ms": 3529.645666014403,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 871.7443749774247,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-1-after1",
+      "errors": 0,
+      "load_average": [
+        12.11865234375,
+        19.12353515625,
+        19.35400390625
+      ],
+      "warmup": {
+        "ms": 2849.3569169659168,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 849.0513341967016,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-1-before",
+      "errors": 0,
+      "load_average": [
+        12.10888671875,
+        19.0048828125,
+        19.310546875
+      ],
+      "warmup": {
+        "ms": 3502.187332836911,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 878.7164581008255,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-2-before",
+      "errors": 0,
+      "load_average": [
+        12.18017578125,
+        18.90478515625,
+        19.2734375
+      ],
+      "warmup": {
+        "ms": 2837.7024999354035,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 859.4906248617917,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-2-after1",
+      "errors": 0,
+      "load_average": [
+        12.80615234375,
+        18.9228515625,
+        19.27734375
+      ],
+      "warmup": {
+        "ms": 3514.2012080177665,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 899.4419157970697,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-3-after1",
+      "errors": 0,
+      "load_average": [
+        12.80615234375,
+        18.9228515625,
+        19.27734375
+      ],
+      "warmup": {
+        "ms": 2875.41341711767,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 862.6454169861972,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-3-before",
+      "errors": 0,
+      "load_average": [
+        13.3017578125,
+        18.923828125,
+        19.275390625
+      ],
+      "warmup": {
+        "ms": 3524.3555000051856,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 836.4762919954956,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "before",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-4-before",
+      "errors": 0,
+      "load_average": [
+        13.037109375,
+        18.775390625,
+        19.220703125
+      ],
+      "warmup": {
+        "ms": 2856.0872089583427,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 872.0047089736909,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-before-after1-board-4-after1",
+      "errors": 0,
+      "load_average": [
+        13.51416015625,
+        18.77880859375,
+        19.21923828125
+      ],
+      "warmup": {
+        "ms": 3491.477374918759,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 870.5415411386639,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-0-after1",
+      "errors": 0,
+      "load_average": [
+        12.6572265625,
+        18.2421875,
+        19.01611328125
+      ],
+      "warmup": {
+        "ms": 5193.05424997583,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3311.530416831374,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-0-after2",
+      "errors": 0,
+      "load_average": [
+        12.77685546875,
+        18.0849609375,
+        18.951171875
+      ],
+      "warmup": {
+        "ms": 4260.187874780968,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 1236.0892079304904,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-1-after2",
+      "errors": 0,
+      "load_average": [
+        12.71435546875,
+        17.98388671875,
+        18.91015625
+      ],
+      "warmup": {
+        "ms": 3572.9268328286707,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 1230.7644579559565,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-1-after1",
+      "errors": 0,
+      "load_average": [
+        12.57666015625,
+        17.86767578125,
+        18.86376953125
+      ],
+      "warmup": {
+        "ms": 5856.459875125438,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3235.070083057508,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-2-after1",
+      "errors": 0,
+      "load_average": [
+        12.11279296875,
+        17.59228515625,
+        18.75390625
+      ],
+      "warmup": {
+        "ms": 5201.001167064533,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3155.878165969625,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-2-after2",
+      "errors": 0,
+      "load_average": [
+        11.646484375,
+        17.30908203125,
+        18.63916015625
+      ],
+      "warmup": {
+        "ms": 4182.59312515147,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 1269.1545418929309,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-3-after2",
+      "errors": 0,
+      "load_average": [
+        11.67431640625,
+        17.220703125,
+        18.60009765625
+      ],
+      "warmup": {
+        "ms": 3523.619458079338,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 1243.441917002201,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-3-after1",
+      "errors": 0,
+      "load_average": [
+        11.2197265625,
+        17.0341796875,
+        18.52587890625
+      ],
+      "warmup": {
+        "ms": 5863.343416946009,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3225.761041045189,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-4-after1",
+      "errors": 0,
+      "load_average": [
+        12.126953125,
+        17.033203125,
+        18.5078125
+      ],
+      "warmup": {
+        "ms": 5192.599083995447,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 3216.62983414717,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "task",
+      "label": "iteration3-after1-after2-task-4-after2",
+      "errors": 0,
+      "load_average": [
+        12.35693359375,
+        16.9990234375,
+        18.48681640625
+      ],
+      "warmup": {
+        "ms": 4390.26966621168,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "ms": 1243.095292011276,
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-0-after1",
+      "errors": 0,
+      "load_average": [
+        12.16796875,
+        16.8828125,
+        18.43701171875
+      ],
+      "warmup": {
+        "ms": 3269.6417081169784,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 450.56112483143806,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-0-after2",
+      "errors": 0,
+      "load_average": [
+        11.75390625,
+        16.71826171875,
+        18.36962890625
+      ],
+      "warmup": {
+        "ms": 1870.0177911669016,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 434.4517909921706,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-1-after2",
+      "errors": 0,
+      "load_average": [
+        11.373046875,
+        16.556640625,
+        18.302734375
+      ],
+      "warmup": {
+        "ms": 1220.3570411074907,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 432.8129580244422,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-1-after1",
+      "errors": 0,
+      "load_average": [
+        11.373046875,
+        16.556640625,
+        18.302734375
+      ],
+      "warmup": {
+        "ms": 1811.9767920579761,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 445.2404170297086,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-2-after1",
+      "errors": 0,
+      "load_average": [
+        11.373046875,
+        16.556640625,
+        18.302734375
+      ],
+      "warmup": {
+        "ms": 1200.3151250537485,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 431.19074986316264,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-2-after2",
+      "errors": 0,
+      "load_average": [
+        11.1025390625,
+        16.41455078125,
+        18.2421875
+      ],
+      "warmup": {
+        "ms": 1856.249124975875,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 450.4323329310864,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-3-after2",
+      "errors": 0,
+      "load_average": [
+        11.1025390625,
+        16.41455078125,
+        18.2421875
+      ],
+      "warmup": {
+        "ms": 1219.5373747963458,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 440.4309580568224,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-3-after1",
+      "errors": 0,
+      "load_average": [
+        11.1025390625,
+        16.41455078125,
+        18.2421875
+      ],
+      "warmup": {
+        "ms": 1847.6657909341156,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 440.49216713756323,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-4-after1",
+      "errors": 0,
+      "load_average": [
+        10.77392578125,
+        16.2578125,
+        18.17626953125
+      ],
+      "warmup": {
+        "ms": 1297.4320829380304,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 438.2500001229346,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "cli",
+      "label": "iteration3-after1-after2-cli-4-after2",
+      "errors": 0,
+      "load_average": [
+        10.77392578125,
+        16.2578125,
+        18.17626953125
+      ],
+      "warmup": {
+        "ms": 1844.3411248736084,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "ms": 442.15408293530345,
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-0-after1",
+      "errors": 0,
+      "load_average": [
+        10.5517578125,
+        16.12060546875,
+        18.1162109375
+      ],
+      "warmup": {
+        "ms": 1895.5897081177682,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 274.5744998101145,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-0-after2",
+      "errors": 0,
+      "load_average": [
+        10.5517578125,
+        16.12060546875,
+        18.1162109375
+      ],
+      "warmup": {
+        "ms": 1933.17695800215,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 269.6587089449167,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-1-after2",
+      "errors": 0,
+      "load_average": [
+        10.98779296875,
+        16.1181640625,
+        18.103515625
+      ],
+      "warmup": {
+        "ms": 1307.7013751026243,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 264.65575001202524,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-1-after1",
+      "errors": 0,
+      "load_average": [
+        10.98779296875,
+        16.1181640625,
+        18.103515625
+      ],
+      "warmup": {
+        "ms": 1871.911457972601,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 279.0714579168707,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-2-after1",
+      "errors": 0,
+      "load_average": [
+        10.98779296875,
+        16.1181640625,
+        18.103515625
+      ],
+      "warmup": {
+        "ms": 1254.879292100668,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 268.22283305227757,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-2-after2",
+      "errors": 0,
+      "load_average": [
+        10.74853515625,
+        15.98291015625,
+        18.0439453125
+      ],
+      "warmup": {
+        "ms": 1909.9379170220345,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 271.0782499052584,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-3-after2",
+      "errors": 0,
+      "load_average": [
+        10.74853515625,
+        15.98291015625,
+        18.0439453125
+      ],
+      "warmup": {
+        "ms": 1262.1075841598213,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 262.7482919488102,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-3-after1",
+      "errors": 0,
+      "load_average": [
+        10.74853515625,
+        15.98291015625,
+        18.0439453125
+      ],
+      "warmup": {
+        "ms": 1924.5353329461068,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 281.42825001850724,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-4-after1",
+      "errors": 0,
+      "load_average": [
+        10.9287109375,
+        15.93310546875,
+        18.01416015625
+      ],
+      "warmup": {
+        "ms": 1296.4091249741614,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 268.4464999474585,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after2",
+      "workload": "waves",
+      "label": "iteration3-after1-after2-waves-4-after2",
+      "errors": 0,
+      "load_average": [
+        10.9287109375,
+        15.93310546875,
+        18.01416015625
+      ],
+      "warmup": {
+        "ms": 1940.8781661186367,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "ms": 271.7182917986065,
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22",
+      "stderr": ""
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-0-after1",
+      "errors": 0,
+      "load_average": [
+        10.61376953125,
+        15.78466796875,
+        17.94921875
+      ],
+      "warmup": {
+        "ms": 3479.242250090465,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 855.798042146489,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after2",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-0-after2",
+      "errors": 0,
+      "load_average": [
+        10.884765625,
+        15.7548828125,
+        17.92578125
+      ],
+      "warmup": {
+        "ms": 3480.8150420431048,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 835.5227911379188,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after2",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-1-after2",
+      "errors": 0,
+      "load_average": [
+        10.884765625,
+        15.7548828125,
+        17.92578125
+      ],
+      "warmup": {
+        "ms": 2903.5624579992145,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 863.8169579207897,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-1-after1",
+      "errors": 0,
+      "load_average": [
+        10.9736328125,
+        15.6923828125,
+        17.890625
+      ],
+      "warmup": {
+        "ms": 3475.197750143707,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 852.2323339711875,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-2-after1",
+      "errors": 0,
+      "load_average": [
+        10.6552734375,
+        15.5478515625,
+        17.82666015625
+      ],
+      "warmup": {
+        "ms": 2829.308083979413,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 833.979916991666,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after2",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-2-after2",
+      "errors": 0,
+      "load_average": [
+        10.6025390625,
+        15.45556640625,
+        17.78076171875
+      ],
+      "warmup": {
+        "ms": 3524.2593330331147,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 833.3458751440048,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after2",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-3-after2",
+      "errors": 0,
+      "load_average": [
+        10.55419921875,
+        15.36474609375,
+        17.73486328125
+      ],
+      "warmup": {
+        "ms": 2998.1995408888906,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 826.6770830377936,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-3-after1",
+      "errors": 0,
+      "load_average": [
+        10.55419921875,
+        15.36474609375,
+        17.73486328125
+      ],
+      "warmup": {
+        "ms": 3527.784666977823,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 889.0700410120189,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after1",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-4-after1",
+      "errors": 0,
+      "load_average": [
+        10.4296875,
+        15.2587890625,
+        17.68359375
+      ],
+      "warmup": {
+        "ms": 2877.8905000071973,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 828.3483749255538,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    },
+    {
+      "side": "after2",
+      "workload": "board",
+      "label": "iteration3-after1-after2-board-4-after2",
+      "errors": 0,
+      "load_average": [
+        9.99462890625,
+        15.08837890625,
+        17.60888671875
+      ],
+      "warmup": {
+        "ms": 3505.7042501866817,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "ms": 886.729208054021,
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c",
+      "stderr": "warning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\nwarning: /Users/jack/src/loopflow.878ecf-assign-workflow-stages/.lf/config.yaml:2: skipping crons: unknown setting\n"
+    }
+  ],
+  "counts": [
+    {
+      "label": "count-before-task-0",
+      "side": "before",
+      "workload": "task",
+      "ms": 7368.0449582170695,
+      "errors": 0,
+      "security_spawns": 336,
+      "warmup": {
+        "ms": 10671.86399991624,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-before-task-1",
+      "side": "before",
+      "workload": "task",
+      "ms": 7390.286915935576,
+      "errors": 0,
+      "security_spawns": 336,
+      "warmup": {
+        "ms": 9559.080249862745,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-before-task-2",
+      "side": "before",
+      "workload": "task",
+      "ms": 7549.363874830306,
+      "errors": 0,
+      "security_spawns": 336,
+      "warmup": {
+        "ms": 9371.659375028685,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-before-task-3",
+      "side": "before",
+      "workload": "task",
+      "ms": 8509.49633307755,
+      "errors": 0,
+      "security_spawns": 336,
+      "warmup": {
+        "ms": 9482.266749953851,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-before-task-4",
+      "side": "before",
+      "workload": "task",
+      "ms": 8406.49150009267,
+      "errors": 0,
+      "security_spawns": 336,
+      "warmup": {
+        "ms": 9806.823500199243,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-before-cli-0",
+      "side": "before",
+      "workload": "cli",
+      "ms": 451.96212478913367,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 2589.6319169551134,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-before-cli-1",
+      "side": "before",
+      "workload": "cli",
+      "ms": 439.7125418763608,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1280.729333870113,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-before-cli-2",
+      "side": "before",
+      "workload": "cli",
+      "ms": 464.7537500131875,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1216.7712920345366,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-before-cli-3",
+      "side": "before",
+      "workload": "cli",
+      "ms": 444.38795815221965,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1231.0905000194907,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-before-cli-4",
+      "side": "before",
+      "workload": "cli",
+      "ms": 444.8238748591393,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1274.5670001022518,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-before-waves-0",
+      "side": "before",
+      "workload": "waves",
+      "ms": 274.5122918859124,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1268.640958936885,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-before-waves-1",
+      "side": "before",
+      "workload": "waves",
+      "ms": 279.4281248934567,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1289.7375840693712,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-before-waves-2",
+      "side": "before",
+      "workload": "waves",
+      "ms": 300.7765419315547,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1306.037750095129,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-before-waves-3",
+      "side": "before",
+      "workload": "waves",
+      "ms": 293.68550004437566,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1337.2579580172896,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-before-waves-4",
+      "side": "before",
+      "workload": "waves",
+      "ms": 335.2722921408713,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1312.0712500531226,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-before-board-0",
+      "side": "before",
+      "workload": "board",
+      "ms": 979.8591251019388,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 3181.071624858305,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-before-board-1",
+      "side": "before",
+      "workload": "board",
+      "ms": 883.1925000995398,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2927.571708103642,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-before-board-2",
+      "side": "before",
+      "workload": "board",
+      "ms": 813.5608751326799,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 3408.819792093709,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-before-board-3",
+      "side": "before",
+      "workload": "board",
+      "ms": 858.5391251835972,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2913.582667009905,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-before-board-4",
+      "side": "before",
+      "workload": "board",
+      "ms": 863.5740829631686,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 3007.048749830574,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after1-task-0",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2809.865500079468,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 5794.511666987091,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after1-task-1",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2854.864374967292,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 5383.745708037168,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after1-task-2",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2771.428208099678,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 5179.638791130856,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after1-task-3",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2866.1062500905246,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 5156.292709056288,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after1-task-4",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2745.3409591689706,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 5070.454249856994,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after1-cli-0",
+      "side": "after1",
+      "workload": "cli",
+      "ms": 434.2394999694079,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1716.0360410343856,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after1-cli-1",
+      "side": "after1",
+      "workload": "cli",
+      "ms": 432.35008395276964,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1216.9282080139965,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after1-cli-2",
+      "side": "after1",
+      "workload": "cli",
+      "ms": 459.59954196587205,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1207.4443330056965,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after1-cli-3",
+      "side": "after1",
+      "workload": "cli",
+      "ms": 434.4103748444468,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1246.8738751485944,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after1-cli-4",
+      "side": "after1",
+      "workload": "cli",
+      "ms": 454.64954106137156,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1236.1740828491747,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after1-waves-0",
+      "side": "after1",
+      "workload": "waves",
+      "ms": 255.9266670141369,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1272.8864999953657,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after1-waves-1",
+      "side": "after1",
+      "workload": "waves",
+      "ms": 267.6596671808511,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1281.6977920010686,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after1-waves-2",
+      "side": "after1",
+      "workload": "waves",
+      "ms": 269.97070806100965,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1269.856457831338,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after1-waves-3",
+      "side": "after1",
+      "workload": "waves",
+      "ms": 268.37120903655887,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1318.0148750543594,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after1-waves-4",
+      "side": "after1",
+      "workload": "waves",
+      "ms": 262.063791975379,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1244.2982499487698,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after1-board-0",
+      "side": "after1",
+      "workload": "board",
+      "ms": 779.4335000216961,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2867.1798340510577,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after1-board-1",
+      "side": "after1",
+      "workload": "board",
+      "ms": 817.1479168813676,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2796.4022080413997,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after1-board-2",
+      "side": "after1",
+      "workload": "board",
+      "ms": 775.5372920073569,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2764.3731660209596,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after1-board-3",
+      "side": "after1",
+      "workload": "board",
+      "ms": 799.5750419795513,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2793.506084010005,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after1-board-4",
+      "side": "after1",
+      "workload": "board",
+      "ms": 824.0910831373185,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2769.1107080318034,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after2-task-0",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1103.821292053908,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 4094.633915927261,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after2-task-1",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1102.8799170162529,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 3379.1300000157207,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after2-task-2",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1108.30779094249,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 3421.7291669920087,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after2-task-3",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1087.34399988316,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 3335.542625049129,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after2-task-4",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1095.3787919133902,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 3386.5245000924915,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "count-after2-cli-0",
+      "side": "after2",
+      "workload": "cli",
+      "ms": 409.5476670190692,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1158.8929169811308,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after2-cli-1",
+      "side": "after2",
+      "workload": "cli",
+      "ms": 406.7925838753581,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1140.0133341085166,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after2-cli-2",
+      "side": "after2",
+      "workload": "cli",
+      "ms": 395.3002088237554,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1161.2958339974284,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after2-cli-3",
+      "side": "after2",
+      "workload": "cli",
+      "ms": 406.53295908123255,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1170.6160421017557,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after2-cli-4",
+      "side": "after2",
+      "workload": "cli",
+      "ms": 404.6876251231879,
+      "errors": 0,
+      "security_spawns": 4,
+      "warmup": {
+        "ms": 1161.6815000306815,
+        "rows": 100,
+        "raw": 0,
+        "turns": 9,
+        "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+        "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+      },
+      "rows": 100,
+      "raw": 0,
+      "turns": 9,
+      "digest": "92c927135d8f037aeefed40f025ddac2a27ffbf567f5f46bac26d57c68106096",
+      "full_digest": "10d96fd6b6ff7190a433e111ee9d0b366c376dac36a9d4e6e2f9c5b349e0f33e"
+    },
+    {
+      "label": "count-after2-waves-0",
+      "side": "after2",
+      "workload": "waves",
+      "ms": 251.1333751026541,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1279.9675830174237,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after2-waves-1",
+      "side": "after2",
+      "workload": "waves",
+      "ms": 245.10508286766708,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1239.1460828948766,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after2-waves-2",
+      "side": "after2",
+      "workload": "waves",
+      "ms": 245.25674991309643,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1260.5184998828918,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after2-waves-3",
+      "side": "after2",
+      "workload": "waves",
+      "ms": 241.59437511116266,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1243.3206671848893,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after2-waves-4",
+      "side": "after2",
+      "workload": "waves",
+      "ms": 234.93237514048815,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 1209.1674159746617,
+        "rows": 7,
+        "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+      },
+      "rows": 7,
+      "full_digest": "b6cbe80cb74652f1dfb95ca85cd1a2ae100a3425e1a2530ed7021b17de520c22"
+    },
+    {
+      "label": "count-after2-board-0",
+      "side": "after2",
+      "workload": "board",
+      "ms": 794.96999992989,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2764.8492080625147,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after2-board-1",
+      "side": "after2",
+      "workload": "board",
+      "ms": 827.0845420192927,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2914.303416153416,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after2-board-2",
+      "side": "after2",
+      "workload": "board",
+      "ms": 834.7589999902993,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2886.509709060192,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after2-board-3",
+      "side": "after2",
+      "workload": "board",
+      "ms": 852.7946670074016,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2880.0668749026954,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    },
+    {
+      "label": "count-after2-board-4",
+      "side": "after2",
+      "workload": "board",
+      "ms": 829.4681250117719,
+      "errors": 0,
+      "security_spawns": 0,
+      "warmup": {
+        "ms": 2842.3419578466564,
+        "rows": 183,
+        "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+      },
+      "rows": 183,
+      "full_digest": "7b687a209dfc8c034f2a723dd925ebbe122f7717d0d76baf0c0e95e31285bb0c"
+    }
+  ],
+  "samples": [
+    {
+      "label": "sample-before",
+      "side": "before",
+      "workload": "task",
+      "ms": 7477.93525015004,
+      "errors": 0,
+      "warmup": {
+        "ms": 9382.875750074163,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "sample-after1",
+      "side": "after1",
+      "workload": "task",
+      "ms": 3484.4293338246644,
+      "errors": 0,
+      "warmup": {
+        "ms": 5198.7636249978095,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    },
+    {
+      "label": "sample-after2",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1373.3046669512987,
+      "errors": 0,
+      "warmup": {
+        "ms": 3769.5226250216365,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+    }
+  ],
+  "attributions": [
+    {
+      "label": "scope-after1",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2662.6895829103887,
+      "errors": 0,
+      "warmup": {
+        "ms": 5129.1639159899205,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "timers": {
+        "repository_scope": {
+          "calls": 1154,
+          "total_ms": 1508.737083,
+          "range_ms": [
+            0.218125,
+            3.147209
+          ]
+        },
+        "check_scope": {
+          "calls": 1,
+          "total_ms": 1560.726125,
+          "range_ms": [
+            1560.726125,
+            1560.726125
+          ]
+        },
+        "repository_discover": {
+          "calls": 28,
+          "total_ms": 302.473293,
+          "range_ms": [
+            9.571875,
+            12.97525
+          ]
+        }
+      }
+    },
+    {
+      "label": "sql-after1",
+      "side": "after1",
+      "workload": "task",
+      "ms": 2888.282167026773,
+      "errors": 0,
+      "warmup": {
+        "ms": 4876.291082939133,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "timers": {
+        "repository_scope": {
+          "calls": 1154,
+          "total_ms": 1580.725205,
+          "range_ms": [
+            0.218083,
+            2.6535
+          ]
+        },
+        "check_scope": {
+          "calls": 1,
+          "total_ms": 1738.403875,
+          "range_ms": [
+            1738.403875,
+            1738.403875
+          ]
+        },
+        "repository_discover": {
+          "calls": 28,
+          "total_ms": 312.332999,
+          "range_ms": [
+            10.214833,
+            12.505958
+          ]
+        }
+      }
+    },
+    {
+      "label": "scope-after2",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1125.0544579233974,
+      "errors": 0,
+      "warmup": {
+        "ms": 3644.2973748780787,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "timers": {
+        "repository_scope": {
+          "calls": 40,
+          "total_ms": 16.739752,
+          "range_ms": [
+            0.233709,
+            1.772125
+          ]
+        },
+        "check_scope": {
+          "calls": 1,
+          "total_ms": 43.157334,
+          "range_ms": [
+            43.157334,
+            43.157334
+          ]
+        },
+        "repository_discover": {
+          "calls": 28,
+          "total_ms": 318.941875,
+          "range_ms": [
+            9.921084,
+            14.791125
+          ]
+        }
+      }
+    },
+    {
+      "label": "sql-after2",
+      "side": "after2",
+      "workload": "task",
+      "ms": 1238.856665790081,
+      "errors": 0,
+      "warmup": {
+        "ms": 3388.675999827683,
+        "rows": 1,
+        "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64"
+      },
+      "rows": 1,
+      "full_digest": "c2302831d006c7469ec2e359840f1fea6afb4632605f6b7f2f7c663d05703c64",
+      "timers": {
+        "repository_scope": {
+          "calls": 40,
+          "total_ms": 14.836879,
+          "range_ms": [
+            0.210375,
+            1.605292
+          ]
+        },
+        "check_scope": {
+          "calls": 1,
+          "total_ms": 97.782125,
+          "range_ms": [
+            97.782125,
+            97.782125
+          ]
+        },
+        "repository_discover": {
+          "calls": 28,
+          "total_ms": 317.42121,
+          "range_ms": [
+            9.4565,
+            16.083667
+          ]
+        }
+      }
+    }
+  ]
+}

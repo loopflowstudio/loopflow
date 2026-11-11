@@ -1,9 +1,11 @@
 # Session-list optimization measurements — LOO-822
 
-**Iteration 2: keep `761c28056`.** On sealed private copies, Wave-list median
-falls **44.2%** and network-denied Task-status median **6.9%**, with matching
-full JSON. The first, unsealed cohort is invalid; its apparent Work-selection
-gain is withdrawn. Full results and the remaining limiter are below.
+**Iteration 3: better; keep `d1f1caa3f7` and `a835f03e6f`.** On the sealed
+iteration-2 snapshot, one capacity read cuts network-denied Task-status median
+**59.1%**; resolving scope once per repository cuts another **61.5%** against
+the kept capacity change. Five alternating pairs each; all full JSON matches,
+zero errors, and no measurable guard regressions. Next limiter: repeated Git
+repository discovery during planning field delivery.
 
 ## Iteration 1 verdict
 
@@ -263,6 +265,124 @@ comparisons and attribution before retaining a performance claim.
 - `cargo test -p loopflow --lib linear_on_demand_adopts_new_open_issues_without_allocating_execution` passed (1).
 - Scope fix: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; LF variables unset and stdin closed. Existing oversized unwind-table linker warning only.
 
-Remaining: measure both candidates against `761c28056` on sealed private stores,
-including complete JSON comparisons. No iteration-3 wall-time verdict yet.
-`scratch/loo-822.md` stayed byte-identical to the start of this iteration.
+## Iteration 3 measurement — repeated reads (2026-11-11)
+
+**Better: keep both commits.** Claim tested: “Each repeated-read removal reduces
+network-denied Task-status latency beyond run-to-run noise, with identical full
+JSON.” The primary is the complete warm CLI command, including output collection.
+Each comparison has five alternating pairs, reversing order each pair. Values
+are **median [minimum–maximum] milliseconds, n=5 per side**.
+
+| Change / workload | Before | After | Verdict |
+|---|---:|---:|---|
+| Capacity: Task status, network denied | 7285.6 [6957.5–8583.1] | 2982.7 [2733.3–3222.4] | Better: 59.1% lower |
+| Capacity: default Session list | 441.7 [440.4–451.8] | 440.6 [427.9–449.7] | No measurable difference |
+| Capacity: Wave list | 277.7 [264.4–281.6] | 269.0 [266.1–271.9] | No measurable difference |
+| Capacity: board | 859.5 [835.9–878.7] | 870.5 [849.1–899.4] | No measurable difference |
+| Scope: Task status, network denied | 3225.8 [3155.9–3311.5] | 1243.1 [1230.8–1269.2] | Better: 61.5% lower |
+| Scope: default Session list | 440.5 [431.2–450.6] | 440.4 [432.8–450.4] | No measurable difference |
+| Scope: Wave list | 274.6 [268.2–281.4] | 269.7 [262.7–271.7] | No measurable difference |
+| Scope: board | 852.2 [828.3–889.1] | 835.5 [826.7–886.7] | No measurable difference |
+
+Capacity compares `0f39f7be21` → `d1f1caa3f7`; scope compares the kept
+`d1f1caa3f7` → `a835f03e6f`. Neither requires a revert. The two capacity-side
+medians come from different cohorts; no combined paired speedup is claimed.
+
+### Frozen inputs and correctness
+
+Reuse iteration 2’s checkpointed `after.db`, with no new live-store backup.
+All three standalone files have the same SHA-256, no WAL, and matching digests
+for all 78 application tables. Every benchmark sets `LF_HOME` under
+`/tmp/loo822-reads-measure`; none runs against the live `~/.lf` store.
+The five sealed harness hashes still match. Only side selection and the
+requested four workloads change in the iteration-3 driver.
+
+Exact commit exports use the same `cargo build --release -p loopflow --bin lf`,
+development provenance, Rust 1.98.1 and macOS 26.0.1 arm64. All builds finish
+before their measurements. The clock shim, private transcript copies and
+excluded warm-up procedure are unchanged. Calibration distinguishes one row
+at 265.8–269.3 ms from the default 100 rows at 435.5–448.1 ms.
+
+All 80 timed calls and warm-ups match complete JSON per workload, as do the
+60 separate spawn-count calls, three native samples and four wall/SQL
+attribution calls. Zero command or validation errors. Answers contain one
+Task with 84 unique Sessions, 100 default Sessions, seven Waves and 183 board
+Tasks. Task Session titles/cwds match the sealed store; the harness checks
+Session fields, unique IDs, usage and Task titles. No fields are normalized
+or omitted. The 20 timed board calls emit 80 existing unknown-`crons` warnings.
+
+These are warm local reads with network denied, not successful planning
+exchange or online authentication. Private homes omit credential files;
+Keychain fallback costs can differ from normal logins. OS processes and
+Git/config files remain ambient. Timed one-minute Machine load ranges
+10.0–26.6. The original 18–75 s Session-list stall remains unreproduced.
+
+### What changed in a run
+
+The native baseline sample has **3,318/5,337 (62.2%)** main-thread samples in
+`read_claude_keychain_blob_with_security`; after capacity reuse, **49/2,243
+(2.2%)**. Separate DYLD-interposed runs count successful `security` child PIDs,
+never arguments, credential values or command output. Each cell below is the
+same count in all five attribution calls:
+
+| Call | Before | Capacity | Scope |
+|---|---:|---:|---:|
+| Task status | 336 | 4 | 4 |
+| Default Session list | 4 | 4 | 4 |
+| Wave list | 0 | 0 | 0 |
+| Board | 0 | 0 | 0 |
+
+The Task still returns all 84 Sessions. Removing 98.8% of subprocesses from
+a path occupying about 62.2% of baseline samples gives an approximate 61.5%
+latency ceiling, consistent with the observed 59.1% reduction. Stack shares
+cover captured main-thread samples, not the complete elapsed command.
+
+After capacity reuse, planning scope checks account for 50.9% of captured
+main-thread samples. This fraction alone does not explain the scope cohort’s
+61.5% reduction, so separate release attribution builds add wall timers at
+`planning_client::repository_scope` and `linear_observe::check_scope`.
+They record **1,154 → 40 scope resolutions**, taking **1,508.7 → 16.7 ms**.
+The complete check takes **1,560.7 → 43.2 ms** in commands lasting
+**2,662.7 → 1,125.1 ms**. The check saves **1,517.6 ms** of the command’s
+**1,537.6 ms** reduction (98.7%). Its baseline share is 58.6%, giving at most
+58.6% lower latency (2.42× speed); the profiled path’s 57.7% reduction fits.
+Nested scope time is not added. These bounds belong to those instrumented
+runs; they do not numerically decompose the 61.5% measured in the earlier,
+uninstrumented cohort.
+
+Bound-SQL attribution uses the same SQLite 3.53.2 callback as iteration 2.
+Both scope sides execute **3,812 statements**, with matching leading work
+counters. The repeated 84 Session summaries take 25.6 → 25.7 ms; no SQL gain
+is attributed to scope caching. Counter, sampler and SQL instrumentation are
+absent from the five-pair timing cohorts.
+
+### Next limiter and checks
+
+The final native sample points to repeated Git discovery during planning field
+delivery: **204/578 main-thread samples (35.3%)** in `RepoId::discover`.
+A separate wall-timer run records **28 calls taking 318.9 ms**, **28.3%** of
+its 1,125.1 ms command. Path:
+`linear_observe::sync_scope` → `planning_delivery::deliver_fields` →
+`PlanningClient::for_repository` → `linear::resolve_repository_context` →
+`RepoId::discover` → `git remote get-url origin`.
+Removing all of that work would cap that run’s improvement at 28.3% lower
+latency, about 1.40× speed. This is the next measurement target, not an
+implementation made here.
+
+SQLite is another remaining cost: 29.8% of final main-thread samples are in
+`sqlite3_step`; the final SQL trace’s leading Process query takes 112.7 ms
+across five executions. Profile measurements overlap and are not added.
+
+- Three uninstrumented and two attribution release builds: passed.
+- `cargo fmt --check`; `git diff --check`: passed. Production source is
+  unchanged, so the focused tests and clippy recorded above are not repeated.
+- All frozen store and harness hashes: unchanged. `scratch/loo-822.md` matches
+  its starting hash, including the pre-existing edit. No server was started;
+  every sampler and command exited. The kept uninstrumented binary is restored
+  at `target/release/lf`.
+- [Every trial and warm-up](measure.html#iteration3-trials),
+  [timings, spawn counts and hashes](session-list-measure/iteration3-results.json),
+  [stack attribution and checks](session-list-measure/iteration3-checks.json),
+  [leading SQL and counters](session-list-measure/iteration3-profiles.json).
+  All 151 calls and their excluded warm-ups are retained; raw JSON, stores and
+  captures stay in the private `/tmp/loo822-reads-measure` directory.

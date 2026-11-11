@@ -63,3 +63,9 @@ for the parent plan after its obsolete scratch plans were removed.
   Keep iteration 1’s private provider transcript copies and unchanged timing
   harness; OS/Git facts remain ambient. Test a non-overlapping local planning
   latency improvement, with full JSON unchanged, without inventing a target.
+
+- Iteration 3 measurement: keep iteration 2's sealed snapshot, clock and timing
+  functions unchanged. Count `security` spawns in separate, excluded attribution
+  calls with a DYLD interposer that records only successful child PIDs; do not
+  put instrumentation in the five-pair wall-time cohort. Compare scope caching
+  against the capacity commit if that commit clears the noise rule.

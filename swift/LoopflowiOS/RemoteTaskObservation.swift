@@ -48,7 +48,11 @@ final class RemoteTaskObservation {
             do {
                 for try await frame in subscription.readings {
                     guard let observation, !observation.closed else { return }
-                    try observation.receive(frame)
+                    // A reading is tens to hundreds of kilobytes; decoding it here would
+                    // stall a scroll for each one.
+                    let reading = try await Task.detached { try Self.decode(frame: frame) }.value
+                    guard !observation.closed else { return }
+                    observation.receive(reading)
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { observation?.close(error: error) }
@@ -91,8 +95,7 @@ final class RemoteTaskObservation {
         refreshing = nil
     }
 
-    private func receive(_ frame: JSONValue) throws {
-        let reading = try Self.decode(frame: frame)
+    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading)) {
         continuation.yield(reading.reading)
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
@@ -100,7 +103,7 @@ final class RemoteTaskObservation {
         }
     }
 
-    static func decode(frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
+    nonisolated static func decode(frame: JSONValue) throws -> (answers: UInt64?, reading: MobileTaskReading) {
         struct Frame: Decodable {
             let answers: UInt64?
             let unavailable: String?

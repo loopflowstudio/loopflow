@@ -90,14 +90,16 @@ final class TaskFeed {
                         guard let self, current == self.generation else { return }
                         switch reading {
                         case .success(let repositories):
-                            if repositories != self.repositories { self.repositories = repositories }
+                            let changed = repositories != self.repositories || !self.loaded
+                            if changed { self.repositories = repositories }
                             self.loaded = true
                             self.error = nil
                             Perf.launch("tasks_current")
                             if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                             self.waiting = nil
+                            let known = self.paths.count
                             await self.name(repositories.map(\.repository))
-                            self.save()
+                            if changed || self.paths.count != known { self.save() }
                         case .failure(let error): self.error = error.message
                         }
                     }
@@ -144,8 +146,11 @@ final class TaskFeed {
     }
 
     private func save() {
-        try? JSONEncoder().encode(Saved(repositories: repositories, paths: paths))
-            .write(to: savedURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let (saved, url) = (Saved(repositories: repositories, paths: paths), savedURL)
+        Task.detached(priority: .utility) {
+            try? JSONEncoder().encode(saved)
+                .write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
     }
 
     private func name(_ ids: [String]) async {

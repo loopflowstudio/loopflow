@@ -74,7 +74,7 @@ const SETTLE_WAIT: Duration = Duration::from_millis(800);
 pub(crate) const SETTLE_LINGER: Duration = Duration::from_secs(20);
 
 /// The exit code a provider's status reports on its own.
-fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
+pub(crate) fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
     use std::os::unix::process::ExitStatusExt;
     status
         .code()
@@ -386,16 +386,17 @@ fn delegate(
 
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
 /// server, so that it outlives every lf process that views it. A held launch
-/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too)
-/// with a terminal viewing it, or a Desktop pane. A bare launch, one in a
-/// Task's checkout, a piped or `-b` execution and a Desktop Task shell keep an
+/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too:
+/// Task, Wave and repository conversations) or a Task run, with a terminal
+/// viewing it, wherever it is opened. A bare launch, one attributed only by
+/// its checkout, a piped or `-b` execution and a Desktop Task shell keep an
 /// owner process of their own.
 #[cfg_attr(test, allow(dead_code))]
 fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
     if !viewed {
         return false;
     }
-    if task_run || std::env::var_os("LF_SERVER").is_some() {
+    if task_run {
         return true;
     }
     let Some(session) = session else {

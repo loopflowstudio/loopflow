@@ -141,49 +141,18 @@ to trade against delivery time. Holder restart does not resurrect a process.
 
 A moved the owner loops into the server; B modeled the held terminal as a
 registry keyed by `TerminalId`; C added a disk recovery journal. B was taken
-(1b, below); the candidates' full text is at `a18d6a915:scratch/holder.md`.
-Question 2 (a fresh process for an ended Task/Wave Session: 2a managed, 2b
-by entry point) is answered under "Direction after explore".
+(1b, below); full text at `a18d6a915:scratch/holder.md`.
 
 ### Competitor comparison — November 10, 2026
 
 Jack Heart: "what would rex do? what do t3code / paradev / paseo do?"
-
-Fresh documentation/source reads, not new runtime probes. Open-source pins
-match `docs/dev/research/server-protocols.md`; these are not claims about HEAD.
-
-- [Rex upgrades](https://www.superlogical.com/rex/docs/linux/upgrading):
-  personal/account terminal servers keep running the old build. The login
-  server can restart independently. Restarting a shared terminal server ends
-  its programs. Its [API](https://www.superlogical.com/rex/docs/reference/api)
-  addresses blocks separately from client views; ownership controls size,
-  not exclusive input. Recorded local API research establishes Ghostty
-  snapshot then bytes. This supports B's model, not reconstructing the
-  emulator on each coordinator restart.
-- [Paseo worker at 71439e5](https://raw.githubusercontent.com/getpaseo/paseo/71439e51a555bfca21dc21e74bcfb39f1eb5e760/docs/terminal-worker.md):
-  the surviving worker holds both PTYs and headless xterm, including 10,000
-  history rows. No lifetime byte log. Its two-version policy can close
-  workers two protocol versions behind; do not copy that into the promise
-  that installs never end conversations.
-- [Paradev daemon at 61645f48](https://raw.githubusercontent.com/ParadevAI/Paradev/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/packages/pty-daemon/README.md):
-  an independent PTY service, in-memory replay, fd handoff on daemon upgrade.
-  [SessionStore](https://raw.githubusercontent.com/ParadevAI/Paradev/61645f4852d3f7ecca7f58a6f6d68d7bc9dc460c/packages/pty-daemon/src/SessionStore/SessionStore.ts)
-  also tracks terminal modes/colors. Its default ring is 64 KiB, overridden
-  to 512 KiB by DaemonSupervisor at this pin. The earlier 2 MiB reconnect
-  note describes another layer; do not call it this daemon's ring size.
-- [T3 terminal manager at 71c2d3a3](https://raw.githubusercontent.com/pingdotgg/t3code/71c2d3a302092b94511eb7e6ab4e6844a66dbf22/apps/server/src/terminal/Manager.ts):
-  server-owned node-pty with bounded persisted terminal history. Its provider
-  manager releases runtimes on server shutdown and can resume provider
-  conversations. History continuity does not mean same-process continuity.
-
-Inference: B is the nearest model, but a surviving emulator is an additional
-axis the original page did not compare. Rex/Paseo keep screen state with the
-long-lived terminal owner. That avoids rebuilding it when the coordinator
-restarts, at the cost of keeping emulator code on the old build and a richer
-holder protocol. It does not survive holder death or reboot by itself.
-Consider this before C's disk journal if closer Rex behavior becomes the goal.
-It changes the earlier emulator-in-server decision; this question alone does
-not select that change. A/B/C and their scope remain proposals.
+Documentation reads at pinned commits (links: `8bfcccdfc:scratch/holder.md`).
+Rex and Paseo keep screen state with the long-lived terminal owner (Paseo's
+worker: PTYs plus headless xterm, 10,000 rows; it may close workers two
+protocol versions behind, not to be copied). Paradev's PTY daemon: in-memory
+replay, fd handoff on upgrade, 64 KiB ring (512 KiB via DaemonSupervisor).
+T3: server-owned node-pty with bounded history; provider runtimes end on
+server shutdown. A surviving emulator in the holder is an axis not taken here.
 
 ### Three goals — November 10, 2026
 
@@ -524,9 +493,6 @@ Gate/CI: Swift and Desktop suites; the Linux RunPod run of
 
 ## Concept review — November 10, 2026
 
-The steers on positions, queries and view drawing are in the plan above and
-in `docs/dev/server-first.md` (every-view-types row). No open product choice.
-
 **A held terminal stands where the owner stood for the lf processes inside
 it.** Built. The start receipt of the lf process that takes up the
 `LF_TRANSPORT_HELD` handoff writes `processes.held_terminal_id`
@@ -534,9 +500,6 @@ it.** Built. The start receipt of the lf process that takes up the
 start-row paths). Graph steps receive the same handoff and name it too, as
 they sit under an owner. `require_settled_work` seeds its allowed set with
 `held_terminal_processes(terminal)`, as it seeds owners.
-
-Without the write, `retirement_ends_an_idle_held_conversation` fails
-"Process … still has live or unresolved work".
 
 ### Second pass, after the positions/queries/drawing steers — November 11, 2026
 
@@ -793,40 +756,24 @@ a_held_terminal_with_no_view a_held_conversation_has_no_idle` 3 passed; clippy c
 All six steers are built and recorded above. One mismatch is left in the
 managed rule.
 
-**The repository conversation records no WorkSource.**
-`primary.rs::repository_session` leaves `work_source: None`; Task and Wave
-primaries record `Declared`. So `is_managed` calls it bare (LOO-821: no
-hooks, no steers), while `transport::managed` holds it from a Desktop pane
-through `LF_SERVER` and not from `lf session resume` in a terminal. The
-answer to 778081f8 ("there is no such thing other than one you start through a
-shell") reads every Desktop conversation as Task or Wave work; the repository
-primary is the one that isn't. LOO-823 recorded "wave/repo should behave
-exactly like open tasks" for lifetime.
-
-Open: is the repository conversation managed?
-
-- (a) Yes: `repository_session` records `Declared` (on this branch and
-  LOO-821's reader alike), it gets hooks and steers, and `managed()` loses its
-  `LF_SERVER` branch: held = `task_run || is_managed`, one rule wherever it is
-  opened.
-- (b) No: it stays bare. It is held from Desktop because the holder holds
-  unmanaged things too (as shells will in LOO-830), and `LF_SERVER` stays the
-  Desktop rule; from a terminal it keeps its own owner.
-
-Why it matters: (a) changes what LOO-821 delivers to a repository
-conversation; (b) keeps two answers to "is this held" for one conversation,
-depending on where it was opened. Built today: (b).
+Open then: is the repository conversation managed? It recorded no
+WorkSource, so `is_managed` called it bare while `managed()` held it from a
+Desktop pane through `LF_SERVER`. Options offered: (a) managed, one rule
+wherever opened; (b) bare, held from Desktop only. Text:
+`8bfcccdfc:scratch/holder.md`.
 
 Jack Heart, in the LOO-820 conversation (comment a6a8449e): "repo and wave sessions should be managed. you can tell 84 that". The repository primary records Declared, so is_managed holds it; managed() drops its LF_SERVER branch (held = task_run || is_managed).
 Then: "the repo is really secretly just the a wave".
 Then: "i just meant concpetually. whether we should give repo a wave project and stuff we dont need to wrory about". Not filed.
 
-Not built yet (QA, November 11): `repository_session` still records no
-WorkSource, and `managed()` still has the `LF_SERVER` branch. The
-`transport_tests` that set `LF_SERVER=1` to get a held terminal
-(`a_held_terminal_with_no_view_reports_that_it_waits` and its neighbours)
-need a managed launch instead. Existing repository primaries recorded with
-no WorkSource stay bare.
+Built (November 11): `repository_session` records `Declared`, as does a
+moved Wave or repository primary (`moves.rs`); `managed()` lost its
+`LF_SERVER` branch: held = viewed && (task_run || is_managed). Repository
+primaries recorded earlier with no WorkSource stay bare;
+`prepared_start_and_take_back_…` uses one (Start/Take back are an owner's).
+The four held tests that set `LF_SERVER=1` launch `lf resume` (the
+repository conversation) instead; `first_native_launch_keeps_only_valid_…`
+sets `LF_SERVER=1` to show a bare launch from a pane keeps its owner.
 
 ## QA — November 11, 2026 (second pass)
 
@@ -835,6 +782,16 @@ no WorkSource stay bare.
 `held.sock` revision change (views on the new `lf` reopen, pinned ones end
 with one line); a second holder per build; SIGKILL and `launchctl kickstart -k`
 restarts with contiguous output; readiness from a stopped server; exits
-settled by the next server. Still wrong: a held agent's exit records the
-launcher's code (1, agent exited 3), and its view's last line tells the
-person to close "another client".
+settled by the next server.
+
+Fixed since: `native_exit::settle` carries the provider's own code (a
+held agent exiting 3 records 3 on the launcher Process and the terminal) and
+its line reads "claude exited with 3."; an interrupt or a mover still reads
+as 0. `NativeExit.resuming` is gone (only the old hint read it). Test:
+`a_failed_provider_exit_carries_its_own_code_and_says_so`.
+
+Checks, November 11: focused lib tests 20 passed; `transport_tests` 7
+passed; `session_launch_contract` 2 passed; clippy clean. Gate: `session_cli_tests`, `session_lifecycle_tests`,
+`work_open_tests` launch the repository conversation and may now need a server.
+
+Jack Heart: "can you stack ontop of 821". Steered the run to lf sync onto jack/loo-821-managed-sessions-hooks-call-the-machine-server (plan: merge_target, 54 unique commits, 82 files).

@@ -25,7 +25,6 @@ pub(crate) struct NativeExit {
     pub provider: String,
     /// A client of a provider running beside it, not the provider itself.
     pub client: bool,
-    pub resuming: bool,
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
     pub capture: Option<CaptureHandoff>,
@@ -102,15 +101,22 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
         }
     }
-    // The command's result differs from the provider's native status. Use the
-    // returning launcher's interpretation, including attachment loss.
-    let result = command.result(&exit.provider, exit.resuming);
+    // An interrupt or a mover ends the launch as a success; any other failure
+    // carries the provider's own code, so the person and the store read it.
+    let failed = command.moved.is_none() && !command.interrupted && !status.success();
+    let code = if failed {
+        crate::transport::provider_exit_code(status)
+    } else {
+        0
+    };
     let mut settled = Settled {
-        code: crate::journal::command_exit_code(&result),
+        code,
         lines: command.moved.into_iter().collect(),
     };
-    if let Err(error) = result {
-        settled.lines.push(error.to_string());
+    if failed {
+        settled
+            .lines
+            .push(format!("{} exited with {code}.", exit.provider));
     }
     let (path, size) = &exit.diagnostics;
     if std::fs::metadata(path).is_ok_and(|info| info.len() > *size) {
@@ -256,7 +262,6 @@ mod tests {
                 attachment,
                 provider: "codex".into(),
                 client: false,
-                resuming: false,
                 cwd: home.into(),
                 capture: Some(capture.hand_off(None, false, None)),
                 capture_key: Some(capture.artifact_key()),
@@ -279,6 +284,58 @@ mod tests {
             .unwrap();
             assert_eq!(terminal["outcome"], "completed");
         }
+    }
+
+    #[test]
+    fn a_failed_provider_exit_carries_its_own_code_and_says_so() {
+        let ledger = TestLedgerGuard::new();
+        let home = ledger.home();
+        journal::with_runtime(home, &["lf".into(), "-i".into()], || {
+            let capture = crate::session_record::SessionRecorder::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let session = store
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            let launcher = journal::current_lf_process_id().unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &launcher, true)
+                .unwrap();
+            let exit = NativeExit {
+                session: session.id.to_string(),
+                attachment,
+                provider: "claude".into(),
+                client: false,
+                cwd: home.into(),
+                capture: Some(capture.hand_off(None, false, None)),
+                capture_key: Some(capture.artifact_key()),
+                account: None,
+                diagnostics: (home.join("absent.log"), 0),
+            };
+            let settled = settle(&exit, ExitStatus::from_raw(3 << 8));
+            assert_eq!(settled.code, 3);
+            assert_eq!(settled.lines, ["claude exited with 3."]);
+            let launcher = store.lf_process(&launcher).unwrap().unwrap();
+            assert_eq!(launcher.exit_code, Some(3));
+            assert_eq!(launcher.outcome.as_deref(), Some("failed"));
+            Ok::<_, anyhow::Error>(())
+        })
+        .unwrap();
     }
 
     #[test]
@@ -316,7 +373,6 @@ mod tests {
                 attachment: attachment.clone(),
                 provider: "claude".into(),
                 client: false,
-                resuming: true,
                 cwd: home.into(),
                 capture: Some(capture.hand_off(None, false, None)),
                 capture_key: Some(capture.artifact_key()),

@@ -327,6 +327,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
         .unwrap_or_else(|| repo.to_string());
     Ok(LfSession {
         repo: Some(repo.to_string()),
+        work_source: Some(WorkSource::Declared),
         ..conversation(repo.as_path(), "repo/session", title)?
     })
 }
@@ -440,6 +441,11 @@ mod tests {
             let session = store.session(&first.id).await.unwrap().unwrap();
             assert_eq!(session.skill.as_deref(), Some("repo-session"));
             assert_eq!((session.wave_id, session.task_id), (None, None));
+            // Managed like Task and Wave conversations: held, with hooks.
+            assert_eq!(
+                session.work_source,
+                Some(crate::session::WorkSource::Declared)
+            );
 
             // A Wave's conversation in the same repository is a separate scope.
             let ambient_wave = wave(&store, &repo).await;

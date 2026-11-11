@@ -2078,8 +2078,9 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
     for valid in [true, false] {
         let fixture = Fixture::new();
         let path = fixture.waiting_provider();
+        // A bare launch keeps its own owner, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
-        command.env("PATH", path);
+        command.env("PATH", path).env("LF_SERVER", "1");
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
@@ -2099,8 +2100,9 @@ fn held_desktop_launch_links_its_session_to_the_pane() {
     let fixture = Fixture::new();
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held placement"]);
-    command.env("PATH", path).env("LF_SERVER", "1");
+    // The repository's conversation is managed, so a terminal viewing it holds it.
+    let mut command = fixture.command(&["-a", "claude", "resume"]);
+    command.env("PATH", path);
     let terminal = Terminal::spawn_with_placement(command, Some(true));
     let launch = fixture.launches(1).pop().unwrap();
     let session = session_of(&fixture.sql(), &launch);
@@ -2130,8 +2132,8 @@ fn a_held_conversation_has_no_idle_ending() {
     .unwrap();
     let _service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut command = fixture.command(&["-i", "-a", "claude", ":", "held idle"]);
-    command.env("PATH", path).env("LF_SERVER", "1");
+    let mut command = fixture.command(&["-a", "claude", "resume"]);
+    command.env("PATH", path);
     let view = Terminal::spawn_with_placement(command, Some(true));
     let launch = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
@@ -2786,6 +2788,15 @@ printf '%s' "$answer" > "$HOME/answer"
         if let Some(before) = &before {
             assert_eq!(before["id"], session);
         }
+        // A repository conversation recorded before it was managed stays bare,
+        // with an owner of its own: Start and Take back are that owner's.
+        fixture
+            .sql()
+            .execute(
+                "UPDATE agent_sessions SET work_source=NULL WHERE id=?1",
+                [session],
+            )
+            .unwrap();
         assert!(!fixture.home.path().join("launches").exists());
         assert!(prepared["open_argv"]
             .as_array()
@@ -7729,8 +7740,8 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
     let path = fixture.waiting_provider();
-    let mut launch = fixture.command(&["-i", "-a", "claude", ":", "held pane"]);
-    launch.env("PATH", &path).env("LF_SERVER", "1");
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
@@ -7798,8 +7809,8 @@ printf 'May I?\r\n\033]7501;state=blocked:app=claude-code\033\\'
 read -r answer < /dev/tty
 "#,
     );
-    let mut launch = fixture.command(&["-i", "-a", "claude", ":", "held status"]);
-    launch.env("PATH", &path).env("LF_SERVER", "1");
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path);
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();

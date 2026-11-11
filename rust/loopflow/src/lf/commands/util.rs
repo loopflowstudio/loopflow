@@ -605,7 +605,6 @@ fn run_native_session(
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
             client: owned.is_none(),
-            resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),
             capture: capture.map(LfProcessRuntime::hand_off),
             capture_key: environment

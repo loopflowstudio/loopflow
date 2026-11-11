@@ -1,6 +1,6 @@
 """Build scratch/process-audit.html from live ps, lsof and lf's own records.
 
-Read-only: it signals nothing. Run with `python3 -I scratch/process_audit.py`.
+Read-only: it signals nothing. Run with `uv run python -I scratch/process_audit.py`.
 """
 
 import html
@@ -275,8 +275,8 @@ def main():
             )
             if reason:
                 note += f"; rollover: {reason}"
-            # Input or a Graph holding the conversation is work in progress, not a leftover.
-            healthy = bool(viewers) or p["age"] < 86400 or "holds" in reason
+            # An open conversation stays resident; age and absent viewers do not
+            # distinguish a leak from its intended lifetime.
             if shell:
                 note = f"Task {shell['task']} is {shell['state']}; " + note
                 if shell["phase"]:
@@ -377,12 +377,12 @@ def advice(rows):
         f"Safe to stop; they record nothing. <code>kill {e(observer_pids)}</code>" if observers else "Nothing left.",
     )
     row(
-        "Owners held by typed input", drafts,
+        "Owners held by typed input (older lf)", drafts,
         "Bytes typed into the provider that it never acknowledged as one exact prompt: a draft, an edit, "
-        "arrow keys or Esc. Idle ending and <code>lf process rollover</code> both keep these, because a dead "
+        "arrow keys or Esc. Older lf owners retain these because a dead "
         "editor can't be rebuilt from history. Most also run an <code>lf</code> replaced on disk since they started.",
-        "Open each with <code>lf resume &lt;ID&gt;</code>, then send or clear what is there; it ends on its own "
-        "after <code>session.end_detached_after</code>. Stopping one loses that input.",
+        "Quitting the provider loses unsent input. The new lifetime rule removes this hold: Task cleanup "
+        "ends closed conversations, and rollover may replace an idle provider even with a draft.",
     )
     row(
         "Owners held by a running Graph", graphs,
@@ -397,17 +397,17 @@ def advice(rows):
         "quit, keeps running until Close. "
         + (
             f"{len(finished)} belong to finished Tasks ({e(', '.join(tasks))}), which keep their checkout and "
-            f"shells until cleanup runs; for {held_by_input} of them cleanup waits on input held in the "
+            f"shells until cleanup runs; older lf still holds {held_by_input} of them on input in the "
             "Task's own conversation."
             if finished else "None belongs to a finished Task."
         ),
-        "Close a shell from its Desktop tab. For a finished Task, <code>lf resume</code> the conversation its "
-        "row names and send or clear the input; cleanup closes the shells about fifteen minutes later. "
+        "Close a shell from its Desktop tab. Completed-Task cleanup ends its conversation and shells after "
+        "the viewing grace once live work settles. With an older lf, quit a conversation held on input. "
         "Stopping one by PID loses its jobs and environment; its saved screen stays.",
     )
     row(
         "Demo and Dev app processes", demos,
-        "A demo keeps its processes while a person's input there is unsettled. Its leftover observers are "
+        "A demo keeps its processes until its conversations are closed. Its leftover observers are "
         "counted in the row above.",
         f"Read the demo's note under its Task's <code>scratch/</code> first. PIDs: <code>{e(demo_pids)}</code>" if demos else "Nothing left.",
     )
@@ -454,10 +454,10 @@ def write_report(now, rows, recount):
         out.append(f"<tr><td>{e(kind)}</td><td class=num>{count}</td><td>{listed}</td></tr>")
     out.append("</table>")
     out.append(
-        "<p><b>Looks stale</b> means: an owner more than a day old with no viewer attached and no input or Graph holding it; "
-        "an unviewed Desktop shell whose Task is done or abandoned; an observer whose "
+        "<p><b>Looks stale</b> means: an unviewed Desktop shell whose Task is done or abandoned; an observer whose "
         "Desktop client is gone or that a newer observer replaced; a hook or observer whose parent exited; "
-        "an attach whose terminal is gone. An old owner with a live provider can still hold a turn, draft or "
+        "an attach whose terminal is gone. Age and absent viewers alone do not make a conversation stale. "
+        "An old owner with a live provider can still hold a turn, draft or "
         "pending request, so read it with <code>lf resume &lt;ID&gt;</code> before deciding.</p>"
     )
     for r, _ in roles.most_common():

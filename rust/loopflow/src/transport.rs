@@ -3,8 +3,6 @@
 
 mod connection;
 mod input;
-#[cfg(test)]
-mod input_retry_tests;
 mod lifetime;
 #[cfg(test)]
 mod lifetime_tests;
@@ -1016,8 +1014,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
     loop {
         #[cfg(test)]
-        input_retry_tests::poll();
-        #[cfg(test)]
         lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
         let mut owner_change = false;
@@ -1383,13 +1379,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             output.title(&name);
         }
         if let Some(input) = input.as_mut() {
-            // Typing at an idle shell prompt is not an agent draft: retain only
-            // input that work running inside the shell could receive.
-            let record = terminal
-                && (shell.is_none()
-                    || pending_input.is_empty()
-                    || crate::desktop::shells::holds_input(&id));
-            pending_input.forward(input, &id, record);
+            pending_input.forward(input);
         }
         if end_input && pending_input.is_empty() {
             input.take();
@@ -1478,7 +1468,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && exit_record.is_some())
         {
-            pending_input.native_ended(&id);
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,
@@ -1594,7 +1583,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             let event = lifetime::report_result(
                 &mut ending_failure,
                 "Session ending",
-                ending.confirm(&id, observed, pending_input.holds_owner()),
+                ending.confirm(&id, observed, !pending_input.is_empty()),
             )
             .flatten();
             if let Some(event) = event {
@@ -1607,8 +1596,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 snapshot::leave(&id, &output);
                 crate::platform::kill_process(std::process::id());
             }
-            // Flush even throttled activity so the applicable quiet interval
-            // starts again and a settled owner can eventually end.
+            // Refresh the policy after a candidate was judged against newer activity.
             if ending.activity != observed {
                 let _ = activity.send(observed);
             }
@@ -1616,7 +1604,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         #[cfg(test)]
         lifetime_tests::after_judgment(&output, observed)?;
         // Sleep until a descriptor has work or held output, exit announcement,
-        // input retention or disconnected-viewer grace needs another attempt.
+        // disconnected-viewer grace needs another attempt.
         let deadline = match exit {
             Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
             Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
@@ -1633,7 +1621,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             })
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
-            .chain(pending_input.retry_at())
             .chain(title.as_ref().map(|title| title.deadline()))
             .chain(settling.as_ref().and_then(Settling::deadline))
             .min();
@@ -1642,7 +1629,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             &wake,
             &viewers,
             &readers,
-            input.as_ref().filter(|_| pending_input.needs_write()),
+            input.as_ref().filter(|_| !pending_input.is_empty()),
             deadline.map(|at| at.saturating_duration_since(Instant::now())),
         );
     }

@@ -1,6 +1,6 @@
 # LOO-823 process leaks
 
-Report: `python3 -I scratch/process_audit.py` writes `scratch/process-audit.html`
+Report: `uv run python -I scratch/process_audit.py` writes `scratch/process-audit.html`
 (read-only; it opens `loopflow.db` with `mode=ro` for shell receipts).
 
 Readings, 2026-11-10 ~17:30, 343 lf processes:
@@ -23,51 +23,12 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining, at demo: regenerate the report (the committed one is the 20:20
+Remaining at demo: regenerate the audit report (the committed one is the 20:20
 reading: 354, 358 at its own second `ps`, 358 on a separate recount) and show
-the `transport_tests` ps diff again. QA walkthrough: `scratch/qa.html`.
-Open: `scratch/questions.md` 1a-1d.
-
-Checks:
-- `cargo test -p loopflow --test transport_tests`, load 40-60, after dropping
-  the per-test `StopOwner`/`ShellOwnerGuard` (Fixture's Drop covers them): 108
-  passed, plus `--ignored ssh_shells::` 3 passed; ps diff empty. Earlier, load
-  200-330: 6 then 2 `launches(..)` 30 s timeouts, each passed alone.
-- 19:02, after dropping four more cleanup-only `fixture.stop` calls:
-  `cargo test -p loopflow --test transport_tests -- first_native_launch_keeps_only_valid_desktop_terminal_placement detached_sessions_end_after_their_limit resume_takes_over_an_owner_from_another_build resume_ends_an_unanswering_superseded_owner_of_a_completed_session`:
-  4 passed; no new `/tmp/lf-7501-` process. Gate runs the whole suite.
-- Regression test fails without the owner fix, passes with it.
-- swiftc probe: EOF with `Pipe.uninherited()`, none with `Pipe()`.
-- `scripts/test_desktop.sh --skip-build --filter 'ProgramStatusTests|UninheritedPipeTests'`:
-  15 passed (after `swift build --build-tests --package-path swift`).
-
-- QA 19:42, load 75-110: `cargo test -p loopflow --test transport_tests` 108
-  passed in 107 s; `-- --ignored ssh_shells::` 3 passed. No new process; the
-  SSH tests left four `/tmp/lf-7501-*` dirs holding only `screens/` (246 of 305
-  such dirs have that shape): an owner writes its screen after its home is gone.
-- QA: real `lf -i -a codex` from a host holding a pipe: reader reaches EOF with
-  the branch owner alive; installed 0.15.2 owner keeps fd 4. Live Dev app on an
-  `lf-world`: Desktop holds 16 pipes, 0 in pane children or owners.
-- `uv run python scripts/third_party.py check` exits 0 after `refresh` (the
-  `Cargo.lock` change had left `inventory.json` stale).
-- `lf task status MTG-269 --select task.state --json` (installed) took 13 min
-  once at load 295, in `SqliteStore::task_work`; the audit now gives each `lf`
-  read 120 s and names the ones that did not answer.
-
-## Concept review (2026-11-10)
-
-- `Pipe.uninherited()` covers every Desktop `Pipe()` today, but a new `Pipe()`
-  reintroduces the leak silently. GhosttyKit forks panes, so the one-place
-  fix is not ours. Leave the call-site form; no lint.
-
-- 19:10 pass over `94ebffc67` and `249c21b21`: no design change. `lf process
-  rollover --dry-run` read 194 stays: 117 "keeps its lf until it exits", 76
-  "native input holds the conversation", 1 Graph. Its reasons answer "can this
-  move to the selected lf", so shells and observers all read as the first;
-  troubleshooting covers shells in its own paragraph. A "what holds this"
-  column in `lf process list` is question 1d, not this Task.
-- This Task ships under 1a (behaviour unchanged, documented). Submit clears
-  `scratch/`, so the PR body carries 1a-1d and the five held Tasks.
+the affected test suite's process diff again. Earlier checks and the pre-review
+concept discussion are in `551becf586687262921e0681a169b5b7973fc75b:scratch/process-leaks.md`.
+The audit describes the installed build at the time; its input holds disappear
+with this change. `scratch/qa.html` predates this lifetime revision.
 
 ## Desktop shells (read 2026-11-10 18:55)
 
@@ -84,9 +45,9 @@ shells; the report lists them under `desktop shell` with Task and state from
   retirement stays `waiting` and `request_retirement` is never reached. The
   sweep itself runs (`com.loopflow.cleanup`; `Task cleanup pending` lines in
   `logs/lf.log` through 18:53). No shell-specific bug: it is the input hold in
-  `scratch/questions.md`, which records these five Tasks.
+  the five Tasks listed above.
 
-## Next implement pass: conversations live as long as their scope (2026-11-11)
+## Design: conversations live as long as their scope (2026-11-11)
 
 Direction (Jack Heart, word for word, in the demo-step review):
 - "with bare lf, noting holds its at all"
@@ -130,4 +91,44 @@ emulator (5a). Bare launches with no owner stay the server-first piece; until
 then the 14 unscoped owners run until someone quits them, accepted as
 transition cost.
 
-Questions 1a-1d in `scratch/questions.md` are superseded by this section.
+## Delete — do not maintain
+
+Runtime cuts below are complete. Only the ignored shared-config key and the
+released SQLite column remain for their post-release removal.
+
+- `transport/lifetime.rs`: `Grace`, `limit`, quiet/viewer idle expiry and its tests.
+  Keep viewer observations, stale-candidate rejection, abandonment and retirement.
+- `config.rs`: `DetachedLimit`; keep only the ignored parser until
+  `task_c118380f31f14d07ba28669499efa395` removes shared-config compatibility.
+- `store/sqlite/native_input.rs`, `OwnerRetention::NativeInput`,
+  `acknowledge_native_input`, `try_record_owner_input`, `clear_owner_input`.
+  Keep current-turn recording and the released column without runtime consumers.
+- `transport/input.rs`: retention recording, budget and replay; delete
+  `transport/input_retry_tests.rs` and its serve-loop hook. Keep the bounded
+  byte queue and partial-write forwarding. Input must flow during store locks.
+- `desktop::shells::holds_input`, `SqliteStore::idle_retention`, ledger-only
+  steers/rollover fixtures and transport tests requiring idle expiry.
+  Keep live-turn/request/Graph, shell Close and takeover coverage. The Task-Graph
+  check belongs in `owner_retiring_tasks`; it does not hold explicit rollover.
+
+## Remaining verification
+
+The upgrade fixture uses native turn hooks for both responsive and unresponsive
+owners, then one replacement/reconnect path; no synthetic live-turn SQL or
+draft-retention branch remains. Abandonment skips retirement-only reads. Fixture
+teardown waits for completed owners' final writes as well as unfinished owners;
+the late screen directories noted in `qa.html` need a fresh SSH-suite check at gate.
+The audit no longer calls an open conversation stale solely for being old and unviewed.
+
+- `cargo test -p loopflow --lib -- transport::lifetime::tests:: transport::lifetime_tests::`: 7 passed after compression; linker warned that `__eh_frame` exceeded its compact-unwind size limit.
+- `cargo test -p loopflow-test-support cleanup_tests::`: 1 passed; completed-process final write precedes cleanup return.
+- `cargo test -p loopflow --lib -- retirement_waits_for_final_work_and_shell_job_settlement obsolete_detached_limit_is_readable_but_not_written`: 2 earlier passing cases unchanged.
+- `cargo test -p loopflow --test transport_tests -- completed_task_cleanup_ends_a_conversation_with_typed_input a_locked_store_does_not_delay_input_or_replay_it_on_return resumed_session_completes_turns_after_build_replacement_and_viewer_return unanswering_superseded_owner_preserves_pending_turn_and_queued_input`: 4 passed across focused runs after compression. The responsive upgrade case initially failed before startup because macOS denied system Python 3.13's `termios` signature; `uv run cargo test` with that filter passed using the repository Python.
+- `cargo test -p loopflow --test transport_tests -- quiet_unviewed_conversations_ignore_the_obsolete_detached_limit silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement`: 3 earlier passing cases; gate reruns them with the changed fixture teardown.
+- `swift build --build-tests --package-path swift`, then `scripts/test_desktop.sh --skip-build --filter UninheritedPipeTests`: built and 1 passed in 0.001s. The first run spent 30s in SIGTERM teardown; SIGKILL removes the inherited-mask wait. The rebuilt test bundle initially failed signature validation; local `codesign --force --sign - --timestamp=none` on that bundle restored the headless check.
+- `ps -axo pid=,command=` before/after focused Rust tests: 42 prior matching processes remained, no new fixture/build process (excluding the reading commands). Nothing pre-existing was signalled.
+- `cargo fmt --check`, `git diff --check`: passed; audit script syntax parses.
+
+Gate: affected transport, retirement, native-turn/steers, rollover, config,
+CLI resolution/parser, documented-command and server schema suites; Clippy. Demo: process diff and regenerated audit. Full build/test results before
+this lifetime revision do not cover these deletions.

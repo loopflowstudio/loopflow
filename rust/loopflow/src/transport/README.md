@@ -70,61 +70,40 @@ Leaving a terminal relay restores keyboard and drawing modes at the current
 cursor position. Returning to the shell must not home the cursor or overwrite
 the command's output.
 
-A Session nobody views ends after `session.end_detached_after` (default `2m`,
-`off` disables it) of quiet. The grace counts wall time, including laptop sleep,
-from the last viewer change, command output or held work. A turn, pending request
-or running Graph keeps its owner and restarts the grace; finished Graphs do not.
-A Task conversation also stays while its Task's Graph runs, so it is there to
-talk to when you come back. `lf task run`, `lf ship`, and explicit checkout start
-an unopened conversation detached beside the Graph; `lf resume` in the worktree
-reattaches it. Preparation alone does not launch it. Background starts require
-a configured, installed agent and stop at sixteen running Task conversations;
-past that, `lf resume` starts one as before. Abandon stops an unviewed Task
-conversation, including an active turn; a conversation being viewed stays open.
+Conversations stay running while their scope is open. Completed Tasks end their
+conversations through retirement; abandonment ends unviewed Task conversations,
+even during a turn. Wave, repository and bare conversations run until closed.
+`lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
+detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
+launch it. Background starts require a configured, installed agent and stop at
+sixteen running Task conversations; past that, `lf resume` starts one as before.
+
 Native Claude prompt/stop hooks preserve silent waits, background tasks and
 scheduled wakeups until Claude reports settlement. Terminal status counts only
 while a viewer is attached to refresh it; an idle prompt cannot settle an
 unfinished native turn. Headless Runs never end for want of viewers.
 
-Unsubmitted input keeps its native editor alive so returning can edit it.
-A plain, single Claude submission can release this protection after its exact
-text and prompt ID are acknowledged and settled, with no later typing.
-Edits, paste, long input, input during a turn, ambiguous submissions and missing
-prompt IDs retain the owner until the native client exits. Other providers
-retain typed input because they have no matching acknowledgement here. Clearing
-the screen or showing an idle prompt cannot discard that protection. Pending
-approvals and questions stay with their original provider until answered or canceled.
+Input goes straight to the provider. The owner queues only bytes not yet written
+to its terminal; no store read or write delays forwarding. Returning does not
+resubmit input. Unsent input is lost when an explicit rollover or takeover
+replaces its provider, just as on quit.
 
-The store records a conversation; it never carries it. Input waits in the owner
-only while its retention record is busy, and at most for the one second hooks
-give a locked store: the owner retries every 100 ms without polling the
-writable PTY between attempts, while output, control queries and viewer return
-remain responsive. A store that fails the record or stays locked past that
-second (an install's migration transaction) delivers the bytes anyway, holds
-the Session in memory until the store records them, and logs the gap once.
-The owner keeps the unrecorded bytes and offers them ahead of the next record,
-or on its own every two seconds while nothing is typed, so a quiet draft is
-known to `lf resume`, rollover and the idle ending once the store answers;
-later input delivers at once until a record succeeds and closes the gap.
-Returning to the Session does not resubmit queued input. This cannot recover an
-editor from a dead provider. A quit returns the provider's own exit within a
+A quit returns the provider's own exit within a
 second; exit records still waiting on a locked or refused store finish in the
 background or are lost, logged.
 
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
 are the person quitting, `lf resume` taking the conversation over, `lf process
-rollover`, the detached limit, or an explicit end. Failed store judgments retry
-at the next poll. An owner held past its detached limit logs why: native input,
-a live turn, running Graph, headless Run or no open Session. Repeated unchanged
-policy errors and retention reasons produce one warning until the condition
-changes. Activity cannot accelerate the two-second policy poll; it launches no
-helper process. Policy exit saves the screen, stops the agent and records its
+rollover`, Task closure, or an explicit end. Failed store judgments retry at the
+next two-second poll. Repeated unchanged policy errors and retention reasons
+produce one warning until the condition changes; activity launches no helper.
+Policy exit saves the screen, stops the agent and records its
 exit. `lf resume` reopens provider history without starting a turn. Other ended
 Sessions stay stopped.
 
 `lf resume` replaces an idle owner that is superseded or unanswering, continuing
-its saved provider thread without replaying input. Drafts, pending requests, running
+its saved provider thread without replaying input. Pending requests, running
 turns, Graphs and Runs keep their owner even when its socket does not answer. Resume
 attempts attachment; a failed attachment leaves that work intact. Saved history cannot
 restore a native editor or pending request. No open Session is unknown, not work: the
@@ -135,8 +114,8 @@ moves it.
 `lf process rollover --dry-run` lists the same takeover choices across owners;
 omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
 ends idle owners directly; existing viewers may close and need `lf resume` again.
-Rollover names the same retention reasons. Resume, rollover and the detached
-limit share this judgment; work holds independent of reachability. Only resume asks
+Rollover names the same retention reasons. Resume, rollover and Task retirement
+share this judgment; work holds independent of reachability. Only resume asks
 whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
 
@@ -158,8 +137,7 @@ pipes it allows sixty seconds for SSH setup and destination Session resolution. 
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
 acknowledged, the attachment stays while the owner answers its heartbeats.
 Heartbeat intervals and timeouts use monotonic uptime, so laptop sleep does not
-expire a local connection. The detached Session retention policy still counts
-wall time.
+expire a local connection. Completed-Task cleanup counts wall time.
 
 For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
@@ -260,8 +238,7 @@ and records an ordinary Process. Loopflow launches that owner itself; it has no
 public command. The owner leaves the launcher's session and drops every
 descriptor the launcher inherited (a terminal host's pipes to its other
 children), since it outlives that host. Session rows name that Process; viewer
-tokens remain in memory, and unresolved native input is recorded on the owner
-LfProcess. A Claude conversation keeps one lf owner
+tokens and unwritten input remain in memory. A Claude conversation keeps one lf owner
 and one relay per terminal showing it. `lf resume` resolves the Session,
 then execs into `lf session attach OWNER`, which
 opens no store while relaying and parses no commands. It carries the original
@@ -349,7 +326,7 @@ The serving owner dates its own viewer evidence on its Process (`viewer_hold`,
 already accompany those Sessions and add no hold. Losing the last connection
 starts the absence clock immediately, independently of the sixty-second stream
 replay grace. A resumed viewer cancels cleanup. Ending an unviewed owner preserves
-that absence time, so its two-minute idle ending adds no new workspace grace.
+that absence time; its exit adds no new workspace grace.
 
 Local and remote viewers use this same protocol. SSH carries the frames through
 `lf session attach -- <ssh argv>`; the destination attachment forwards stdin/stdout
@@ -375,11 +352,11 @@ cannot retain a completed workspace indefinitely. The Machine's scheduled cleanu
 pass also reconciles viewed Tasks and uses that same absence window after owner loss.
 
 A completed, released Task keeps its checkout and Desktop shells for fifteen
-minutes total; eligible unviewed agents still end at two minutes. A returning
+minutes total, then ends eligible unviewed agents as well. A returning
 viewer cancels that deadline and its queued automatic shell closes in the same
 write that records viewing, without waiting for a sweep; leaving again starts
 a new one. Owners recheck current Task viewing before consuming automatic closure.
-Explicit Close remains effective. Requested active work, drafts, pending requests
+Explicit Close remains effective. Requested active work, pending requests
 and running Graphs still prevent ending execution; finishing that work does not
 restart an already-due deadline. Completion and PR landing schedule one retirement pinned
 to the completion, checkout and branch; reopen or changed placement revokes it.

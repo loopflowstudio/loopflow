@@ -183,20 +183,3 @@ pub(crate) fn close_allowed(
             && (!store.shell_holds_work(owner)? || store.owner_retention(owner)?.is_none()),
     ))
 }
-
-/// Whether work inside shell `owner` could receive typed input. An idle shell
-/// clears any draft it recorded earlier; an unreadable store keeps recording.
-pub(crate) fn holds_input(owner: &LfProcessId) -> bool {
-    let holds = crate::journal::process_ledger().and_then(|store| {
-        let holds = store.shell_holds_work(owner)?;
-        if !holds {
-            store.clear_owner_input(owner)?;
-        }
-        Ok(holds)
-    });
-    holds
-        .inspect_err(
-            |error| tracing::warn!(%error, %owner, "cannot judge shell work; retaining input"),
-        )
-        .unwrap_or(true)
-}

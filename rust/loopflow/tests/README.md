@@ -773,8 +773,9 @@ Launch proofs use provider-written evidence and terminal receipts.
 A detached owner calls `setsid`, so it outlives the test's process group. A
 fixture that starts owners calls `loopflow_test_support::end_recorded_processes`
 from its `Drop`, as `transport_tests`' `Fixture` does; it ends what the
-fixture's store still records as running. The provider stand-in on the owner's
-terminal ends on hangup.
+fixture's store still records as running and waits for exit, including owners
+whose completion receipt preceded their final screen write. The provider
+stand-in on the owner's terminal ends on hangup.
 
 A detached owner drops every descriptor it inherited above stderr, so a test
 that hands `lf` a pipe can wait for end of input once the viewer exits

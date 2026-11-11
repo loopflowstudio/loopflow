@@ -18,13 +18,14 @@ lf session list --available        # conversations available for your next turn,
 `lf resume` reconnects to the conversation's running provider or continues its
 saved thread after safe replacement.
 
-A live turn, draft or pending request keeps its provider. If attachment fails,
+A live turn or pending request keeps its provider. Replacing an idle provider
+discards unsent input, just as quitting it does. If attachment fails,
 resume reports the failure and leaves that work intact. Returning does not
 resend input.
 
 | The conversation is… | `lf resume` |
 |---|---|
-| running with no terminal showing it (`detached`) | reattaches; nothing restarts |
+| running with no terminal showing it (`detached`) | reattaches, or continues from history if its idle owner needs replacement |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | ended or crashed | continues the same provider thread from its history |
@@ -33,13 +34,16 @@ resend input.
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
-An unviewed, settled conversation ends its processes after two minutes of quiet;
-`session.end_detached_after` changes the grace or disables it with `off`.
-Returning paints its saved screen while the provider reopens its history, without
-replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
-keep their owner. Drafts remain editable and requests remain answerable there.
-Edited, pasted or unacknowledged native input can retain the owner until the
-provider exits; saved history and screens cannot restore an editor or request.
+A conversation stays running while its scope is open. Task conversations end
+when the Task closes (done or abandoned); completed-Task cleanup waits for live
+work and the checkout's viewing grace. Wave and repository conversations stay
+running until you close them. Leaving a viewer does not end its provider.
+Bare conversations also remain running until you quit them.
+
+`lf process rollover` moves idle owners to the selected lf. It discards unsent
+input when it replaces the provider. Saved history and screens cannot restore
+an editor. Returning after an owner ends paints its saved screen while the
+provider reopens its history, without replaying input.
 
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it

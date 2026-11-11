@@ -945,7 +945,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 }
 
 /// Get back to a Session. A terminal showing it hands over control; a provider
-/// client lf started stops only when no live turn, draft or request needs it.
+/// client lf started stops only when no live turn or request needs it.
 /// With `fork`, the holder keeps it and a new Session continues from its log. A
 /// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
@@ -1583,7 +1583,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// cannot reconstruct an active turn or pending request. An idle owner that is
 /// superseded or does not answer gives way to native continuation. So does an
 /// unanswering superseded owner with no open Session: no work is known there, while
 /// an answering one may hold a turn or draft nothing records, so a viewer attaches.

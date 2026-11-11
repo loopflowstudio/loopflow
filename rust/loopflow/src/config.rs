@@ -235,46 +235,11 @@ pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// How long a Session keeps its agent running after its last viewer leaves.
-    #[serde(default)]
-    pub end_detached_after: DetachedLimit,
-}
-
-/// How long a Session nobody views and nothing uses stays resident before its
-/// agent ends: `2m`, `30m`, `24h`, or `off`. `lf resume` reopens it.
-#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum DetachedLimit {
-    Off,
-    After(std::time::Duration),
-}
-
-impl Default for DetachedLimit {
-    fn default() -> Self {
-        Self::After(std::time::Duration::from_secs(2 * 60))
-    }
-}
-
-impl TryFrom<String> for DetachedLimit {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, String> {
-        if value.trim() == "off" {
-            return Ok(Self::Off);
-        }
-        parse_duration(&value)
-            .map(Self::After)
-            .map_err(|error| format!("end_detached_after: {error}; or use off"))
-    }
-}
-
-impl From<DetachedLimit> for String {
-    fn from(limit: DetachedLimit) -> Self {
-        match limit {
-            DetachedLimit::Off => "off".into(),
-            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
-        }
-    }
+    // Remove in task_c118380f31f14d07ba28669499efa395 after LOO-823 ships:
+    // released lf still reads this shared config key. It no longer has an effect.
+    #[serde(default, rename = "end_detached_after", skip_serializing)]
+    #[schemars(skip)]
+    _end_detached_after: Option<String>,
 }
 
 /// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
@@ -1123,33 +1088,17 @@ session:
     }
 
     #[test]
-    fn detached_sessions_end_after_two_minutes_unless_configured() {
-        use super::DetachedLimit;
-        use std::time::Duration;
-        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
-        assert_eq!(
-            parse("agent: claude").unwrap().end_detached_after,
-            DetachedLimit::After(Duration::from_secs(120))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 90m}")
+    fn obsolete_detached_limit_is_readable_but_not_written() {
+        for value in ["2m", "off"] {
+            let config: super::SessionConfig = serde_yaml_ng::from_str(&format!(
+                "terminal: Ghostty\nend_detached_after: {value}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.terminal.as_deref(), Some("Ghostty"));
+            assert!(!serde_yaml_ng::to_string(&config)
                 .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(5_400))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: 2d}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::After(Duration::from_secs(172_800))
-        );
-        assert_eq!(
-            parse("session: {end_detached_after: off}")
-                .unwrap()
-                .end_detached_after,
-            DetachedLimit::Off
-        );
-        assert!(parse("session: {end_detached_after: soon}").is_err());
+                .contains("end_detached_after"));
+        }
     }
 
     #[test]

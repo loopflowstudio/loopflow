@@ -12,10 +12,9 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-/// Why a Session owner cannot retire without losing work or native input.
+/// Why a Session owner cannot retire without losing work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OwnerRetention {
-    NativeInput,
     RunningGraph,
     /// No open Session names the owner. This is unknown, not work: the row may
     /// be complete or absent, so it cannot show the owner is safe to end.
@@ -27,7 +26,6 @@ pub(crate) enum OwnerRetention {
 impl std::fmt::Display for OwnerRetention {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            OwnerRetention::NativeInput => "native input",
             OwnerRetention::RunningGraph => "a running Graph",
             OwnerRetention::NoOpenSession => "no open Session",
             OwnerRetention::HeadlessRun => "a headless Run",
@@ -686,29 +684,6 @@ impl SqliteStore {
         )?)
     }
 
-    /// What keeps an unviewed owner from ending for idleness: its own work,
-    /// or a Task conversation's running Graph, which the person may come back
-    /// to talk about. Rollover and takeover judge `owner_retention` alone.
-    pub(crate) fn idle_retention(
-        &self,
-        owner: &crate::id::LfProcessId,
-    ) -> StoreResult<Option<OwnerRetention>> {
-        if let Some(retention) = self.owner_retention(owner)? {
-            return Ok(Some(retention));
-        }
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let task_graph: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions s
-                 JOIN task_graphs tg ON tg.task_id=s.task_id
-                 JOIN processes g ON g.id=tg.lf_process_id
-                 WHERE s.transport_lf_process_id=?1 AND s.interactive=1
-                     AND s.completed_at IS NULL AND g.completed_at IS NULL)",
-            [owner.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(task_graph.then_some(OwnerRetention::RunningGraph))
-    }
-
     pub(crate) fn owner_task_abandoned(&self, owner: &crate::id::LfProcessId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
@@ -735,16 +710,12 @@ impl SqliteStore {
     }
 
     /// What keeps execution owner `owner` running. None means its standalone
-    /// interactive Sessions hold no work or native input; finished Graphs hold nothing.
+    /// interactive Sessions hold no work; finished Graphs hold nothing.
     pub(crate) fn owner_retention(
         &self,
         owner: &crate::id::LfProcessId,
     ) -> StoreResult<Option<OwnerRetention>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        if super::native_input::pending(&conn, owner)? {
-            return Ok(Some(OwnerRetention::NativeInput));
-        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.
@@ -2537,7 +2508,7 @@ mod metadata_tests {
 mod background_task_conversation_tests {
     use rusqlite::params;
 
-    use super::{OwnerRetention, SqliteStore};
+    use super::SqliteStore;
     use crate::durable::TaskId;
     use crate::id::LfProcessId;
 
@@ -2579,46 +2550,6 @@ mod background_task_conversation_tests {
             )
             .unwrap();
         task
-    }
-
-    fn run_graph(store: &SqliteStore, task: &TaskId, graph: &LfProcessId) {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-                 VALUES(?1,'{}','implement','{}',?2,1)",
-                params![task.as_str(), graph],
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn a_running_task_graph_keeps_its_conversation_from_ending_idle() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let owner = process(&store, false);
-        let task = task_conversation(&store, "conversation", &owner);
-        assert_eq!(store.idle_retention(&owner).unwrap(), None);
-        let graph = process(&store, false);
-        run_graph(&store, &task, &graph);
-        assert_eq!(
-            store.idle_retention(&owner).unwrap(),
-            Some(OwnerRetention::RunningGraph)
-        );
-        assert_eq!(
-            store.owner_retention(&owner).unwrap(),
-            None,
-            "rollover and takeover still move the conversation"
-        );
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE processes SET completed_at=3 WHERE id=?1", [&graph])
-            .unwrap();
-        assert_eq!(store.idle_retention(&owner).unwrap(), None);
     }
 
     #[test]

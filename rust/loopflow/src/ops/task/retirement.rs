@@ -281,7 +281,7 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
                 .is_some()
             {
                 return Err(task_error(
-                    "Requested work, a draft or a pending request still holds this Task",
+                    "Requested work or a pending request still holds this Task",
                 ));
             }
             allowed.insert(owner);

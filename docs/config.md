@@ -420,7 +420,9 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Chrome automation | `--chrome on` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
-| End agents nobody is viewing | — | `session.end_detached_after: 2m` (or `off`) |
+
+`session.end_detached_after` is accepted for older configurations but ignored.
+Conversations remain running until closed or their Task is cleaned up.
 
 ## Scratch lifecycle
 

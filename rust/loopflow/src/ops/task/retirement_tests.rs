@@ -135,7 +135,7 @@ fn retirement_lost_viewers_and_crashed_owners_expire_without_reopening() {
 }
 
 #[test]
-fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
+fn retirement_waits_for_final_work_and_shell_job_settlement() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Workspace::new().await;
@@ -173,9 +173,9 @@ fn retirement_waits_for_final_work_drafts_and_shell_job_settlement() {
             fixture.assert_retained();
         }
         fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
-        assert!(fixture.store.sqlite.try_record_owner_input(&agent, b"unfinished draft").unwrap());
-        advance(&fixture.store, &fixture.task).await.unwrap();
-        fixture.store.sqlite.clear_owner_input(&agent).unwrap();
+        let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
+        assert!(error.to_string().contains("without confirmed job cleanup"));
+        assert_eq!(fixture.intent().phase, "closing");
         worker.0.kill().unwrap();
         worker.0.wait().unwrap();
         fixture.sql().execute("UPDATE agent_sessions SET completed_at=1 WHERE id='final-turn'", []).unwrap();

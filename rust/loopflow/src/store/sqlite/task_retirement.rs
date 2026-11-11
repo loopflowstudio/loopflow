@@ -212,7 +212,10 @@ impl SqliteStore {
     pub(crate) fn owner_retiring_tasks(&self, owner: &LfProcessId) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!("SELECT h.task_id FROM task_retirements h
-            WHERE h.phase='closing' AND (
+            WHERE h.phase='closing'
+                AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
+                    WHERE tg.task_id=h.task_id AND g.completed_at IS NULL)
+                AND (
                 EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.transport_lf_process_id=?1)
                 OR EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
         let tasks = query

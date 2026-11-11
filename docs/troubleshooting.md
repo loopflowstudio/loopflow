@@ -315,19 +315,15 @@ and `lf process rollover --dry-run` name a `session serve` owner by its PID.
 | `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
 | `lf server run` | The Machine server | Desktop's connection until the server is started again |
 
-An owner whose conversation is settled and unviewed ends on its own after
-`session.end_detached_after`; one that is days old and still running is held
-by something `lf process rollover --dry-run` names. `native input` means keys
-reached the agent that lf couldn't read as a sent prompt: a typed draft, an
-edit, or only an arrow key or Esc. Stopping the owner loses a draft. Open it
-with `lf resume <ID>`, then send or clear what is there; the owner ends on
-schedule once its input is empty.
+Conversations remain running while their scope is open. Done Tasks end their
+conversations during cleanup, about fifteen minutes after you stop viewing them,
+once live turns, pending requests and Graphs settle. Abandoning a Task ends its
+unviewed conversation. Typed input does not hold either cleanup.
+`lf process rollover --dry-run` shows which owners can move to the selected lf;
+rollover discards unsent input when it replaces a provider.
 
-A Desktop shell runs until you close its tab; hiding it or quitting Desktop
-leaves it running. A finished Task keeps its checkout and shells until cleanup,
-about fifteen minutes after you stop viewing it. Input held in the Task's own
-conversation holds that cleanup too, so clearing it there lets the shells
-close.
+A Desktop shell runs until you close its tab or its Task is cleaned up; hiding
+it or quitting Desktop leaves it running.
 
 A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from

@@ -422,14 +422,8 @@ impl super::SqliteStore {
         error: Option<&str>,
         conclusion: Option<&str>,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        if tx.execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),now,error,conclusion,session])? == 0 {
-            // Another check already settled this run.
-            return Ok(());
-        }
-        tx.commit()?;
+        // A run another check already settled matches no row.
+        self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),time::OffsetDateTime::now_utc().unix_timestamp(),error,conclusion,session])?;
         Ok(())
     }
 }

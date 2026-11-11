@@ -4,12 +4,16 @@ Implement the [remote attach contract](../rust/loopflow/src/server/README.md#rem
 This checkout currently adds documentation of the intended contract only;
 remote ticket behavior and authenticated acceptance remain unimplemented.
 The listener, mobile settings and bulk protocol are outside this Task.
+The current `server/service.rs::Tickets` consumes local tickets before checking
+UID and expiry, with direct coverage in
+`a_ticket_opens_one_bridge_for_its_user_within_its_lifetime`; its clock is still
+`Instant`. Remote acceptance cannot run against this local-only implementation.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 20:50 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
-reported `OPEN`, `mergedAt: null`, and head
-`bfd4244858864279ca13450c9f5f102c5554643c`, unchanged from 20:16 UTC.
+At 20:53 and 21:27 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
+reported `OPEN`, `mergedAt: null`, `autoMergeRequest: null`, and head
+`bfd4244858864279ca13450c9f5f102c5554643c`, unchanged from 20:50 UTC.
 Fetched main remained at
 `1570bef610a0a0cee0402ecc37d3a31461b213a8`; `git ls-tree` confirmed neither
 `server/mobile.rs` nor `server/ticket.rs` was present. Implementation and

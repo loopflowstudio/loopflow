@@ -3333,7 +3333,6 @@ if not resumed:
 terminal = os.open("/dev/tty", os.O_RDWR)
 tty.setraw(terminal)
 mark("ready-" + ("2" if resumed else "1"), str(os.getpid()))
-os.write(1, b"EDITOR_READY\r\n")
 draft = bytearray()
 while True:
     key = os.read(terminal, 1)
@@ -3357,8 +3356,9 @@ while True:
     let mut command = fixture.native(&entry, &path, "original request");
     command.env("LF_BIN", &entry);
     let owner = fixture.owner(command);
+    // Native launch and its hooks finish before starting the viewer's I/O deadline.
+    fixture.wait_file("ready-1");
     let mut first = fixture.viewer(&owner, true);
-    until_out(&mut first, "EDITOR_READY");
     let session = fixture.session_of_owner(&owner);
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();

@@ -90,6 +90,18 @@ That startup code is the same as on main (this branch renamed the test and chang
 <p>A fresh <code>ps</code> through the audit's own selector (<code>lf_binary</code>) counted 358 at 03:38, matching that run's end-of-reads count. The final run above reported 371 at the end of its reads; a fresh recount at 04:05:33 gave 370.
 "checkout build" <code>server run</code> ×2 are LOO-824's (<code>loopflow.loo-824-hold-managed-sessions/target</code>). The <code>test fixture</code> rows are
 <code>/tmp/lf-7501-*</code> processes 5–8 days old, from before the fixture fix.</p>
+<p><b>Count correction from compression:</b> the saved report includes two shell commands under <code>other</code> whose arguments contained an <code>lf</code> path.
+The recount used the same faulty selector. The script now classifies the executable from <code>ps comm</code>; regenerate the report at demo before treating its totals as accurate.</p>
+
+<h2>Startup repair, 2026-11-11</h2>
+<p>The upgrade fixture attached before native launch and three synchronous hooks finished, putting that startup inside the viewer's 15 s socket silence deadline.
+A temporary Python launcher delayed only this stand-in's non-version launches by 17 s: the old unanswering test failed at <code>EDITOR_READY</code> with <code>WouldBlock</code> (20.68 s).
+Both repaired cases passed with that same delay (65.28 s). The fixture now waits for its existing atomic <code>ready-1</code> file before attaching,
+just as replacement startup waits for <code>ready-2</code>; the redundant screen marker is deleted. Pending-turn, queued-input, history and attachment assertions remain.
+No retry, raised deadline or product lifetime change. The temporary launcher was removed.</p>
+<p><code>uv run cargo test -p loopflow --test transport_tests</code>: <b>110 passed, 8 ignored</b>, 129.20 s after the repair.
+Before/after <code>ps</code> found no new fixture processes; all 34 fixture homes observed by a descendant sampler had no remaining processes.
+The unchanged baseline passed too (117.12 s); the controlled startup delay supplies the failure reproduction.</p>
 
 <h2>What works now</h2>
 <ul><li>Quiet, unviewed Task conversations with a draft keep running while the Task is open.</li>
@@ -101,5 +113,4 @@ That startup code is the same as on main (this branch renamed the test and chang
 <li>Desktop windows: no window was opened in this run.</li><li>Real Claude/Codex providers: the stand-in provider only.</li></ul>
 <h2>Still wrong, worst first</h2>
 <ol><li>Keystrokes typed while a return is still opening the provider are dropped. They are neither delivered nor replayed. This is #1882's opening path, outside this change.</li>
-<li>Attaching waits on a store write lock for as long as it is held. Input after attaching does not.</li>
-<li><code>unanswering_superseded_owner_preserves_pending_turn_and_queued_input</code> can exceed its 15 s startup read under heavy load (load average ~120).</li></ol>
+<li>Attaching waits on a store write lock for as long as it is held. Input after attaching does not.</li></ol>

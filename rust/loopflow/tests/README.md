@@ -64,10 +64,10 @@ failed placement, failed shipping and a Graph held at landing.
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
 without one is a terminal's status observation, which an unviewed owner does
-not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+not read as a turn (`transport_tests::silent_native_turns_survive_until_settlement`).
 `transport_tests::silent_native_turns_survive_until_settlement` runs native
 prompt/stop callbacks from the generated hook settings, preserves silent work
-past the detached grace and executable removal, then proves ending after stop.
+past completed-Task retirement and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
@@ -125,9 +125,9 @@ signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
 installed-provider recovery still need separate proof.
 Use published 0.15.1 for the released boundary: its owner speaks newline JSON
-and predates native-input tracking. Prove attachment and retention of an unsent
-draft before allowing its provider to be replaced; an absent input record does
-not establish that an older provider's editor is empty.
+and predates native-input tracking. Prove attachment retains an unsent draft;
+explicit replacement discards it while continuing recorded history. Pending
+requests still retain their provider across the older protocol.
 Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
 a shallow checkout orders all slugs as drafts and can reject the released store
 before reaching the interaction under test.

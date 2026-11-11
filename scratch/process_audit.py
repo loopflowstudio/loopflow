@@ -41,6 +41,11 @@ def age(s):
 # ---- Readings -------------------------------------------------------------
 
 def read_ps():
+    executables = {
+        int(pid): executable
+        for line in run(["ps", "-axww", "-o", "pid=,comm="]).splitlines()
+        for pid, executable in [line.strip().split(None, 1)]
+    }
     procs = {}
     for line in run(["ps", "-axww", "-o", "pid=,ppid=,pgid=,etime=,command="]).splitlines():
         pid, ppid, pgid, etime, command = line.split(None, 4)
@@ -50,15 +55,14 @@ def read_ps():
             "pgid": int(pgid),
             "age": seconds(etime),
             "command": command,
+            "executable": executables.get(int(pid), ""),
         }
     return procs
 
 
-def lf_binary(command):
-    """The lf executable path when this command line runs lf, else None."""
-    # The first `/lf` or `/lf-<suffix>` word ends the path; app paths hold spaces.
-    m = re.match(r"^(lf|/.*?/lf(?:-[A-Za-z0-9]+)?)(?=\s|$)", command)
-    return m.group(1) if m else None
+def lf_binary(executable):
+    """Match the executable, never an lf path inside a shell's arguments."""
+    return executable if re.fullmatch(r"lf(?:-[A-Za-z0-9]+)?", Path(executable).name) else None
 
 
 def read_lsof():
@@ -239,10 +243,10 @@ def main():
 
     rows = []
     for p in procs.values():
-        path = lf_binary(p["command"])
+        path = lf_binary(p["executable"])
         if not path:
             continue
-        args = p["command"][len(path):].strip()
+        args = p["command"].removeprefix(path).strip()
         r = role(args)
         found = SID.search(args)
         session = None
@@ -265,7 +269,7 @@ def main():
         shell = shells.get(p["pid"]) if r == "desktop shell" else None
         viewers = set()
         if r in ("session serve", "desktop shell"):
-            provider = [c for c in children[p["pid"]] if not lf_binary(c["command"])]
+            provider = [c for c in children[p["pid"]] if not lf_binary(c["executable"])]
             # A viewer holds a unix socket connected to one of the owner's.
             ends = {addr for _, typ, addr, _ in lsof.get(p["pid"], []) if typ == "unix" and addr}
             viewers = {pid for addr in ends for pid in connected_to.get(addr, set()) if pid != p["pid"]}
@@ -335,7 +339,7 @@ def main():
             older["healthy"] = False
 
     # The lf reads take minutes on a busy Machine; say what ps shows once they are done.
-    recount = sum(1 for p in read_ps().values() if lf_binary(p["command"]))
+    recount = sum(1 for p in read_ps().values() if lf_binary(p["executable"]))
     write_report(now, rows, f"{recount} at {time.strftime('%H:%M')}")
     print(f"{len(rows)} lf processes ({recount} when the reads finished) -> {OUT}")
     for (r, kind), count in sorted(Counter((x["role"], x["kind"]) for x in rows).items(), key=lambda kv: -kv[1]):
@@ -433,7 +437,7 @@ def write_report(now, rows, recount):
         "<code>lf session list --all --interactive all --limit 0 --json</code>, <code>lf process list --json</code> and <code>lf process rollover --dry-run --json</code>. "
         f"<b>{len(rows)}</b> processes ran an <code>lf</code> binary at that <code>ps</code>; a second <code>ps</code> after the "
         f"<code>lf</code> reads answered counted {e(recount)} (hooks and commands start and end meanwhile). Recount with "
-        "<code>ps -axww -o command= | grep -cE '^(lf|/.*/lf(-[A-Za-z0-9]+)?)( |$)'</code>. "
+        "<code>ps -axww -o comm= | grep -cE '(^|/)lf(-[A-Za-z0-9]+)?$'</code>. "
         "Nothing here was stopped; stop one by PID after reading what it serves.</p>",
         *(
             ["<p class=stale><b>Unanswered reads:</b> " + "; ".join(f"<code>{e(c)}</code>" for c in UNANSWERED)

@@ -185,10 +185,6 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .is_dir()
         .then(|| super::lock_task_pr_mutation(checkout))
         .transpose()?;
-    // A closed Task ends its conversations whether or not its checkout can go.
-    // Only checkout deletion needs merged delivery; a retained checkout keeps
-    // its files and commits and reports why on every pass.
-    let deletion = prepare_deletion(store, task, &intent).await;
     if let Err(error) = require_settled_work(store, task) {
         store
             .sqlite
@@ -214,7 +210,9 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
             .map_err(task_error)?;
         return Ok(());
     }
-    let deletion = deletion?;
+    // A closed Task ends its conversations whether or not its checkout can go.
+    // Check merged delivery only once execution has settled and deletion is next.
+    let deletion = prepare_deletion(store, task, &intent).await?;
     if !crate::desktop::shells::jobs_settled(&store.sqlite, &task.id).map_err(task_error)? {
         return Err(task_error(
             "Shell owner ended without confirmed job cleanup; retained checkout",

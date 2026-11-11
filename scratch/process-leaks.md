@@ -29,12 +29,14 @@ Readings, 2026-11-10 ~17:30, 343 lf processes:
 Since `ab682d71f`, `observe-status` is one write per reading; a resident one
 is from an older Desktop.
 
-Remaining at demo: regenerate the audit report (the committed one is the 20:20
-reading: 354, 358 at its own second `ps`, 358 on a separate recount) and show
-the affected test suite's process diff again. Earlier checks and the pre-review
+Remaining at demo: regenerate the audit report with the corrected executable
+selector and show the affected test suite's process diff again. The saved
+04:01 reading counted 371, including two shell commands whose arguments named
+an `lf` path. Matching `ps comm` now excludes those false positives; the old
+recount repeated the same selector error. Earlier checks and the pre-review
 concept discussion are in `551becf586687262921e0681a169b5b7973fc75b:scratch/process-leaks.md`.
 The audit describes the installed build at the time; its input holds disappear
-with this change. `scratch/qa.html` predates this lifetime revision.
+with this change. `scratch/qa.html` records the subsequent lifetime walkthrough.
 
 ## Desktop shells (read 2026-11-10 18:55)
 
@@ -150,6 +152,26 @@ the provider are dropped; attaching waits on a held store write lock.
 
 ## Remaining verification
 
+### Delete — do not maintain
+
+- Idle-ending policy, `OwnerRetention::NativeInput`, `store/sqlite/native_input.rs`
+  and `transport/input_retry_tests.rs` are removed. Keep bounded input forwarding,
+  pending-turn/Graph retention and completed-Task closure on the surviving paths.
+- The upgrade fixture's separate `EDITOR_READY` screen marker and wait are removed.
+  Startup uses its existing atomic `ready-1` receipt after native hooks and
+  raw-terminal setup, as replacement startup uses `ready-2`. Both upgrade cases
+  keep every pending-turn, queued-input, history and attachment assertion.
+
+2026-11-11 startup repair: the reported failure preceded upgrade. The viewer's
+15-second socket silence deadline included native launch and three synchronous
+hooks. A temporary PATH wrapper delayed only the upgrade stand-in's non-version
+launches by 17 seconds: the old unanswering case failed at `EDITOR_READY` with
+`WouldBlock` (20.68s); both repaired cases passed under the same delay (65.28s).
+The wrapper was outside the repository and removed. Startup now finishes before
+attachment; no retries, raised deadlines or lifetime changes.
+
+- `uv run cargo test -p loopflow --test transport_tests` (inherited `LF_*` unset, stdin closed): 110 passed, 8 ignored, 129.20s after the repair. Before/after `ps`: no new fixture processes; all 34 fixture homes observed by a descendant sampler had no remaining processes. The unchanged baseline also passed (117.12s), so the controlled delay supplies the failure reproduction.
+
 The branch contains the current local `origin/main` (`976b53db0`), including
 #1882's conversation-opening readiness changes and #1884's package migration
 ordering. The sync repair removed four references to the deleted `StopOwner`
@@ -172,9 +194,12 @@ readings as current behavior.
 - `ps -axo pid=,command=` before/after focused Rust tests: 42 prior matching processes remained, no new fixture/build process (excluding the reading commands). Nothing pre-existing was signalled.
 - `cargo fmt --check`, `git diff --check`: passed; audit script syntax parses.
 - `uv run cargo test -p loopflow --test transport_tests -- conversation_open_` (inherited `LF_*` unset, stdin closed): 3 passed after the sync repair; 11.74s.
-- `uv run cargo test -p loopflow --test integration documented_commands::` (inherited `LF_*` unset, stdin closed): 4 passed after replacing the retired status phrase in `docs/troubleshooting.md` found on the first run.
+- `uv run cargo test -p loopflow --test integration documented_commands::` (inherited `LF_*` unset, stdin closed): 4 passed, 23.80s after the startup repair and test README lifetime corrections.
 - Compress follow-through: `git diff --check` passed; obsolete symbol/doc search found no remaining runtime references. Only prose and a test comment changed; no build or test rerun. `lf context`: within both targets.
 - 2026-11-11 realign: `lf context` and `lf task status LOO-823 --json` succeeded; no outstanding context-loading failure. Code inspection agrees with the lifetime direction; no code repair or test rerun in this pass.
+- Compress: checkout deletion is prepared only after execution settles, removing the deferred result and repeated PR/Git reads while owners close. `uv run cargo test -p loopflow --lib ops::task::retirement::tests::` (inherited `LF_*` unset, stdin closed): 7 passed, 28.43s; existing compact-unwind linker warning.
+- `uv run cargo test -p loopflow --test transport_tests` (inherited `LF_*` unset, stdin closed): 110 passed, 8 ignored, 111.84s after retirement simplification; 797 descendant PIDs and 94 fixture home paths sampled, none remained; before/after `ps` found no new fixture/build matches.
+- Audit selector smoke check (`uv run python -I`, importing `process_audit.py`): app paths and copied lf builds matched, shell arguments did not; live executable reading succeeded. `cargo fmt --check` and `git diff --check`: passed.
 
 Gate: affected transport, retirement, native-turn/steers, rollover, config,
 CLI resolution/parser, server schema and `documented_commands::` suites; Clippy.

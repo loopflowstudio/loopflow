@@ -45,34 +45,48 @@ pub(super) fn start() {
 fn watch() {
     let path = crate::store::default_db_path();
     let mut changes = crate::store::changes::StoreChanges::watch(&path);
-    let mut store = None;
-    let mut seen = None;
+    let mut watcher = Watcher::default();
     loop {
-        if store.is_none() && path.exists() {
-            store = SqliteStore::new(&path)
+        watcher.read(&path);
+        changes.wait(UNSIGNALLED);
+    }
+}
+
+/// The watcher's store and the revisions it last woke conversations for.
+#[derive(Default)]
+struct Watcher {
+    store: Option<SqliteStore>,
+    seen: Option<(i64, i64)>,
+}
+
+impl Watcher {
+    /// Wake idle conversations if the revisions moved since the last reading.
+    /// The first reading wakes too: what arrived while no server ran reaches
+    /// each idle conversation now. One that already heard it gets nothing;
+    /// claimed updates and confirmed steers say so.
+    fn read(&mut self, path: &Path) {
+        if self.store.is_none() && path.exists() {
+            self.store = SqliteStore::new(path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
                 .ok();
         }
-        if let Some(open) = &store {
-            match open
-                .task_update_revision()
-                .and_then(|updates| Ok((updates, open.steer_revision()?)))
-            {
-                // The first reading is a baseline: what arrived while no
-                // server ran waits for each conversation's next boundary.
-                Ok(revision) if seen.is_none() => seen = Some(revision),
-                Ok(revision) if seen != Some(revision) => {
-                    seen = Some(revision);
-                    wake_idle(open, None);
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    tracing::warn!(%error, "steer and Task update revisions unread");
-                    store = None;
-                }
+        let Some(store) = &self.store else {
+            return;
+        };
+        match store
+            .task_update_revision()
+            .and_then(|updates| Ok((updates, store.steer_revision()?)))
+        {
+            Ok(revision) if self.seen != Some(revision) => {
+                self.seen = Some(revision);
+                wake_idle(store, None);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "steer and Task update revisions unread");
+                self.store = None;
             }
         }
-        changes.wait(UNSIGNALLED);
     }
 }
 
@@ -87,11 +101,12 @@ fn wake_idle(store: &SqliteStore, session: Option<&str>) {
     }
 }
 
-/// Deliver `conversation`'s pending steers and Task update, if any. The
-/// update is recorded as dispatched before it is sent; the steer batch is
-/// confirmed once sent, so a failed send returns it to pending for the next
-/// boundary. Once sent, the conversation is recorded as in a turn, so the
-/// next revision starts no second one.
+/// Deliver `conversation`'s pending steers and Task update, if any; with
+/// neither, the conversation is not touched. The update is recorded as
+/// dispatched before it is sent; the steer batch is confirmed once sent, so a
+/// failed send returns it to pending for the next boundary. Once sent, the
+/// conversation is recorded as in a turn, so the next revision starts no
+/// second one.
 fn wake(store: &SqliteStore, conversation: &IdleConversation) {
     let IdleConversation {
         adapter,
@@ -100,6 +115,12 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         reach,
     } = conversation;
     let delivered = (|| -> Result<()> {
+        let session = &adapter.session;
+        if store.session_steers(session, 0, 1)?.pending == 0
+            && crate::harness::task_updates::read(store, session)?.is_none()
+        {
+            return Ok(());
+        }
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
         let reach = match reach {
@@ -214,7 +235,7 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{after_turn, wake_idle};
+    use super::{after_turn, wake_idle, Watcher};
     use crate::context_block::ContextDelivery;
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use crate::steer::{NativeBoundary, SteerAdapter};
@@ -429,12 +450,50 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
         let inbox = fixture.claude(&socket);
         fixture.stop(&fixture.store, &inbox);
-        // A new server process: nothing but the store carries over.
-        let restarted = SqliteStore::new(&fixture.home.path().join("store.db")).unwrap();
-        fixture.comment(&restarted, "c-1", "PR: https://example.test/pr/1");
-        wake_idle(&restarted, None);
+        // News lands while no server runs; a new server process carries over
+        // nothing but the store, and its first reading delivers it.
+        fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
+        let path = fixture.home.path().join("store.db");
+        Watcher::default().read(&path);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/1"));
+        // News after the restart wakes it too.
+        let restarted = SqliteStore::new(&path).unwrap();
+        fixture.stop(&restarted, &inbox);
+        fixture.comment(&restarted, "c-2", "PR: https://example.test/pr/2");
+        wake_idle(&restarted, None);
+        let content = received(&listener)[1]["message"]["content"].to_string();
+        assert!(content.contains("pr/2") && !content.contains("pr/1"));
+    }
+
+    #[test]
+    fn a_revision_with_nothing_new_leaves_the_conversation_alone() {
+        let fixture = fixture("wake-quiet");
+        let socket = fixture.home.path().join("inbox.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let inbox = fixture.claude(&socket);
+        fixture.stop(&fixture.store, &inbox);
+        let mut watcher = Watcher::default();
+        let path = fixture.home.path().join("store.db");
+        watcher.read(&path);
+        // Another Task's Graph moves.
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates'",
+                [],
+            )
+            .unwrap();
+        watcher.read(&path);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "no socket opened"
+        );
     }
 
     #[test]

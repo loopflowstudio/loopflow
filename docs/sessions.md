@@ -187,9 +187,10 @@ and gets no Task progress.
 
 Locally saved comments reach a conversation even when planning connection
 settings are unavailable; sync badges stay in the Task thread. An update that
-lands while the server is down, or one the server cannot reach a conversation
-with, waits for that conversation's next turn, and lf records the gap in
-`logs/lf.log`. Each update reaches a conversation once.
+lands while the server is down reaches the idle conversation when the server
+comes back. One the server cannot reach a conversation with waits for that
+conversation's next turn, and lf records the gap in `logs/lf.log`. Each update
+reaches a conversation once.
 
 ## One more headless turn
 

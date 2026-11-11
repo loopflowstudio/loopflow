@@ -468,9 +468,10 @@ Codex app-server (`processes.endpoint`) or the Claude inbox key its first
 managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
 key names the socket and must still name the conversation. One
 server thread waits on the store's change signal (`store::changes`) and reads
-the `task_updates` revision and the newest steer; when either moves, every idle
-conversation with news gets its pending steer batch and its Task update in one
-message, and is recorded as in a turn until its next Stop. A turn end checks
+the `task_updates` revision and the newest steer at start and whenever either
+moves; every idle conversation with news gets its pending steer batch and its
+Task update in one message, and is recorded as in a turn until its next Stop.
+One with no news is not connected to. A turn end checks
 its own conversation the same way. The update is recorded as delivered first;
 the steer batch is confirmed once the message is sent, so a failed send answers
 it again at the next boundary:

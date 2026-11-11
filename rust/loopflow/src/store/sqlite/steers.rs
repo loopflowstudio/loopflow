@@ -139,14 +139,17 @@ impl SqliteStore {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             let (native, previous_work): (bool, i64) =
                 self.conn.lock().expect("store mutex poisoned").query_row(
-                    "SELECT p.agent_interactive, COALESCE(act.open_tools,0)
-                     FROM processes p LEFT JOIN session_activity act
-                       ON act.agent_process_id=p.id AND act.session_id=?2
+                    "SELECT s.interactive, COALESCE(act.open_tools,0)
+                     FROM processes p JOIN agent_sessions s ON s.id=?2
+                     LEFT JOIN session_activity act
+                       ON act.agent_process_id=p.id AND act.session_id=s.id
                      WHERE p.id=?1",
                     params![adapter.agent_process_id, adapter.session],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
-            // Structured providers already report through their owned stream.
+            // A headless run reports through the stream lf owns. A person's
+            // conversation reports here, Codex's included: its AgentProcess is
+            // an app-server lf spawned, but a native client takes the turns.
             if !native {
                 return Ok(());
             }

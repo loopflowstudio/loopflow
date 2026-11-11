@@ -254,7 +254,7 @@ pub fn emit_block(
     let (path, delivery) = load_delivery(delivery, &input)?;
     // Hooks installed before Task updates rode the boundary answer still
     // name this moment in live conversations; it has nothing left to do.
-    // Deleted with `ContextMoment::TaskUpdates` (LOO-826 follow-up).
+    // Deleted with `ContextMoment::TaskUpdates` (LOO-838).
     if moment == ContextMoment::TaskUpdates {
         return Ok(());
     }

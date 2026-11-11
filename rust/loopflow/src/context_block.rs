@@ -31,7 +31,7 @@ pub enum ContextMoment {
     Stop,
     /// Retired: Task updates ride the boundary answer. Hooks installed in
     /// conversations that started before then still name it; it does nothing.
-    /// TODO(LOO-826 follow-up, filed at delivery): delete it once no
+    /// TODO(LOO-838): delete it once no
     /// conversation started before this build is live.
     TaskUpdates,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.

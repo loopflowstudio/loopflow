@@ -84,13 +84,10 @@ $LF_HOME/loopflow.db</code>, because <code>pgrep -f 'lf server run'</code> match
 servers (it did here; the kill was rejected as a malformed PID list and nothing was signalled).
 <code>scratch/qa/pty.py</code> now writes its <code>.exit</code> file when the PTY read ends with EIO.</p>
 
-<h2>Checks run</h2>
-<pre>cargo test -p loopflow --test transport_tests a_launch_refused_for_a_stopped_server   1 passed (fails with util.rs reverted)
-cargo test -p loopflow --test transport_tests held                                    9 passed
-cargo test -p loopflow --test integration session_steers::                           4 passed, 1 failed in the parallel run:
-  public_context_capability_survives_claim_changes_and_rejects_children_and_replacement
-  (session_steers.rs:409, claim_session_attachment); passed alone. Gate reruns it.
-cargo clippy -p loopflow --all-targets -- -D warnings                                  clean</pre>
+<h2>Checks run (after the fixes)</h2>
+<pre>transport_tests held 9 passed · lib ops::human_session:: 43 · transport:: 77 · ghostty_vt:: 7 · rollover:: 5
+integration documented_commands:: 4 · session_cli_uses_one_truthful_resolution_contract 1 · clippy clean
+Gate reruns session_steers public_context_capability (failed once in parallel, passed alone).</pre>
 
 <h2>Not reached</h2>
 <ul>
@@ -100,16 +97,16 @@ cargo clippy -p loopflow --all-targets -- -D warnings                           
 symlinked <code>LF_BIN</code> and launchd restarts; not repeated.</li>
 </ul>
 
-<h2>Still wrong, worst first</h2>
-<ol>
-<li><code>lf session list</code> says "This conversation is open in another terminal on this Machine;
-Take back transfers input here" for held Sessions no terminal views (repository, Wave, Task), and
-labels Task Sessions <code>Repository</code>. <code>lf resume &lt;id&gt;</code> works regardless. Unchanged
-from the second pass.</li>
-<li>Two wordings for one exit: a view connected when the agent exits prints "claude exited with
-3." after a "Left … Continue with: lf resume …" line; a view that learns of the exit after a
-server restart prints "The agent exited with 3."</li>
-<li>From the second pass, not rechecked: <code>lf ps</code>/rollover name launcher rows by the exec'd
-agent binary; the snapshot's OSC 7 carries a NUL before ST; <code>lf session attach --terminal
-&lt;malformed&gt;</code> says "unrecognized subcommand 'attach'".</li>
-</ol>
+<h2>Fixed after this pass (implement, same day; not yet re-QA'd by hand)</h2>
+<ul>
+<li><code>lf session list</code>: a held Session offers Open here/Reconnect ("View the running conversation
+here: lf resume &lt;id&gt;"), never Take back; a held terminal's <code>viewed</code> sets Detached; a Task
+Session with no Wave is labelled by its Task. Test:
+<code>ops::human_session::tests::a_held_task_conversation_without_a_view_offers_attach</code>.</li>
+<li>One exit line, <code>native_exit::exit_line</code>: the post-restart view prints
+<code>claude exited with 3.</code> from its Session's provider (nothing when the terminal has no Session).</li>
+<li>Repaint OSC 7 NUL dropped (<code>ghostty_vt::drop_pwd_nul</code>, test fails without it).</li>
+<li>Rollover/<code>lf ps</code> BINARIES skip a launcher row whose pid and start time an agent row shares.</li>
+<li><code>lf session attach --terminal &lt;malformed&gt;</code> already named the expected form;
+<code>session_cli_uses_one_truthful_resolution_contract</code> now asserts that message.</li>
+</ul>

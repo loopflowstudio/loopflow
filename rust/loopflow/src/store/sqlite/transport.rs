@@ -99,17 +99,22 @@ impl SqliteStore {
         )?)
     }
 
-    /// What an ended terminal's child exited with, once recorded with a status.
-    pub(crate) fn terminal_exit_code(&self, terminal: &TerminalId) -> StoreResult<Option<u8>> {
+    /// What an ended terminal's child exited with, once recorded with a
+    /// status, and the provider its Session launched, when it has one.
+    pub(crate) fn terminal_exit(
+        &self,
+        terminal: &TerminalId,
+    ) -> StoreResult<Option<(u8, Option<String>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT exit_code FROM held_terminals WHERE id=?1 AND ended_at IS NOT NULL",
+                "SELECT t.exit_code,
+                        (SELECT s.provider FROM agent_sessions s WHERE s.held_terminal_id=t.id LIMIT 1)
+                 FROM held_terminals t WHERE t.id=?1 AND t.ended_at IS NOT NULL AND t.exit_code IS NOT NULL",
                 [terminal.as_str()],
-                |row| row.get::<_, Option<u8>>(0),
+                |row| Ok((row.get::<_, u8>(0)?, row.get::<_, Option<String>>(1)?)),
             )
-            .optional()?
-            .flatten())
+            .optional()?)
     }
 
     pub(crate) fn end_terminal(&self, terminal: &TerminalId, code: Option<u8>) -> StoreResult<()> {

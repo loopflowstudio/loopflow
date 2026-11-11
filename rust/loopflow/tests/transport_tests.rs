@@ -8020,6 +8020,15 @@ fn held_session_survives_server_restart() {
         "the stream skipped or repeated output: {ticks:?}"
     );
 
+    // The terminal's Session names its provider, as a launch records it.
+    fixture
+        .sql()
+        .execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,provider,cwd,input_published,held_terminal_id)
+             VALUES('session_held_restart','Held','generated',1,'claude',?2,1,?1)",
+            rusqlite::params![terminal, home.to_str().unwrap()],
+        )
+        .unwrap();
     // SIGKILL the server; the agent exits 3 while none runs.
     service.stop();
     std::fs::write(home.join("stop"), "").unwrap();
@@ -8061,7 +8070,8 @@ fn held_session_survives_server_restart() {
     );
     // The view ends as the agent did, not as a refused attach.
     assert_eq!(view.wait_exit().code(), Some(3));
-    view.wait_text("The agent exited with 3.");
+    // The same line a view connected at the exit prints.
+    view.wait_text("claude exited with 3.");
     let screen = String::from_utf8_lossy(&view.screen.lock().unwrap()).into_owned();
     assert!(!screen.contains("is not running"), "{screen:?}");
 }

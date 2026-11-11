@@ -2120,9 +2120,14 @@ fn view(
                         }
                         // An agent that exited while no server ran ends the
                         // view as its exit would have.
-                        if let Some(code) = next.as_ref().err().and_then(exit_code) {
+                        if let Some((code, provider)) = next.as_ref().err().and_then(ended_exit) {
                             drop(terminal.take());
-                            eprintln!("\nThe agent exited with {code}.");
+                            if let (Some(provider), 1..) = (provider, code) {
+                                eprintln!(
+                                    "\n{}",
+                                    crate::harness::native_exit::exit_line(&provider, code)
+                                );
+                            }
                             return if code == 0 {
                                 Ok(())
                             } else {
@@ -2699,10 +2704,14 @@ fn replace_view(
 
 /// The code a held terminal's agent exited with, when `error` is a server's
 /// answer that the terminal ended and the store recorded its exit.
-fn exit_code(error: &anyhow::Error) -> Option<u8> {
-    let ended = error.downcast_ref::<crate::engine::Error>()?;
-    let code = ended.data.as_ref()?["exit_code"].as_u64()?;
-    u8::try_from(code).ok()
+/// The code and Session provider of an agent a refused attach says exited.
+fn ended_exit(error: &anyhow::Error) -> Option<(u8, Option<String>)> {
+    let data = error
+        .downcast_ref::<crate::engine::Error>()?
+        .data
+        .as_ref()?;
+    let code = u8::try_from(data["exit_code"].as_u64()?).ok()?;
+    Some((code, data["provider"].as_str().map(str::to_owned)))
 }
 
 /// A bridge to `host` for a view that reconnects: an owner through the

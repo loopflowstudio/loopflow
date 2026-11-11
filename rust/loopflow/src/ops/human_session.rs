@@ -325,6 +325,9 @@ pub(crate) fn session_actions(
 }
 
 fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    if session.interactive && session.held {
+        return held_actions(session);
+    }
     let occupied = session.agent_process_id.is_some()
         && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
     // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
@@ -348,6 +351,25 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
         name_session_holder(&mut actions, session.terminal_id.as_deref());
     }
     actions
+}
+
+/// A held terminal takes any number of views, so opening one takes no other
+/// terminal's input; Take back belongs to an execution owner.
+fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    vec![SessionAction {
+        kind: SessionActionKind::Open,
+        label: if session.unviewed {
+            "Reconnect"
+        } else {
+            "Open here"
+        }
+        .to_string(),
+        help: format!(
+            "View the running conversation here: lf resume {}",
+            session.id
+        ),
+        unavailable_reason: None,
+    }]
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -685,19 +707,19 @@ fn summary_surface(
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         _ => None,
     };
-    let work_path = session.wave_id.as_ref().map(|wave| {
-        let wave = session
+    let wave = session.wave_id.as_ref().map(|wave| {
+        session
             .wave_name
             .clone()
-            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"));
-        match &session.task_id {
-            None => wave,
-            Some(task) => match &session.task_identifier {
-                Some(label) => format!("{wave} / {label}"),
-                None => format!("Task {task} (unavailable)"),
-            },
-        }
+            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"))
     });
+    let task = session.task_id.as_ref().map(|task| {
+        session
+            .task_identifier
+            .clone()
+            .unwrap_or_else(|| format!("Task {task} (unavailable)"))
+    });
+    let work_path = join_work_path(wave, task);
     let graph_membership = match (&session.graph_lf_process_id, &session.graph) {
         (None, _) if session.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -1786,20 +1808,29 @@ fn launch_model(session: &LfSession) -> String {
 }
 
 async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<Option<String>> {
-    let Some(wave_id) = &session.wave_id else {
-        return Ok(None);
+    let wave = match &session.wave_id {
+        Some(id) => Some(match store.get_wave(id).await? {
+            Some(wave) => wave.slug().to_string(),
+            None => format!("Wave {id} (unavailable)"),
+        }),
+        None => None,
     };
-    let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.slug().to_string(),
-        None => format!("Wave {wave_id} (unavailable)"),
-    };
-    Ok(Some(match &session.task_id {
-        None => wave,
-        Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.identifier),
+    let task = match &session.task_id {
+        Some(id) => Some(match store.get_task(id).await? {
+            Some(task) => task.identifier,
             None => format!("Task {id} (unavailable)"),
-        },
-    }))
+        }),
+        None => None,
+    };
+    Ok(join_work_path(wave, task))
+}
+
+/// "Wave / Task", either alone, or nothing for a repository conversation.
+fn join_work_path(wave: Option<String>, task: Option<String>) -> Option<String> {
+    match (wave, task) {
+        (Some(wave), Some(task)) => Some(format!("{wave} / {task}")),
+        (wave, task) => wave.or(task),
+    }
 }
 
 pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {

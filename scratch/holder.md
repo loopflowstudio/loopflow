@@ -89,7 +89,8 @@ Integration test `held_session_survives_server_restart` (in
 3. Restart the server; viewer reconnects; its screen contains the newest
    counter and a counter value printed while the server was down.
 4. SIGKILL the server; the agent exits 3; restart: Session ended with code 3,
-   `<pty>/` gone; the open view prints `The agent exited with 3.` and exits 3.
+   `<pty>/` gone; the open view prints `claude exited with 3.` (`native_exit::exit_line`,
+   from its Session's provider) and exits 3.
 5. `held_terminals_list_one_holder_process`: `lf ps --json` lists one holder
    LfProcess and no owner row per held terminal.
 
@@ -542,7 +543,8 @@ succeeded/failed/interrupted, and nobody saw the exit). Both go through
 so the watch connection never keeps it. `held_terminals_list_one_holder_process`
 covers one row per holder and the adopted holder's row ending after SIGKILL
 (it kills rather than idles; the path is the same socket close). A view whose
-agent exited while no server ran prints `The agent exited with 3.` and exits 3.
+agent exited while no server ran prints the same `claude exited with 3.` a connected view
+prints (`native_exit::exit_line`; nothing without a Session provider) and exits 3.
 The transport `Fixture` kills every holder its store recorded on drop.
 Malformed `lf session attach` args name the expected form.
 
@@ -774,15 +776,12 @@ with one line); a second holder per build; SIGKILL and `launchctl kickstart -k`
 restarts with contiguous output; readiness from a stopped server; exits
 settled by the next server.
 
-Fixed since: `native_exit::settle` carries the provider's own code (a
-held agent exiting 3 records 3 on the launcher Process and the terminal) and
-its line reads "claude exited with 3."; an interrupt or a mover still reads
-as 0. `NativeExit.resuming` is gone (only the old hint read it). Test:
+Fixed since: `native_exit::settle` records the provider's own code (an
+interrupt or a mover reads 0). Test:
 `a_failed_provider_exit_carries_its_own_code_and_says_so`.
 
-Checks, November 11: focused lib tests 20 passed; `transport_tests` 7
-passed; `session_launch_contract` 2 passed; clippy clean. Gate: `session_cli_tests`, `session_lifecycle_tests`,
-`work_open_tests` launch the repository conversation and may now need a server.
+Gate: `session_cli_tests`, `session_lifecycle_tests`, `work_open_tests` launch
+the repository conversation and may now need a server.
 
 Jack Heart: "can you stack ontop of 821".
 
@@ -794,9 +793,6 @@ the schema. Holding and hooks read the same `WorkSource::is_managed`;
 `start_held` calls LOO-821's `require_server`. Removed `open_server`,
 `ServerMissing` and its background-conversation bypass. Repository
 conversations remain Declared. LOO-821's scratch is left in git (top).
-After: clippy clean; `transport_tests` 7 passed (incl. LOO-821's
-`resumed_session_completes_turns_after_build_replacement_and_viewer_return`);
-`--lib` native_exit, agent_process, primary, moves 28 passed.
 
 ## Concept review, headless — November 11, 2026 (fourth)
 
@@ -807,3 +803,5 @@ before failing. `docs/sessions.md` quoted an error text `require_server` no
 longer prints; corrected. No design change, no open product choice. Waiting on
 other work, not on a choice: sync onto LOO-823 when it lands; LOO-830 for
 shells.
+
+QA's third-pass findings are fixed; what and the checks: qa.html.

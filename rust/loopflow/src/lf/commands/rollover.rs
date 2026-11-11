@@ -160,13 +160,28 @@ fn live_lf_processes(
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
     let current = crate::journal::current_lf_process_id();
+    let records = store.unfinished_processes()?;
+    // A native launcher execs its provider: its pid now runs the agent, whose
+    // binary no rollover replaces.
+    let providers: std::collections::HashSet<_> = records
+        .iter()
+        .filter_map(|record| match record {
+            crate::process::ProcessEntry::Agent(agent) => Some((agent.pid?, agent.os_started_at?)),
+            crate::process::ProcessEntry::Lf(_) => None,
+        })
+        .collect();
     let mut live = Vec::new();
-    for record in store.unfinished_processes()? {
+    for record in records {
         let crate::process::ProcessEntry::Lf(record) = record else {
             continue;
         };
         if Some(&record.id) == current.as_ref() {
             continue;
+        }
+        if let (Some(pid), Some(started)) = (record.pid, record.os_started_at) {
+            if providers.contains(&(pid, started)) {
+                continue;
+            }
         }
         let mut live_pid = None;
         let receipt = recorded_process_receipt(store, &record);
@@ -651,6 +666,48 @@ mod tests {
             superseded_summary(&inventory).unwrap(),
             "1 process on Loopflow.app lf (0.14.16); 2 on lf-d49c57c (0.14.16)"
         );
+    }
+
+    /// A launcher that exec'd its provider runs the agent's binary, not lf's.
+    #[test]
+    fn a_launcher_running_its_provider_is_no_lf_binary() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
+        let me = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        let launcher = LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,command,started_at,pid,os_started_at)
+                 VALUES(?1,?1,'[\"lf\",\"resume\"]',?2,?3,?2)",
+                rusqlite::params![launcher, me.started_at, me.pid],
+            )
+            .unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let listed = |store: &SqliteStore| {
+            super::live_lf_processes(store, now)
+                .unwrap()
+                .into_iter()
+                .map(|(process, _)| process.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(listed(&store), std::slice::from_ref(&launcher));
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
+                     agent_provider,agent_interactive,attached_lf_process_id)
+                 VALUES(?1,'agent',?2,?2,?3,?4,?3,'claude',1,?2)",
+                rusqlite::params![crate::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
+            )
+            .unwrap();
+        assert!(listed(&store).is_empty());
     }
 
     #[test]

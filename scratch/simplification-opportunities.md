@@ -70,10 +70,18 @@ sending `--task`/`--wave` on every reopen, the row read and `is_managed` are
 deleted and held means `managed`. A typed `lf resume <id>` of a Task
 conversation then runs bare, which matches "the cli comamnd used should
 direct down different codepaths". This is question 1 on
-`concept-review.html` (1b or 1c), so it is not settled here.
+`concept-review.html`. Answered 1a, "double coverage for now" (see
+`questions.md`): the row read stays until a later cut.
 
 **Cascade**: `held(viewed, managed, session)` becomes `viewed && managed`,
 and `require_server_for` becomes `require_server` behind `managed`.
+
+## Not cut: `Hosted::pass`
+
+`transport/hosted.rs` `pass` is ~600 lines, the owner's loop moved whole;
+the per-viewer frame handling (its first ~250 lines) is the natural first
+extraction. Left alone while both owners drive it; reshape when
+opportunity 2 removes `Child::Local`.
 
 ## Aligned areas
 

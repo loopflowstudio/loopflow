@@ -275,6 +275,7 @@ Checks (November 11, managed by command and boundary queries):
 - `--lib -- task_graph_launch_tests::a_task_run_takes harness::agent_process:: harness::context:: lf::tests::` — 66 pass
 - `--lib -- store::migrations::` — 129 pass; `scripts/check_migrations.py` — only `unmerged: steer_delivery_lookups.sql`
 - clippy — pass
+- Compress: `confirm_session_steers` drops its in-transaction authority pre-read (the closing read still checks and rolls back); `--lib -- store::sqlite::steers server::boundary` — 27 pass
 - gate: `transport_tests`, `binary(two_people)`, `world_recipes::`, `session_lifecycle_tests`, Swift `ServerProtocolTests`
 
 Checks (November 11, on the bare rule):

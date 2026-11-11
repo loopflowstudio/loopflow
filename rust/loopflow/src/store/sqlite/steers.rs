@@ -634,8 +634,8 @@ impl SqliteStore {
         if printed.is_empty() && !stale {
             return Ok(waiting);
         }
+        // The closing read checks authority again; failing it rolls back.
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        read(&tx)?;
         for batch in printed {
             tx.execute(
                 "UPDATE steer_batches SET evidence='emitted'

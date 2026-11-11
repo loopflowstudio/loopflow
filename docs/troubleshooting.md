@@ -99,13 +99,17 @@ shows a gap where a turn should be.
 ```bash
 lf server status                      # is the server listening, and on this build?
 grep 'recording gap' ~/.lf/logs/lf.log | tail
+grep 'recording gap' ~/.lf/logs/pi-extension.log | tail   # Pi conversations
 ```
 
 Hooks at each prompt, tool and turn end ask the Machine server to record the
 turn and hand over waiting steers. When the server is stopped, restarting or
 slow, the hook gives up after two seconds and the conversation continues
 without it; `logs/lf.log` has one `recording gap` line for that conversation
-until the server answers again. A steer saved while the server was down is
+until the server answers again. OpenCode and Pi ask from inside the provider
+instead of a hook process, and write that line to their own log:
+`logs/pi-extension.log`, or `opencode.stderr.log` beside the Session's
+capture. A steer saved while the server was down is
 still waiting and arrives at the next boundary the server answers. One the
 server sent after the hook gave up shows `uncertain` in
 `lf session steers <session>` and is sent again at the next boundary; a steer

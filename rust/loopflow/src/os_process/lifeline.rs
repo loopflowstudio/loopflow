@@ -13,8 +13,9 @@ static HELD_LIFELINES: Mutex<Vec<(Option<u32>, File)>> = Mutex::new(Vec::new());
 
 // stdout acknowledges watchdog startup, not provider output. Ignoring TERM
 // lets the watchdog and its sleep survive the group signal to deliver KILL.
-// dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`.
-const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
+// dash needs `kill -s TERM -- -pgid`, not `kill -TERM -- -pgid`. Pi's bash
+// guard (`harness::context`) runs the same text in each detached tool group.
+pub(crate) const WATCHDOG: &std::ffi::CStr = cr#"printf .; exec 1>&-
 while read -r _; do :; done
 trap '' TERM
 kill -s TERM -- "-$1" 2>/dev/null
@@ -301,30 +302,6 @@ fn start_watchdog(reader: libc::c_int, null: libc::c_int) -> std::io::Result<()>
         drop(ready_writer);
         await_ready(ready_reader.as_raw_fd())
     }
-}
-
-/// Join an already-owned tool group to a writer held by its provider. The
-/// watchdog acknowledges readiness before the shell can execute user commands.
-pub(crate) fn watch_tool_lifeline(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::FileTypeExt;
-
-    // A provider that died before admission cannot leave this open blocked.
-    let reader = above_stdio(
-        File::options()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
-            .open(path)?,
-    )?;
-    if !reader.metadata()?.file_type().is_fifo() {
-        return Err(std::io::Error::other("tool lifeline is not a FIFO"));
-    }
-    // SAFETY: reader is owned here. The watchdog waits for EOF, including when
-    // the provider already closed its writer before the watchdog starts.
-    if unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_SETFL, 0) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
-    start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
 }
 
 fn await_ready(fd: libc::c_int) -> std::io::Result<()> {

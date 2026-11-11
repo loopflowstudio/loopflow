@@ -77,6 +77,11 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertGreaterThan(viewport.frame.height, 20)
         XCTAssertTrue(app.buttons["Close Find"].isHittable)
         app.buttons["Close Find"].tap()
+        guard query.waitForNonExistence(timeout: 5) else {
+            capture(app, "session-find-did-not-close")
+            return XCTFail("Close Find must dismiss the search field before terminal typing continues")
+        }
+        XCTAssertTrue(app.buttons["New line"].isHittable)
         app.buttons["Session details"].tap()
         XCTAssertTrue(app.alerts["Session details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.alerts.staticTexts["Session input study\n\nOffline fixture\n\nKeyboard connected"].exists)

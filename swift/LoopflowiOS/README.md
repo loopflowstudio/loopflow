@@ -150,8 +150,10 @@ never blocks a live connection.
 
 The Task list uses one all-repository view subscription after checking Machine
 identity. Whole readings replace the list; pull-to-refresh confirms the current
-reading on that same connection. Leaving the list or backgrounding closes it.
-Returning opens a fresh subscription. A connection or reading failure keeps the
+reading on that same connection. Opening a Session keeps that subscription alive,
+so returning to Tasks uses the current reading. Leaving the connected workspace
+or the foreground closes it; returning opens a fresh subscription.
+A connection or reading failure keeps the
 last Tasks visible with an explanation; **Try again** reconnects. This path reads
 the Machine’s local Work and does not synchronously refresh an external tracker.
 

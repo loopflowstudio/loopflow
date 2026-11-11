@@ -21,7 +21,6 @@ struct LoopflowiOSApp: App {
 struct MobileTaskList: View {
     @State private var workspace: MobileWorkspace
     @State private var search = ""
-    @State private var listVisible = false
     @State private var creation: MobileTaskCreation?
     @State private var createdTask: MobileTaskOpening?
     @State private var showCreatedTask = false
@@ -107,8 +106,7 @@ struct MobileTaskList: View {
                 }
             }
             .refreshable { await workspace.refresh() }
-            .onAppear { listVisible = true }
-            .onDisappear { listVisible = false; creation = nil; workspace.stopTaskUpdates() }
+            .onDisappear { creation = nil }
             .searchable(text: $search, prompt: "Find a Task")
             .navigationTitle("Tasks")
             .navigationBarTitleDisplayMode(.large)
@@ -158,10 +156,11 @@ struct MobileTaskList: View {
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
-        .task(id: listVisible && scenePhase == .active) {
-            if listVisible && scenePhase == .active { await workspace.startTaskUpdates() }
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active { await workspace.startTaskUpdates() }
             else { workspace.stopTaskUpdates() }
         }
+        .onDisappear { workspace.stopTaskUpdates() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { workspace.suspend() }
         }

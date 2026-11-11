@@ -7,18 +7,24 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 Shipping docs are in `docs/server.md` (phone prerequisites) and
 `rust/loopflow/src/server/README.md` (attachment, remote exchange and recovery).
-Read both during implementation; reuse their settled contract.
+They define the attachment and recovery contract for implementation.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 22:44 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
+At 22:47 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
 reported `OPEN`, `mergedAt: null`, `autoMergeRequest: null`, and head
 `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetched main remained at
 `1570bef610a0a0cee0402ecc37d3a31461b213a8`, still without
 `server/mobile.rs` or `server/ticket.rs`. Landing PR #1812 is outside this Task;
 reinspect its shared store and endpoints after it lands.
 
-The ticket, remote and mobile modules are unchanged from the 22:09 UTC
+At 23:24 UTC, GitHub's PR metadata still reported #1812 `open`,
+`merged: false`, `merged_at: null`, with the same head. A fresh
+`git fetch origin main` returned the same main commit; neither shared
+transport file is present there. Implementation remains dependent on LOO-718
+landing; another pass against this unchanged base cannot complete it.
+
+At that head, the ticket, remote and mobile modules are unchanged from the 22:09 UTC
 inspection of `2a23883cb399fc5d7de180a024cc8fac4e49fdbe` (then also open,
 without auto-merge). That inspection confirms `remote.rs::connection` refuses
 unadmitted peers before either WebSocket upgrade. `mobile.rs::permits_peer`
@@ -30,8 +36,8 @@ ticket after a foreign attempt and releasing abandoned reservations in the
 background. Terminal consumption must change without changing that bulk behavior.
 
 The last successful LOO-718 status read, at 17:27 UTC, reported `feature` / `demo`.
-The 18:04 LOO-809 status read was cancelled without a result at 18:05; its service
-state remains unknown. Earlier observations and their history references are in
+No fresh Task service status was read in this pass. Earlier observations,
+including the cancelled LOO-809 status read, and their history references are in
 `966ba96e44ba13b13f86f6ca09aca9f90e3740f3:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.
 

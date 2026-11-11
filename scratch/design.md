@@ -9,19 +9,19 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 14:27 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
+At 15:08 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
 `ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
-`server/ticket.rs`. LOO-718 remained at `feature` / `demo`. LOO-809's status
-read succeeded: `auto`, state `shipping`, step null, reason `running from start`,
-no PR and no Wave. The earlier timed-out read is in
-`62072a0e69a90602bec564e6d5477b10ca131977:scratch/design.md`.
+`server/ticket.rs`. `lf task status LOO-718 --json` reported `feature` / `demo`.
+Implementation and authenticated acceptance still require that transport to land.
+The 14:27 and 15:04 UTC observations are in
+`d15d8eef1c5ffb8a2961f0786ab5356e82e84733:scratch/design.md`.
 
-At 15:04 UTC, `gh pr view 1812` and a fresh `git fetch origin main`
-confirmed the same open PR head, no auto-merge and unchanged main, still without
-the shared ticket store or remote endpoints. `lf task status LOO-718 --json`
-again reported `feature` / `demo`. Implementation remains blocked on that
-transport landing; no code or acceptance tests can proceed in this scope.
+At 15:42 UTC, GitHub again reported PR #1812 open and unmerged at the same
+head; a fresh fetch returned the same main without either transport file.
+LOO-718 still reported `feature` / `demo`. Implementation remains blocked on
+that landing; the Graph decision must stop for this external dependency.
+The checkout and existing documentation remain ready for continuation.
 
 At that revision, both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.

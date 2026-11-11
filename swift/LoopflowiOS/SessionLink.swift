@@ -53,6 +53,9 @@ final class SessionLink {
     @ObservationIgnored private var sentSize: TerminalGeometry?
     @ObservationIgnored private var wantsOpen = true
     @ObservationIgnored private var resumeOnReturn = false
+    /// From asking for the Session to its first screen, and from input to the next output.
+    @ObservationIgnored private var opening: Perf.Wait?
+    @ObservationIgnored private var echo: Perf.Wait?
 
     init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
         self.client = client
@@ -85,6 +88,7 @@ final class SessionLink {
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
+        self.opening = Perf.begin("session_open")
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session, size: size)
@@ -138,6 +142,7 @@ final class SessionLink {
 
     func send(_ bytes: Data) {
         guard state == .live, !bytes.isEmpty else { return }
+        if echo == nil { echo = Perf.begin("input_echo") }
         do { try attachment?.send(bytes) }
         catch { fail("That may not have been delivered. Reconnect and check before sending it again.") }
     }
@@ -166,14 +171,21 @@ final class SessionLink {
         attachment?.close()
         attachment = nil
         sentSize = nil
+        opening = nil
+        echo = nil
     }
 
     private func receive(_ event: MobileTerminalEvent) {
         switch event {
-        case .snapshot(let data): render?(data, true)
+        case .snapshot(let data):
+            render?(data, true)
+            if let opening { Perf.end(opening, "bytes=\(data.count)") }
+            opening = nil
         case .output(let data):
             // Another device's grid would garble this one; its next snapshot replaces the screen.
             if state != .elsewhere { render?(data, false) }
+            if let echo { Perf.end(echo) }
+            echo = nil
         case .control(let input, let geometry):
             state = input && geometry ? .live : .elsewhere
             if state == .live, let size, sentSize != size { fit(columns: size.columns, rows: size.rows) }

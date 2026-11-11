@@ -40,6 +40,12 @@ final class TaskFeed {
     /// Repository names by durable ID, filled in as readings name them.
     private(set) var names: [String: String] = [:]
     var filter = TaskFilter.started
+    /// The last reading under each filter, shown at once while the Machine answers.
+    private struct Saved: Codable {
+        let repositories: [RepositoryTasks]
+        let names: [String: String]
+    }
+    @ObservationIgnored private var waiting: Perf.Wait?
     @ObservationIgnored private let client: RemoteMobileClient
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
@@ -50,6 +56,16 @@ final class TaskFeed {
     func start() async {
         stop()
         let current = generation
+        waiting = Perf.begin("tasks_current")
+        if let saved = try? JSONDecoder().decode(Saved.self, from: Data(contentsOf: savedURL)) {
+            repositories = saved.repositories
+            names.merge(saved.names) { _, saved in saved }
+            loaded = true
+            Perf.launch("tasks_saved")
+        } else {
+            repositories = []
+            loaded = false
+        }
         do {
             let observation = try await client.observeTasks(expression: filter.expression)
             guard current == generation, !Task.isCancelled else { observation.close(); return }
@@ -63,7 +79,11 @@ final class TaskFeed {
                             if repositories != self.repositories { self.repositories = repositories }
                             self.loaded = true
                             self.error = nil
+                            Perf.launch("tasks_current")
+                            if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
+                            self.waiting = nil
                             await self.name(repositories.map(\.repository))
+                            self.save()
                         case .failure(let error): self.error = error.message
                         }
                     }
@@ -94,6 +114,23 @@ final class TaskFeed {
         reader = nil
         observation?.close()
         observation = nil
+    }
+
+    /// Removes what this Machine's readings left on the phone.
+    func forget() {
+        stop()
+        for filter in TaskFilter.allCases { try? FileManager.default.removeItem(at: savedURL(filter)) }
+    }
+
+    private var savedURL: URL { savedURL(filter) }
+
+    private func savedURL(_ filter: TaskFilter) -> URL {
+        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue).json")
+    }
+
+    private func save() {
+        try? JSONEncoder().encode(Saved(repositories: repositories, names: names))
+            .write(to: savedURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     private func name(_ ids: [String]) async {
@@ -254,7 +291,7 @@ struct TaskListView: View {
                         Text(client.savedMachine.endpoint.host ?? "Machine")
                         Button("Change address", action: onChangeAddress)
                         Button("Forget Machine", role: .destructive) {
-                            feed.stop()
+                            feed.forget()
                             onForget()
                         }
                     } label: { Image(systemName: "desktopcomputer") }

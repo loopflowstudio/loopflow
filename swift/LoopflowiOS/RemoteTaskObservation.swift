@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 /// One repository's Tasks in a reading, in the Machine's order.
-struct RepositoryTasks: Equatable {
+struct RepositoryTasks: Codable, Equatable {
     /// The repository's durable ID, as `WorkWorkspaceKey.repository` carries it.
     let repository: String
     let tasks: [WorkViewPlan.Content]

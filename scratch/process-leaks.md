@@ -1,5 +1,11 @@
 # LOO-823 process leaks
 
+Outcome: account for every resident lf process, fix fixture/demo leaks and
+observer lifetime bugs, and show the affected suites leave no new lf, provider
+or Dev-app processes. Existing processes are report-only: no signaling anything
+this work did not start, no name-pattern kills, no synthetic CPU load, and no
+step-tree reaper in lf.
+
 Report: `uv run python -I scratch/process_audit.py` writes `scratch/process-audit.html`
 (read-only; it opens `loopflow.db` with `mode=ro` for shell receipts).
 
@@ -81,25 +87,14 @@ emulator (5a). Bare launches with no owner stay the server-first piece; the
 14 unscoped owners in the audit run until someone quits them during this
 transition.
 
-## Delete — do not maintain
+## Current approach and related work
 
-The 2026-11-11 headless review's four documentation corrections are applied:
-
-- `rust/loopflow/src/builtins/task/skill/demo.md`: remove draft-settlement and
-  permanent input-hold rules. Wait for live turns and pending requests, resume
-  each demo Session and quit its provider; signal only a verified demo PID that
-  will not exit. Keep history roots and the ban on signaling by process name.
-- `docs/server.md`: remove draft retention and idle expiry. Open scopes keep
-  their conversations; completed-Task cleanup waits for live work and viewing grace.
-- `docs/dev/execution.md`: remove draft retention during replacement; document
-  loss of unsent editor input.
-- `docs/sessions.md`: replace the nonexistent conversation-close action with
-  quitting the agent. "nothing ends it" (Jack Heart) remains the lifetime rule.
-
-The related test guide now describes direct input during store locks and live-turn
-retention, with no references to the deleted retry suite. Config, transport and
-troubleshooting docs name quitting the agent; quitting a demo app alone leaves
-its owners running. Teardown uses the demo's saved Machine environment.
+The lifetime and input deletions are implemented, including the demo teardown
+and Swift README corrections. Quitting a demo app alone leaves its owners
+running; demo teardown quits each provider after live work settles and keeps
+its saved history. Fixture teardown joins recorded processes before deleting
+their home, including completed owners still writing their final screen.
+Desktop pipes use close-on-exec so unrelated panes cannot retain their writers.
 
 Kept on purpose: `Ending::may_end` still vetoes completed-Task retirement when
 output arrived after the judgment. Hooks are best-effort, so streaming output
@@ -108,24 +103,20 @@ is the one sign of a turn the store never recorded. It no longer times anything.
 No new product choice. Still open, and not this PR's: the resident-limit
 default count and how suspension knows the editor is empty (`questions.md`).
 
-## Swift README review
+Concept review, 2026-11-11: no further implementation direction or open choice
+for LOO-823. Advance to verification. The review page now shows this model;
+its former input-ledger alternatives and 01:10 store reading remain in
+`a6bb4d5a5:scratch/concept-review.html`.
 
-The second headless review (2026-11-11, diff at `261426a65`) found two remaining
-contradictions in `swift/README.md`: the two-minute/fifteen-minute lifecycle and
-drafts delaying cleanup. Both passages now describe completed-Task cleanup after
-fifteen minutes without a Session viewer, subject to live work settling.
-
-`git diff --check`: passed; Swift README lifecycle wording matches the transport
-contract. Prose only, no build or test; `documented_commands::` remains with gate.
-
-2026-11-11 compress: `lf context` initially reported 3,373/12,000 tokens and
-13,902/98,304 bytes. After the prose edit, its recheck and Session rename failed:
-`/Users/jack/.lf/config.yaml: invalid graph: unknown or ineligible setting claude`.
-No Machine configuration changed; resident-limit choices remain deferred.
-
-Left alone on purpose: "an explicit end" in `transport/README.md` and the
-`transport_tests.rs` comment is the wording of the 2026-11-05 rule in Wave
-memory, minus the detached limit.
+The interaction to show: leave an open Task with a draft, return to the same
+provider, then complete the Task and leave; eligible cleanup ends it despite
+the draft. A locked store must neither stall input nor authorize closure;
+recovery retries the closure judgment without replaying input. A return before
+cleanup cancels it; after cleanup, history and the saved screen survive, but
+the editor and deleted checkout do not return. Keep the missed-hook
+counterexample: output arriving after a cleanup judgment invalidates it even
+when no live turn was recorded. Abandonment deliberately differs: it can end
+an unviewed conversation during a turn.
 
 Consequences of the rule, no change here:
 
@@ -146,19 +137,18 @@ Consequences of the rule, no change here:
 
 ## Remaining verification
 
-The sync at `475d5b369` includes #1882's conversation-opening readiness changes.
-Its three new tests brought back four references to the removed `StopOwner`;
-those references are removed, with cleanup still owned by `Fixture::drop`.
+The branch contains the current local `origin/main` (`976b53db0`), including
+#1882's conversation-opening readiness changes and #1884's package migration
+ordering. The sync repair removed four references to the deleted `StopOwner`
+from three new tests; cleanup remains owned by `Fixture::drop`.
 LOO-824 will adopt this lifetime rule after this PR lands (exact coordination
 quote in `questions.md`); resident-limit suspension still awaits its emulator
 and a decision on how to detect an empty editor.
 
-The upgrade fixture uses native turn hooks for both responsive and unresponsive
-owners, then one replacement/reconnect path; no synthetic live-turn SQL or
-draft-retention branch remains. Abandonment skips retirement-only reads. Fixture
-teardown waits for completed owners' final writes as well as unfinished owners;
-the late screen directories noted in `qa.html` need a fresh SSH-suite check at gate.
-The audit no longer calls an open conversation stale solely for being old and unviewed.
+The late screen directories noted in `qa.html` need a fresh SSH-suite check at
+gate. The audit no longer calls an open conversation stale solely for being old
+and unviewed; regenerate it at demo rather than presenting the pre-revision
+readings as current behavior.
 
 - `cargo test -p loopflow --lib -- transport::lifetime::tests:: transport::lifetime_tests::`: 7 passed after compression; linker warned that `__eh_frame` exceeded its compact-unwind size limit.
 - `cargo test -p loopflow-test-support cleanup_tests::`: 1 passed; completed-process final write precedes cleanup return.
@@ -171,6 +161,7 @@ The audit no longer calls an open conversation stale solely for being old and un
 - `uv run cargo test -p loopflow --test transport_tests -- conversation_open_` (inherited `LF_*` unset, stdin closed): 3 passed after the sync repair; 11.74s.
 - `uv run cargo test -p loopflow --test integration documented_commands::` (inherited `LF_*` unset, stdin closed): 4 passed after replacing the retired status phrase in `docs/troubleshooting.md` found on the first run.
 - Compress follow-through: `git diff --check` passed; obsolete symbol/doc search found no remaining runtime references. Only prose and a test comment changed; no build or test rerun. `lf context`: within both targets.
+- 2026-11-11 realign: `lf context` and `lf task status LOO-823 --json` succeeded; no outstanding context-loading failure. Code inspection agrees with the lifetime direction; no code repair or test rerun in this pass.
 
 Gate: affected transport, retirement, native-turn/steers, rollover, config,
 CLI resolution/parser, server schema and `documented_commands::` suites; Clippy.

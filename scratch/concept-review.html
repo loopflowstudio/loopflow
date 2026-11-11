@@ -3,284 +3,68 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-823 concept review</title>
+<title>LOO-823 · Conversation lifetime</title>
 <style>
-  :root {
-    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6a665f; --rule: #dedad2;
-    --panel: #f2efe8; --accent: #0b6b57; --accent-bg: #e6f2ee; --warn: #a13a1e;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #17171a; --fg: #e8e6e1; --muted: #9a968d; --rule: #34343a;
-      --panel: #202024; --accent: #6fd0b6; --accent-bg: #18302b; --warn: #f0906f;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  main { max-width: 44rem; margin: 0 auto; padding: 2.5rem 1rem 5rem; }
-  h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 .4rem; text-wrap: balance; }
-  h2 { font-size: 1.15rem; margin: 2.6rem 0 .6rem; }
-  p { margin: .7rem 0; }
-  .meta { color: var(--muted); font-size: .9rem; }
-  .meta code { font-size: .85em; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
-  pre { background: var(--panel); padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
-  .lead { font-size: 1.1rem; }
-  .proposed { border-left: 3px solid var(--accent); background: var(--accent-bg); padding: .6rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0; }
-  .proposed > :first-child { margin-top: 0; } .proposed > :last-child { margin-bottom: 0; }
-  .tag { color: var(--accent); font-weight: 600; }
-  .today { border-left: 3px solid var(--rule); padding: .1rem 1rem; margin: 1rem 0; }
-  .bad { color: var(--warn); font-weight: 600; }
-  .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
-  th, td { text-align: left; vertical-align: top; padding: .45rem .7rem .45rem 0; border-bottom: 1px solid var(--rule); }
-  th { font-weight: 600; }
-  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; padding-right: 1.2rem; }
-  ol.steps { padding-left: 1.3rem; } ol.steps li { margin: .5rem 0; }
-  dl.q { margin: .4rem 0 1.6rem; }
-  dl.q dt { float: left; clear: left; width: 2.4rem; font-weight: 600; font-family: ui-monospace, Menlo, monospace; font-size: .9rem; padding-top: .1rem; }
-  dl.q dd { margin: 0 0 .45rem 2.4rem; }
-  h3 { font-size: 1rem; margin: 1.6rem 0 .3rem; }
-  svg { display: block; width: 100%; height: auto; margin: 1rem 0; }
-  svg text { fill: var(--fg); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
-  svg .box { fill: var(--panel); stroke: var(--rule); }
-  svg .trap { fill: none; stroke: var(--warn); stroke-width: 1.5; }
-  svg .ln { stroke: var(--muted); fill: none; stroke-width: 1.2; }
-  svg .pl { stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-dasharray: 5 4; }
-  svg .pt { fill: var(--accent); font-weight: 600; }
-  svg .mt { fill: var(--muted); font-size: 12px; }
+:root { color-scheme: light dark; --bg: #faf9f6; --fg: #252724; --muted: #62655e; --line: #cccfc5; --accent: #246851; }
+@media (prefers-color-scheme: dark) { :root { --bg: #191c1a; --fg: #e5e9e2; --muted: #adb5a9; --line: #434b42; --accent: #8bd8b3; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+main { max-width: 48rem; padding: 2rem 1.1rem 3rem; margin: auto; }
+h1 { font-size: 1.8rem; line-height: 1.15; margin: .8rem 0; }
+h2 { font-size: 1.1rem; margin: 1.6rem 0 .5rem; }
+p { margin: .6rem 0; }
+.meta, small { color: var(--muted); font-size: .82rem; }
+code { font: .88em ui-monospace, monospace; overflow-wrap: anywhere; }
+.lead { border-left: 3px solid var(--accent); padding-left: .9rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; vertical-align: top; padding: .6rem .6rem .6rem 0; border-bottom: 1px solid var(--line); }
+th:first-child { width: 24%; }
+blockquote { margin: .6rem 0; padding-left: .9rem; border-left: 2px solid var(--line); }
+li { margin: .5rem 0; }
+a { color: var(--accent); }
+@media (max-width: 480px) { main { padding: 1rem .8rem 2rem; } table { font-size: .8rem; } }
 </style>
 </head>
 <body>
 <main>
+<header>
+<p class="meta">LOO-823 · concept review · 2026-11-11 · PR #1877</p>
+<h1>Leaving a conversation keeps it running</h1>
+<p class="lead"><strong>No further design decision needed for this change.</strong> The lifetime and input deletions match the working design. Advance to gate and demo; suspension remains deferred.</p>
+<p class="meta">Built from <code>scratch/process-leaks.md</code>, <code>scratch/questions.md</code>, <code>docs/sessions.md</code>, <code>swift/README.md</code>, <code>rust/loopflow/src/transport/{input,lifetime}.rs</code>, <code>store/sqlite/sessions.rs</code>, <code>ops/task/retirement.rs</code> and <code>builtins/task/skill/demo.md</code> (the last three under <code>rust/loopflow/src/</code>).</p>
+</header>
 
-<p class="meta">LOO-823 · concept review at the demo step · 2026-11-11 · PR #1877<br>
-Built from <code>store/sqlite/native_input.rs</code>, <code>store/sqlite/sessions.rs</code>, <code>transport/lifetime.rs</code>, <code>ops/task/retirement.rs</code>, <code>docs/sessions.md</code>, <code>docs/troubleshooting.md</code>, <code>scratch/process-leaks.md</code>, and a read-only query of <code>~/.lf/loopflow.db</code> at about 01:10.</p>
-
-<h1>A conversation lives as long as what it belongs to</h1>
-
-<p class="lead">Direction from the review: drop the two-minute idle ending. A bare <code>lf</code> is held by nothing but its terminal. A Task's conversation is held until the Task is closed.</p>
-
-<div class="proposed">
-<p><span class="tag">Built in PR #1877, 2026-11-11,</span> except bare-direct launch and suspension; current state is in <code>scratch/process-leaks.md</code>.</p>
-<div class="scroll">
+<h2>The mismatch removed</h2>
+<p><strong>Before:</strong> quiet conversations were meant to expire, but an edited draft could hold them indefinitely—even after their Task finished. <strong>Built on this branch:</strong> open conversations stay resident; Task closure ends them through cleanup. No keystroke ledger decides their lifetime.</p>
 <table>
-  <tr><th>Conversation</th><th>Runs until</th><th class="n">Running now</th></tr>
-  <tr><td>Bare: <code>lf implement</code>, <code>lf -i</code> in a terminal</td><td>Its terminal closes. No detached owner. This is the unbuilt "Bare launches go direct" piece of <code>docs/dev/server-first.md</code>; today every launch still gets an owner.</td><td class="n">14</td></tr>
-  <tr><td>Task conversation</td><td>The Task is done or abandoned. Cleanup then ends it whatever is in its editor, and saves the last screen.</td><td class="n">63</td></tr>
-  <tr><td>Wave or repository conversation</td><td>Same as an open Task; it has no close of its own.</td><td class="n">9</td></tr>
+<thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
+<tbody>
+<tr><td>Type, edit, send</td><td>Bytes waiting for the provider, then no lf input state</td><td><code>PendingInput::push / forward</code>; no store write</td></tr>
+<tr><td>Leave; return</td><td>Viewer leaves; provider stays</td><td><code>record_owner_viewer_hold</code>; <code>lf resume &lt;session&gt;</code></td></tr>
+<tr><td>Complete a Task</td><td>Cleanup after viewing grace and live work settle; drafts do not hold it</td><td><code>retirement::run</code> → <code>owner_retiring</code> → <code>Ending::confirm</code></td></tr>
+<tr><td>Abandon a Task</td><td>Unviewed conversations end, even during a turn</td><td><code>owner_task_abandoned</code> → <code>Ending::confirm</code></td></tr>
+<tr><td>Quit or replace the provider</td><td>History survives; its unsent editor does not</td><td>Provider quit; <code>lf resume</code> takeover; <code>lf process rollover</code></td></tr>
+</tbody>
 </table>
-</div>
-<p>Of the 63 Task conversations, 43 belong to Tasks with no cleanup scheduled, 18 to Tasks whose cleanup is scheduled and stuck behind the input hold, 2 to abandoned Tasks.</p>
-<p><strong>Goes away:</strong> <code>session.end_detached_after</code>, the idle watch in <code>transport/lifetime.rs</code>, <code>native_input.rs</code> and its <code>Uncertain</code> state, <code>OwnerRetention::NativeInput</code>, and the store write the owner makes for every keystroke before forwarding it.</p>
-<p><strong>Changes on purpose:</strong> an open Task's conversation nobody is looking at keeps its agent running. PR #1804 (LOO-709, "An idle conversation costs nothing") is reversed for Tasks: 43 agents stay resident today where the two-minute rule meant to end them. In practice it ended none of them. A draft left in a finished Task's conversation is lost at cleanup, apart from the saved screen.</p>
-</div>
 
-<h3>1. What holds a Wave's or repository's ongoing conversation?</h3>
-<p>Answered: "nothing ends it but i could be open to allowing soem sort of "idle" state for task and wave/repo sessions on the server, if we ahve some cache limit, as long as only cost is slightly slower spin up time next time youj switch to them" (Jack Heart).</p>
+<h2>Use it, lose the connection, return</h2>
+<p>Leave a draft in an open Task and close its viewer. Return to the same provider. Complete the Task and leave again: after fifteen minutes without viewing, cleanup can end it once live work settles. A returning viewer cancels cleanup.</p>
+<p>A locked store cannot stall typing or authorize closure. The owner retries the judgment after recovery without replaying input. After cleanup, provider history and a saved screen remain; the editor and deleted checkout do not return.</p>
+<p><strong>Counterexample kept:</strong> a missed hook can hide an active turn. Output arriving after the cleanup judgment invalidates that judgment. The output check remains; the idle timer is gone.</p>
 
-<div class="proposed">
-<p><span class="tag">Proposed, not built.</span> Two separate rules.</p>
-<div class="scroll">
-<table>
-  <tr><th>Rule</th><th>What it does</th></tr>
-  <tr><td>Lifetime</td><td>Task, Wave and repository conversations behave the same while open: "wave/repo should behave exactly like open tasks tho" (Jack Heart). Only a Task has an end of its own: done or abandoned ends its conversation at cleanup. A Wave or repository conversation is an open Task that never closes.</td></tr>
-  <tr><td>Suspension</td><td>To stay under a resident limit, the server stops the agent of the least recently viewed conversation and keeps its screen. Switching to it paints that screen and resumes from provider history: a few seconds slower, and nothing lost.</td></tr>
-</table>
-</div>
-<p>"Only cost is slower spin up" means suspension may only take conversations with nothing to lose: no live turn, pending request, running Graph or unsent input. The first three are already known exactly. Unsent input is the hard part, and it is the same problem that holds all 85 owners today.</p>
-</div>
+<h2>Words people will meet</h2>
+<blockquote><p>“A conversation stays running while its scope is open.” — current <code>docs/sessions.md</code></p></blockquote>
+<p>The demo skill now waits for live work, quits each demo provider and joins its processes before removing the runtime root. Quitting the app alone is insufficient. History stays.</p>
+<p><strong>Built:</strong> Wave and repository conversations follow the open-Task rule. Bare owners also remain until quit during this transition. The ignored <code>end_detached_after</code> key and unused database column remain only for release compatibility and staged removal.</p>
+<p><strong>Proposed, unbuilt:</strong> bare-direct launch and resident-limit suspension. LOO-824 supplies the planned emulator; reading an empty editor from it has not been chosen. Nothing here adds a replacement ledger.</p>
 
-<h3>5. How does the server know the editor is empty?</h3>
-<p>"no opinion on 5" (Jack Heart). <span class="tag">Proposed:</span> 5c until the emulator exists, then 5a.</p>
-<dl class="q">
-  <dt>5a</dt><dd>Read it off the screen. The server's terminal emulator, planned in server-first, sees the agent's input line; empty prompt box means nothing to lose. Per-provider screen knowledge, but it reads what you see, and the byte ledger goes.</dd>
-  <dt>5b</dt><dd>Keep the byte ledger, with question 1b of the earlier set: a sent prompt that finishes empties it. Claude only; Codex never suspends.</dd>
-  <dt>5c</dt><dd>Don't decide. Suspend only conversations with no keys since their last finished turn, which today is rare, and revisit once the emulator exists.</dd>
-</dl>
+<p><small>Next demonstration: regenerate the process audit and show the affected suites leave no new lf, provider or Dev-app process. Earlier counts are historical, not a reading from this review.</small></p>
 
-<h3>6. What is the limit?</h3>
-<p>"6a" (Jack Heart). The default count is still unnamed.</p>
-<dl class="q">
-  <dt>6a</dt><dd>A count of resident agents per Machine, set in config, with a default you name.</dd>
-  <dt>6b</dt><dd>Memory: suspend while resident agents use more than some share of RAM.</dd>
-  <dt>6c</dt><dd>No limit until someone hits one; build suspension later.</dd>
-</dl>
-
-<h3>2. What happens to unscoped conversations before bare-direct lands?</h3>
-<dl class="q">
-  <dt>2a</dt><dd>Change Task conversations now (cleanup stops waiting on input; idle ending no longer applies to them). Leave the idle rule and ledger for everything else until bare-direct deletes them.</dd>
-  <dt>2b</dt><dd>Delete idle ending and the ledger now. The 14 unscoped owners then run until someone quits them, until bare-direct lands.</dd>
-  <dt>2c</dt><dd>Do all of it with the bare-direct piece; nothing changes before then except the doc correction.</dd>
-</dl>
-
-<h3>3. Where does this land?</h3>
-<dl class="q">
-  <dt>3a</dt><dd>In LOO-823 and PR #1877, before it merges.</dd>
-  <dt>3b</dt><dd>#1877 merges with its troubleshooting paragraph corrected to today's behavior; this gets its own Task under LOO-819's plan.</dd>
-</dl>
-
-<h3>4. Does "closed" mean done and abandoned both?</h3>
-<dl class="q">
-  <dt>4a</dt><dd>Both. Abandoning already ends unviewed conversations at once; done waits the cleanup grace, about fifteen minutes after you stop viewing.</dd>
-  <dt>4b</dt><dd>Something else; say what.</dd>
-</dl>
-
-<h2>What led here</h2>
-<p>The rest of this page is the reading that prompted the direction: why the input hold never lets go. Its own proposal and questions, further down, are superseded by the above.</p>
-
-<h2>One conversation, start to recovery</h2>
-
-<ol class="steps">
-  <li>You type a prompt in a Task's conversation, fix a typo with Backspace, and send it. The agent answers. You close the tab.</li>
-  <li><code>docs/sessions.md</code> says what happens next: "An unviewed, settled conversation ends its processes after two minutes of quiet." <span class="bad">It doesn't.</span> The Backspace marked the input as uncertain, and the prompt you sent afterwards did not clear that.</li>
-  <li>You mark the Task done. Cleanup should remove its checkout and shell tabs about fifteen minutes later. It waits on the same hold, indefinitely.</li>
-  <li>Days later <code>ps</code> shows hundreds of <code>lf</code> processes. <code>lf process rollover --dry-run</code> says "native input holds the conversation".</li>
-  <li>The troubleshooting page this PR adds says: "Open it with <code>lf resume &lt;ID&gt;</code>, then send or clear what is there; the owner ends on schedule once its input is empty." You resume and send a prompt. <span class="bad">Still held.</span> Only quitting the agent releases it.</li>
+<h2>Questions deferred beyond this PR</h2>
+<ol>
+<li>How will suspension establish that the editor is empty? Screen inspection is proposed; “no opinion on 5” (Jack Heart) leaves the method open.</li>
+<li>What default agent count per Machine should apply, and should the existing sixteen-conversation background-start cap use it? “6a” (Jack Heart) specifies a configured agent count, not its default or its relationship to that cap.</li>
 </ol>
-
-<div class="proposed">
-<p><span class="tag">Proposed.</span> Step 2 goes the way the docs say, because the prompt you sent settled the input. Step 5 works as written: send or clear, and it ends on schedule.</p>
-</div>
-
-<h2>Why it never lets go</h2>
-
-<p>lf records the keys that reach the agent and keeps a small state for each conversation. One clean path leads back to empty. Everything else leads to <code>Uncertain</code>, and the only exit from there is the agent process ending.</p>
-
-<svg viewBox="0 0 680 250" role="img" aria-label="Input states: Empty, Text, Submitted, Acknowledged return to Empty; any other key leads to Uncertain, which has no exit today.">
-  <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker>
-  </defs>
-  <rect class="box" x="10" y="50" width="110" height="38" rx="6"/><text x="65" y="74" text-anchor="middle">Empty</text>
-  <rect class="box" x="190" y="50" width="110" height="38" rx="6"/><text x="245" y="74" text-anchor="middle">Text</text>
-  <rect class="box" x="370" y="50" width="110" height="38" rx="6"/><text x="425" y="74" text-anchor="middle">Submitted</text>
-  <rect class="box" x="550" y="50" width="120" height="38" rx="6"/><text x="610" y="74" text-anchor="middle">Acknowledged</text>
-  <path class="ln" d="M120 69H188" marker-end="url(#a)"/><text class="mt" x="154" y="62" text-anchor="middle">letters</text>
-  <path class="ln" d="M300 69H368" marker-end="url(#a)"/><text class="mt" x="334" y="62" text-anchor="middle">Enter</text>
-  <path class="ln" d="M480 69H548" marker-end="url(#a)"/><text class="mt" x="514" y="62" text-anchor="middle">exact match</text>
-  <path class="ln" d="M610 50C610 8 65 8 65 48" marker-end="url(#a)"/><text class="mt" x="338" y="14" text-anchor="middle">that turn finishes</text>
-  <rect class="trap" x="190" y="170" width="290" height="42" rx="6"/><text x="335" y="196" text-anchor="middle">Uncertain — exits only when the agent quits</text>
-  <path class="ln" d="M65 88C65 150 130 190 188 190" marker-end="url(#a)"/>
-  <path class="ln" d="M245 88V168" marker-end="url(#a)"/>
-  <path class="ln" d="M425 88V168" marker-end="url(#a)"/>
-  <path class="ln" d="M610 88C610 150 540 190 482 190" marker-end="url(#a)"/>
-  <text class="mt" x="335" y="134" text-anchor="middle">any other key</text>
-  <path class="pl" d="M190 205C80 240 30 160 50 90" marker-end="url(#a)"/>
-  <text class="pt" x="14" y="240">proposed: a sent prompt finishes, no key since its Enter</text>
-</svg>
-
-<div class="scroll">
-<table>
-  <tr><th>What you did</th><th>Why lf can't account for it</th></tr>
-  <tr><td>Backspace, at any point</td><td>It isn't a letter or Enter. The recorded text is discarded.</td></tr>
-  <tr><td>Enter on an empty editor, Ctrl-C</td><td>Same rule.</td></tr>
-  <tr><td>Arrow keys, Esc, a paste</td><td>Escape sequences that aren't terminal replies.</td></tr>
-  <tr><td>Any key while the agent is working</td><td>A queued message or a permission answer can't be matched to a prompt.</td></tr>
-  <tr><td>A prompt lf can't match byte for byte</td><td>The acknowledged text differs from what was typed.</td></tr>
-</table>
-</div>
-
-<p>The rule was written to keep a draft from being lost (PR #1804: "Edits, paste, ambiguous input and missing acknowledgements can retain processes until native exit"). It does that. What it lacks is a way back: the test <code>ambiguous_or_later_input_keeps_the_native_editor</code> pins that <code>draft⌫⏎</code>, acknowledged and finished, still holds.</p>
-
-<h2>What the store shows</h2>
-
-<div class="scroll">
-<table>
-  <tr><th>Conversation owners</th><th class="n">Count</th><th>Input state</th></tr>
-  <tr><td>Running now, with an open interactive Session</td><td class="n">85</td><td>all <code>Uncertain</code> (79 idle, 6 mid-turn)</td></tr>
-  <tr><td>Ended in the last three days</td><td class="n">31</td><td>15 <code>Empty</code>, 13 no record, 2 <code>Uncertain</code>, 1 <code>Text</code></td></tr>
-</table>
-</div>
-
-<p>Idle ending works when input was never touched oddly. Everything that accumulates is <code>Uncertain</code>. None of the 85 has recorded text, so lf can't say which of them hold a real draft and which hold one stray arrow key.</p>
-
-<p>Five finished Tasks (LOO-775, LOO-776, LOO-812, MTG-252, MTG-268) were 26–33 hours past cleanup at the 18:55 reading on November 10, each behind one such owner, keeping six shell tabs and five checkouts.</p>
-
-<h2>Actions, concepts, APIs</h2>
-
-<div class="today">
-<p><strong>Today</strong></p>
-<div class="scroll">
-<table>
-  <tr><th>You do</th><th>Concept</th><th>What changes state</th></tr>
-  <tr><td>Type, edit, send</td><td>Native input: five states, one of them absorbing</td><td><code>try_record_owner_input</code>, <code>acknowledge_native_input</code></td></tr>
-  <tr><td>Close the tab, walk away</td><td>Idle ending, unless something holds the owner</td><td><code>lifetime::watch</code> → <code>idle_retention</code></td></tr>
-  <tr><td>Finish the Task</td><td>Cleanup, unless something holds the owner</td><td><code>retirement::require_settled_work</code> → <code>owner_retention</code></td></tr>
-  <tr><td>Ask why it's still running</td><td>None of its own; borrowed from "can this move to the new lf"</td><td><code>lf process rollover --dry-run</code></td></tr>
-  <tr><td>Release it</td><td>Quit the agent</td><td><code>native_ended</code> → <code>clear_owner_input</code></td></tr>
-</table>
-</div>
-</div>
-
-<div class="proposed">
-<p><span class="tag">Proposed.</span> One sentence a person can hold: <strong>unsent input keeps a conversation running until you send it or clear it.</strong></p>
-<div class="scroll">
-<table>
-  <tr><th>You do</th><th>Concept</th><th>What changes state</th></tr>
-  <tr><td>Type, edit, send</td><td>Unsent input: there is some, or there isn't</td><td>Same two calls; a finished prompt with no key since its Enter returns to empty from any state</td></tr>
-  <tr><td>Close the tab, walk away</td><td>Unchanged</td><td>Unchanged</td></tr>
-  <tr><td>Finish the Task</td><td>Question 3</td><td></td></tr>
-  <tr><td>Ask why it's still running</td><td>"Kept by" on each process (question 2)</td><td><code>lf process list</code>, Desktop</td></tr>
-  <tr><td>Release it</td><td>Send or clear, as the docs already say</td><td>The same settle path</td></tr>
-</table>
-</div>
-<p>Prompts lf injects itself (a steer, <code>lf desktop send</code>) never count as settling, since they don't pass through the editor.</p>
-</div>
-
-<h2>Where the proposal could lose a draft</h2>
-
-<div class="scroll">
-<table>
-  <tr><th>Case</th><th>Outcome under the proposal</th></tr>
-  <tr><td>Queue a message mid-turn, then start typing another before the turn ends</td><td>Holds: keys arrived after the Enter.</td></tr>
-  <tr><td>A draft sits in the editor and a steer arrives</td><td>Holds: injected prompts don't settle.</td></tr>
-  <tr><td>Backslash-Enter for a newline, stop typing, then a steer arrives</td><td>Holds, by the same rule.</td></tr>
-  <tr><td>Backslash-Enter for a newline, stop typing, and a previously queued message is sent by the agent at turn end</td><td><span class="bad">Would release with a draft in the editor.</span> Needs the Enter that sent the prompt to postdate the queue, or a second signal. Unsolved.</td></tr>
-  <tr><td>Codex and other providers</td><td>No acknowledgements reach lf, so they stay held as today. They need question 1c or a clear key.</td></tr>
-</table>
-</div>
-
-<h2>The docs paragraph, as it would read</h2>
-
-<div class="today">
-<p><strong>Today</strong>, <code>docs/sessions.md</code>: "Edited, pasted or unacknowledged native input can retain the owner until the provider exits; saved history and screens cannot restore an editor or request."</p>
-</div>
-<div class="proposed">
-<p><span class="tag">Proposed.</span> "Unsent input keeps a conversation running. Send it or clear it and the conversation ends on schedule. <code>lf process list</code> shows which conversations are kept this way and since when."</p>
-</div>
-
-<h2>Earlier questions, superseded</h2>
-
-<h3>1. What releases a held conversation?</h3>
-<dl class="q">
-  <dt>1a</dt><dd>Only quitting the agent, as today. The troubleshooting paragraph in #1877 is corrected to say so.</dd>
-  <dt>1b</dt><dd>A sent prompt. One that the provider acknowledges and finishes, with no key since its Enter, empties the input from any state. Claude only until other providers acknowledge.</dd>
-  <dt>1c</dt><dd>1b, plus an age: input nobody has viewed for some number of days ends anyway, with its last screen saved. This also ends real drafts that were ever edited, since an edit discards the recorded text. You'd name the age.</dd>
-  <dt>1d</dt><dd>Only stop counting navigation keys on an empty editor (the earlier 1b). Backspace, paste and mid-turn typing still hold forever.</dd>
-</dl>
-
-<h3>2. Should each process say what keeps it?</h3>
-<dl class="q">
-  <dt>2a</dt><dd>Yes: a "kept by" reading in <code>lf process list</code> and on the conversation in Desktop ("unsent input since Nov 9").</dd>
-  <dt>2b</dt><dd>Not now; <code>lf process rollover --dry-run</code> stays the way to ask.</dd>
-</dl>
-
-<h3>3. Does a finished Task's cleanup wait on unsent input?</h3>
-<dl class="q">
-  <dt>3a</dt><dd>Yes, as today: the checkout and shells stay until the conversation is released.</dd>
-  <dt>3b</dt><dd>No: once a done Task passes its cleanup grace, its conversation ends whatever the input state, and its last screen is saved.</dd>
-  <dt>3c</dt><dd>Only for recorded text; <code>Uncertain</code> alone doesn't hold a done Task.</dd>
-</dl>
-
-<h3>4. Where does this land?</h3>
-<dl class="q">
-  <dt>4a</dt><dd>In LOO-823 and PR #1877, before it merges.</dd>
-  <dt>4b</dt><dd>#1877 merges with the troubleshooting paragraph corrected to today's behavior; the change gets its own Task.</dd>
-</dl>
-
 </main>
 </body>
 </html>

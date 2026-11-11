@@ -133,7 +133,7 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        let connection = Self::start(connect(path)?, 64 * 1024, cli_identity(), HANDSHAKE)?;
+        let connection = Self::start(connect(path)?, 64 * 1024, identity("cli", "lf"), HANDSHAKE)?;
         connection.set_read_timeout(None)?;
         Ok(connection)
     }
@@ -317,11 +317,11 @@ impl Connection {
     }
 }
 
-fn cli_identity() -> ClientIdentity {
+fn identity(kind: &str, name: &str) -> ClientIdentity {
     ClientIdentity {
-        kind: "cli".into(),
+        kind: kind.into(),
         platform: std::env::consts::OS.into(),
-        name: "lf".into(),
+        name: name.into(),
         version: crate::build_info::BUILD_VERSION.into(),
     }
 }
@@ -332,12 +332,7 @@ pub fn hook_request(path: &Path, operation: Operation, within: Duration) -> Resu
     let deadline = std::time::Instant::now() + within;
     let stream = connect(path)?;
     stream.set_write_timeout(Some(within))?;
-    let client = ClientIdentity {
-        kind: "hook".into(),
-        platform: std::env::consts::OS.into(),
-        name: "lf __context-block".into(),
-        version: crate::build_info::BUILD_VERSION.into(),
-    };
+    let client = identity("hook", "lf __context-block");
     let mut connection = Connection::start(stream, 64 * 1024, client, within)?;
     let left = deadline.saturating_duration_since(std::time::Instant::now());
     anyhow::ensure!(
@@ -388,7 +383,8 @@ pub fn attach(
     session: &LfSessionId,
     owner: Option<&LfProcessId>,
 ) -> Result<UnixStream> {
-    let mut connection = Connection::start(connect(path)?, 64 * 1024, cli_identity(), HANDSHAKE)?;
+    let mut connection =
+        Connection::start(connect(path)?, 64 * 1024, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
         .request(Operation::Server(ServerOperation::SessionAttach {
             session: session.clone(),

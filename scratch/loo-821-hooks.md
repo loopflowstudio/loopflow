@@ -102,7 +102,7 @@ Turn-end planning refresh now has no Linear-fixture test;
 
 Checks:
 
-- `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block` — 35 pass with steer confirmation; `store::sqlite::steers` — 17 pass
+- `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block store::sqlite::steers` — 53 pass after compress
 - `cargo test -p loopflow --test integration session_steers::` — 4 pass (server up, down, back; printed steer `uncertain` then `emitted` after the next hook; new `a_skill_with_no_task_runs_without_the_machine_server`). One earlier run failed two with 10 s provider-start timeouts at load average 416; same tree passed at 115.
 - `cargo test -p loopflow --test integration dto_fixtures` — 50 pass
 - `transport_tests` hook tests (`native_drafts…`, `retained_hooks_survive_upgrade`,

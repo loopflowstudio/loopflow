@@ -584,17 +584,16 @@ impl SqliteStore {
         Ok(waiting)
     }
 
-    /// Returns whether a batch was handed to `write`, not whether a hook
-    /// printed it: the batch stays `uncertain` until a later request confirms
-    /// it through [`Self::confirm_session_steers`].
+    /// The Session's next batch of pending steers and its rendered text, for a
+    /// hook to print. The batch stays `uncertain` until a later request
+    /// confirms it through [`Self::confirm_session_steers`].
     pub(crate) fn emit_session_steers(
         &self,
         adapter: &SteerAdapter,
         provider_thread: &str,
         boundary: &str,
         render: impl FnOnce(&str, &[Steer], usize) -> StoreResult<SteerContext>,
-        write: impl FnOnce(&str) -> StoreResult<()>,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<(crate::id::SteerBatchId, String)>> {
         let _lock = self.lock_session_dispatch(&adapter.session)?;
         let batch = crate::id::SteerBatchId::new();
         let (steers, remaining) = {
@@ -612,14 +611,14 @@ impl SqliteStore {
             reconcile(&tx, &adapter.session)?;
             let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
             if duplicate {
-                return Ok(false);
+                return Ok(None);
             }
             let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steers p ON p.id=s.steer_id
                 WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
                 WHERE d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt)
                 ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],read_steer)?.collect::<rusqlite::Result<Vec<_>>>()?;
             if rows.is_empty() {
-                return Ok(false);
+                return Ok(None);
             }
             tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
                 VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
@@ -663,11 +662,10 @@ impl SqliteStore {
                 params![batch,hash])? == 1;
             tx.commit()?;
             if !retained {
-                return Ok(false);
+                return Ok(None);
             }
         }
-        write(&payload.text)?;
-        Ok(true)
+        Ok(Some((batch, payload.text)))
     }
 }
 

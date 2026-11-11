@@ -49,6 +49,10 @@ pub(super) fn answer(
     if delivery.relocate(store)? {
         delivery.save(path)?;
     }
+    let nothing = SessionBoundaryAnswer {
+        steers: None,
+        waiting: false,
+    };
     let Some(adapter) = adapter else {
         anyhow::ensure!(
             *moment == BoundaryMoment::Stop,
@@ -58,11 +62,7 @@ pub(super) fn answer(
             repo: delivery.repo,
             session: None,
         };
-        let answer = SessionBoundaryAnswer {
-            steers: None,
-            waiting: false,
-        };
-        return Ok((answer, Some(after)));
+        return Ok((nothing, Some(after)));
     };
     let thread = callback["session_id"]
         .as_str()
@@ -105,11 +105,7 @@ pub(super) fn answer(
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
         };
-        let answer = SessionBoundaryAnswer {
-            steers: None,
-            waiting: false,
-        };
-        return Ok((answer, Some(after)));
+        return Ok((nothing, Some(after)));
     }
     let (steers, waiting) =
         claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
@@ -186,31 +182,17 @@ fn claim_steers(
             "{event}:{}:{invocation}",
             callback["turn_id"].as_str().unwrap_or("")
         );
-        let mut batch = None;
-        let mut text = None;
-        store.emit_session_steers(
-            adapter,
-            thread,
-            &boundary,
-            |id, steers, remaining| {
-                batch = Some(
-                    crate::id::SteerBatchId::parse(id)
-                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                );
+        let steers =
+            store.emit_session_steers(adapter, thread, &boundary, |id, steers, remaining| {
                 let (text, excerpts) =
                     render_steers(delivery, &adapter.session, id, steers, remaining)
                         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
                 Ok(SteerContext { text, excerpts })
-            },
-            |rendered| {
-                text = Some(rendered.to_owned());
-                Ok(())
-            },
-        )?;
-        let answer = batch
-            .zip(text)
-            .map(|(batch, text)| SteerBatch { batch, text });
-        Ok((answer, waiting))
+            })?;
+        Ok((
+            steers.map(|(batch, text)| SteerBatch { batch, text }),
+            waiting,
+        ))
     })
 }
 

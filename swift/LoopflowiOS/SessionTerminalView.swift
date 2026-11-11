@@ -5,6 +5,22 @@ import SwiftUI
 import UIKit
 
 private final class TerminalViewport: UIScrollView {
+    private var lastLayout: (height: CGFloat, contentHeight: CGFloat)?
+
+    override func layoutSubviews() {
+        let followedBottom = lastLayout.map { contentOffset.y + $0.height >= $0.contentHeight - 1 } ?? false
+        super.layoutSubviews()
+        lastLayout = (bounds.height, contentSize.height)
+        // Status/header and keyboard changes must keep a bottom-aligned reader
+        // at the bottom, without taking over a drag or an earlier reading position.
+        if followedBottom, !isTracking, !isDecelerating {
+            let bottom = max(0, contentSize.height - bounds.height)
+            if abs(contentOffset.y - bottom) > 1 {
+                setContentOffset(CGPoint(x: contentOffset.x, y: bottom), animated: false)
+            }
+        }
+    }
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === panGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)

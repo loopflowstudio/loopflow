@@ -453,7 +453,14 @@ final class MobileTerminalTests: XCTestCase {
         XCTAssertGreaterThan(viewport.contentSize.height, viewport.bounds.height)
         XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1)
 
+        controller.view.frame.size.height -= 28
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(viewport.contentOffset.y, viewport.contentSize.height - viewport.bounds.height, accuracy: 1,
+                       "The ready header must not move a bottom-aligned view away from current output")
+
         viewport.setContentOffset(CGPoint(x: 100, y: 120), animated: false)
+        controller.view.frame.size.height -= 28
+        controller.view.layoutIfNeeded()
         workspace.render?(Data("More output".utf8), false)
         workspace.render?(snapshot, true)
         controller.view.layoutIfNeeded()

@@ -46,6 +46,8 @@ export default {
         recordingGap(error);
       }
     });
+    // A bare headless run reports no turn end to the Machine server.
+    if (!spec.managed) return async () => {};
     const controller = new AbortController();
     const watching = (async () => {
       for await (const item of event.subscribe({ signal: controller.signal })) {

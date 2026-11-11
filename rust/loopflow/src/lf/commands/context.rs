@@ -240,17 +240,21 @@ pub fn explain_task_checkout(
 }
 
 /// Provider callbacks use launch-owned authority rather than the current client.
+/// A turn or tool boundary opens no store: the Machine server records it and
+/// answers steers, and the context block comes from checkout files.
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: crate::context_block::ContextMoment,
 ) -> Result<()> {
+    use crate::context_block::ContextMoment;
+    use crate::server::wire::BoundaryMoment;
     let input = read_callback()?;
     if input.get("agent_id").is_some_and(|id| !id.is_null()) {
         return Ok(());
     }
-    let delivery = load_delivery(delivery, &input)?;
+    let (path, delivery) = load_delivery(delivery, &input)?;
     #[cfg(unix)]
-    if moment == crate::context_block::ContextMoment::TaskUpdates {
+    if moment == ContextMoment::TaskUpdates {
         if input["hook_event_name"] == "PiTaskUpdates" {
             let adapter =
                 serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
@@ -282,93 +286,189 @@ pub fn emit_block(
         }
         return crate::harness::claude_updates::watch(&delivery.home, &input);
     }
+    let boundary = match moment {
+        ContextMoment::Start => BoundaryMoment::Start,
+        ContextMoment::Compact => BoundaryMoment::Compact,
+        ContextMoment::Tool => BoundaryMoment::Tool,
+        ContextMoment::Stop => BoundaryMoment::Stop,
+        other => anyhow::bail!("{other:?} is not a turn or tool boundary"),
+    };
     let adapter = std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)
         .ok()
         .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
         .transpose()?;
-    let yielded = match (moment, input["hook_event_name"].as_str()) {
-        (crate::context_block::ContextMoment::Stop, Some("Stop")) => Some(true),
-        (crate::context_block::ContextMoment::Tool, Some("UserPromptSubmit")) => Some(false),
-        _ => None,
+    // Mark the check before the server reads pending steers, so one saved
+    // during it is newer and the next tool boundary checks again.
+    let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
+        .map(std::path::PathBuf::from)
+        .filter(|_| adapter.is_some() && moment == ContextMoment::Tool);
+    if let Some(seen) = &seen {
+        crate::steer::touch(seen)?;
+    }
+    // A conversation lf did not start (a Codex app-server thread) has no
+    // provider context; only its turn end asks, to refresh planning.
+    let printed = match &adapter {
+        Some(_) => PrintedBatches::claim(&path),
+        None => PrintedBatches::default(),
     };
-    // Turn evidence is independent of steering and planning delivery: even a
-    // failed context refresh must preserve work the provider has started. A
-    // store the hook cannot reach is a recording gap, never a failed turn.
-    if let (Some(adapter), Some(yielded)) = (&adapter, yielded) {
-        let thread = input["session_id"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Provider turn callback has no native conversation"))?;
-        // Claude's Stop snapshot includes work that will wake the conversation
-        // again. A yielded reply cannot settle a watch or a scheduled wakeup.
-        let open_tools = input["background_tasks"]
-            .as_array()
-            .zip(input["session_crons"].as_array())
-            .map(|(tasks, crons)| tasks.len() + crons.len());
-        let mut gap = recording_gap(&delivery.home, thread);
-        let recorded = hook_store(&delivery.home).and_then(|store| {
-            store.record_native_turn(adapter, thread, yielded, open_tools)?;
-            if let Some(prompt_id) = input["prompt_id"].as_str().filter(|id| !id.is_empty()) {
-                if yielded {
-                    store.acknowledge_native_input(adapter, thread, prompt_id, None)?;
-                } else if let Some(prompt) = input["prompt"].as_str() {
-                    store.acknowledge_native_input(adapter, thread, prompt_id, Some(prompt))?;
-                }
-            }
-            store.close_recording_gap(&adapter.session, &mut gap)
-        });
-        if let Err(error) = recorded {
-            gap.note("turn evidence", &error);
-        }
+    let answered = if adapter.is_some() || boundary == BoundaryMoment::Stop {
+        ask_server(
+            &path,
+            &delivery.home,
+            boundary,
+            adapter.as_ref(),
+            &input,
+            &printed.batches,
+        )
+    } else {
+        None
+    };
+    printed.settle(answered.is_some());
+    // Steers just delivered may have more behind them, an earlier batch may
+    // still be waiting out its hook, and an unanswered boundary delivered
+    // none: the next tool boundary asks again.
+    let ask_again = answered
+        .as_ref()
+        .is_none_or(|answer| answer.steers.is_some() || answer.waiting);
+    if let Some(seen) = seen.filter(|_| ask_again) {
+        let _ = std::fs::remove_file(seen);
     }
-    // The transcript is the only writer of usage rows; the exit read writes
-    // any turn this misses. Pi and OpenCode reach Stop with no hook name.
-    if let (Some(adapter), true) = (
-        &adapter,
-        moment == crate::context_block::ContextMoment::Stop && yielded != Some(false),
-    ) {
-        match hook_store(&delivery.home) {
-            Ok(store) => crate::transcript::facts::record_session(
-                &store,
-                &adapter.session,
-                crate::transcript::facts::Moment::TurnEnd,
-            ),
-            Err(error) => tracing::warn!(%error, "cannot record turn usage at this turn end"),
-        }
-    }
-    if moment == crate::context_block::ContextMoment::Stop {
-        if let Err(error) = acquire_planning(&delivery) {
-            tracing::warn!(%error, "planning refresh unavailable at this turn boundary");
-        }
-        // A move asked of this Session while it was busy happens once its turn
-        // has ended. The hook only peeks and starts the applier; it never
-        // stops the provider it runs inside.
-        if let (Some(adapter), Some(thread)) = (&adapter, input["session_id"].as_str()) {
-            let started = hook_store(&delivery.home)
-                .map_err(anyhow::Error::from)
-                .and_then(|store| {
-                    crate::ops::human_session::moves_bulk::start_pending_move(
-                        &store,
-                        &adapter.session,
-                    )
-                });
-            if let Err(error) = started {
-                recording_gap(&delivery.home, thread).note("pending Session move", &error);
-            }
-        }
+    if moment == ContextMoment::Stop {
         return Ok(());
     }
-    emit_context(delivery, input, moment, adapter.as_ref())
+    // An answering server may have followed a moved checkout.
+    let (delivery, steers) = match answered {
+        Some(answer) => (
+            crate::context_block::ContextDelivery::load(&path)?,
+            answer.steers,
+        ),
+        None => (delivery, None),
+    };
+    let prefix = steers.as_ref().map_or("", |steers| steers.text.as_str());
+    let text = delivery.block_with_prefix(moment, prefix)?;
+    let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
+    let output = serde_json::json!({"hookSpecificOutput": {
+        "hookEventName": event, "additionalContext": text,
+    }});
+    write_output(format!("{output}\n").as_bytes())?;
+    // Printed first: a hook that dies between the two has its batch answered
+    // again, and a steer that arrives twice beats one that never arrives.
+    if let Some(steers) = steers {
+        PrintedBatches::add(&path, &steers.batch);
+    }
+    Ok(())
 }
 
-/// The applier a Stop hook started for a pending Session move.
-pub fn apply_session_move() -> Result<()> {
-    crate::ops::human_session::moves_bulk::apply_pending_move()
+/// Steer batches this conversation's hooks printed and no request has told
+/// the server about yet. Every hook is a fresh process, so they are lines in
+/// a file beside the delivery file.
+#[derive(Debug, Default)]
+struct PrintedBatches {
+    batches: Vec<crate::id::SteerBatchId>,
+    /// The file's lines moved aside for this request, so a hook printing in
+    /// parallel starts a new file and neither loses the other's batch.
+    claimed: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
-fn hook_store(
+impl PrintedBatches {
+    fn file(delivery: &std::path::Path) -> std::path::PathBuf {
+        delivery.with_extension("printed")
+    }
+
+    fn claim(delivery: &std::path::Path) -> Self {
+        let file = Self::file(delivery);
+        let aside = file.with_extension(format!("printed.{}", std::process::id()));
+        if std::fs::rename(&file, &aside).is_err() {
+            return Self::default();
+        }
+        let batches = std::fs::read_to_string(&aside)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| crate::id::SteerBatchId::parse(line).ok())
+            .collect();
+        Self {
+            batches,
+            claimed: Some((file, aside)),
+        }
+    }
+
+    /// The server heard these, or it did not and the next request repeats them.
+    fn settle(self, answered: bool) {
+        let Some((file, aside)) = self.claimed else {
+            return;
+        };
+        if !answered {
+            for batch in &self.batches {
+                Self::append(&file, batch);
+            }
+        }
+        let _ = std::fs::remove_file(aside);
+    }
+
+    fn add(delivery: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        Self::append(&Self::file(delivery), batch);
+    }
+
+    fn append(file: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        use std::io::Write;
+        let wrote = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file)
+            .and_then(|mut file| writeln!(file, "{batch}"));
+        if let Err(error) = wrote {
+            tracing::warn!(batch = %batch, error = %error, "printed steers not noted; they will arrive again");
+        }
+    }
+}
+
+/// One `session.boundary` request, or `None` when the server did not answer,
+/// which is a recording gap and never a failed turn.
+fn ask_server(
+    delivery: &std::path::Path,
     home: &std::path::Path,
-) -> crate::store::StoreResult<crate::store::sqlite::SqliteStore> {
-    crate::store::sqlite::SqliteStore::open_for_hook(&home.join("loopflow.db"))
+    moment: crate::server::wire::BoundaryMoment,
+    adapter: Option<&crate::steer::SteerAdapter>,
+    input: &serde_json::Value,
+    printed: &[crate::id::SteerBatchId],
+) -> Option<crate::server::wire::SessionBoundaryAnswer> {
+    use crate::server::wire::{BoundaryGap, Operation, ServerOperation, SessionBoundary};
+    // Only a Session lf recorded has history to hold a gap; the server refuses
+    // an adapter's callback that names no conversation.
+    let mut gap = match (adapter, input["session_id"].as_str()) {
+        (Some(_), Some(thread)) => recording_gap(home, thread),
+        _ => RecordingGap::default(),
+    };
+    let operation = Operation::Server(ServerOperation::SessionBoundary(SessionBoundary {
+        moment,
+        delivery: delivery.to_owned(),
+        adapter: adapter.cloned(),
+        callback: input.clone(),
+        gap: gap.span().map(|span| BoundaryGap {
+            first: span.first_miss,
+            last: span.last_miss,
+        }),
+        printed: printed.to_vec(),
+    }));
+    let answered = crate::server::socket_path()
+        .and_then(|socket| {
+            crate::server::client::hook_request(
+                &socket,
+                operation,
+                crate::server::boundary::HOOK_DEADLINE,
+            )
+        })
+        .and_then(|response| Ok(serde_json::from_value(response.result)?));
+    match answered {
+        Ok(answer) => {
+            gap.recovered();
+            Some(answer)
+        }
+        Err(error) => {
+            gap.note("session boundary", &format!("{error:#}"));
+            None
+        }
+    }
 }
 
 /// Every hook is a fresh process, so the native conversation keeps its open gap
@@ -395,10 +495,11 @@ fn read_callback() -> Result<serde_json::Value> {
     })
 }
 
+/// The delivery file a callback names, and what it holds.
 fn load_delivery(
     path: Option<&std::path::Path>,
     input: &serde_json::Value,
-) -> Result<crate::context_block::ContextDelivery> {
+) -> Result<(std::path::PathBuf, crate::context_block::ContextDelivery)> {
     let path = path
         .map(std::path::Path::to_path_buf)
         .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
@@ -410,224 +511,8 @@ fn load_delivery(
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
         })?;
-    let bytes = std::fs::read(&path).map_err(|error| {
-        anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
-    })?;
-    let mut delivery: crate::context_block::ContextDelivery = serde_json::from_slice(&bytes)
-        .map_err(|error| {
-            anyhow!(
-                "Decode provider context delivery {}: {error}",
-                path.display()
-            )
-        })?;
-    if let Err(error) = delivery.relocate() {
-        let thread = input["session_id"].as_str().unwrap_or_default();
-        recording_gap(&delivery.home, thread).note("checkout relocation", &error);
-    }
-    Ok(delivery)
-}
-
-fn emit_context(
-    delivery: crate::context_block::ContextDelivery,
-    input: serde_json::Value,
-    moment: crate::context_block::ContextMoment,
-    adapter: Option<&crate::steer::SteerAdapter>,
-) -> Result<()> {
-    let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let render = |prefix: &str| -> crate::store::StoreResult<String> {
-        delivery
-            .block_with_prefix(moment, prefix)
-            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-    };
-    let write = |text: &str| -> crate::store::StoreResult<()> {
-        let output = serde_json::json!({"hookSpecificOutput": {
-            "hookEventName": event, "additionalContext": text,
-        }});
-        write_output(format!("{output}\n").as_bytes())
-            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-    };
-    // Mark the check before reading pending steers, so one saved during it is
-    // newer and the next tool boundary checks again.
-    let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
-        .map(std::path::PathBuf::from)
-        .filter(|_| adapter.is_some() && moment == crate::context_block::ContextMoment::Tool);
-    if let Some(seen) = &seen {
-        crate::steer::touch(seen)?;
-    }
-    let more = std::cell::Cell::new(false);
-    let result = deliver_steers(&delivery, &input, event, adapter, &render, &write, &more);
-    // Steers left beyond this batch, or a failed delivery, need the next boundary.
-    if let Some(seen) = seen.filter(|_| result.is_err() || more.get()) {
-        let _ = std::fs::remove_file(seen);
-    }
-    result
-}
-
-fn deliver_steers(
-    delivery: &crate::context_block::ContextDelivery,
-    input: &serde_json::Value,
-    event: &str,
-    adapter: Option<&crate::steer::SteerAdapter>,
-    render: &dyn Fn(&str) -> crate::store::StoreResult<String>,
-    write: &dyn Fn(&str) -> crate::store::StoreResult<()>,
-    more: &std::cell::Cell<bool>,
-) -> Result<()> {
-    if let Some(adapter) = adapter {
-        let thread = input["session_id"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("Provider context callback has no native conversation")
-        })?;
-        // Context is emitted once: a store failure after the write is only a gap.
-        let wrote = std::cell::Cell::new(false);
-        let write_once = |text: &str| -> crate::store::StoreResult<()> {
-            wrote.set(true);
-            write(text)
-        };
-        let write = &write_once;
-        let boundary = match event {
-            "SessionStart" => NativeBoundary::Select {
-                source: input["source"].as_str().unwrap_or("startup"),
-            },
-            "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
-            _ => NativeBoundary::Turn,
-        };
-        let mut gap = recording_gap(&delivery.home, thread);
-        let delivered = hook_store(&delivery.home).and_then(|store| {
-            store.recover_prepared_steers(&adapter.session)?;
-            store.with_provider_context(adapter, thread, boundary, || {
-                let invocation = input["tool_use_id"]
-                    .as_str()
-                    .or_else(|| input["adapter_invocation_id"].as_str())
-                    .or_else(|| input["turn_id"].as_str())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                let boundary = format!(
-                    "{event}:{}:{invocation}",
-                    input["turn_id"].as_str().unwrap_or("")
-                );
-                let emitted = store.emit_session_steers(
-                    adapter,
-                    thread,
-                    &boundary,
-                    |batch, steers, remaining| {
-                        more.set(remaining > 0);
-                        let (prefix, excerpts) =
-                            render_steers(delivery, &adapter.session, batch, steers, remaining)
-                                .map_err(|error| {
-                                    crate::store::StoreError::InvalidData(error.to_string())
-                                })?;
-                        Ok(crate::steer::SteerContext {
-                            text: render(&prefix)?,
-                            excerpts,
-                        })
-                    },
-                    write,
-                )?;
-                if !emitted {
-                    write(&render("")?)?;
-                }
-                Ok(())
-            })?;
-            store.close_recording_gap(&adapter.session, &mut gap)
-        });
-        match delivered {
-            Ok(()) => {}
-            Err(error) => {
-                gap.note("steers and turn boundary", &error);
-                // The native thread still gets its context from the delivery file alone.
-                if !wrote.get() {
-                    write(&render("")?)?;
-                }
-            }
-        }
-    } else {
-        write(&render("")?)?;
-    }
-    Ok(())
-}
-
-/// Native turn hooks consume the same team freshness as CLI and watcher reads.
-fn acquire_planning(delivery: &crate::context_block::ContextDelivery) -> Result<()> {
-    let database = delivery.home.join("loopflow.db");
-    if !database.exists() {
-        return Ok(());
-    }
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async {
-            let store = tokio::time::timeout(
-                crate::store::sqlite::HOOK_BUSY_TIMEOUT,
-                crate::store::open_store(&crate::store::StorageConfig::sqlite(database)),
-            )
-            .await
-            .map_err(|_| anyhow!("store busy past the hook's budget"))??;
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(8),
-                crate::ops::linear_observe::sync_repository(
-                    &store,
-                    &delivery.repo.to_string_lossy(),
-                ),
-            )
-            .await;
-            Ok(())
-        })
-}
-
-fn excerpt(text: &str, bytes: usize) -> &str {
-    let mut end = text.len().min(bytes);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
-}
-
-fn render_steers(
-    delivery: &crate::context_block::ContextDelivery,
-    session: &str,
-    batch: &str,
-    steers: &[crate::steer::Steer],
-    remaining: usize,
-) -> Result<(String, Vec<crate::id::SteerId>)> {
-    let mut excerpts = Vec::new();
-    let mut text = format!("<lf:steers batch=\"{batch}\">\n");
-    for steer in steers {
-        let path = crate::prompt::write_prompt_log(
-            &delivery.repo,
-            &serde_json::to_string_pretty(steer)?,
-            "steer",
-            None,
-        )?;
-        let path = path.strip_prefix(&delivery.repo).unwrap_or(&path);
-        let mut item = format!(
-            "Steer {}. Source {} revision {}; author {}. Complete source: {}\n",
-            steer.id,
-            serde_json::to_string(excerpt(&steer.source, 96))?,
-            serde_json::to_string(excerpt(&steer.revision, 64))?,
-            serde_json::to_string(excerpt(&steer.author.to_string(), 96))?,
-            serde_json::to_string(path)?
-        );
-        let mut body = excerpt(&steer.text, 400);
-        while !body.is_empty()
-            && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
-        {
-            body = excerpt(body, body.len() - 1);
-        }
-        item.push_str(&crate::prompt::render_reference(body));
-        if body.len() != steer.text.len() {
-            excerpts.push(steer.id.clone());
-            item.push_str(" [excerpt; full source above]");
-        }
-        item.push('\n');
-        anyhow::ensure!(
-            item.len() <= 1024,
-            "Steer attribution and source pointer exceed the item budget"
-        );
-        text.push_str(&item);
-    }
-    text.push_str(&format!(
-        "{remaining} pending. Inspect: lf session steers {session} --json\n</lf:steers>\n"
-    ));
-    Ok((text, excerpts))
+    let delivery = crate::context_block::ContextDelivery::load(&path)?;
+    Ok((path, delivery))
 }
 
 /// A stalled provider cannot retain the takeover fence through an unread pipe.
@@ -693,7 +578,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, PrintedBatches};
     use crate::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -716,7 +601,32 @@ mod tests {
     }
 
     #[test]
+    fn printed_batches_wait_for_a_request_the_server_answers() {
+        let home = tempfile::tempdir().unwrap();
+        let delivery = home.path().join("delivery.json");
+        let (one, two) = (
+            crate::id::SteerBatchId::new(),
+            crate::id::SteerBatchId::new(),
+        );
+        PrintedBatches::add(&delivery, &one);
+        // The request went unanswered; a hook beside it printed meanwhile.
+        let unanswered = PrintedBatches::claim(&delivery);
+        assert_eq!(unanswered.batches, std::slice::from_ref(&one));
+        PrintedBatches::add(&delivery, &two);
+        unanswered.settle(false);
+        let mut answered = PrintedBatches::claim(&delivery);
+        answered.batches.sort_by_key(|batch| batch.to_string());
+        let mut both = [one, two];
+        both.sort_by_key(|batch| batch.to_string());
+        assert_eq!(answered.batches, both);
+        answered.settle(true);
+        assert!(PrintedBatches::claim(&delivery).batches.is_empty());
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn callbacks_select_exact_session_after_other_tasks_and_resume() {
+        let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_CONTEXT_DELIVERY", "LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
@@ -757,7 +667,7 @@ mod tests {
             .collect();
         for index in [0, 1, 0] {
             std::env::set_var("LF_CONTEXT_DELIVERY", &paths[index]);
-            let restored = load_delivery(None, &serde_json::json!({})).unwrap();
+            let restored = load_delivery(None, &serde_json::json!({})).unwrap().1;
             assert_eq!(restored, contexts[index]);
             let compact = restored.block(ContextMoment::Compact).unwrap().text;
             assert!(compact.contains(&format!("SESSION_{index}_SKILL")));
@@ -766,7 +676,7 @@ mod tests {
         std::env::remove_var("LF_CONTEXT_DELIVERY");
         for index in [0, 1, 0] {
             let input = serde_json::json!({"session_id":format!("thread-{index}")});
-            let restored = load_delivery(None, &input).unwrap();
+            let restored = load_delivery(None, &input).unwrap().1;
             assert_eq!(restored, contexts[index]);
             let compact = restored.block(ContextMoment::Compact).unwrap().text;
             assert!(compact.contains(&format!("SESSION_{index}_SKILL")));
@@ -782,7 +692,8 @@ mod tests {
                 None,
                 &serde_json::json!({"session_id":format!("thread-{index}")}),
             )
-            .unwrap();
+            .unwrap()
+            .1;
             assert_eq!(restored, contexts[index]);
         }
     }

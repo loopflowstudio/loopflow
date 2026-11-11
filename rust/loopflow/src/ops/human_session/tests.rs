@@ -49,9 +49,10 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 command,
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
+                false,
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
+            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -830,6 +831,7 @@ impl Logins {
                     session.id.to_string(),
                     attachment,
                 ),
+                false,
             )
             .unwrap(),
         )
@@ -1098,6 +1100,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             false,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1121,6 +1124,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &record.id,
             SessionOpenIntent::Start,
             true,
+            false,
             false,
         )
         .await
@@ -1148,6 +1152,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             false,
             false,
+            false,
         )
         .await
         .unwrap();
@@ -1157,6 +1162,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            false,
             false,
             false,
             false,
@@ -1190,6 +1196,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             &store,
             &record.id,
             SessionOpenIntent::Reveal,
+            false,
             false,
             false,
         )
@@ -1231,6 +1238,7 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             SessionOpenIntent::Reveal,
             true,
             false,
+            false,
         )
         .await
         .unwrap_err();
@@ -1263,6 +1271,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             &store,
             &record.id,
             SessionOpenIntent::Reveal,
+            false,
             false,
             false,
         )
@@ -1308,6 +1317,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             &store,
             &record.id,
             SessionOpenIntent::Reveal,
+            false,
             false,
             false,
         )
@@ -1389,6 +1399,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 SessionOpenIntent::Reveal,
                 false,
                 false,
+                false,
             )
             .await
             .unwrap();
@@ -1421,6 +1432,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 &store,
                 &next.id,
                 SessionOpenIntent::Reveal,
+                false,
                 false,
                 false,
             )

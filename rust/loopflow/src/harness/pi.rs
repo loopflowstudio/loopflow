@@ -197,6 +197,7 @@ impl PiHarness {
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
+            config.managed,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
@@ -210,7 +211,7 @@ impl PiHarness {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner)
+        let mut child = super::agent_process::spawn(command, None, &owner, config.managed)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
         let (store, session, attachment) = owner;
         self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(

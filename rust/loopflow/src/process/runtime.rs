@@ -203,6 +203,7 @@ impl LfProcessRuntime {
     pub(crate) fn spawn_native_agent(
         &self,
         mut command: std::process::Command,
+        managed: bool,
     ) -> anyhow::Result<(std::process::Child, crate::process::SessionAttachment)> {
         let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
         if runtime.settled_outcome.is_some() {
@@ -221,7 +222,7 @@ impl LfProcessRuntime {
         );
         let snapshot = attachment.clone();
         // Keep the invocation's settlement snapshot fixed through admission.
-        let child = crate::harness::agent_process::spawn_native(command, owner)?;
+        let child = crate::harness::agent_process::spawn_native(command, owner, managed)?;
         Ok((child, snapshot))
     }
 
@@ -777,6 +778,7 @@ mod tests {
             crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), "resume".into(), attached.clone()),
+                false,
             )
             .unwrap(),
         );

@@ -775,7 +775,12 @@ async fn request(
     let write = matches!(operation, Operation::Write(_));
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
-    let result = operate(operation, &id, &instance, &trace_id, reservation.clone()).await;
+    let result = match operation {
+        Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
+            session_boundary(boundary, reservation.clone()).await
+        }
+        operation => operate(operation, &id, &instance, &trace_id, reservation.clone()).await,
+    };
     tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
     let message = match result {
         Ok(result) => ServerMessage::Response {
@@ -860,7 +865,37 @@ async fn operate(
         Operation::Server(ServerOperation::SessionAttach { .. }) => {
             unreachable!("the session dispatches attachment")
         }
+        Operation::Server(ServerOperation::SessionBoundary(_)) => {
+            unreachable!("request dispatches boundaries")
+        }
     }
+}
+
+/// Record a hook's boundary and answer its steers. A `stop`'s planning refresh
+/// and pending move start before the answer and never delay it; a closed
+/// connection does not cancel them.
+async fn session_boundary(
+    boundary: super::wire::SessionBoundary,
+    reservation: Arc<Reservation>,
+) -> Result<serde_json::Value, Error> {
+    let (answer, after) = tokio::task::spawn_blocking(move || {
+        let _held = reservation;
+        crate::journal::request::isolate(|| {
+            let path = crate::store::default_db_path();
+            anyhow::ensure!(path.exists(), "Machine registry is absent");
+            let store = crate::store::sqlite::SqliteStore::new(&path)?;
+            super::boundary::answer(&store, &boundary)
+        })
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)?;
+    if let Some(after) = after {
+        tokio::task::spawn_blocking(move || {
+            crate::journal::request::isolate(|| super::boundary::after_stop(after))
+        });
+    }
+    serde_json::to_value(answer).map_err(unavailable)
 }
 
 /// Run a write on a request worker under `trace_id`. Once admitted,

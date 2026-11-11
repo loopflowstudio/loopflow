@@ -104,6 +104,11 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
                 println!("{}; {} pending", status.capability, status.pending);
+                // Hooks deliver steers through the Machine server and nothing else.
+                let server = crate::server::client::status()?;
+                if let Some(error) = server.error.filter(|_| !server.listening) {
+                    println!("{error}. Steers wait and turns go unrecorded until it runs.");
+                }
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }
@@ -681,6 +686,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
+    let managed = resumes_work(cli, connection);
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -694,7 +700,9 @@ async fn resume(
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
         drop(launch);
         let id = session.id;
-        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
+        return tokio::task::block_in_place(|| {
+            crate::lf::commands::run::resume(&id, message, cli, managed)
+        });
     }
     let session = reopen(
         &store,
@@ -703,9 +711,16 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
+        managed,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
+}
+
+/// A resume naming its Task or Wave is managed, as `Cli::names_work` is for
+/// a launch.
+fn resumes_work(cli: &crate::lf::Cli, connection: &SessionConnectionArgs) -> bool {
+    connection.work_flag(cli).is_some() || crate::journal::task_run_step()
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -738,6 +753,7 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
+    managed: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -750,11 +766,21 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
+            managed,
         )
         .await;
     }
     let id = select(store, directory, target).await?;
-    crate::ops::human_session::open(store, directory, &id, fork, !connection.prepare, json).await
+    crate::ops::human_session::open(
+        store,
+        directory,
+        &id,
+        fork,
+        !connection.prepare,
+        json,
+        managed,
+    )
+    .await
 }
 
 /// What `lf session resume|new --prepare` run from `directory` records and
@@ -773,7 +799,15 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                reopen(&store, directory, target, connection, *fork, false).await
+                let managed = resumes_work(cli, connection);
+                let mut record =
+                    reopen(&store, directory, target, connection, *fork, false, managed).await?;
+                // The opening terminal resumes this Session by id, managed
+                // when the prepare named its Work.
+                if let Some(flag) = connection.work_flag(cli) {
+                    record.open_argv.extend(flag.map(str::to_string));
+                }
+                Ok(record)
             }
             SessionCommand::New {
                 id,

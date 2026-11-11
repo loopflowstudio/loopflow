@@ -53,6 +53,33 @@ impl SqliteStore {
             NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
             _ => None,
         };
+        // A turn in the selected, activated, already observed conversation
+        // changes nothing; it takes no write lock. Any other answer goes
+        // through the transaction, which checks again.
+        if matches!(boundary, NativeBoundary::Turn) && !thread.is_empty() {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let current: Option<bool> = conn
+                .query_row(
+                    "SELECT s.provider_thread IS ?4 AND a.activated_at IS NOT NULL FROM steer_adapters a
+                 JOIN processes p ON p.id=a.agent_process_id
+                 JOIN agent_sessions s ON s.agent_process_id=p.id
+                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
+                    params![
+                        adapter.session,
+                        adapter.agent_process_id,
+                        adapter.capability,
+                        thread
+                    ],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if current == Some(true)
+                && super::provider_transitions::observed_in(&conn, &adapter.session, thread)?
+            {
+                drop(conn);
+                return write();
+            }
+        }
         {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -275,19 +302,12 @@ pub(super) fn save_in(
     Ok(result)
 }
 
-fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-        [session],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(StoreError::NotFound);
-    }
+/// The steers that apply to Session `?1`, as CTE `applicable`.
+fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
     // Reuse Task inventory's association rule, including explicit binds and
     // checkout membership. UNION terminates even in malformed cyclic ancestry.
-    let scopes = format!("WITH RECURSIVE member_tasks(id) AS (
+    format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
@@ -298,7 +318,40 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         (p.session_id=?1 OR p.task_id IN member_tasks OR p.wave_id IN member_waves
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steers newer WHERE newer.source=p.source AND newer.seq>p.seq)
-        )", super::task_work::session_tasks("s"));
+        -- A shared steer saved before this Session started and already emitted
+        -- to another Session was read there; a later Session starts past it.
+        AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
+         OR NOT EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
+            WHERE d.steer_id=p.id AND d.session_id!=?1 AND b.evidence='emitted'))
+        )", super::task_work::session_tasks("s"))
+}
+
+/// Whether some applicable steer has no delivery at its current attempt: the
+/// only case in which [`reconcile`] leaves the Session anything to emit.
+fn undelivered(conn: &Connection, session: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "{} SELECT EXISTS(SELECT 1 FROM applicable a
+            LEFT JOIN session_steers s ON s.session_id=?1 AND s.steer_id=a.id
+            WHERE NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=?1
+            AND d.steer_id=a.id AND d.attempt=COALESCE(s.attempt,0)))",
+            scopes()
+        ),
+        [session],
+        |row| row.get(0),
+    )?)
+}
+
+fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+        [session],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::NotFound);
+    }
+    let scopes = scopes();
     conn.execute(
         &format!(
             "{scopes} UPDATE session_steers SET applicable=(steer_id IN applicable)
@@ -325,7 +378,7 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     )?;
     conn.execute(
         "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
-        SELECT id FROM steer_batches WHERE evidence='cancelled')",
+        SELECT id FROM steer_batches WHERE session_id=?1 AND evidence='cancelled')",
         [session],
     )?;
     // Emitted and uncertain receipts survive scope changes and corrections.
@@ -357,6 +410,15 @@ impl SqliteStore {
             return Ok(());
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nearly every boundary has nothing to recover; it takes no write lock.
+        let prepared: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='prepared')",
+            [session],
+            |row| row.get(0),
+        )?;
+        if !prepared {
+            return Ok(());
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM steer_deliveries WHERE batch_id IN (
@@ -465,7 +527,7 @@ impl SqliteStore {
         let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'capability reserved; no authenticated callback observed (hook may be unavailable or untrusted)'
+            WHEN a.activated_at IS NULL THEN 'capability reserved; the Machine server has recorded no callback from this conversation'
             ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
             FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
             LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
@@ -525,20 +587,97 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Returns whether a payload was written, not whether it was accepted. Only
-    /// owned provider history containing the batch and hash could confirm it.
+    /// What a hook's request settles: batches it `printed` become `emitted`,
+    /// and any other batch an answer carried more than `deadline_secs` ago goes
+    /// back to pending, since the hook that asked for it had given up. Returns
+    /// whether a newer unconfirmed batch is still waiting for its hook.
+    pub(crate) fn confirm_session_steers(
+        &self,
+        adapter: &SteerAdapter,
+        printed: &[crate::id::SteerBatchId],
+        deadline_secs: u64,
+    ) -> StoreResult<bool> {
+        // Whole seconds: a batch counts as older only once it is past the
+        // deadline whatever the fraction it was created at.
+        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?4";
+        let owns = "EXISTS(SELECT 1 FROM steer_adapters a
+            JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)";
+        let waiting =
+            "EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='uncertain')";
+        let identity = params![
+            adapter.session,
+            adapter.agent_process_id,
+            adapter.capability,
+            deadline_secs as i64
+        ];
+        // (whether a batch is past the deadline, whether one is unconfirmed)
+        let read = |conn: &Connection| -> StoreResult<(bool, bool)> {
+            let (owns, stale, waiting): (bool, bool, bool) = conn.query_row(
+                &format!(
+                    "SELECT {owns}, EXISTS(SELECT 1 FROM steer_batches WHERE {older}), {waiting}"
+                ),
+                identity,
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if !owns {
+                return Err(StoreError::InvalidAuthority(
+                    "Context adapter no longer owns this provider".into(),
+                ));
+            }
+            Ok((stale, waiting))
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Most boundaries confirm and cancel nothing: answer them without the
+        // write lock every Session's writes share.
+        let (stale, waiting) = read(&conn)?;
+        if printed.is_empty() && !stale {
+            return Ok(waiting);
+        }
+        // The closing read checks authority again; failing it rolls back.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for batch in printed {
+            tx.execute(
+                "UPDATE steer_batches SET evidence='emitted'
+                WHERE id=?1 AND session_id=?2 AND agent_process_id=?3 AND evidence='uncertain'",
+                params![batch, adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        tx.execute(
+            &format!(
+                "DELETE FROM steer_deliveries WHERE batch_id IN (
+                SELECT id FROM steer_batches WHERE {older})"
+            ),
+            identity,
+        )?;
+        tx.execute(
+            &format!("UPDATE steer_batches SET evidence='cancelled' WHERE {older}"),
+            identity,
+        )?;
+        let (_, waiting) = read(&tx)?;
+        tx.commit()?;
+        Ok(waiting)
+    }
+
+    /// The Session's next batch of pending steers and its rendered text, for a
+    /// hook to print. The batch stays `uncertain` until a later request
+    /// confirms it through [`Self::confirm_session_steers`].
     pub(crate) fn emit_session_steers(
         &self,
         adapter: &SteerAdapter,
         provider_thread: &str,
         boundary: &str,
         render: impl FnOnce(&str, &[Steer], usize) -> StoreResult<SteerContext>,
-        write: impl FnOnce(&str) -> StoreResult<()>,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<(crate::id::SteerBatchId, String)>> {
         let _lock = self.lock_session_dispatch(&adapter.session)?;
         let batch = crate::id::SteerBatchId::new();
         let (steers, remaining) = {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
+            // Nothing to emit at most boundaries: answer without the write
+            // lock. The caller already checked this adapter's authority.
+            if !undelivered(&conn, &adapter.session)? {
+                return Ok(None);
+            }
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
                 JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
@@ -552,14 +691,14 @@ impl SqliteStore {
             reconcile(&tx, &adapter.session)?;
             let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
             if duplicate {
-                return Ok(false);
+                return Ok(None);
             }
             let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steers p ON p.id=s.steer_id
                 WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
                 WHERE d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt)
                 ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],read_steer)?.collect::<rusqlite::Result<Vec<_>>>()?;
             if rows.is_empty() {
-                return Ok(false);
+                return Ok(None);
             }
             tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
                 VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
@@ -603,15 +742,10 @@ impl SqliteStore {
                 params![batch,hash])? == 1;
             tx.commit()?;
             if !retained {
-                return Ok(false);
+                return Ok(None);
             }
         }
-        write(&payload.text)?;
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE steer_batches SET evidence='emitted' WHERE id=?1",
-            [batch],
-        )?;
-        Ok(true)
+        Ok(Some((batch, payload.text)))
     }
 }
 

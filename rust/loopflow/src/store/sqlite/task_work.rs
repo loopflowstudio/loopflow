@@ -57,6 +57,9 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
+/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
+/// that cwd or one of its ancestors as its worktree, so candidates come from
+/// `tasks_checkout_root` rather than every Task. Explicit binding also counts.
 pub(super) fn session_tasks(session: &str) -> String {
     // Probe checkout roots from the cwd outward. Keep paths lexical: repeated
     // slashes and relative paths have the same meaning as in `checkout`. CROSS

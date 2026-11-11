@@ -20,15 +20,24 @@ impl SqliteStore {
         &self,
         input: &str,
     ) -> StoreResult<Option<ProviderSessionRef>> {
-        let Some(session) = self.session_for_artifact(input)? else {
-            return Ok(None);
-        };
-        crate::session_record::provider_session_from_history(
-            self.summary_for_input(&session.id, input)?
-                .into_iter()
-                .map(|event| event.payload),
-        )
-        .map_err(|error| StoreError::InvalidData(error.to_string()))
+        // Only the input's own observations, keyed `<input>:<source>`, name its
+        // provider session; a Session switching conversation reads these at a
+        // turn boundary, so read that key range rather than its whole history.
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let payloads = conn
+            .prepare(
+                "SELECT payload FROM session_events INDEXED BY session_observation_receipt
+                 WHERE session_id=(SELECT session_id FROM session_events
+                     WHERE kind='captured' AND receipt_key=?1)
+                 AND kind='observed' AND receipt_key>?1||':' AND receipt_key<?1||';'
+                 ORDER BY seq",
+            )?
+            .query_map([input], |row| row.get::<_, String>(0))?
+            .map(|payload| Ok(serde_json::from_str(&payload?)?))
+            .collect::<StoreResult<Vec<Value>>>()?;
+        drop(conn);
+        crate::session_record::provider_session_from_history(payloads)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
     /// What the store kept of each provider conversation `session` used, in
@@ -375,26 +384,37 @@ impl SqliteStore {
         gap: &mut crate::store::RecordingGap,
     ) -> StoreResult<()> {
         if let Some(span) = gap.span() {
-            let session = self.session(session)?.ok_or(StoreError::NotFound)?;
-            let input = session
-                .input_key()
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .clone();
-            self.retain_session_observation(
-                &session,
-                &crate::session::SessionObservation {
-                    artifact_key: input,
-                    source: format!("store-gap:{}:{}", span.first_miss, span.last_miss),
-                    observed_at: span.first_miss,
-                    task_id: session.task_id.clone(),
-                    wave_id: session.wave_id.clone(),
-                    payload: serde_json::json!({"source":"store-gap",
-                        "first_miss":span.first_miss,"last_miss":span.last_miss}),
-                },
-            )?;
+            self.record_recording_gap(session, span.first_miss, span.last_miss)?;
         }
         gap.recovered();
         Ok(())
+    }
+
+    /// One `store-gap` observation for boundaries missed from `first_miss` to
+    /// `last_miss`.
+    pub(crate) fn record_recording_gap(
+        &self,
+        session: &str,
+        first_miss: i64,
+        last_miss: i64,
+    ) -> StoreResult<()> {
+        let session = self.session(session)?.ok_or(StoreError::NotFound)?;
+        let input = session
+            .input_key()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            .clone();
+        self.retain_session_observation(
+            &session,
+            &crate::session::SessionObservation {
+                artifact_key: input,
+                source: format!("store-gap:{first_miss}:{last_miss}"),
+                observed_at: first_miss,
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+                payload: serde_json::json!({"source":"store-gap",
+                    "first_miss":first_miss,"last_miss":last_miss}),
+            },
+        )
     }
 
     pub(crate) fn retain_session_observation(
@@ -707,14 +727,6 @@ impl SqliteStore {
     }
 
     /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
-    pub(crate) fn summary_for_input(
-        &self,
-        session: &str,
-        input: &str,
-    ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input), (None, None, None), None)
-    }
-
     pub(super) fn summary_for_input_matching(
         &self,
         session: &str,
@@ -2054,14 +2066,20 @@ mod tests {
             )
             .unwrap();
         // Start, usage and completion.
-        let history = store.summary_for_input(&session.id, &first_input).unwrap();
+        let history = store
+            .summary_for_input_matching(&session.id, &first_input, (None, None, None))
+            .unwrap();
         assert_eq!(history.len(), 3);
         assert!(history.iter().all(
             |event| event.lf_process_id.as_deref() == Some(first.as_str())
                 && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
         ));
         assert!(store
-            .summary_for_input(&session.id, replacement.input_key().unwrap())
+            .summary_for_input_matching(
+                &session.id,
+                replacement.input_key().unwrap(),
+                (None, None, None)
+            )
             .unwrap()
             .is_empty());
         let old = store.input_history(&first_input).unwrap();
@@ -2105,7 +2123,11 @@ mod tests {
             )
             .unwrap();
         assert!(store
-            .summary_for_input(&session.id, replacement.input_key().unwrap())
+            .summary_for_input_matching(
+                &session.id,
+                replacement.input_key().unwrap(),
+                (None, None, None)
+            )
             .unwrap()
             .is_empty());
         assert_eq!(

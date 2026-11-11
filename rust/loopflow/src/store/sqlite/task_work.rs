@@ -74,14 +74,33 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
+    let relocations: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?;
+    let (unmoved, relocated) = if relocations {
+        (
+            "AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)",
+            "UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id",
+        )
+    } else {
+        ("", "")
+    };
     // History and attachments share one query-local membership; the partial
-    // index skips retained events that name no Process.
-    Ok(format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+    // index skips retained events that name no Process. In BINARY path order,
+    // [root+'/', root+'0') is exactly the descendants of root. CROSS JOIN keeps
+    // the selected checkouts outside the cwd probes; '%' and '_' stay literal.
+    Ok(format!("WITH members AS MATERIALIZED ({}), tw AS MATERIALIZED ({})
+        SELECT ae.id FROM tw CROSS JOIN processes ae
+        WHERE tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!=''
+            AND (ae.cwd=rtrim(tw.worktree,'/') OR
+                (ae.cwd>=rtrim(tw.worktree,'/')||'/' AND ae.cwd<rtrim(tw.worktree,'/')||'0'))
+            {unmoved}
+        {relocated}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
-        session_ids(selector), tasks(selector), process_membership(conn, "ae")?))
+        session_ids(selector), tasks(selector)))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -956,6 +975,173 @@ mod tests {
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn process_membership_upgrade_probes_cwd_and_session_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use rusqlite::{types::Value, StatementStatus};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
+                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('member','Member','human',1,0,'/elsewhere','task_11111111111111111111111111111111');
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
+             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,kind)
+             SELECT printf('00000000-0000-4000-8000-%012x',i),
+                    printf('00000000-0000-4000-8000-%012x',i),'/unrelated/'||i,1,2,
+                    CASE WHEN i>3000 THEN 'agent' ELSE 'lf' END FROM n;
+             UPDATE processes SET cwd='/repo/task' WHERE id='00000000-0000-4000-8000-000000000001';
+             UPDATE processes SET cwd='/repo/task/sub' WHERE id='00000000-0000-4000-8000-000000000002';
+             UPDATE processes SET cwd='/repo/task-other' WHERE id='00000000-0000-4000-8000-000000000003';
+             INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+             VALUES('member','started','history','00000000-0000-4000-8000-000000000004',1,'{}');
+             UPDATE processes SET agent_session_id='member',attached_lf_process_id='00000000-0000-4000-8000-000000000005'
+                WHERE id='00000000-0000-4000-8000-000000001001';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             VALUES('task_11111111111111111111111111111111','00000000-0000-4000-8000-000000000006');",
+        ).unwrap();
+        let sql = format!(
+            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+            super::super::processes::PROCESS_SELECT,
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let width = query.column_count();
+            let rows = query
+                .query_map(["FIX-1"], |row| {
+                    (0..width)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                query.get_status(StatementStatus::VmStep),
+                query.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        let (before, before_steps, _) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps, scans) = read();
+        assert_eq!(after, before);
+        let ids: Vec<_> = after.iter().map(|row| row[0].clone()).collect();
+        assert_eq!(
+            ids,
+            [1, 2, 4, 5, 6, 4097].map(|i| Value::Text(format!("00000000-0000-4000-8000-{i:012x}")))
+        );
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        assert!(scans < 100, "fullscan steps: {scans}");
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["FIX-1"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for index in [
+            "processes_cwd (cwd=?)",
+            "processes_cwd (cwd>? AND cwd<?)",
+            "agent_process_session",
+        ] {
+            assert!(
+                plans.iter().any(|line| line.contains(index)),
+                "missing {index}: {plans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_process_membership_keeps_lexical_paths_and_relocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
+                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1),
+                ('task_22222222222222222222222222222222','repo_11111111111111111111111111111111',
+                'FIX-2','/other',(SELECT id FROM machines WHERE is_local=1),1);",
+        ).unwrap();
+        for cwd in [
+            None,
+            Some(""),
+            Some("/"),
+            Some("//"),
+            Some("/repo/task"),
+            Some("/repo/task/"),
+            Some("/repo/task//sub"),
+            Some("/repo/task-other"),
+            Some("/repo/task0"),
+            Some("relative/sub"),
+            Some("relative"),
+            Some("relative-other"),
+            Some("/repo/%_"),
+            Some("/repo/%_/é"),
+            Some("/repo/AB/x"),
+            Some("/repo//task/sub"),
+        ] {
+            let id = LfProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
+                params![id, cwd],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_22222222222222222222222222222222',id FROM processes WHERE cwd='/repo/task';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_11111111111111111111111111111111',id FROM processes WHERE cwd='/repo/AB/x';",
+        ).unwrap();
+        let original = format!(
+            "SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) ORDER BY ae.id",
+            super::tasks("?1"),
+            super::process_membership(&conn, "ae").unwrap()
+        );
+        let indexed = format!(
+            "SELECT id FROM ({}) ORDER BY id",
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        for root in [
+            "/repo/task",
+            "/repo/task/",
+            "/repo//task//",
+            "/repo/%_",
+            "relative/",
+            "/",
+            "///",
+            "",
+        ] {
+            for local in [true, false] {
+                conn.execute("UPDATE tasks SET worktree=?1,checkout_machine_id=CASE WHEN ?2 THEN (SELECT id FROM machines WHERE is_local=1) END WHERE issue_identifier='FIX-1'", params![root,local]).unwrap();
+                let read = |sql: &str| {
+                    conn.prepare(sql)
+                        .unwrap()
+                        .query_map(["FIX-1"], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap()
+                };
+                assert_eq!(
+                    read(&indexed),
+                    read(&original),
+                    "root={root:?}, local={local}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn session_membership_upgrade_probes_task_indexes() {

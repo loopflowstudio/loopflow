@@ -20,6 +20,7 @@ pub mod files;
 pub mod keys;
 pub mod migrate;
 pub(crate) mod placement;
+pub(crate) mod reader;
 pub mod remote;
 pub mod settings;
 
@@ -575,9 +576,7 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
-        LoadError::InvalidGraph(format!("YAML parse error in {}: {}", path.display(), e))
-    })?;
+    let mut value = serde_yaml_ng::Value::Mapping(reader::parse(&content, path));
     keys::fold(&mut value);
     normalize_context(&mut value);
     Ok(Some(value))
@@ -808,12 +807,6 @@ fn personal_file_layers(
     let mut layers = Vec::new();
     let path = global_config_path();
     if let Some(value) = load_yaml_file(&path)? {
-        if value.get("repos").is_some() {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: repos entries need migration to lf.config.local.yaml; run `lf config migrate`",
-                path.display()
-            )));
-        }
         layers.push(ConfigDeclarations {
             source: ConfigSource::Personal,
             scope: settings::SettingScope::Global,
@@ -880,9 +873,16 @@ fn global_config_path() -> PathBuf {
 /// Linear Team bindings use this path; personal transport defaults do not assign
 /// a repository to a Team.
 pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
-    let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
+    let path = repo_root.join(".lf/config.yaml");
+    let Some(mut value) = load_yaml_file(&path)? else {
         return Ok(None);
     };
+    settings::filter_file_preferences(
+        &mut value,
+        &path,
+        ConfigSource::Repository,
+        settings::SettingScope::Repository,
+    );
     serde_yaml_ng::from_value(value)
         .map(Some)
         .map_err(|error| LoadError::InvalidGraph(format!("Config validation error: {error}")))
@@ -896,7 +896,7 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn private_wave_reads_allow_missing_identity_but_report_invalid_authored_config() {
+    fn private_wave_reads_skip_malformed_entries_but_validate_authored_identity() {
         let repo = tempfile::tempdir().unwrap();
         let path = repo.path().join("lf.config.local.yaml");
         let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
@@ -908,6 +908,12 @@ mod tests {
         let wave = repo.path().join(".lf/wave/broken");
         std::fs::create_dir_all(&wave).unwrap();
         std::fs::write(wave.join("config.yaml"), "id: [invalid\n").unwrap();
+        assert!(
+            super::private_wave_layers(repo.path(), Some("broken"), &path, &document)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(wave.join("config.yaml"), "id: invalid\n").unwrap();
         assert!(super::private_wave_layers(repo.path(), Some("broken"), &path, &document).is_err());
     }
 
@@ -1235,7 +1241,7 @@ release:
     // ==========================================================================
 
     #[test]
-    fn skill_settings_merge_per_skill_and_a_wave_layer_rejects_repository_keys() {
+    fn skill_settings_merge_per_skill_and_a_wave_layer_ignores_repository_keys() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home =
@@ -1269,18 +1275,17 @@ release:
                 .unwrap(),
             "claude"
         );
-        std::fs::write(&wave, "workflow: code\n").unwrap();
+        std::fs::write(&wave, "workflow: review\n").unwrap();
         assert_eq!(
             load_wave_config(Some(repo.path()), Some("infra"))
                 .unwrap()
                 .unwrap()
                 .graph
                 .as_deref(),
-            Some("code")
+            Some("review")
         );
         std::fs::write(&wave, "planning: {provider: git}\n").unwrap();
-        let error = load_wave_config(Some(repo.path()), Some("infra")).unwrap_err();
-        assert!(error.to_string().contains(wave.to_str().unwrap()));
+        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_ok());
         std::fs::write(&wave, "agnet: claude\n").unwrap();
         assert_eq!(
             load_wave_config(Some(repo.path()), Some("infra"))
@@ -1293,9 +1298,12 @@ release:
         assert!(load_config(Some(repo.path())).is_ok());
         let repo_config = repo.path().join(".lf/config.yaml");
         std::fs::write(&repo_config, "session: {terminal: ghostty}\n").unwrap();
-        let error = load_config(Some(repo.path())).unwrap_err().to_string();
-        assert!(error.contains("does not apply"));
-        assert!(error.contains(repo_config.to_str().unwrap()));
+        assert!(load_config(Some(repo.path()))
+            .unwrap()
+            .unwrap()
+            .session
+            .terminal
+            .is_none());
     }
 
     #[test]

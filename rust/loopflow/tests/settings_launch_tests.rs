@@ -45,11 +45,11 @@ const CODEX_NATIVE: &str = concat!(
 );
 
 #[test]
-fn unknown_personal_preferences_do_not_stop_graph_commands() {
+fn bad_config_lines_do_not_stop_graph_commands() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
-    let preferences = "default_agent: codex\nfuture: {enabled: true}\nclaude: {model: opus, future: true}\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
+    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
         vec!["--context", "graph", "auto"],
@@ -61,6 +61,20 @@ fn unknown_personal_preferences_do_not_stop_graph_commands() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        let warnings = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            warnings.contains("config.yaml:3: skipping future: unknown setting"),
+            "{warnings}"
+        );
+        assert!(
+            warnings.contains("config.yaml:4: skipping malformed YAML entry"),
+            "{warnings}"
+        );
+        assert!(
+            warnings.contains("config.yaml:6: skipping yolo: invalid value"),
+            "{warnings}"
+        );
+        assert!(!warnings.contains("do-not-print-this-value"), "{warnings}");
         if args[0] == "config" {
             let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(settings[0]["settings"]["agent"]["value"], "claude:fable");
@@ -81,16 +95,42 @@ fn unknown_personal_preferences_do_not_stop_graph_commands() {
     assert!(!output.status.success());
     fs::write(
         home.path().join("config.yaml"),
-        "yolo: perhaps\nfuture: true\n",
+        "default_agent: codex\nyolo: perhaps\nfuture: true\n",
     )
     .unwrap();
     assert!(
-        !command(repo.path(), home.path(), &["--context", "graph", "auto"])
+        command(repo.path(), home.path(), &["--context", "graph", "auto"])
             .output()
             .unwrap()
             .status
             .success()
     );
+    for args in [
+        vec!["set", "--global", "yolo", "perhaps"],
+        vec!["--setting", "yolo=perhaps", "--context", "graph", "auto"],
+    ] {
+        assert!(!command(repo.path(), home.path(), &args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    fs::write(
+        home.path().join("config.yaml"),
+        "default_agent: codex\n# skills:\n#   kickoff:\n#     agent: claude:fable\n",
+    )
+    .unwrap();
+    let output = command(
+        repo.path(),
+        home.path(),
+        &["config", "settings", "--skill", "kickoff", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("warning:"));
+    let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(settings[0]["settings"]["default_agent"]["value"], "codex");
 }
 
 #[test]

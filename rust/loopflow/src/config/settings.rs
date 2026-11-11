@@ -484,42 +484,99 @@ fn leaves(value: &Value, path: &mut Vec<String>, result: &mut Vec<(Vec<String>, 
     }
 }
 
-// Files can be shared by different lf versions. Filter their unknown preferences
-// before validation; explicit setters and invocation overrides remain strict.
-fn _discard_unknown_file_settings(
+// File mistakes must not stop unrelated work. Keep usable preferences;
+// explicit setters and invocation overrides remain strict.
+pub(super) fn filter_file_preferences(
+    value: &mut Value,
+    file: &std::path::Path,
+    source: ConfigSource,
+    scope: SettingScope,
+) {
+    if !value.is_mapping() && !value.is_null() {
+        super::reader::warn(file, None, "skipping settings that are not a mapping");
+        *value = Value::Mapping(Default::default());
+    }
+    _normalize_preferences(value);
+    _filter_file_settings(value, &mut Vec::new(), file, source, scope);
+}
+
+fn _normalize_preferences(value: &mut Value) {
+    super::normalize_context(value);
+    if let Some(map) = value.as_mapping_mut() {
+        if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
+            map.entry(Value::String("graph".into())).or_insert(graph);
+        }
+    }
+}
+
+fn _filter_file_settings(
     value: &mut Value,
     path: &mut Vec<String>,
     file: &std::path::Path,
+    source: ConfigSource,
+    scope: SettingScope,
 ) {
     let Some(map) = value.as_mapping_mut() else {
         return;
     };
     map.retain(|key, value| {
         let Some(key) = key.as_str() else {
-            return true; // Validation reports non-string keys.
+            super::reader::warn_setting(file, path, "setting names must be strings");
+            return false;
         };
         path.push(key.to_owned());
         let parts: Vec<_> = path.iter().map(String::as_str).collect();
-        let known = match parts.as_slice() {
-            ["skills"] | ["skills", _] | ["graphs"] | ["graphs", _]
-            | ["graphs", _, "steps"] | ["graphs", _, "steps", _] => true,
-            parts => {
-                let preference = match parts {
-                    ["skills", _, preference @ ..]
-                    | ["graphs", _, "steps", _, preference @ ..] => preference,
-                    _ => parts,
-                };
-                super::catalog::definition(&preference.join("."))
-                    .is_some_and(|definition| definition.accepts(preference))
+        let selector = matches!(
+            parts.as_slice(),
+            ["skills"]
+                | ["skills", _]
+                | ["graphs"]
+                | ["graphs", _]
+                | ["graphs", _, "steps"]
+                | ["graphs", _, "steps", _]
+        );
+        let graph_selector = matches!(parts.as_slice(), ["graphs", _]);
+        let preference = match parts.as_slice() {
+            ["skills", _, preference @ ..] | ["graphs", _, "steps", _, preference @ ..] => {
+                preference
             }
+            parts => parts,
         };
+        let preference: Vec<String> = preference.iter().map(|part| (*part).to_owned()).collect();
+        let definition = super::catalog::definition(&preference.join("."));
+        let known = selector
+            || definition.is_some_and(|definition| {
+                definition.accepts(&preference.iter().map(String::as_str).collect::<Vec<_>>())
+            });
+        if known && !selector && value.is_null() {
+            path.pop();
+            return false;
+        }
+        let mut reason = (!known).then_some("unknown setting");
         if known {
-            _discard_unknown_file_settings(value, path, file);
-        } else {
-            tracing::warn!(path = %file.display(), key = %path.join("."), "ignoring unknown LF configuration key");
+            _filter_file_settings(value, path, file, source, scope);
+            if selector {
+                if !value.is_mapping() {
+                    reason = Some("settings must be a mapping");
+                } else if graph_selector && value.get("steps").is_none() {
+                    reason = Some("Graph settings need a steps mapping");
+                }
+            } else {
+                let preference: Vec<_> = preference.iter().map(String::as_str).collect();
+                if definition.is_some_and(|definition| definition.key == preference.join(".")) {
+                    if validate_scope(&path.join("."), source, scope).is_err() {
+                        reason = Some("setting does not apply here");
+                    } else if validate_value(&preference, value).is_err() {
+                        reason = Some("invalid value");
+                    }
+                }
+            }
+        }
+        if let Some(reason) = reason {
+            super::reader::warn_setting(file, path, reason);
         }
         path.pop();
-        known
+        reason.is_none()
     });
 }
 
@@ -581,12 +638,13 @@ pub fn resolve_layers(
     ];
     for layer in layers.iter().chain(&invocation) {
         let mut layer = layer.clone();
-        super::normalize_context(&mut layer.value);
         if matches!(
             layer.source,
             ConfigSource::Personal | ConfigSource::Repository
         ) {
-            _discard_unknown_file_settings(&mut layer.value, &mut Vec::new(), &layer.path);
+            filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
+        } else {
+            _normalize_preferences(&mut layer.value);
         }
         if layer.value.is_null() {
             continue;
@@ -656,9 +714,6 @@ pub fn resolve_layers(
     for mut candidate in candidates {
         let mut values = std::mem::replace(&mut candidate.value, Value::Null);
         if let Some(map) = values.as_mapping_mut() {
-            if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
-                map.entry(Value::String("graph".into())).or_insert(graph);
-            }
             if let Some(value) = map.get_mut("machine") {
                 super::placement::expand_shorthand(value)
                     .map_err(|error| invalid(error.to_string()))?;
@@ -998,12 +1053,13 @@ mod tests {
     #[test]
     fn file_reads_ignore_unknown_preferences_without_losing_known_neighbors() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let values = "default_agent: codex\nfuture: {enabled: true}\nclaude: {model: opus, future: true}\ncontext: {docs: [README.md], future: true}\nskills: {implement: {agent: 'claude:fable', future: true}}\ngraphs: {release: {steps: {write-code: {yolo: true, future: true}}}}";
+        let values = "default_agent: codex\nworkflow: review\nfuture: {enabled: true}\nclaude: {model: opus, future: true}\ncontext: {docs: [README.md], future: true}\nskills: {implement: {agent: 'claude:fable', future: true}}\ngraphs: {release: {steps: {write-code: {yolo: true, future: true}}}}";
         for source in [ConfigSource::Personal, ConfigSource::Repository] {
             let declaration = layer(source, SettingScope::Global, values);
             let resolved =
                 resolve_layers(std::slice::from_ref(&declaration), Some(&occurrence())).unwrap();
             assert_eq!(resolved.config.agent().unwrap(), "claude:fable");
+            assert_eq!(resolved.config.graph.as_deref(), Some("review"));
             assert_eq!(resolved.config.claude.model.as_deref(), Some("opus"));
             assert_eq!(resolved.config.context.docs, ["README.md"]);
             assert!(resolved.config.yolo);
@@ -1013,12 +1069,19 @@ mod tests {
         for values in [
             "yolo: perhaps\nfuture: true",
             "claude: {model: [], future: true}",
+            "context: {diff: perhaps, docs: [README.md]}",
+            "yolo: null\nclaude: {model: null}",
         ] {
-            assert!(resolve_layers(
+            let resolved = resolve_layers(
                 &[layer(ConfigSource::Personal, SettingScope::Global, values)],
                 None,
             )
-            .is_err());
+            .unwrap();
+            assert!(!resolved.config.yolo);
+            assert!(resolved.config.claude.model.is_none());
+            if values.starts_with("context:") {
+                assert_eq!(resolved.config.context.docs, ["README.md"]);
+            }
         }
         assert!(resolve_layers(
             &[layer(
@@ -1357,7 +1420,7 @@ mod tests {
     }
 
     #[test]
-    fn files_share_personal_and_repository_scope_rules() {
+    fn files_ignore_ineligible_settings_but_keep_applicable_ones() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         {
             let source = ConfigSource::Personal;
@@ -1369,7 +1432,11 @@ mod tests {
                 )],
                 None,
             )
-            .is_err());
+            .unwrap()
+            .config
+            .session
+            .terminal
+            .is_none());
             assert!(resolve_layers(
                 &[layer(
                     source,
@@ -1378,7 +1445,7 @@ mod tests {
                 )],
                 None,
             )
-            .is_err());
+            .is_ok());
             assert!(resolve_layers(
                 &[layer(
                     source,

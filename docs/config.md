@@ -279,10 +279,15 @@ protect against concurrent edits. Hand edits invalidate the same readers. Config
 inspection and bootstrap preferences do not require a compatible database; account
 or machine availability can still require runtime observations.
 
-File readers warn and skip unknown preference keys, including keys inside skill
-and Graph-step settings, so files shared with another `lf` version remain usable.
-Known settings still require valid values. `lf set`, `--setting` and `LF_SETTINGS`
-reject unknown keys rather than saving a typo. Reading does not rewrite the file.
+File readers print warnings and skip unknown keys, invalid values and malformed
+YAML entries, including settings inside skills and Graph steps. Warnings identify
+the file and entry, with line numbers when the source is available. A malformed
+entry's indented contents are skipped with it; valid neighboring settings still
+load. Comments are ignored silently. Reading does not rewrite the file.
+
+`lf set`, `--setting` and `LF_SETTINGS` validate keys and values strictly, so a
+direct edit reports a typo instead of saving it. Fix malformed YAML before using
+a setter to edit that file; setters preserve comments and unrelated content.
 
 ## Where settings live
 

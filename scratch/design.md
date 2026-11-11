@@ -9,12 +9,24 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At November 11 12:15 UTC, PR #1812 was open, unmerged and without auto-merge
+At November 11 13:04 UTC, PR #1812 remained open and unmerged at
+`ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main remained
+`976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
+`server/ticket.rs`. The PR's ticket, service and mobile modules had no diff
+from the previously inspected `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`.
+Both Task status reads again timed out after 20 seconds; live Graph positions
+remain unverified. The Graph decision remains stop for the missing LOO-718
+transport; implementation and publication cannot proceed on the local-only store.
+
+At November 11 12:19 UTC, PR #1812 was open and unmerged
 at `21d26bceaa2fdac6fc09c3cb3a952cdd86c597ba`. Fetched main was
 `976b53db0c5affa519af66bfe9bf58ee83fba347`, without `server/mobile.rs` or
-`server/ticket.rs`. `lf task status LOO-718 --json` reported `feature` at
-`demo`, with PR settlement not armed. The LOO-809 status read produced no
-output before termination; its live Graph status was not verified.
+`server/ticket.rs`. The PR description still states: “The pull request is
+published for review; no Task settlement is requested.” At 12:15 UTC,
+`lf task status LOO-718 --json` reported `feature` at `demo`, with PR
+settlement not armed. At 12:19 UTC, fresh `lf task status LOO-718 --json`
+and `lf task status LOO-809 --json` reads each timed out after 20 seconds
+without a status response. Their live Graph positions were not verified.
 
 Inspection found both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and ticket expiry uses
@@ -49,10 +61,17 @@ model; local/remote separation does not require a second per-ticket UID field.
 ## Implementation and acceptance
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
-redemption policy. Through authenticated client and bridge connections, test that
-matching node/user succeeds once; a different node, different user, or
-local/remote mismatch fails and consumes the terminal ticket. Local UID tests
-alone cannot satisfy these checks.
+redemption policy. Test matching node/user success once, different node,
+different user, and both local/remote mismatches in the shared store; every
+terminal redemption attempt consumes the ticket, including mismatches.
+
+Through authenticated control and bridge connections, test ticket issuance,
+one successful bridge, replay refusal, and consumption after an admitted
+different node or local/remote mismatch. The transport admits only the host
+owner's Tailscale user: another user's connection is rejected before WebSocket
+upgrade and cannot present a ticket. Test that rejection on both endpoints
+separately from different-user redemption in the shared store. Local UID tests
+alone cannot satisfy remote acceptance; authentication policy stays unchanged.
 
 Replace ticket timing with `SystemTime`; test expiry at 60 seconds with a clock
 advance representing host sleep, expired-ticket sweeping, and unchanged bulk
@@ -66,5 +85,9 @@ Keep connection steps and Desktop controls in the client guide; protocol details
 and shared exact-owner recovery belong in the server README. Keep authentication
 before the two-connection example, with the running-owner prerequisite and
 missing-owner error beside it, so neither steps nor retries repeat the rules.
+
+Shipping docs are in `docs/server.md` and `rust/loopflow/src/server/README.md`.
+The remote contract distinguishes rejection before WebSocket upgrade from a
+ticket redemption attempt; use these in-place docs during implementation.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

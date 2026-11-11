@@ -184,6 +184,7 @@
               "states": [
                 "backlog"
               ],
+              "identifier": "LOO-1",
               "primary_session": null,
               "location": null,
               "argv": null,

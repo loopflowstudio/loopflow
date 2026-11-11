@@ -739,6 +739,8 @@ pub struct ViewContent {
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,
+    /// A Task's short name, as people say it: `LOO-809`.
+    pub identifier: Option<String>,
     pub primary_session: Option<String>,
     pub location: Option<ViewLocation>,
     /// An explicit connect command, never a fallback shell or provider launch argv.

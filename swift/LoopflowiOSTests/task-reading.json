@@ -152,6 +152,7 @@
           "open",
           "available"
         ],
+        "identifier": "LOO-1",
         "primary_session": "session_fixture_1",
         "location": null,
         "argv": null,
@@ -170,6 +171,7 @@
           "open",
           "available"
         ],
+        "identifier": "LOO-1",
         "primary_session": "session_fixture_2",
         "location": null,
         "argv": null,
@@ -188,6 +190,7 @@
           "open",
           "available"
         ],
+        "identifier": "LOO-1",
         "primary_session": null,
         "location": null,
         "argv": null,

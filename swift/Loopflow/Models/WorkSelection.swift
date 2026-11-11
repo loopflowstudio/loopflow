@@ -171,12 +171,14 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let title: String
         public let states: [WorkSelectionState]
+        /// A Task's short name, as people say it: `LOO-809`.
+        public let identifier: String?
         public let primarySession: String?
         public let location: Location?
         public let argv: [String]?
         public let unavailable: [String]
         enum CodingKeys: String, CodingKey {
-            case work, title, states, location, argv, unavailable, face, paneRevision = "pane_revision"
+            case work, title, states, identifier, location, argv, unavailable, face, paneRevision = "pane_revision"
             case primarySession = "primary_session"
         }
     }

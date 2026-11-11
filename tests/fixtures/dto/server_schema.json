@@ -14898,6 +14898,13 @@
             }
           ]
         },
+        "identifier": {
+          "description": "A Task's short name, as people say it: `LOO-809`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "location": {
           "anyOf": [
             {
@@ -14947,6 +14954,7 @@
         "work",
         "title",
         "states",
+        "identifier",
         "primary_session",
         "location",
         "argv",

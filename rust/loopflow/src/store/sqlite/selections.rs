@@ -280,6 +280,7 @@ fn plan_in(
             work: key.clone(),
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+            identifier: None,
             primary_session: None,
             location: None,
             argv: None,
@@ -292,6 +293,7 @@ fn plan_in(
         } else if key.kind == WorkWorkspaceKind::Task {
             let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
+            content.identifier = Some(task.identifier);
             content.title = task.title;
             let primary = super::sessions::primary_session_in(
                 conn,

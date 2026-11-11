@@ -377,9 +377,14 @@ struct TaskListView: View {
                     .font(Typography.strong(17))
                     .foregroundStyle(theme.palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(task.mobileStatus)
-                    .font(Typography.caption(13))
-                    .foregroundStyle(statusColor(task))
+                HStack(spacing: 6) {
+                    Text(task.mobileStatus)
+                        .foregroundStyle(statusColor(task))
+                    if let identifier = task.identifier {
+                        Text(identifier).foregroundStyle(theme.palette.textSecondary)
+                    }
+                }
+                .font(Typography.caption(13))
             }
         }
         .padding(.vertical, 2)

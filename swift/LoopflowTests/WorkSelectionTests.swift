@@ -101,5 +101,5 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
 }
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
-        states: [.open], primarySession: nil, location: nil, argv: nil, unavailable: [])
+        states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
 }

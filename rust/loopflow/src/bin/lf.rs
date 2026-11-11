@@ -2836,22 +2836,6 @@ fn execute_command(
                 )
             }),
         },
-        // Neither Pi callback reads hook JSON; a tool group's stdin is the command's.
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::PiEvent,
-            ..
-        }) => loopflow::harness::pi::native_event(),
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::ToolGroup,
-            lifeline,
-            provider_pid,
-            ..
-        }) => loopflow::harness::agent_process::guard_tool_lifeline(
-            lifeline
-                .as_deref()
-                .expect("clap requires --lifeline for tool-group"),
-            provider_pid.expect("clap requires --provider-pid with --lifeline"),
-        ),
         Some(Commands::ContextBlock {
             moment: ContextMoment::Limit,
             ..

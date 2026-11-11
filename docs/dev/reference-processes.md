@@ -76,8 +76,9 @@ recover one thread.
 
 Pi's native bash executor creates detached tool groups. Its launch extension
 wraps the built-in executor with a per-command FIFO writer held by Pi. Before
-user commands run, `lf __context-block --moment tool-group` verifies that the current detached group
-is a direct child of the live provider, then starts the same group watchdog.
+user commands run, a `/bin/sh` guard script verifies with `ps` that the current detached group
+is a direct child of the live provider, then starts the same group watchdog; no
+`lf` process starts.
 Normal completion, abort and provider death close the writer. Custom extension
 tools retain their own execution ownership; there is no tool PID registry or
 postmortem discovery of signal targets.

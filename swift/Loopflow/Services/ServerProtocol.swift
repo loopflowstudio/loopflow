@@ -133,7 +133,7 @@ public enum ServerOperation: Encodable, Sendable {
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
     /// A provider hook's turn or tool boundary, answered `{steers, waiting}`.
-    /// Desktop never sends it; `lf __context-block` does.
+    /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String])
 

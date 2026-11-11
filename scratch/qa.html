@@ -1,81 +1,123 @@
-<!doctype html><meta charset="utf-8"><title>LOO-823 QA: the Task closes its conversations</title>
-<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-823 QA: open conversations stay, done ones close</title>
+<style>
+body{font:14px/1.5 -apple-system,system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
 pre{background:#f5f5f7;padding:.7rem;overflow-x:auto;font:12px/1.4 ui-monospace,Menlo,monospace}code{font:12px ui-monospace,Menlo,monospace}h2{margin-top:2.2rem}
-table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e5e5ea;padding:.3rem .5rem;text-align:left;vertical-align:top}th{background:#f5f5f7}</style>
-<h1>LOO-823 QA: the Task closes its conversations</h1>
-<p>2026-11-11, 05:13–05:55 PST, on the final closure code (HEAD <code>2710ba043</code>). Branch <code>lf</code> and <code>lf-world</code> from
-<code>cargo build -p loopflow --bin lf --bin lf-world</code>. Private Machine: <code>lf-world build one-task /tmp/lf-qa-823d</code> with its own
-<code>HOME</code>, <code>LF_HOME</code> and provider homes. Its <code>bin/claude</code> stand-in echoes each line and exits on <code>quit</code>. Inherited <code>LF_*</code> was unset and CLI stdin closed.
-A Python PTY driver attached with <code>lf session resume</code>, typed and closed the pane. No cleanup sweep runs in a world (its <code>launchctl</code> is a stub), so each owner's own closure check did the ending.
-Except where noted, I ran <code>lf task retire</code> only for the checkout Task. Nothing outside the private Machine was signalled.
-The earlier walkthrough (PR-less retirement bug, locked store, startup repair) is in <code>2710ba043:scratch/qa.html</code>.</p>
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e5e5ea;padding:.3rem .5rem;text-align:left;vertical-align:top}th{background:#f5f5f7}
+.note{background:#fff8e6;padding:.6rem .8rem;border-left:3px solid #e0a800}
+</style>
+<h1>LOO-823 QA: open conversations stay, done ones close</h1>
 
-<h2>Three conversations left with a draft, side by side</h2>
+<p>2026-11-11, 08:54–09:30 PST, on HEAD <code>a99272166</code> (the close-request design). Branch
+<code>lf</code> and <code>lf-world</code> from <code>cargo build -p loopflow --bin lf --bin lf-world</code>.
+Private Machine <code>lf-world build one-task /tmp/lf-qa-823e</code> with its own HOME, LF_HOME and provider
+homes; inherited <code>LF_*</code> unset, CLI stdin closed. A Python PTY driver attached with
+<code>lf session resume</code>, typed, and closed the pane. No cleanup job runs in a world, so a loop ran
+<code>lf task retire</code> once a minute in place of <code>com.loopflow.cleanup</code>. Nothing outside the
+private Machine was signalled.</p>
+
+<p class="note">Mid-walkthrough the concept review answered "1b 2c": cleanup will signal the verified owner in
+the pass that decides closure, with no stored close request. The <em>mechanism</em> below is therefore about to
+be replaced. What carries over is the decision (open stays; done closes fifteen minutes after its viewer leaves,
+once work settles; returning pushes it out; abandonment ends at once) and everything input- and process-related.
+The next implement should re-run S2–S4 against the signalling path.</p>
+
+<h2>Timeline</h2>
 <table>
-<tr><th></th><th>Scope</th><th>Left</th><th>Task done</th><th>Owner ended</th></tr>
-<tr><td>S1</td><td>open Task f50926 (control)</td><td>05:15:23, draft <code>open task draft</code></td><td>no</td><td>still running at 05:55, 40 min unviewed</td></tr>
-<tr><td>S2</td><td>repository conversation, then bound to done Task 431a3a, <b>no checkout</b></td><td>05:18:13, draft <code>bound task draft</code></td><td>05:18:19</td><td><b>05:33:19</b></td></tr>
-<tr><td>S3</td><td>Task 83fb14 with a checkout (<code>lf wt create</code> + <code>--worktree</code>), PR-less</td><td>05:20:27, draft <code>draft before retirement</code></td><td>05:20:33</td><td><b>05:35:35</b></td></tr>
-<tr><td>S3′</td><td>same conversation, resumed after cleanup</td><td>05:38:20</td><td>still done</td><td><b>05:53:21</b></td></tr>
+<tr><th>Scope</th><th>Viewer left</th><th>Task closed</th><th>Request written</th><th>Owner ended</th></tr>
+<tr><td>S1 open Task c8ae7c (control)</td><td>08:55, again 09:02:52</td><td>no</td><td>never</td><td>running 30 min unviewed; quit by hand 09:26</td></tr>
+<tr><td>S2 repository conversation bound to done Task 9d7f32, no checkout</td><td>08:58:46</td><td>08:55:51</td><td>09:14:30 pass</td><td>09:14:31</td></tr>
+<tr><td>S3 Task 754866 with checkout, PR-less</td><td>09:01:56; returned and left 09:08:51</td><td>09:01:57</td><td>09:24:33 pass</td><td>09:24:34</td></tr>
+<tr><td>S4 Task acfec9, abandoned unviewed</td><td>09:02:02</td><td>abandoned 09:02:05</td><td>with the abandon</td><td>by 09:02:08</td></tr>
 </table>
-<pre>05:20:39 open-task=alive bound-no-checkout=alive checkout-task=alive | row: waiting:
-  … one line a minute, all alive …
-05:32:40 open-task=alive bound-no-checkout=alive checkout-task=alive | row: waiting:
-05:33:40 open-task=alive bound-no-checkout=ended checkout-task=alive | row: waiting:
-05:34:41 open-task=alive bound-no-checkout=ended checkout-task=alive | row: waiting:
-05:35:41 open-task=alive bound-no-checkout=ended checkout-task=ended | retire: Error: …: Retained PR-less checkout | row: closing:Retained PR-less checkout</pre>
-<p>Each ending fell on the later of viewer-left and completion, plus 15:00, give or take two seconds.</p>
+<pre>09:13:30 S1-open=alive S2-done-nocheckout=alive S3-done-checkout=alive | … 07bbaa71:absent@08:58:46:-
+09:14:30 S1-open=alive S2-done-nocheckout=alive S3-done-checkout=alive | … 07bbaa71:absent@08:58:46:completed
+09:15:31 S1-open=alive S2-done-nocheckout=ended S3-done-checkout=alive
+09:23:33 … 17790385:absent@09:08:51:-
+09:24:33 … 17790385:absent@09:08:51:completed
+09:25:33 S1-open=alive S2-done-nocheckout=ended S3-done-checkout=ended | retire: Error: …: Retained PR-less checkout</pre>
+<p>Each ending fell on the first pass after viewer-left + 15:00. S3's return moved its deadline from 09:16:57 to
+09:23:51. The PR-less checkout <code>repo.qa3</code> stays, row <code>closing / Retained PR-less checkout</code>.</p>
 
-<h3>S1: an open Task's conversation stays</h3>
-<p>Quiet, unviewed and holding a draft for 40 minutes, it was still running. Returning at 05:55 painted the saved screen with <code>open task draft</code> still in the editor.
-<code>Ctrl-U quit⏎</code> ended it.</p>
+<h2>S1: an open Task's conversation stays, and keeps its draft</h2>
+<p>Typed <code>hello⏎</code>, got its reply, left <code>open task draft</code> unsent and closed the pane. Thirty
+cleanup passes later the owner (PID 34299) was still running. Returning at 09:02 painted
+<code>open task draft</code> in the editor.</p>
 
-<h3>S2: a done Task without a checkout</h3>
-<p><code>lf session resume --prepare --json</code> in the repository gave a repository conversation. I started it, typed <code>hello⏎</code> (and saw the reply), left a draft and closed the pane. The owner kept running: repository conversations follow the open-Task rule.
-Then <code>lf task complete 431a3a</code> and <code>lf session bind 9bbf… --task 431a3a</code>:</p>
-<pre>Session 9bbf8651eed2469aaef91c0ae78cb7f2 belongs to 431a3a.
-Binding 9bbf8651eed2469aaef91c0ae78cb7f2 to 431a3a (Bind a conversation late). Permanent.</pre>
-<p>The store afterwards: <code>tasks.worktree</code> NULL, no <code>task_retirements</code> row, primary Session = this one, Task still completed. The owner ended at 05:33:19 (<code>interrupted</code>, 130) and <code>lf session list</code> reads <code>closed</code>.
-Before this branch's repair, nothing ended this conversation.</p>
+<h2>S5: input keeps flowing while the store is locked</h2>
+<p>Attached to S1, then held <code>BEGIN EXCLUSIVE</code> on the private <code>loopflow.db</code> for 40 s and typed two lines:</p>
+<pre>09:02:32 locked
+while locked one
+reply 08cb313e-…: while locked one
+while locked two
+reply 08cb313e-…: while locked two
+09:03:12 released</pre>
+<p>Both replies arrived at once. <code>logs/lf.log</code> recorded one gap:
+<code>recording gap: Session viewer hold: sqlite error: database is locked; the conversation goes on without lf's records</code>.
+After release the row read <code>absent@09:02:52</code>: the leave write was retried, and S1 stayed open.</p>
 
-<h3>S3: ordinary closure, then return after cleanup</h3>
-<p>The owner ended at 05:35:35. The checkout <code>repo.qa3</code> stays on disk and the row reads <code>closing / Retained PR-less checkout</code>.
-At 05:36 <code>lf session resume</code> painted the saved screen (<code>before retirement</code>, its reply and <code>draft before retirement</code>), then the same provider thread reopened with an empty editor.
-A second attach sent <code>after cleanup⏎</code> and got <code>reply f13aafb8…: after cleanup</code>. The viewer left at 05:38:20.
-With no <code>lf task retire</code> pass running, the owner's own check ended the resumed conversation at 05:53:21. The Task stayed <code>completed</code> and the provider transcript is still on disk.</p>
+<h2>S2: return after closure</h2>
+<p><code>lf session resume</code> repainted the saved screen (<code>hello</code>, its reply, <code>bound task draft</code>), then
+the same provider thread resumed with 2 transcript lines and an empty editor. The draft was not replayed.
+<code>after close</code>, typed while that saved screen showed and before the new provider read input, was echoed and
+then lost (see below).</p>
 
-<h2>The audit report against a fresh <code>ps</code></h2>
-<p><code>uv run python -I scratch/process_audit.py</code> at 05:20, after the selector fix (executable from <code>ps comm</code>):</p>
-<pre>05:20:46  ps -axww -o comm= | grep -cE '(^|/)lf(-[A-Za-z0-9]+)?$'   → 368
-          report: 368 lf processes (368 when the reads finished)
-05:23:12  same recount                                         → 368</pre>
-<p>The 14 "checkout build" processes in the report include 3 owners from this walkthrough (all ended since). The rest are from the LOO-824, 820, 822 and 835 checkouts.
-The 24 test fixture processes are the 5–8-day-old <code>/tmp/lf-7501-*</code> leftovers from before the fixture fix. The report recommends; nothing was stopped.</p>
+<h2>S4: abandonment</h2>
+<p><code>lf task abandon acfec9</code> printed <code>canceled; PRs and branches removed</code>, then
+<code>retained checkout/PR: Process … has live or unresolved execution</code> for three Processes. The owner (row
+<code>close_requested=abandoned</code>, <code>interrupted</code>) and provider were gone within three seconds. The
+agent and exec'd <code>lf</code> rows of that provider still have no <code>completed_at</code>, and nothing later deletes
+<code>repo.qa4</code>: <code>lf task retire acfec9</code> does nothing and writes no retirement row.</p>
 
-<h2>Left behind</h2>
-<p>After quitting S1: <code>ps</code> shows nothing from <code>/tmp/lf-qa-823d</code>, <code>/tmp/lf-qa-823c</code> or this checkout's <code>target/debug/lf</code>.
-The S2 provider's <code>processes</code> rows still have no <code>completed_at</code> after the owner ended it. The earlier world showed the same after ordinary closure.
-<code>lf process list</code> leaves them out (only live PIDs show) and the Session reads <code>closed</code>.</p>
+<h2>Leftover processes from the affected suites</h2>
+<pre>uv run cargo test -p loopflow --lib --test transport_tests -- transport::lifetime::tests:: transport::lifetime_tests::
+  ops::task::retirement::tests:: store::sqlite::task_retirement::tests:: desktop::shells::store::tests::
+  completed_task_ returning_task_viewer_cancels_shell_close_without_another_sweep --test-threads=4
+test result: ok. 25 passed … finished in 104.57s
+test result: ok. 3 passed … finished in 18.31s</pre>
+<p>A <code>ps -axww -o pid=,comm=</code> diff before and after shows no new process from this checkout's
+<code>target/</code>, any <code>/tmp/lf-7501-*</code> fixture home, a Dev app, or a provider. The diff's other new processes
+belonged to other checkouts and installed <code>lf</code>. After quitting S1, nothing from <code>/tmp/lf-qa-823e</code>
+or <code>/tmp/lf-qa-823f</code> remains.</p>
+
+<h2>The audit against a fresh ps</h2>
+<pre>09:03:43  ps -axww -o comm= | grep -cE '(^|/)lf(-[A-Za-z0-9]+)?$'   → 295
+          uv run python -I scratch/process_audit.py               → 295 lf processes
+09:04:37  same recount                                           → 294</pre>
+<p>All 25 <code>/tmp/lf-7501-*</code> fixture processes are 4–8 days old, older than the fixture fix. The report recommends; nothing was stopped.</p>
+
+<h2>Fixed during QA</h2>
+<p><code>lf-world</code>'s stand-in <code>claude</code> stopped at EOF of stdin. lf hands Claude its opening turn on stdin
+(a file) and Claude then reads the terminal, so every <em>new</em> world conversation exited right after its opening
+turn and typed input went nowhere. The stand-in in <code>rust/loopflow/src/world/mod.rs</code> now reopens
+<code>/dev/tty</code> after the opening turn when stdout is a terminal. On a fresh world
+(<code>/tmp/lf-qa-823f</code>), a new Task conversation answered <code>hello</code> and <code>quit</code> ended it.
+<code>cargo test -p loopflow --test integration world_recipes</code>: 7 passed. The qa skill's workaround note is
+replaced.</p>
 
 <h2>What works now</h2>
 <ul>
-<li>Open Task and repository conversations stay running unviewed with a draft. Returning shows the draft.</li>
-<li>A done Task's conversation ends 15 minutes after its viewer leaves, both with a checkout and with none (bound late, no retirement row). The checkout is a separate effect: a PR-less one is kept.</li>
-<li>A conversation resumed after cleanup ends again after the same grace, without reopening the Task. History and the saved screen survive; the editor does not.</li>
-<li>The audit's count matches a fresh <code>ps</code>.</li>
+<li>Open Task and repository conversations run unviewed with a draft; returning shows it.</li>
+<li>A done Task's conversation ends on the first pass fifteen minutes after its viewer leaves, with or without a checkout. Returning first pushes the deadline out.</li>
+<li>Abandonment ends an unviewed conversation at once.</li>
+<li>A locked store delays no input. The leave is recorded once the store answers.</li>
+<li>Returning after closure restores history and the saved screen, but not the editor.</li>
+<li>The affected suites leave no processes. The audit's count matches <code>ps</code>.</li>
 </ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>A <code>retired</code> row (checkout deleted after a merged PR): the world has no merged PR, so S3 resumed from <code>closing</code>. The <code>completed_task_</code> transport regression covers <code>retired</code>.</li>
-<li>Returning <em>before</em> cleanup to cancel it, live: covered by <code>retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion</code>.</li>
-<li>Desktop windows, real Claude/Codex providers, the launchd cleanup sweep.</li>
+<li>The 1b signalling path: not built yet.</li>
+<li>Mid-turn abandonment: the stand-in has no turns.</li>
+<li>A retired (merged) checkout: no merged PR exists in a world.</li>
+<li>Desktop windows, real providers, the launchd sweep, gate's full suites and Clippy.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>Keystrokes typed while a return is still opening the provider are dropped. They are echoed by the attach but never delivered or replayed. This was seen again on S3's first return: the driver typed after the saved screen was painted but before the new provider read input. This is #1882's opening path, outside this change.</li>
-<li>After S3's return and its closure, the checkout row reads <code>waiting / Retained by an open Task Session viewer</code> until the next cleanup pass. Nothing runs that pass in a world; the scheduled sweep does on a real Machine. Conversation closure doesn't read this row, but whoever reads the reason sees a viewer that left 15 minutes ago.</li>
-<li>Owner-ended providers keep open <code>processes</code> rows (above). Nothing reads them as running.</li>
-<li>Setup, not product: in an isolated <code>HOME</code> with no global Git identity, <code>lf session bind</code> fails with "claiming needs your Git user.email". A repository-local identity fixed it. <code>lf-world</code>'s <code>env.json</code> sets no <code>HOME</code>, so a world normally reads the person's global one.</li>
+<li>Keys typed while a return is still opening the provider are echoed, then dropped. This is #1882's path, seen again on S2's return.</li>
+<li>An abandoned Task whose conversation was live during <code>lf task abandon</code> keeps its checkout forever: no later pass retries it. Provider rows the owner ended stay without <code>completed_at</code>, and the abandon message named them as live execution.</li>
+<li>S3's checkout row read <code>waiting / Retained by an open Task Session viewer</code> after its viewer left, until a later pass. Same as the earlier walkthrough.</li>
+<li>The whole-store revision guard didn't visibly delay a decision on this idle private Machine. The concept review measured it moving 8 times a second on the real one; 1b removes it.</li>
 </ol>

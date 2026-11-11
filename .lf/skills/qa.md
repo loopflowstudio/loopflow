@@ -354,11 +354,10 @@ After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
 passed without a viewer and live work has settled. That pass requests conversation
 closure even without a checkout; the owner consumes the request.
 
-A new conversation's first launch exits the stand-in at once: its first turn
-arrives on a pipe, not the terminal. Read the thread ID from the transcript
-(`started <id>`), write any line to `$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl`
-beside the world's existing transcript, and `lf session resume` again; resumed,
-it reads the terminal. For a done Task without a checkout, prepare a repository
+A new conversation's stand-in reads its opening turn from stdin, then the
+terminal, as Claude does, but writes no transcript: before resuming one after
+its provider ends, write any line to
+`$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl` (the ID follows `started`). For a done Task without a checkout, prepare a repository
 conversation (`lf session resume --prepare --json` in the repository), complete
 a checkout-less Task, then `lf session bind <session> --task <task>`. Binding
 claims the Task, which reads `git config user.email` in the repository: with an

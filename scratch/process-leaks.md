@@ -35,6 +35,8 @@ Jack Heart, word for word:
 
 At `89181c49ac`, the direct-signalling changes and both QA repairs are built;
 bare-direct launch followed in `59fdcdaee0` (see the demo review section).
+Interrupt hooks run in reverse registration order (`agent::exit_on_interrupt`), so a
+signalled shell owner writes `jobs_settled` before its Process record completes.
 `ops/task/retirement.rs::close_conversations` uses
 `ops/human_session.rs::end_owner`, shared with rollover. The migration has no
 Process close columns or automatic cancellation triggers;
@@ -198,7 +200,7 @@ its drivers remained. `scratch/qa.html` keeps the timeline and limits.
 `lf sync` merged `763da5c92f` as `4fec5e787b`, resolving the hook migration
 without restoring native-input recording. Its focused background-work test passed.
 
-- `uv run python scripts/check_migrations.py`: passed; only `owner_close_requests.sql` is unmerged.
+- `uv run python scripts/check_migrations.py`: passed; only `owner_close_requests.sql` (now `closed_task_cleanup.sql`) is unmerged.
 - `scripts/test.py --reuse-passing --rust-filter …`: architecture, test inventory and formatting passed; macOS `syspolicyd` at 281% CPU stopped CLI compilation. No product failure. `/tmp/loo823-publish-gate.log`; 37 sampled descendants, none left.
 - Documented pressure fallback: candidate build, the same filtered nextest plan (573/573), Clippy, packaging, fixture regression, inventory (14/14), website, Swift app build/tests (807 tests, 99 suites) and Swift platform checks passed. `/tmp/loo823-publish-manual.log`; exact commands and phase results in `/tmp/loo823_manual_checks.py` and `/tmp/loo823-manual-results.json`.
 - `cargo test -p loopflow --lib store::sqlite::steers::tests::`: 18/18 passed; the initial filter used the filename instead of this module. `/tmp/loo823-publish-steers.log`; no surviving descendants.
@@ -227,6 +229,12 @@ its recorded results and limitations remain above and in `scratch/qa.html`.
 
 ## Remaining
 
+- Demo: bare `lf` with Claude and with Codex in Rex shows the provider icon.
+- Gate: affected suites and the suite process census. Under load ~175,
+  `a_headless_run_survives_without_viewers` once missed its 30 s `launched` wait
+  (`/tmp/loo823-hooks-transport2.log`); 5/5 alone. Watch it there.
+- Publish: replace PR #1877's body ("Native-input retention is unchanged" and
+  pre-direct-signal validation are stale); lead as the demo review says.
 - LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) removes only `processes.native_input`, exporting released data first; shell Close stays. LOO-829 removes the ignored config key after release.
 
 ## Concept review, 2026-11-11
@@ -288,11 +296,10 @@ owner's PTY. Existing owner tests that resumed with pipes needed no change.
 launches `-b`. `nested_cli_execution_survives_its_calling_provider_and_viewer`
 is deleted: a nested bare run "ends with its parent" (server-first).
 
-- `transport_tests`: 111 passed, 1 failed, 8 ignored (`/tmp/loo823-bare-transport2.log`). `completed_task_cleanup_signals_shell_owner_and_settles_jobs` failed `settled` under the full run, passed alone twice; it passed in the run before. Open race in shell cleanup, not this pass's code.
+- `transport_tests`: 111 passed, 1 failed, 8 ignored (`/tmp/loo823-bare-transport2.log`). `completed_task_cleanup_signals_shell_owner_and_settles_jobs` failed `settled`; cause and fix under Focused checks ("Shell settlement race").
 - `context_launch_tests::` 21/21; lib `harness::context|context_block|harness::codex|os_process` 65/65; `documented_commands::` 4/4; `cargo clippy --all-targets -- -D warnings` clean on macOS. Linux `siginfo_t::si_pid()` branch compiles only in CI.
 - Not tried: Ctrl+Z under a job-control shell; Desktop opening a bare Session.
 - Compress (bare-direct): SAFETY comments per `unsafe` in `foreground.rs`, single wait loop in the bare test. `transport_tests bare_lf_runs_its_provider…` passed, clippy `--all-targets` clean; `/tmp/loo823-compress-bare.log`.
-Demo still owed: bare `lf` with Claude and with Codex in Rex shows the provider icon.
 
 Answered (concept review, scratch/concept-review.html): before bare-direct every interactive launch
 spawned `lf session serve` via `transport::delegate`, bare included. (1) Tie a

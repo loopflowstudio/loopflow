@@ -101,9 +101,9 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             tracing::warn!(%error, session = %exit.session, "cannot settle the Session capture");
         }
     }
-    // An interrupt or a mover ends the launch as a success; any other failure
-    // carries the provider's own code, so the person and the store read it.
-    let failed = command.moved.is_none() && !command.interrupted && !status.success();
+    // A failure carries the provider's own code, so the person and the store
+    // read it.
+    let failed = command.failed();
     let code = if failed {
         crate::transport::provider_exit_code(status)
     } else {

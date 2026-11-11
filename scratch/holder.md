@@ -531,9 +531,9 @@ No open product choice.
 `scratch/qa.html`. Fixed in QA: a continuing held view was cleared by the
 relay's `handoff()`; the restart test now refuses `ESC[2J`.
 
-### Still wrong, after the QA fixes
+### Fixed after QA
 
-Fixed since: a holder is one LfProcess (id from pid + OS start time). The
+A holder is one LfProcess (id from pid + OS start time). The
 server that spawns it writes the row and settles it from `wait`; a server that
 adopts it at startup writes the row, keeps one idle request connection, and
 settles it with no outcome when that closes (the store allows only

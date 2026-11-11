@@ -344,8 +344,9 @@ and Desktop Task shells.
 | Launch | Managed |
 |---|---|
 | `lf task run`, an interactive `lf ship` step, `lf resume --task`, a Task's primary conversation, Wave session commands | yes |
-| A Desktop pane (`LF_SERVER=1` on the prepared command) | yes |
+| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | yes |
 | `lf resume SESSION` of a Session bound to a Task or Wave | yes |
+| A repository conversation recorded before it was managed (no `work_source`) | no |
 | `lf <skill>`, `lf graph …`, `lf -i`, any `-b` or piped execution | no |
 | Desktop Task shells | no: they run without a server on headless Linux |
 

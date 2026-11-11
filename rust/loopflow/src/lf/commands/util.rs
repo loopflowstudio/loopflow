@@ -238,8 +238,13 @@ impl SessionCommandOutcome {
         }
     }
 
+    /// Whether the launch failed: an interrupt or a mover ends it as a success.
+    pub(crate) fn failed(&self) -> bool {
+        self.moved.is_none() && !self.interrupted && !self.status.success()
+    }
+
     pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
-        if self.moved.is_some() || self.status.success() || self.interrupted {
+        if !self.failed() {
             Ok(())
         } else if resuming {
             Err(anyhow!(

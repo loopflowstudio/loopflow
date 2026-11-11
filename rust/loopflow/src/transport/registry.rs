@@ -420,7 +420,7 @@ impl Registry {
             let listed = Client::connect(&place)
                 .map_err(anyhow::Error::from)
                 .and_then(|mut client| {
-                    crate::holder::client::record(client.hello()?.pid);
+                    crate::holder::client::adopt(&place, client.hello()?.pid);
                     client.list()
                 });
             let listed = match listed {

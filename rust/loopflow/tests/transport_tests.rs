@@ -7817,4 +7817,29 @@ fn held_terminals_list_one_holder_process() {
     for terminal in &terminals {
         fixture.held_ends(terminal);
     }
+    // The holder leaves, as it would after idling: the server that adopted it
+    // settles its row, though only the server that started it saw the exit.
+    let holder = first[0] as libc::pid_t;
+    // SAFETY: the holder this fixture's servers recorded.
+    unsafe { libc::kill(holder, libc::SIGKILL) };
+    // A settled holder row is completed, then forgotten: none stays unfinished.
+    let unfinished = || {
+        fixture
+            .sql()
+            .query_row(
+                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
+                   AND pid=?1 AND completed_at IS NULL"#,
+                [holder],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while unfinished() > 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the adopted holder's row never ended"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }

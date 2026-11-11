@@ -233,7 +233,7 @@ fn spawn() -> Result<()> {
     std::thread::spawn(move || {
         let status = child.wait();
         if let (Some(started), Ok(status)) = (started, status) {
-            settle(child.id(), started, status);
+            settled(child.id(), started, status);
         }
     });
     // A ready line, or end of file from a holder that found the lock taken.
@@ -280,19 +280,40 @@ pub fn record(pid: u32) {
     write(&holder_process(pid, started));
 }
 
+/// Record the holder `pid` at `place`, which another server started, and
+/// settle its row when its socket closes. Nothing here waits on its exit, so
+/// the row has no outcome. An idle request connection never keeps a holder.
+pub fn adopt(place: &Place, pid: u32) {
+    let Ok(Some(started)) = crate::journal::process_started_at(pid) else {
+        return;
+    };
+    write(&holder_process(pid, started));
+    let Ok(mut socket) = UnixStream::connect(&place.socket) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        // Blocks until the holder's end closes: it exited or was killed.
+        let _ = io::copy(&mut socket, &mut io::sink());
+        settle(pid, started, None, None);
+    });
+}
+
 /// Record that the holder this server started has exited.
-fn settle(pid: u32, os_started_at: i64, status: std::process::ExitStatus) {
+fn settled(pid: u32, os_started_at: i64, status: std::process::ExitStatus) {
+    let outcome = if status.success() {
+        "succeeded"
+    } else {
+        "failed"
+    };
+    settle(pid, os_started_at, Some(outcome), status.code());
+}
+
+/// A completed row with no outcome says the holder ended in a way nobody saw.
+fn settle(pid: u32, os_started_at: i64, outcome: Option<&str>, exit_code: Option<i32>) {
     let mut process = holder_process(pid, os_started_at);
     process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    process.outcome = Some(
-        if status.success() {
-            "succeeded"
-        } else {
-            "failed"
-        }
-        .into(),
-    );
-    process.exit_code = status.code();
+    process.outcome = outcome.map(str::to_owned);
+    process.exit_code = exit_code;
     write(&process);
 }
 

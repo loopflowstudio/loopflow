@@ -747,14 +747,17 @@ earlier draft of `a_held_pane_reads_reconnecting…` (an endless 0.2 s tick
 loop); the transport `Fixture` now kills every holder its store recorded on
 drop. Malformed `lf session attach` args name the expected form.
 
-Remaining: a holder adopted by a later server and idling out leaves its row
-unfinished (only the spawning server waits on it); `lf ps` hides it by OS
-identity, but the row never gets `completed_at`. The fix is unchosen: the
-adopting server settles the row (outcome unknown) when the holder's socket goes
-away, or the holder writes its own exit before it leaves.
+Fixed since: a server that adopts a holder at startup keeps one idle request
+connection to it and, when that closes, settles the holder's row with no
+outcome (the store allows only succeeded/failed/interrupted, and nobody saw the
+exit); a completed holder row is then forgotten. `held_terminals_list_one_holder_process`
+kills the adopted holder and requires no unfinished row. One thread per adopted
+holder, not per terminal. Gap: a holder that did not answer at startup is not
+watched.
 
 Compress (after d695dacce): holder row writes share one `write`; rest kept.
 `transport_tests -- held_terminals_list_one_holder_process held_session_survives` 2 passed.
 
 Checks: `transport_tests -- held_ a_held` 5 passed; `--lib -- transport::
-holder::` 85 passed; `documented_commands::` passed; clippy clean.
+holder::` 85 passed; clippy clean (after the adopted-holder settle);
+`documented_commands::` passed (before it).

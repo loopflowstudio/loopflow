@@ -83,20 +83,29 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn close_desktop_shell(&self, id: &str) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        tx.execute(
-            "UPDATE processes SET close_requested='shell_pending',close_task_id=NULL
-            WHERE id=(SELECT owner FROM desktop_shells WHERE id=?1)",
-            [id],
+    pub(crate) fn settle_unstarted_task_shells(&self, task: &TaskId) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE desktop_shells SET jobs_settled=1 WHERE task_id=?1 AND owner IS NULL",
+            [task.as_str()],
         )?;
-        tx.execute(
-            "UPDATE desktop_shells SET jobs_settled=1 WHERE id=?1 AND owner IS NULL",
-            [id],
-        )?;
-        tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn close_desktop_shell(&self, id: &str) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE desktop_shells SET close_requested=1,
+            jobs_settled=CASE WHEN owner IS NULL THEN 1 ELSE jobs_settled END WHERE id=?1",
+            [id],
+        )?;
+        Ok(())
+    }
+    pub(crate) fn shell_should_close(&self, owner: &LfProcessId) -> StoreResult<bool> {
+        let requested: bool = self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=?1 AND close_requested=1)",
+            [owner],
+            |r| r.get(0),
+        )?;
+        Ok(requested && !(self.shell_holds_work(owner)? && self.owner_retention(owner)?.is_some()))
     }
 }
 
@@ -118,29 +127,6 @@ pub(crate) fn owners(store: &SqliteStore, task: &TaskId) -> StoreResult<Vec<LfPr
     Ok(rows)
 }
 
-/// Close is recorded immediately; requested work settles before it is consumable.
-/// The cleanup sweep retries pending requests even for open Tasks.
-pub(crate) fn advance_closes(store: &SqliteStore) -> anyhow::Result<()> {
-    let owners = {
-        let conn = store.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT id FROM processes WHERE close_requested='shell_pending' AND completed_at IS NULL")?;
-        let owners = query
-            .query_map([], |r| r.get::<_, LfProcessId>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        owners
-    };
-    for owner in owners {
-        let revision = store.close_revision()?;
-        if store.shell_holds_work(&owner)? && store.owner_retention(&owner)?.is_some() {
-            continue;
-        }
-        store.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE processes SET close_requested='shell' WHERE id=?1 AND close_requested='shell_pending'
-                AND (SELECT SUM(revision) FROM store_revisions)=?2", params![owner,revision])?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use crate::durable::TaskId;
@@ -148,7 +134,6 @@ mod tests {
 
     #[test]
     fn shell_close_waits_for_requested_work_and_new_work_revokes_readiness() {
-        use crate::store::sqlite::owner_close::CloseRequest;
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
         let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
@@ -162,25 +147,16 @@ mod tests {
         conn.execute("UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1,agent_process_id=?1 WHERE id='nested'", [&owner]).unwrap();
         conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('nested',?1,1,1,0,0)", [&owner]).unwrap();
         store.close_desktop_shell("shell").unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
+        assert!(!store.shell_should_close(&owner).unwrap());
         conn.execute("UPDATE session_activity SET open_tools=0,yielded=1", [])
             .unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(
-            store.owner_close_request(&owner).unwrap(),
-            Some(CloseRequest::Shell)
-        );
+        assert!(store.shell_should_close(&owner).unwrap());
         conn.execute("UPDATE session_activity SET pending_input=1", [])
             .unwrap();
-        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
+        assert!(!store.shell_should_close(&owner).unwrap());
         conn.execute("UPDATE session_activity SET pending_input=0", [])
             .unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(
-            store.owner_close_request(&owner).unwrap(),
-            Some(CloseRequest::Shell)
-        );
+        assert!(store.shell_should_close(&owner).unwrap());
         let graph = store.test_lf_process();
         conn.execute(
             "UPDATE processes SET parent_lf_process_id=?2 WHERE id=?1",
@@ -188,15 +164,10 @@ mod tests {
         )
         .unwrap();
         conn.execute("INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'nested','{\"name\":\"nested\",\"steps\":[]}')", [&graph]).unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
+        assert!(!store.shell_should_close(&owner).unwrap());
         conn.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&graph])
             .unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(
-            store.owner_close_request(&owner).unwrap(),
-            Some(CloseRequest::Shell)
-        );
+        assert!(store.shell_should_close(&owner).unwrap());
     }
 
     #[test]
@@ -224,7 +195,7 @@ mod tests {
         let owner = store.test_lf_process();
         store.bind_desktop_shell("shell", &owner).unwrap();
         assert!(store.bind_desktop_shell("shell", &owner).is_err());
-        assert_eq!(store.owner_close_request(&owner).unwrap(), None);
+        assert!(!store.shell_should_close(&owner).unwrap());
         // Desktop shell ownership adds no checkout hold; the Task Session supplies it.
         store
             .record_owner_viewer_hold(&owner, Some(ViewerHold::Viewed(100)))
@@ -232,11 +203,7 @@ mod tests {
         assert!(store.task_viewer_holds(&task).unwrap().is_empty());
         store.record_owner_viewer_hold(&owner, None).unwrap();
         store.close_desktop_shell("shell").unwrap();
-        super::advance_closes(&store).unwrap();
-        assert_eq!(
-            store.owner_close_request(&owner).unwrap(),
-            Some(crate::store::sqlite::owner_close::CloseRequest::Shell)
-        );
+        assert!(store.shell_should_close(&owner).unwrap());
         assert!(!store
             .create_desktop_shell("shell", &task, "/repo.task")
             .unwrap());

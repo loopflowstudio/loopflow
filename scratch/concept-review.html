@@ -3,55 +3,90 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-823 · Conversation closure review</title>
+<title>LOO-823 concept review</title>
 <style>
-:root { color-scheme:light dark; --bg:#faf9f5; --ink:#222622; --muted:#62665f; --line:#c9cec5; --accent:#17664e; }
-@media(prefers-color-scheme:dark) { :root { --bg:#191c1b; --ink:#eceee8; --muted:#b0b7ac; --line:#454e46; --accent:#8ed8b5; } }
-* { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
-main { max-width:49rem; margin:auto; padding:2rem 1rem 3rem; }
-h1 { font-size:1.8rem; line-height:1.2; margin:.7rem 0; }
-h2 { font-size:1.1rem; margin:1.5rem 0 .5rem; }
-p { margin:.6rem 0; }
-.meta { color:var(--muted); font-size:.8rem; overflow-wrap:anywhere; }
-code { font: .85em ui-monospace,monospace; overflow-wrap:anywhere; }
-.outcome { border-left:3px solid var(--accent); padding-left:1rem; }
-table { border-collapse:collapse; width:100%; font-size:.88rem; }
-th,td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
-th:first-child { width:24%; }
-ol { padding-left:1.3rem; }
-li { margin:.5rem 0; }
-@media(max-width:480px) { main { padding-top:1rem; } table { font-size:.78rem; } }
+  :root { --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6a665f; --rule:#dedad2; --panel:#f2efe8; --accent:#0b6b57; --accent-bg:#e6f2ee; --warn:#a13a1e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#e8e6e1; --muted:#9a968d; --rule:#34343a; --panel:#202024; --accent:#6fd0b6; --accent-bg:#18302b; --warn:#f0906f; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1rem 5rem; }
+  h1 { font-size:1.6rem; line-height:1.2; margin:0 0 .5rem; text-wrap:balance; }
+  h2 { font-size:1.15rem; margin:2.3rem 0 .6rem; }
+  h3 { font-size:1rem; margin:1.5rem 0 .3rem; }
+  .meta { color:var(--muted); font-size:.9rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.87em; }
+  pre { background:var(--panel); padding:.8rem 1rem; border-radius:6px; overflow-x:auto; font-size:.83rem; line-height:1.45; }
+  .lead { font-size:1.08rem; }
+  .proposed { border-left:3px solid var(--accent); background:var(--accent-bg); padding:.6rem 1rem; border-radius:0 6px 6px 0; margin:1rem 0; }
+  .built { border-left:3px solid var(--rule); padding:.1rem 1rem; margin:1rem 0; }
+  .proposed > :first-child, .built > :first-child { margin-top:0; }
+  .tag { color:var(--accent); font-weight:600; }
+  .bad { color:var(--warn); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.93rem; }
+  th, td { text-align:left; vertical-align:top; padding:.45rem .7rem .45rem 0; border-bottom:1px solid var(--rule); }
+  th { font-weight:600; }
+  dl.q { margin:.4rem 0 1.4rem; }
+  dl.q dt { float:left; clear:left; width:2.4rem; font-weight:600; font-family:ui-monospace,Menlo,monospace; font-size:.9rem; padding-top:.1rem; }
+  dl.q dd { margin:0 0 .45rem 2.4rem; }
 </style>
 </head>
-<body><main>
-<header>
-<p class="meta">LOO-823 · concept-review · 2026-11-11 · branch at <code>11a00b559</code> plus working notes<br>
-Sources: <code>scratch/process-leaks.md</code>, <code>scratch/questions.md</code>, <code>docs/sessions.md</code>, <code>transport/lifetime.rs</code>, <code>transport/input.rs</code>, <code>ops/task/retirement.rs</code>, <code>store/sqlite/owner_close.rs</code>, <code>store/migrations/owner_close_requests.sql</code>, <code>desktop/shells/store.rs</code>, <code>ops/human_session/primary.rs</code>.</p>
-<h1>No further product decision needed</h1>
-<p class="outcome">The branch implements the review answers. Advance to gate and demo. No new implementation direction; resident-limit suspension remains deferred.</p>
-</header>
-<h2>Actions → concepts → APIs, built in this branch</h2>
-<table>
-<thead><tr><th>Action</th><th>What survives or ends</th><th>Who changes state</th></tr></thead>
-<tbody>
-<tr><td>Switch away, then return</td><td>An open Task, Wave, repository or bare conversation keeps its provider running.</td><td><code>record_owner_viewer_hold</code> records viewing; <code>lf resume</code> attaches or replaces an eligible owner.</td></tr>
-<tr><td>Complete a Task</td><td>After 15 minutes unviewed and settled work, conversations end even without a checkout. Completion and a new owner launch bound the grace.</td><td><code>lf task retire</code> → <code>request_conversation_closes</code> → Process close request → <code>Ending::consume</code>.</td></tr>
-<tr><td>Abandon a Task</td><td>An unviewed terminal conversation ends on cleanup, even mid-turn. Headless Runs keep their existing lifetime.</td><td>Cleanup writes an abandonment request; the terminal owner consumes it.</td></tr>
-<tr><td>Return or reopen before closure</td><td>Viewing or reopening revokes completion cleanup. New work also revokes it.</td><td>Viewer recording and store triggers cancel the request.</td></tr>
-<tr><td>Close a Desktop shell</td><td>Requested work settles before Close takes effect. Viewing does not cancel explicit Close.</td><td><code>close_desktop_shell</code> → <code>advance_closes</code> → the same Process request path.</td></tr>
-</tbody></table>
-<h2>The mismatch removed</h2>
-<p><strong>Before:</strong> owners interpreted Task state, an input ledger retained execution, and a count of sixteen skipped new background starts. <strong>Now:</strong> cleanup decides Task closure; owners report viewing and obey revocable requests. Input is a bounded byte queue. Every eligible Task background start proceeds.</p>
-<p>A Session keeps history; its Process owns execution. Checkout retirement is separate: an unmerged checkout can remain after its conversation ends. No new lifecycle record is needed.</p>
-<h2>One interaction, including recovery</h2>
-<p>Leave a draft on an open Task and return: the same provider keeps it. Complete the Task, leave, and let work settle: cleanup can end it after the viewing grace. Return afterward: provider history and the saved screen come back; the editor does not, and the Task stays closed.</p>
-<p>If the store fails, input continues and failure cannot authorize closure. Viewing writes retry before consuming a request. Output racing a completion request cancels it off the input path. A returning viewer or new work revokes the queued close; cleanup decides again.</p>
-<p><strong>Next demo:</strong> return before and after closure, recover from a store failure while typing, then count new fixture processes. Earlier test results and demo readings remain historical; this review ran no suites.</p>
-<h2>Review questions resolved</h2>
-<p>Jack Heart: “1a 2b”. The later direction says: “owners obey a close request instead of judging Task closure”.</p>
+<body>
+<main>
+<p class="meta">LOO-823 · concept review, Graph at qa · 2026-11-11 · branch <code>a99272166</code><br>
+Built from <code>store/migrations/owner_close_requests.sql</code>, <code>store/sqlite/owner_close.rs</code>, <code>ops/task/retirement.rs</code>, <code>transport/lifetime.rs</code>, <code>lf/commands/rollover.rs</code>, <code>scratch/process-leaks.md</code>.</p>
+
+<h1>Should cleanup end a done Task's conversation itself, instead of leaving it a note?</h1>
+
+<p class="lead">The last pass moved the "is this Task closed?" judgment out of each owner, as the simplification asked. It did that by storing a close request on the owner and keeping it true with seven database triggers. A stored judgment has to be un-made whenever anything it depended on changes. That is where most of the new code went.</p>
+
+<h2>What is built</h2>
+<div class="built">
 <ol>
-<li><strong>What happens on resume after an install? 1a:</strong> an idle owner on another build may be replaced. History continues; an unsent draft can be lost. Attaching forever to old builds is no longer proposed.</li>
-<li><strong>What happens at sixteen conversations? 2b:</strong> there is no background conversation cap. Per-Machine suspension is deferred; editor detection remains unchosen and outside this PR.</li>
+  <li>Every minute, cleanup finds done or abandoned Tasks with running conversations and decides which may end.</li>
+  <li>It writes <code>close_requested='completed'</code> (or <code>'abandoned'</code>) on each owner's process row, but only if no write anywhere in the store happened since it started reading.</li>
+  <li>Seven triggers clear that request if the Task reopens, a Graph starts, a turn begins, the Session moves, and so on.</li>
+  <li>Each owner polls every two seconds and ends when it finds a request.</li>
 </ol>
-</main></body></html>
+<pre>ALTER TABLE processes ADD COLUMN close_requested TEXT
+  CHECK(close_requested IN ('completed','abandoned','shell_pending','shell','retired_shell'));
+-- 81 lines, 7 CREATE TRIGGER</pre>
+</div>
+
+<h2>Three things this costs</h2>
+<div class="scroll"><table>
+  <tr><th></th><th>What happens</th></tr>
+  <tr><td>A done Task may not close for a long time</td><td>Step 2's guard compares one sum over all of <code>store_revisions</code>. At rest it moved 8 times in one second (11346900 → 11346908). Any write in between, including another owner recording its viewer, cancels the pass, and the next try is a minute later.</td></tr>
+  <tr><td><span class="bad">The conversations holding your disk today stay</span></td><td>Owners started by the installed <code>lf</code> never read the new column. The done Tasks still holding builds (LOO-723, 775, 800, 810, 812, 813, MTG-180, 241, 244, 245, 249, 252, 268) keep running after this ships, until someone runs rollover.</td></tr>
+  <tr><td>A stored judgment to maintain</td><td>Five request states, a Task column on every process row, seven triggers, an upgrade fixture, and a staged removal of the old shell column.</td></tr>
+</table></div>
+
+<h2>Proposed</h2>
+<div class="proposed">
+<p><span class="tag">Proposed, not built.</span> Cleanup ends the conversation in the same pass that decides it. It verifies the owner's PID and start time and signals it, as <code>lf process rollover</code> already does for owners of any build. The owner saves its screen and exits with "Task completed".</p>
+<div class="scroll"><table>
+  <tr><th></th><th>As built</th><th>Proposed</th></tr>
+  <tr><td>Where the decision lives</td><td>A row, kept valid by triggers</td><td>Nowhere; it is acted on at once</td></tr>
+  <tr><td>Window for the decision to go stale</td><td>Until the owner's next poll, up to 2 s, guarded by triggers</td><td>The milliseconds between the last read and the signal</td></tr>
+  <tr><td>Owners on older builds</td><td>Never close</td><td>Close at the next pass</td></tr>
+  <tr><td>Desktop shell Close</td><td>Moved onto the same column</td><td>Stays a stored request on <code>desktop_shells</code>: a person asked for it, so it must outlive a restart</td></tr>
+  <tr><td>Removed</td><td></td><td>The migration's new columns and triggers, the whole-store revision guard, the owner's request poll, the upgrade fixture</td></tr>
+</table></div>
+<p>Counterexample kept: you open the conversation in the instant between cleanup's last read and its signal. It ends in front of you with "Task completed", and resuming continues from history. Under the built design the same instant is covered by a trigger.</p>
+</div>
+
+<h2>Questions</h2>
+<h3>1. How does cleanup end a done Task's conversation?</h3>
+<dl class="q">
+  <dt>1a</dt><dd>As built: a stored close request on the owner, kept valid by triggers, consumed on the owner's next poll.</dd>
+  <dt>1b</dt><dd>Cleanup signals the verified owner in the pass that decides it; nothing stored. Shell Close stays on <code>desktop_shells</code>.</dd>
+</dl>
+<h3>2. The done-Task conversations already running on the installed build</h3>
+<dl class="q">
+  <dt>2a</dt><dd>End them at the first cleanup pass after this ships. That follows from 1b; under 1a it needs its own path.</dd>
+  <dt>2b</dt><dd>Leave them until someone runs <code>lf process rollover</code>.</dd>
+  <dt>2c</dt><dd>End them now, by hand and by PID, before this ships.</dd>
+</dl>
+</main>
+</body>
+</html>

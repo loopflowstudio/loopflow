@@ -19,9 +19,9 @@ Session `9af9d3006a494e3dba19fdd82e01b7a0` for Jack Heart:
 
 LOO-829 (`task_c118380f31f14d07ba28669499efa395`) removes the ignored
 `session.end_detached_after` parser after LOO-823 ships; Linear sync was confirmed
-2026-11-11. The released `processes.native_input` and `desktop_shells.close_requested`
-columns remain until a staged contract migration can remove them; runtime no
-longer uses them. Removal Task `task_1ddbd3851a8e424e9ce887fa8f39353b` resolved
+2026-11-11. The released `processes.native_input` column remains until staged removal.
+`desktop_shells.close_requested` remains the explicit Close authority after "1b 2c";
+LOO-840 must not remove it. Removal Task `task_1ddbd3851a8e424e9ce887fa8f39353b` resolved
 as LOO-840 in the 2026-11-11 realign status read.
 
 2026-11-11 implementation assumption: a resumed owner that has never had a viewer
@@ -32,9 +32,10 @@ For a completed Task lacking a completion date, its existing update time supplie
 the lower bound, matching closed-Task ordering; malformed dates cannot authorize
 closure.
 
-2026-11-11 implementation choice: explicit shell Close becomes consumable at
-once when requested work has settled. Otherwise the existing once-per-minute
-cleanup pass retries it, including on open Tasks. No per-owner Task poll remains.
+2026-11-11 implementation choice after "1b 2c": shell owners poll only their
+explicit Close receipt and requested work; no per-owner Task poll remains.
+Abandoned checkout retries use the existing abandonment checks with `force=false`;
+a past one-shot `--force` does not grant future forced deletion.
 
 Proposed infrastructure memory correction (read-only in this Task): replace
 `.lf/wave/infrastructure/MEMORY.md`'s "Idle owners end" two-minute rule with

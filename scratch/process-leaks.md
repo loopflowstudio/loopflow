@@ -36,21 +36,31 @@ owner's launch are lower bounds on that grace. This applies without a checkout
 and after checkout retirement. Abandonment ends unviewed terminal conversations
 even mid-turn. Headless Runs retain their existing lifetime.
 
-Task cleanup owns the decision and writes a close request on the existing
-Process. Owners record viewing and consume requests; they do not read Task
-state. The cleanup inventory includes closed Tasks with live conversations,
-including missing or retired checkouts. Shell Close waits for requested work
-in the cleanup producer; shells and conversations consume the same request path.
-Shell viewing adds no Task hold, and explicit shell Close remains effective.
+Task cleanup owns the decision and signals verified owners in that pass, using
+rollover's termination path. It first sends a best-effort notice and saves the
+screen; an older owner that cannot receive the notice still ends by signal.
+No automatic close request is stored. Owners record viewing changes and retry
+failed writes; once recorded, they wait for the next change. Only shell owners
+poll explicit Close. They do not read Task state. The cleanup inventory includes closed Tasks with live conversations,
+including missing or retired checkouts, and abandoned local checkouts whose
+cleanup previously met live work. Abandoned checkout retries use the existing
+retirement queue and backoff, leaving it after successful deletion. Reopening
+revokes that checkout intent; this is separate from owner signalling.
 
-Returning viewing, reopening, changed membership and new work revoke automatic
-requests. A revision check prevents a decision from overwriting an intervening
-write. The final output veto remains: streaming can reveal work whose hook
-never reached the store. Compare with the last observed absence of a request,
-including output before the owner polls a newly written request. The watcher
-cancels it outside the byte path; no idle timer is involved. Store failure cannot
-authorize closure. Input is forwarded through the bounded byte queue with no
-store write, ledger or retry recording.
+A return, reopen, membership change or new work observed before cleanup's decision
+keeps execution. The accepted return-between-decision-and-signal race ends with
+“Task completed”; resume continues history. A store read failure cannot authorize
+closure. Cleanup recognizes current Session launchers through the Session’s AgentProcess
+relationship as well as Process ancestry; an exec handoff can start without a
+parent link. Independent execution and live requests still hold cleanup.
+Input uses the bounded byte queue with no ledger or store writes. Initial
+attachment leaves cooked input queued until input control is acknowledged;
+recovery still discards uncertain input.
+
+Explicit shell Close remains on `desktop_shells.close_requested`. Its owner waits
+for requested work to settle, then closes ordinary jobs. Automatic shell cleanup
+signals owners directly after the Task's viewing grace and work checks. Shell
+viewing adds no Task hold.
 
 Retirement still checks merged delivery before deleting a checkout; a PR-less
 or unresolved checkout stays. Resuming retains provider history and the saved
@@ -59,31 +69,21 @@ checkout deletion. `docs/sessions.md` and the transport README own this behavior
 
 ### Delete — do not maintain
 
-Runtime cuts are complete: idle ending; native-input ledger and retries;
-`BACKGROUND_TASK_CONVERSATIONS` and its count/skip path; owner-side Task and
-retention polls; the second Task judgment at consumption; runtime reads of
-`desktop_shells.close_requested`. Released columns remain for staged removal
-in LOO-840; the ignored config key goes in LOO-829.
+These runtime cuts are complete; no deletion target below remains in use.
 
-## Concept review, 2026-11-11
+- Idle ending; native-input ledger and retries; `BACKGROUND_TASK_CONVERSATIONS`.
+- `store/sqlite/owner_close.rs`, Process close columns/index, seven close-request
+  cancellation triggers, whole-store revision guard and automatic owner polling.
+- Automatic shell close state and its cancellation tests. Preserve explicit Close,
+  viewer deadlines, requested-work holds, job settlement and checkout protections.
+- `transport/lifetime_tests.rs` and queued-ending veto tests, which exclusively
+  exercised the replaced policy. Keep viewer recording recovery and direct-signal
+  integration coverage.
 
-No further design change or open product choice for this PR. The earlier review
-page's resume and cap questions are answered by "1a 2b"; old-build replacement
-can discard a draft, and background starts have no count cap. Resident-limit
-suspension remains deferred, not a condition for shipping this change.
-
-The model is one Session's history, one Process's execution and viewing, and a
-close request from Task cleanup. Checkout retirement remains separate: an
-unmerged checkout must survive even when its closed Task's conversation ends.
-Returning, reopening or starting work can revoke completion cleanup; abandonment
-still ends an unviewed terminal mid-turn. An unavailable store leaves execution
-running, with failed viewing writes retried before closure. Output that races a
-completion request cancels it without putting a write in the input path.
-
-Next: gate and the private-Machine demo already listed below. Show return before
-closure, return after closure with history but no editor, and store recovery with
-input still flowing. The page at `scratch/concept-review.html` now shows this
-model rather than the superseded proposals. No code changed in this review.
+Released `processes.native_input` remains for LOO-840's staged removal;
+`desktop_shells.close_requested` stays in use and must stay out of that removal.
+LOO-829 removes the ignored detached-timeout config key after release.
+Resident-limit suspension remains deferred.
 
 ## Readings that cannot be recovered
 
@@ -123,21 +123,35 @@ the close-request design. That description needs replacement at publish.
 
 ## Focused checks, 2026-11-11
 
-Inherited `LF_*` unset; stdin closed. The first implementation run preceded the
-output/poll cancellation repair; the second covers it and the same six transport
-cases. Both preceded compression. Existing compact-unwind linker warning only.
+Previous close-request checks and their commands are in
+`b936afed1b42e416b160835604cb2ec43a85268b:scratch/process-leaks.md`.
+They do not cover direct signalling. With inherited `LF_*` unset and stdin closed:
 
-- `uv run cargo test -p loopflow --lib --test transport_tests --test integration -- transport::lifetime::tests:: transport::lifetime_tests:: ops::task::retirement::tests:: store::sqlite::task_retirement::tests:: desktop::shells::store::tests:: owner_close_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes completed_task_ returning_task_viewer_cancels_shell_close_without_another_sweep silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return a_task_checkout_starts_its_conversation_in_the_background a_task_run_starts_its_conversation_and_abandon_stops_it documented_commands:: --test-threads=4`: 25 library, 6 integration and 6 transport cases passed. Background-start proofs include sixteen pre-existing conversations.
-- `uv run cargo test -p loopflow --lib --test transport_tests -- transport::lifetime::tests:: transport::lifetime_tests:: conversation_cleanup_owns_grace_work_and_reversible_close_requests owner_close_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes shell_close_waits_for_requested_work_and_new_work_revokes_readiness completed_task_closes_a_conversation_resumed_after_checkout_retirement completed_task_without_checkout_ends_a_conversation_with_typed_input returning_task_viewer_cancels_shell_close_without_another_sweep silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return --test-threads=4`: implementation tree passed 8 library cases (23.62s) and 6 transport cases (59.74s). Recovery revokes the stale request, then cleanup issues the next one; cancellation under a store lock stays off the byte path.
+- `cargo test -p loopflow --lib -- ops::task::retirement::tests:: store::sqlite::task_retirement::tests:: desktop::shells::store::tests:: owner_close_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes`: 20 passed on the final migration/retry queue; `/tmp/loo823-cleanup-final.log`.
+- `cargo test -p loopflow --test transport_tests -- completed_task_closes_a_conversation_resumed_after_checkout_retirement completed_task_without_checkout_ends_a_conversation_with_typed_input returning_task_viewer_resets_cleanup_without_another_sweep silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return`: 6 passed; `/tmp/loo823-focused-final.log`. The first two also passed after the retry-queue refinement.
+- `cargo test -p loopflow --test transport_tests completed_task_cleanup_signals_shell_owner_and_settles_jobs`: passed; `/tmp/loo823-shell-final.log`. Initial fixture attempts lacked required Task title/description/placement fields; the corrected fixture reaches cleanup, receives “Task completed”, settles its ordinary job, and retains its PR-less checkout without storing Close.
+- `cargo test -p loopflow --lib -- snapshot_preview_keeps_typing_until_initial_attachment_is_acknowledged viewer_state_retries_after_a_store_failure_without_another_viewer_change`: passed in `/tmp/loo823-implement-tests.log`.
+- `cargo test -p loopflow --test integration -- task_abandonment:: documented_commands:: a_task_run_starts_its_conversation_and_abandon_stops_it`: 6 passed; `/tmp/loo823-focused-final.log`.
+- `cargo test -p loopflow --lib --test transport_tests -- conversation_cleanup_owns_grace_membership_and_work cleanup_recognizes_current_session_launchers_without_process_parents` plus the seven transport cases above: 2 policy and 7 transport tests passed after the live-walkthrough repair; `/tmp/loo823-launcher-focused.log`.
+- `cargo build -p loopflow --bin lf --bin lf-world`, `cargo fmt`, `uv run python scripts/check_migrations.py`, `git diff --check`: passed. Gate owns broader checks below.
+- Compress: `cargo test -p loopflow --lib --test transport_tests -- transport::lifetime::tests:: store::sqlite::task_retirement::tests:: completed_task_ returning_task_viewer_resets_cleanup_without_another_sweep silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return desktop_shell_reconnects_and_settles --test-threads=4`: 10 unit and 7 transport tests passed; `/tmp/loo823-compress-tests.log`. The lib-test link warned that `__eh_frame` exceeded compact-unwind's 16 MiB limit; build and tests succeeded. The last filter matched no test; explicit shell Close is checked separately below.
+- Compress: `cargo test -p loopflow --test transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs`: passed; `/tmp/loo823-compress-shell.log`. `cargo fmt --check` and `git diff --check` passed; `lf context` remains under both limits. Gate owns the broader suites and process census.
 
-- `ps -axo pid=,comm=` after focused tests: 0 processes executing from this checkout’s `target/`; the full descendant/fixture census remains for demo. No provider or watcher was started outside fixtures.
+The first live direct-signal world was interrupted at 09:58 when a rebuilt CLI
+met its older draft-migration checksum. Its own processes were stopped and a
+fresh world with pinned copies of both binaries replaced it. Its earlier S4 and
+startup-input readings are not grace-period completion results.
 
-- `cargo fmt --check`, `git diff --check`, `lf context`: passed; scratch is within both targets. Clippy remains for gate.
-
-- Compression: `uv run cargo test -p loopflow --lib --test transport_tests -- transport::lifetime::tests:: transport::lifetime_tests:: ops::task::retirement::tests:: store::sqlite::task_retirement::tests:: desktop::shells::store::tests:: completed_task_ returning_task_viewer_cancels_shell_close_without_another_sweep ssh_shells:: --include-ignored --test-threads=4`: 25 library (86.23s) and 6 transport (115.37s) passed; includes all three real SSH cases and 20 reconnect/close cycles with process, PTY and socket checks. Final build has only the existing compact-unwind linker warning.
-- `uv run python -` with isolated SQLite shell receipts omitting `close_requested`: audit reading passed; no schema fallback remains.
-
-- Post-compression `ps -axo pid=,comm=`: 0 processes executing from this checkout’s `target/` (also 0 before the final run). Full suite census remains for demo.
+2026-11-11, 10:03–10:20 direct-signal world: S3 closed at 10:18:34,
+fifteen minutes after its return/departure, and S4 ended during abandonment.
+Fresh S2 and an extra fresh Task conversation stayed beyond grace: their provider
+launcher's Process parent was absent, although the Session's current AgentProcess
+named it. Cleanup treated that launcher as independent work. This invalidated
+the ancestry-only ownership check; cleanup now reads that existing Session
+relationship too. The failed walkthrough stopped its own processes. The repaired S2 repeat ended at 10:40:18, completion/departure +15:03,
+with no checkout and the same parentless-launcher shape. S3 resumed history and
+answered fresh opening input. At 10:41 no process from either private world or
+its drivers remained. `scratch/qa.html` keeps the timeline and limits.
 
 ## Remaining
 
@@ -150,11 +164,46 @@ cases. Both preceded compression. Existing compact-unwind linker warning only.
   `scripts/test.py --list` reading on 2026-11-11 selects architecture, Rust,
   website and Swift. Reuse only identical tree/plans; earlier Swift results in
   PR #1877 are historical.
-- Demo: process diff after affected suites and corrected audit recount. Walk the
-  draft/return/close cases again with cleanup as the close-request producer.
+- Demo: process diff after affected suites and corrected audit recount. The direct-
+  signalling S2–S4 walkthrough and repaired S2 repeat are in `scratch/qa.html`.
 - Publish: rewrite PR #1877 around scope-based lifetime, deletion of input
-  retention, central close requests, no background cap, and fixture/pipe cleanup.
+  retention, direct cleanup signals, no background cap, and fixture/pipe cleanup.
 
-LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) removes `processes.native_input` and
-`desktop_shells.close_requested` after the migration's staging window, exporting
-released data first. LOO-829 removes the ignored config key after release.
+LOO-840 (`task_1ddbd3851a8e424e9ce887fa8f39353b`) must now remove only
+`processes.native_input`, exporting released data first; shell Close stays. LOO-829 removes the ignored config key after release.
+
+## Concept review with a person, after the close-request pass (2026-11-11)
+
+Page: `scratch/concept-review.html`. Read at `a99272166` while the Graph ran qa.
+
+- Built: `processes.close_requested` (5 states) and `close_task_id`, written by
+  cleanup only when `SUM(store_revisions.revision)` is unchanged since its
+  read, and cleared by 7 triggers in `owner_close_requests.sql` (Task, Session,
+  Graph and activity changes). The owner obeys whenever it next polls.
+- Measured: that revision sum moved 8 times in one second at rest
+  (11346900 → 11346908). A decision spanning several queries can lose that race
+  repeatedly; on a busy Machine a done Task may not close for many passes.
+- Old-build owners don't read the new column. The done-Task conversations
+  holding builds today (LOO-723, 775, 800, 810, 812, 813, MTG-180, 241, 244,
+  245, 249, 252, 268) run the installed build and stay after this ships.
+- `lf process rollover` already ends owners of any build by signalling them
+  directly, after its own judgment.
+
+Direction reviewed before this implementation: cleanup ends a done Task's conversation in the pass that
+decides it, by signalling the verified owner as rollover does. Nothing is
+stored, so nothing can go stale and no trigger is needed. Desktop shell Close
+stays a stored request, because it is a person's request that must outlive a
+restart. Counterexample kept: a viewer who opens the conversation in the
+milliseconds between the decision and the signal sees it end with "Task
+completed" and resumes from history.
+
+Answers (Jack Heart): "1b 2c".
+- 1b: cleanup signals the verified owner in the pass that decides closure;
+  nothing stored. Next implement: delete `processes.close_requested`/
+  `close_task_id` and the seven triggers from `owner_close_requests.sql` (the
+  migration is unmerged; edit it in place), the whole-store revision guard,
+  `owner_close.rs`'s request reads and the owner's request poll. Shell Close
+  goes back to `desktop_shells.close_requested`. Signal through the same
+  verified-PID path rollover uses; the owner exits with "Task completed".
+- 2c: done-Task conversations on the installed build were ended by hand, by PID
+  (see below), before this ships.

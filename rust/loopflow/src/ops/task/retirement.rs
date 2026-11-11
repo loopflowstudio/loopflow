@@ -7,7 +7,6 @@ use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
-use crate::store::sqlite::owner_close::CloseRequest;
 use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
@@ -20,7 +19,7 @@ fn now() -> i64 {
 }
 
 // Completion, landing and each cleanup pass serialize against the same Task.
-// A returning viewer revokes queued work before the next pass performs an effect.
+// A returning viewer resets the checkout deadline before the next pass.
 pub(super) fn lock(task: &TaskId) -> OpsResult<File> {
     let file = lock_file(task.as_str())?;
     file.lock_exclusive()?;
@@ -73,32 +72,60 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
 
 /// Task cleanup owns closure, including Tasks without a checkout and resumed
 /// conversations whose checkout was already retired.
-pub(crate) fn request_conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
-    let revision = store.close_revision().map_err(task_error)?;
-    let now = now();
-    let owners = store.task_close_candidates(task, now).map_err(task_error)?;
-    if owners.is_empty() {
-        return Ok(());
+pub(crate) fn close_conversations(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
+    for (owner, abandoned) in conversation_closes(store, task)? {
+        end_owner(
+            store,
+            &owner,
+            if abandoned {
+                "Task abandoned"
+            } else {
+                "Task completed"
+            },
+        )?;
     }
-    let request = if owners[0].1 {
-        CloseRequest::Abandoned
+    Ok(())
+}
+
+fn conversation_closes(
+    store: &SqliteStore,
+    task: &TaskId,
+) -> OpsResult<Vec<(crate::id::LfProcessId, bool)>> {
+    let now = now();
+    let mut owners = store.task_close_candidates(task, now).map_err(task_error)?;
+    let Some((_, abandoned)) = owners.first() else {
+        return Ok(owners);
+    };
+    if *abandoned {
+        let holds = store.task_viewer_holds(task).map_err(task_error)?;
+        owners.retain(|(owner, _)| {
+            !holds.iter().any(|hold| &hold.owner == owner
+            && matches!(hold.hold, ViewerHold::Viewed(at) if now < at + VIEWER_OBSERVATION_GRACE))
+        });
     } else {
         match viewer_hold(store, task, now)? {
-            Some(ViewerHold::Viewed(_)) => return Ok(()),
+            Some(ViewerHold::Viewed(_)) => return Ok(Vec::new()),
             Some(ViewerHold::Absent(at)) if at + crate::store::sqlite::WORKSPACE_GRACE > now => {
-                return Ok(())
+                return Ok(Vec::new())
             }
             _ => {}
         }
         if unsettled_work(store, task)?.is_some() {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        CloseRequest::Completed
+    }
+    Ok(owners)
+}
+
+fn end_owner(store: &SqliteStore, owner: &crate::id::LfProcessId, notice: &str) -> OpsResult<()> {
+    let Some(pid) = crate::journal::live_process_pid(store, owner) else {
+        return Ok(());
     };
-    let owners: Vec<_> = owners.into_iter().map(|(owner, _)| owner).collect();
-    store
-        .request_owner_closes(task, &owners, request, revision)
-        .map_err(task_error)
+    // Older owners may not understand the notice; the verified signal still ends them.
+    if let Err(error) = crate::transport::close_notice(owner, notice) {
+        tracing::debug!(%owner, %error, "Owner close notice unavailable");
+    }
+    crate::ops::human_session::end_owner(store, owner, pid).map_err(task_error)
 }
 
 pub(crate) async fn schedule(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -133,7 +160,6 @@ async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
         Err(error) => return Err(error.into()),
     }
-    crate::desktop::shells::advance_closes(&store.sqlite).map_err(task_error)?;
     let mut failures = Vec::new();
     for id in tasks {
         let result = async {
@@ -169,7 +195,7 @@ async fn sweep(store: &SharedStore, tasks: &[TaskId]) -> OpsResult<()> {
 }
 
 async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    request_conversation_closes(&store.sqlite, &task.id)?;
+    close_conversations(&store.sqlite, &task.id)?;
     let Some(intent) = reconcile(&store.sqlite, &task.id)? else {
         return Ok(());
     };
@@ -179,15 +205,26 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     if intent.due_at.is_none_or(|due| due > now()) || intent.retry_at.is_some_and(|at| at > now()) {
         return Ok(());
     }
-    if super::task_work_status(store, task).await? != WorkStatus::Done {
-        return Ok(());
+    match super::task_work_status(store, task).await? {
+        WorkStatus::Abandoned => {
+            let repo = super::repository_for_task(store, task)?;
+            if !super::lifecycle::cleanup_abandoned(&repo, store, task, false).await? {
+                return Err(task_error("Retained checkout without unmerged delivery"));
+            }
+            store
+                .sqlite
+                .retirement_progress(&intent, "retired", None)
+                .map_err(task_error)?;
+            return Ok(());
+        }
+        WorkStatus::Done => {}
+        _ => return Ok(()),
     }
     let checkout = Path::new(&intent.checkout);
     let _mutation = checkout
         .is_dir()
         .then(|| super::lock_task_pr_mutation(checkout))
         .transpose()?;
-    let revision = store.sqlite.close_revision().map_err(task_error)?;
     if let Some(reason) = unsettled_work(&store.sqlite, &task.id)? {
         store
             .sqlite
@@ -197,12 +234,19 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     }
     if !store
         .sqlite
-        .begin_task_retirement(&task.id, revision)
+        .retirement_progress(&intent, "closing", None)
         .map_err(task_error)?
     {
         return Ok(());
     }
-    // Owners consume these requests; checkout deletion waits for their exit.
+    for owner in crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)? {
+        end_owner(&store.sqlite, &owner, "Task completed")?;
+    }
+    store
+        .sqlite
+        .settle_unstarted_task_shells(&task.id)
+        .map_err(task_error)?;
+    // A signal is not proof that all execution and shell jobs have settled.
     let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         store
@@ -277,6 +321,7 @@ fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String
                 "Requested work or a pending request still holds this Task".into(),
             ));
         }
+        allowed.extend(store.owner_session_launchers(&owner).map_err(task_error)?);
         allowed.insert(owner);
     }
     let processes = store.task_open_processes(task).map_err(task_error)?;

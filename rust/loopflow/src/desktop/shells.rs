@@ -2,7 +2,7 @@
 //! The shared transport owns the PTY and SSH stream; Session viewers alone hold
 //! Task checkouts. This runtime needs no GUI on either execution Machine.
 mod store;
-pub(crate) use store::{advance_closes, jobs_settled, owners};
+pub(crate) use store::{jobs_settled, owners};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -81,7 +81,6 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     );
     if *close {
         store.close_desktop_shell(id)?;
-        advance_closes(&store)?;
         return Ok(());
     }
 

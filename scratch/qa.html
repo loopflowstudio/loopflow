@@ -9,6 +9,52 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e5e5ea;
 </style>
 <h1>LOO-823 QA: open conversations stay, done ones close</h1>
 
+<h2>Direct signalling, 2026-11-11 10:03–10:41 PST</h2>
+<p>This pass supersedes the close-request mechanism and unresolved implementation findings below.
+Cleanup signals verified owners directly. Process close columns, the seven cancellation triggers,
+the revision-sum guard and automatic owner polling are removed. Explicit shell Close remains on
+<code>desktop_shells.close_requested</code>.</p>
+<p>Private world <code>/tmp/lf-823-signal-u_7xjfok</code>, isolated homes and fake providers,
+production CLI writes, real PTYs, and read-only SQLite inspection. Cleanup ran every thirty seconds
+in place of the scheduler. The final pinned CLI SHA256 was
+<code>1fb3afd37004604c378770f4b16990682d3964225de4e538de0850fde3b59cf0</code>.</p>
+<table>
+<tr><th>Case</th><th>Closed / viewer left</th><th>Observed result</th></tr>
+<tr><td>S2, Task 003cf2, repository conversation bound without a checkout</td><td>10:25:15</td><td>Owner ended 10:40:18, first eligible sweep (+15:03). Worktree stayed NULL.</td></tr>
+<tr><td>S3, Task 8b3b4d, PR-less checkout</td><td>Completed 10:03:26; returned and left 10:03:27</td><td>Owner ended 10:18:34 (+15:07). Checkout retained. Resume continued history and answered input typed during opening.</td></tr>
+<tr><td>S4, Task d19f1c, abandoned unviewed</td><td>Left 10:03:29; abandon returned 10:03:30</td><td>Owner ended during abandonment. Checkout entered the retry queue; the existing missing-delivery check retained it with increasing backoff.</td></tr>
+</table>
+<p>S2's complete line typed before initial attachment produced exactly one provider reply.
+S3's returned draft produced the expected provider reply too: these checks matched reply text,
+not terminal echo. <code>nocheckout-fixed.log</code>, <code>nocheckout-fixed-startup.txt</code>,
+<code>walk.log</code> and <code>resume-fixed.txt</code> remain in the private world.</p>
+<h3>What the walkthrough changed</h3>
+<p>The first fresh S2 stayed beyond grace. Its provider launcher had no Process parent after an
+exec handoff, so cleanup mistook it for independent work. The current Session still named its
+AgentProcess and launcher. Cleanup now reads that relationship alongside ancestry. A regression
+checks idle closure, live-request retention and retention of a launcher no longer owned by the
+current Session. The repeated S2 above exercised the same parentless shape and passed.</p>
+<p>The earlier startup-input loss is fixed by leaving cooked input queued until initial attachment
+is acknowledged. Abandoned checkout cleanup now uses the existing retry queue and backoff;
+a regression kept live work and dirty files, removed the checkout after they cleared, and revoked
+cleanup on reopening. Future retries do not inherit an earlier one-shot <code>--force</code>.</p>
+<h3>Focused verification</h3>
+<p>Twenty cleanup/store/migration tests passed. After the ownership repair, two policy tests and
+seven transport cases passed, including locked-store input, requested-work retention, return,
+closure without a checkout, closure after checkout retirement, and automatic shell shutdown.
+The shell case received “Task completed”, settled its ordinary job, retained a PR-less checkout,
+and left explicit Close unset. Six abandonment/documentation integration cases and the startup-input
+and viewer-recorder recovery checks also passed. Commands and logs are in <code>process-leaks.md</code>.</p>
+<p>At 10:41, no process from either private world or its PTY drivers remained. Only processes started
+for this pass were stopped. Temporary pinned binary copies were removed after this check; readings
+remain. Gate, the broader suite process census, audit refresh and publication remain later work.</p>
+<p class="note">The first direct-signal world was restarted when a rebuild changed its draft-migration
+checksum. The first fresh S2 then exposed the ownership bug above and failed its timeout. Neither
+attempt is counted as a passing grace-period check.</p>
+
+<h2>Historical close-request pass</h2>
+
+
 <p>2026-11-11, 08:54–09:30 PST, on HEAD <code>a99272166</code> (the close-request design). Branch
 <code>lf</code> and <code>lf-world</code> from <code>cargo build -p loopflow --bin lf --bin lf-world</code>.
 Private Machine <code>lf-world build one-task /tmp/lf-qa-823e</code> with its own HOME, LF_HOME and provider

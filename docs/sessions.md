@@ -51,7 +51,8 @@ scope's operating instructions.
 A conversation stays running while its scope is open. Task conversations end
 when the Task closes (done or abandoned). A done Task's conversation ends after
 fifteen minutes without viewing once live work settles, on the next cleanup pass,
-whether or not the Task has a checkout. Returning before cleanup cancels that ending. Returning afterward
+whether or not the Task has a checkout. Returning before cleanup keeps it running;
+a return that races the cleanup signal sees “Task completed”. Returning afterward
 continues from saved history; it does not reopen the Task. Checkout deletion is
 separate. Abandonment ends unviewed conversations even during a turn.
 Wave, repository and bare conversations stay running until you quit their agent.

@@ -3625,8 +3625,8 @@ while True:
         complete_conversation(&fixture, &owner);
         owners.push(owner);
     }
+    // Cleanup signals synchronously; its return is the lifetime decision.
     retire_conversations(&fixture);
-    std::thread::sleep(Duration::from_secs(6));
     for owner in &owners {
         assert!(
             fixture.running(owner),
@@ -3644,7 +3644,7 @@ while True:
         )
         .unwrap();
     std::fs::remove_file(&removable).unwrap();
-    std::thread::sleep(Duration::from_secs(4));
+    retire_conversations(&fixture);
     for owner in &owners {
         assert!(
             fixture.running(owner),
@@ -3677,7 +3677,6 @@ while True:
         if background {
             fixture.wait_file(&format!("{name}-scheduled"));
             retire_conversations(&fixture);
-            std::thread::sleep(Duration::from_secs(4));
             assert!(fixture.running(owner), "scheduled native work ended");
             std::fs::write(fixture.home.path().join(format!("{name}-unschedule")), "").unwrap();
         }
@@ -3685,7 +3684,6 @@ while True:
     }
     if !background {
         retire_conversations(&fixture);
-        std::thread::sleep(Duration::from_secs(6));
         for owner in &owners {
             assert!(fixture.running(owner), "quiet Graph supervisor ended");
         }
@@ -5134,7 +5132,85 @@ fn viewer_input_survives_its_disconnect() {
 }
 
 #[test]
-fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
+fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
+    let fixture = Fixture::new();
+    let task = "task_5e55105e000040008000000000000007";
+    fixture.shell_task(task);
+    let mut launch = fixture
+        .command(&[
+            "desktop",
+            "shell",
+            task,
+            "--checkout",
+            fixture.repo.path().to_str().unwrap(),
+            "--id",
+            "cleanup-shell",
+            "--create",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready > \"$HOME/ready\"",
+        ])
+        .env("SHELL", "/bin/bash")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    fixture.wait_file("ready");
+    let owner = fixture.shell_owner("cleanup-shell");
+    let mut viewer = fixture.viewer(&owner, true);
+    launch.wait().unwrap();
+    viewer.input("sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
+    let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
+    fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',base_commit='head',updated_at=1,planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
+    fixture
+        .sql()
+        .execute(
+            "INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
+        SELECT id,planning_completed_at,worktree,branch,0,'waiting' FROM tasks WHERE id=?1",
+            [task],
+        )
+        .unwrap();
+    // The shell's own viewer holds neither its Task nor ordinary shell jobs.
+    let cleanup = fixture.command(&["task", "retire", task]).output().unwrap();
+    assert!(!cleanup.status.success(), "a PR-less checkout must remain");
+    assert!(
+        String::from_utf8_lossy(&cleanup.stderr).contains("Retained PR-less checkout"),
+        "{cleanup:?}"
+    );
+    let ended = viewer.until_event("control");
+    assert!(events(&ended, "control")
+        .iter()
+        .any(|event| event["notice"] == "Task completed"));
+    fixture.ends(&owner);
+    let (settled, requested): (bool, i64) = fixture
+        .sql()
+        .query_row(
+            "SELECT jobs_settled,close_requested FROM desktop_shells WHERE owner=?1",
+            [&owner],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(settled);
+    assert_eq!(
+        requested, 0,
+        "automatic cleanup must not store a shell Close"
+    );
+    assert!(fixture.repo.path().is_dir());
+    let status = Command::new("ps")
+        .args(["-p", &job.to_string(), "-o", "stat="])
+        .output()
+        .unwrap();
+    assert!(
+        !status.status.success()
+            || String::from_utf8_lossy(&status.stdout)
+                .trim()
+                .starts_with('Z')
+    );
+}
+
+#[test]
+fn returning_task_viewer_resets_cleanup_without_another_sweep() {
     let fixture = Fixture::new();
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
@@ -5196,39 +5272,24 @@ fn returning_task_viewer_cancels_shell_close_without_another_sweep() {
         .unwrap();
 
     for brief_return in [false, true] {
-        // Hold the consumer while the sweep's queued close and the Session's
-        // return are recorded, then let the actual owner judge the request.
-        let pid = fixture
-            .sql()
-            .query_row("SELECT pid FROM processes WHERE id=?1", [&shell], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        // SAFETY: pid belongs to this fixture's shell owner and the guard resumes it.
-        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
-        let paused = PausedOwner(pid);
-        fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;
-            UPDATE processes SET close_requested='retired_shell',close_task_id=(SELECT task_id FROM desktop_shells WHERE owner=processes.id) WHERE id IN (SELECT owner FROM desktop_shells);").unwrap();
+        fixture.sql().execute_batch("UPDATE task_retirements SET due_at=0,phase='closing',retry_at=unixepoch()+3600,failures=3;").unwrap();
         let mut passive = fixture.viewer(&session_owner, false);
         wait_hold(&fixture, &session_owner, Some("viewed"));
-        let state: (String, Option<i64>, Option<i64>, i64, Option<String>) = fixture
+        let state: (String, Option<i64>, Option<i64>, i64, i64) = fixture
             .sql()
             .query_row(
-                "SELECT h.phase,h.due_at,h.retry_at,h.failures,p.close_requested
-             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id JOIN processes p ON p.id=s.owner",
+                "SELECT h.phase,h.due_at,h.retry_at,h.failures,s.close_requested
+             FROM task_retirements h JOIN desktop_shells s ON s.task_id=h.task_id",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .unwrap();
-        assert_eq!(state, ("waiting".into(), None, None, 0, None));
+        assert_eq!(state, ("waiting".into(), None, None, 0, 0));
         if brief_return {
             passive.request(json!({"kind":"leave"}));
             wait_hold(&fixture, &session_owner, Some("absent"));
         }
-        drop(paused);
-        // Allow the owner policy to consume any queued candidate. No sweep or
-        // retirement reconciliation occurs between return and these assertions.
-        std::thread::sleep(Duration::from_secs(3));
+        // No sweep occurs between return and these assertions.
         assert!(fixture.running(&shell));
         terminal.input("printf 'value:%s\\n' \"$RETAINED\"\r");
         until_out(&mut terminal, "value:still-here");

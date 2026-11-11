@@ -72,9 +72,8 @@ the command's output.
 
 Conversations stay running while their scope is open. Completed Tasks end their
 conversations after the viewing grace, with or without a checkout; abandonment
-ends unviewed Task conversations,
-even during a turn. Wave, repository and bare conversations run until their
-agent quits.
+ends unviewed Task conversations, even during a turn. Wave, repository and bare
+conversations run until their agent quits.
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
 launch it. Background starts require a configured, installed agent; there is no
@@ -85,7 +84,8 @@ scheduled wakeups until Claude reports settlement. Terminal status counts only
 while a viewer is attached to refresh it; an idle prompt cannot settle an
 unfinished native turn. Headless Runs never end for want of viewers.
 
-Input goes straight to the provider. The owner queues only bytes not yet written
+During initial attachment, cooked input waits until the owner grants control.
+Input then goes straight to the provider. The owner queues only bytes not yet written
 to its terminal; no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when an explicit rollover or takeover
 replaces its provider, just as on quit.
@@ -96,11 +96,15 @@ waiting on a locked or refused store finish in the background or are lost, logge
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
 are the person quitting, `lf resume` taking the conversation over, `lf process
-rollover`, Task closure, or an explicit end. Owners retry failed viewing writes
-and close-request reads at the next two-second poll; Task cleanup decides closure
-on its scheduled pass. Repeated unchanged store errors produce one warning until
-the condition changes; activity launches no helper.
-Policy exit saves the screen, stops the agent and records its exit.
+rollover`, Task closure, or an explicit end. Owners record viewing changes and
+retry failed writes every two seconds. Once recorded, a conversation waits for
+the next change; only shell owners keep polling their explicit Close receipt.
+Task cleanup decides automatic closure on its scheduled pass. Repeated unchanged
+store errors produce one warning until the condition changes; viewing launches
+no helper process.
+Cleanup sends a best-effort notice and saves the screen, then signals the verified
+owner through the same path as rollover. Old owners that cannot receive the notice
+still end by signal.
 `lf resume` reopens provider history without starting a turn. Other ended
 Sessions stay stopped.
 
@@ -253,7 +257,7 @@ moved. Graph steps keep their launcher so each step settles before the Graph
 continues. A Codex launcher does the same into its client, which talks to its
 app-server directly. OpenCode keeps its launcher beside its private server.
 The owner sleeps in `poll` on its sockets, its child's output and a wake pipe
-that a blocking child wait and the lifetime policy write to. Native clients retain their original provider
+that a blocking child wait and explicit shell Close write to. Native clients retain their original provider
 channels, including pending request identities. Graph steps share their Graph's
 terminal owner through explicit child handoff, retaining their own Process results.
 
@@ -357,17 +361,19 @@ A done Task ends its eligible conversations after fifteen minutes without
 viewing, independently of checkout retirement. The grace starts no earlier than
 completion; a newly resumed, never-viewed owner starts it at launch. A returning
 viewer cancels closure; leaving again starts a new grace. The cleanup pass checks
-current Task membership, completion and viewing, then requests closure on each
-owner. Owners record viewing and consume these requests; they do not judge Task
-closure. Requested active work,
+current Task membership, completion and viewing, then signals each verified
+owner directly. Owners record viewing; they do not judge Task closure or poll
+automatic requests. A viewer returning between that decision and the signal sees
+“Task completed” and can resume from history. Requested active work,
 pending requests and running Graphs still hold execution; their completion does
 not restart a deadline. Store failures cannot authorize closure. Returning after
 cleanup continues saved provider history without reopening the Task, and the same
 closure rule applies even after its checkout has been retired.
 
 Checkout and Desktop shell cleanup use the same fifteen-minute viewing grace.
-Renewed viewing also cancels queued automatic shell closes in the same write,
-without waiting for a sweep. Explicit Close remains effective. Completion and PR
+Renewed viewing resets the checkout deadline before the next sweep. Automatic
+shell closes are signalled in the pass that decides cleanup; explicit Close stays
+on the shell receipt and waits for requested work to settle. Completion and PR
 landing schedule one retirement pinned to the completion, checkout and branch;
 reopen or changed placement revokes it.
 Installation provisions a separate launchd/cron job running `lf task retire` once
@@ -376,9 +382,12 @@ retirement queue, reconciles viewers, attempts
 eligible cleanup and exits. No Task owns a waiting cleanup process. Eligibility
 normally reaches a pass in 15–16 minutes while awake; wall-clock deadlines survive
 sleep and reboot. Destination owners confirm shell job settlement before deletion;
-a pending close finishes on a later pass. Eligible cleanup discards
-uncommitted files but preserves primary/persistent checkouts and changed
-committed refs. Failures record a reason and retry after one minute, doubling up
+a failed cleanup is retried on a later pass. Abandoned local checkouts also remain
+in the same retry queue after their last conversation exits, until cleanup
+succeeds or the Task reopens. Completed-Task cleanup discards uncommitted files but
+preserves primary/persistent checkouts and changed committed refs. Abandoned
+checkout retries retain dirty files; an earlier `--force` applies only to that
+invocation. Failures record a reason and retry after one minute, doubling up
 to an hour independently of the absence deadline. One failed Task does not stop
 other queued Tasks. Overlapping passes serialize, and interrupted effects can be
 retried. `lf task retire <task>` runs one pass for a specific Task. Reopening a

@@ -4,8 +4,6 @@
 mod connection;
 mod input;
 mod lifetime;
-#[cfg(test)]
-mod lifetime_tests;
 mod native;
 mod output;
 pub(crate) use output::local_directory_report;
@@ -52,8 +50,6 @@ pub(crate) const STREAM_ENV: &str = "LF_VIEWER_STREAM";
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 // SSH connection setup and destination Session resolution precede attachment.
 const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
-/// Continuous output tells the lifetime policy once per pause, not per read.
-const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -985,10 +981,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut ownership = Ownership::default();
     let mut size = (24, 80);
     let mut pending_input = PendingInput::default();
-    let mut ending_failure = crate::store::RecordingGap::default();
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
+    let mut close_notice = None;
     let mut client: Option<native::NativeClient> = None;
     let mut returning = None;
     let mut hint_due = false;
@@ -999,7 +995,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
+    let (viewing, closing) = lifetime::spawn(id.clone(), shell.is_some(), waker.try_clone()?);
     let child_pid = child.id();
     let settle_waker = waker.try_clone()?;
     let (finished, child_exit) = mpsc::channel();
@@ -1008,15 +1004,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let _ = (&waker).write_all(&[1]);
     });
     let mut settling: Option<Settling> = None;
-    let mut observed = lifetime::Activity::default();
-    let mut output_told: Option<Instant> = None;
+    let mut observed_hold = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut execution_directory_reported = false;
     let mut planning = None;
     let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
     loop {
-        #[cfg(test)]
-        lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
@@ -1096,6 +1089,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::InputHint { key, hint } if key == control_key => {
                             viewer.input_hint = Some(hint);
                             hint_due = true;
+                        }
+                        Request::CloseNotice { text } => {
+                            close_notice = Some((viewer.id.clone(), answers, text));
                         }
                         Request::Controlled { ready } => {
                             if let Some(ready) = ready {
@@ -1414,7 +1410,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => return Err(e.into()),
                 };
-                observed.output += 1;
                 // An exec handoff announces before exec. The provider's first
                 // output establishes that it reached its configured directory.
                 if !execution_directory_reported {
@@ -1446,10 +1441,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     &ready,
                     detached,
                 );
-                if output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE) {
-                    output_told = Some(Instant::now());
-                    let _ = activity.send(observed);
-                }
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
@@ -1565,7 +1556,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
-                release_viewer_hold(&id, observed.hold);
+                release_viewer_hold(&id, observed_hold);
                 snapshot::leave(&id, &output);
                 // Records still being written finish before this process exits.
                 if let Some(settling) = settling.take() {
@@ -1578,43 +1569,45 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
-        // Ready output and viewer changes precede the final ending judgment.
-        // A throttled/unconsumed activity report also invalidates the candidate.
         let hold = viewer_hold(
             &viewers,
-            observed.hold,
+            observed_hold,
             time::OffsetDateTime::now_utc().unix_timestamp(),
         );
-        if hold != observed.hold {
-            observed.hold = hold;
-            let _ = activity.send(observed);
+        if hold != observed_hold {
+            observed_hold = hold;
+            let _ = viewing.send(hold);
         }
-        #[cfg(test)]
-        lifetime_tests::before_judgment();
-        if let Ok(ending) = ending.try_recv() {
-            let event = lifetime::report_result(
-                &mut ending_failure,
-                "Session ending",
-                ending.consume(&id, observed, !pending_input.is_empty()),
-            )
-            .flatten();
-            if let Some(event) = event {
-                if let Some(jobs) = &shell_jobs {
-                    jobs.terminate()?;
-                    crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
-                }
-                end_viewers(&mut viewers, event);
-                release_viewer_hold(&id, observed.hold);
-                snapshot::leave(&id, &output);
-                crate::platform::kill_process(std::process::id());
-            }
-            // Refresh the policy after a candidate was judged against newer activity.
-            if ending.activity != observed {
-                let _ = activity.send(observed);
+        if let Some((requester, answers, text)) = close_notice.take() {
+            end_viewers(
+                &mut viewers,
+                Event::Control {
+                    held: false,
+                    notice: Some(text),
+                },
+            );
+            snapshot::leave(&id, &output);
+            if let Some(viewer) = viewers.iter_mut().find(|viewer| viewer.id == requester) {
+                viewer.reply(answers, Reply::Accepted);
+                let _ = viewer.flush();
             }
         }
-        #[cfg(test)]
-        lifetime_tests::after_judgment(&output, observed)?;
+        if closing.try_recv().is_ok() {
+            if let Some(jobs) = &shell_jobs {
+                jobs.terminate()?;
+                crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
+            }
+            end_viewers(
+                &mut viewers,
+                Event::Control {
+                    held: false,
+                    notice: Some("Shell closed".into()),
+                },
+            );
+            release_viewer_hold(&id, observed_hold);
+            snapshot::leave(&id, &output);
+            crate::platform::kill_process(std::process::id());
+        }
         // Sleep until a descriptor has work or held output, exit announcement,
         // disconnected-viewer grace needs another attempt.
         let deadline = match exit {
@@ -2438,7 +2431,9 @@ fn view(
                 revents: 0,
             },
             libc::pollfd {
-                fd: if stdin_open && (controlled || terminal.is_some()) {
+                fd: if stdin_open
+                    && (controlled || (terminal.is_some() && acknowledgement_deadline.is_none()))
+                {
                     0
                 } else {
                     -1
@@ -2946,6 +2941,18 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 /// leaves its execution running with none, ready for the next viewer.
 pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
     attachment(id).map(|(held, _)| held)
+}
+
+/// Announce cleanup before its caller signals the owner. No decision is stored.
+pub(crate) fn close_notice(id: &LfProcessId, text: &str) -> Result<()> {
+    let mut socket = UnixStream::connect(endpoint(id)?)?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    send(&mut socket, Request::CloseNotice { text: text.into() })?;
+    match receive_reply(&mut socket)? {
+        Reply::Accepted => Ok(()),
+        other => bail!("unexpected close notice reply {other:?}"),
+    }
 }
 
 /// Input ownership and the controlling viewer's native readiness are separate.

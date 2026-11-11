@@ -1646,6 +1646,13 @@ pub(crate) fn end_owner(
     pid: u32,
 ) -> Result<()> {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    if !owner_running(store, owner)? {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        crate::journal::live_process_pid(store, owner) == Some(pid),
+        "owner {owner} no longer has verified pid {pid}"
+    );
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, owner)? {

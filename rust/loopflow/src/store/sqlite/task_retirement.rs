@@ -1,4 +1,4 @@
-//! Session-viewer holds and one cleanup intent pinned to a Task's completion.
+//! Session-viewer holds and one checkout cleanup intent pinned to Task closure.
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
@@ -53,8 +53,56 @@ pub(crate) struct TaskRetirement {
 }
 
 impl SqliteStore {
+    /// Current Session launchers belong to their owner even after an exec handoff
+    /// starts a new trace without a Process parent.
+    pub(crate) fn owner_session_launchers(
+        &self,
+        owner: &LfProcessId,
+    ) -> StoreResult<Vec<LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "WITH agents AS (
+                SELECT p.parent_lf_process_id,p.attached_lf_process_id FROM agent_sessions s
+                JOIN processes p ON p.id=s.agent_process_id
+                WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
+             SELECT parent_lf_process_id FROM agents WHERE parent_lf_process_id IS NOT NULL
+             UNION SELECT attached_lf_process_id FROM agents WHERE attached_lf_process_id IS NOT NULL",
+        )?;
+        let launchers = query
+            .query_map([owner], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(launchers)
+    }
+
+    /// Completion and each newly launched owner receive the same viewing grace.
+    pub(crate) fn task_close_candidates(
+        &self,
+        task: &TaskId,
+        now: i64,
+    ) -> StoreResult<Vec<(LfProcessId, bool)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT p.id,tw.abandoned_at IS NOT NULL FROM tasks tw JOIN agent_sessions s ON ({})
+             JOIN processes p ON p.id=s.transport_lf_process_id
+             WHERE tw.id=?1 AND s.interactive=1 AND s.completed_at IS NULL AND p.completed_at IS NULL
+               AND NOT EXISTS(SELECT 1 FROM desktop_shells sh WHERE sh.owner=p.id)
+               AND (tw.abandoned_at IS NOT NULL OR (tw.planning_completed=1
+                 AND (CASE WHEN tw.planning_completed_at IS NULL THEN tw.updated_at
+                     ELSE unixepoch(tw.planning_completed_at) END)+?3<=?2
+                 AND COALESCE(p.viewer_hold_at,p.started_at)+?3<=?2
+                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
+                     WHERE tg.task_id=tw.id AND g.completed_at IS NULL)))",
+            super::task_work::session_membership("s")))?;
+        let owners = query
+            .query_map(params![task.as_str(), now, super::WORKSPACE_GRACE], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(owners)
+    }
+
     /// Record one observation for both Session activity and checkout retention.
-    /// Renewed viewing revokes automatic closure in this same transaction.
+    /// Renewed viewing resets checkout cleanup in this same transaction.
     pub(crate) fn record_owner_viewer_hold(
         &self,
         owner: &LfProcessId,
@@ -120,6 +168,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "SELECT task_id FROM task_retirements WHERE phase!='retired'
+             UNION SELECT id FROM tasks WHERE abandoned_at IS NOT NULL AND worktree IS NOT NULL
+               AND checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=tasks.id)
              UNION SELECT tw.id FROM tasks tw JOIN agent_sessions s ON ({})
                JOIN processes p ON p.id=s.transport_lf_process_id
                WHERE (tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL)
@@ -142,7 +193,7 @@ impl SqliteStore {
     }
 
     /// Viewing clears the deadline; absence starts one fifteen-minute interval
-    /// that later work completion does not restart.
+    /// that later work completion does not restart. Abandonment needs no grace.
     pub(crate) fn reconcile_task_retirement(
         &self,
         task: &TaskId,
@@ -151,20 +202,33 @@ impl SqliteStore {
     ) -> StoreResult<Option<TaskRetirement>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
+        let Some(abandoned) = tx
+            .query_row(
+                "SELECT abandoned_at IS NOT NULL FROM tasks WHERE id=?1",
+                [task.as_str()],
+                |r| r.get::<_, bool>(0),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let grace = if abandoned { 0 } else { WORKSPACE_GRACE };
         tx.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
-            SELECT id,planning_completed_at,worktree,branch,?2+?3,'waiting' FROM tasks
-            WHERE id=?1 AND planning_completed=1 AND planning_completed_at IS NOT NULL AND worktree IS NOT NULL
-            ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,WORKSPACE_GRACE])?;
+            SELECT id,CASE WHEN abandoned_at IS NOT NULL THEN 'abandoned:'||abandoned_at ELSE planning_completed_at END,
+                worktree,branch,?2+?3,'waiting' FROM tasks
+            WHERE id=?1 AND (abandoned_at IS NOT NULL OR (planning_completed=1 AND planning_completed_at IS NOT NULL))
+                AND worktree IS NOT NULL
+            ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,grace])?;
         match hold {
             Some(ViewerHold::Viewed(_)) => hold_retirement(&tx, task, Some(VIEWED))?,
             absent => {
                 let absent_since = absent.map(ViewerHold::at);
                 // A viewer can reconnect and leave between cleanup passes,
-                // including after shell closure was queued. Revoke that work too.
+                // including after checkout cleanup began. Reset its deadline too.
                 let renewed: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=?1
                      AND phase!='retired' AND due_at<?2+?3)",
-                    params![task.as_str(), absent_since, WORKSPACE_GRACE],
+                    params![task.as_str(), absent_since, grace],
                     |row| row.get(0),
                 )?;
                 if renewed {
@@ -173,7 +237,7 @@ impl SqliteStore {
                 tx.execute(
                     "UPDATE task_retirements SET due_at=?2+?3,reason=NULL
                      WHERE task_id=?1 AND phase='waiting' AND due_at IS NULL",
-                    params![task.as_str(), absent_since.unwrap_or(now), WORKSPACE_GRACE],
+                    params![task.as_str(), absent_since.unwrap_or(now), grace],
                 )?;
             }
         }
@@ -204,33 +268,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub(crate) fn begin_task_retirement(&self, task: &TaskId, revision: i64) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        if tx.execute(
-            "UPDATE task_retirements SET phase='closing',reason=NULL
-            WHERE task_id=?1 AND due_at<=unixepoch() AND phase!='retired'
-                AND (SELECT SUM(revision) FROM store_revisions)=?2",
-            params![task.as_str(), revision],
-        )? == 0
-        {
-            return Ok(false);
-        }
-
-        tx.execute(
-            "UPDATE processes SET close_requested='retired_shell',close_task_id=?1
-            WHERE id IN (SELECT owner FROM desktop_shells WHERE task_id=?1)
-              AND close_requested IS NULL",
-            [task.as_str()],
-        )?;
-        tx.execute(
-            "UPDATE desktop_shells SET jobs_settled=1 WHERE task_id=?1 AND owner IS NULL",
-            [task.as_str()],
-        )?;
-        tx.commit()?;
-        Ok(true)
-    }
-
     pub(crate) fn retirement_progress(
         &self,
         intent: &TaskRetirement,
@@ -250,12 +287,6 @@ fn hold_viewer_retirements(
     owner: &LfProcessId,
     absent_since: Option<i64>,
 ) -> StoreResult<()> {
-    conn.execute(&format!(
-        "UPDATE processes SET close_requested=NULL,close_task_id=NULL
-         WHERE close_requested IN ('completed','retired_shell') AND (?2 IS NULL OR ?2+?3>unixepoch()) AND close_task_id IN (
-             SELECT tw.id FROM tasks tw JOIN agent_sessions s ON ({})
-             WHERE s.transport_lf_process_id=?1)",
-        super::task_work::session_membership("s")), params![owner,absent_since,WORKSPACE_GRACE])?;
     let mut query = conn.prepare(&format!(
         "WITH owned AS MATERIALIZED (
              SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE transport_lf_process_id=?1
@@ -276,13 +307,8 @@ fn hold_viewer_retirements(
     Ok(())
 }
 
-// A returning viewer cancels only retirement's queued shell closes, never
-// explicit Close. Keep both writes in the caller's retirement transaction.
+// A returning viewer resets checkout cleanup, including its retry deadline.
 fn hold_retirement(conn: &Connection, task: &TaskId, reason: Option<&str>) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE processes SET close_requested=NULL,close_task_id=NULL WHERE close_task_id=?1 AND close_requested='retired_shell'",
-        [task.as_str()],
-    )?;
     conn.execute(
         "UPDATE task_retirements SET due_at=NULL,phase='waiting',reason=?2,retry_at=NULL,failures=0
          WHERE task_id=?1 AND phase!='retired'
@@ -323,19 +349,6 @@ mod tests {
             .collect()
     }
 
-    fn close_requested(store: &SqliteStore, shell: &str) -> Option<String> {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT p.close_requested FROM desktop_shells s LEFT JOIN processes p ON p.id=s.owner WHERE s.id=?1",
-                [shell],
-                |r| r.get(0),
-            )
-            .unwrap()
-    }
-
     fn diagnostics(store: &SqliteStore, task: &TaskId) -> (Option<String>, u32) {
         store
             .conn
@@ -350,26 +363,20 @@ mod tests {
     }
 
     #[test]
-    fn returning_viewers_revoke_closes_and_retry_without_a_sweep() {
+    fn returning_viewers_reset_retirement_and_retry_without_a_sweep() {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
             let (_home, store, task) = fixture();
             let viewer = session_owner(&store, &task, "passive");
-            for shell in ["automatic", "explicit"] {
-                store
-                    .create_desktop_shell(shell, &task, "/repo.task")
-                    .unwrap();
-                store
-                    .bind_desktop_shell(shell, &store.test_lf_process())
-                    .unwrap();
-            }
+            let shell = store.test_lf_process();
+            store
+                .create_desktop_shell("explicit", &task, "/repo.task")
+                .unwrap();
+            store.bind_desktop_shell("explicit", &shell).unwrap();
             let intent = store
                 .reconcile_task_retirement(&task, 100, None)
                 .unwrap()
                 .unwrap();
             store.retirement_progress(&intent, "closing", None).unwrap();
-            store
-                .begin_task_retirement(&task, store.close_revision().unwrap())
-                .unwrap();
             store.close_desktop_shell("explicit").unwrap();
             store
                 .fail_retirement(&task, 1100, "owner not settled")
@@ -395,11 +402,7 @@ mod tests {
                 ),
                 (None, None, 0)
             );
-            assert_eq!(close_requested(&store, "automatic"), None);
-            assert_eq!(
-                close_requested(&store, "explicit").as_deref(),
-                Some("shell_pending")
-            );
+            assert!(store.shell_should_close(&shell).unwrap());
             store
                 .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
                 .unwrap();
@@ -417,57 +420,37 @@ mod tests {
     }
 
     #[test]
-    fn viewer_return_and_close_cancellation_commit_together() {
+    fn abandoned_checkout_remains_pending_after_its_last_conversation_ends() {
         let (_home, store, task) = fixture();
-        let viewer = session_owner(&store, &task, "session");
-        store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap();
-        store
-            .bind_desktop_shell("shell", &store.test_lf_process())
-            .unwrap();
-        let intent = store
-            .reconcile_task_retirement(&task, 100, None)
-            .unwrap()
-            .unwrap();
-        store.retirement_progress(&intent, "closing", None).unwrap();
-        store
-            .begin_task_retirement(&task, store.close_revision().unwrap())
-            .unwrap();
+        let owner = session_owner(&store, &task, "abandoned");
         store
             .conn
             .lock()
             .unwrap()
-            .execute_batch(
-                "CREATE TRIGGER reject_cancel BEFORE UPDATE ON task_retirements
-             BEGIN SELECT RAISE(FAIL, 'temporary cancellation failure'); END;",
+            .execute(
+                "UPDATE tasks SET planning_completed=0,abandoned_at=1,
+            checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                [task.as_str()],
             )
             .unwrap();
-        let record = || store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(1200)));
-        assert!(record().is_err());
-        assert_eq!(
-            close_requested(&store, "shell").as_deref(),
-            Some("retired_shell")
-        );
-        let recorded: bool = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT viewed IS 1 OR viewer_hold IS NOT NULL FROM processes WHERE id=?1",
-                [&viewer],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert!(!recorded);
+        assert!(store.pending_retirements().unwrap().contains(&task));
         store
             .conn
             .lock()
             .unwrap()
-            .execute_batch("DROP TRIGGER reject_cancel")
+            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&owner])
             .unwrap();
-        record().unwrap();
-        assert_eq!(close_requested(&store, "shell"), None);
+        assert!(store.pending_retirements().unwrap().contains(&task));
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET abandoned_at=NULL WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        assert!(!store.pending_retirements().unwrap().contains(&task));
     }
 
     #[test]
@@ -564,15 +547,6 @@ mod tests {
                 .due_at,
             left.due_at
         );
-        store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap();
-        store
-            .bind_desktop_shell("shell", &store.test_lf_process())
-            .unwrap();
-        store
-            .begin_task_retirement(&task, store.close_revision().unwrap())
-            .unwrap();
         let returned = store
             .reconcile_task_retirement(&task, 900, Some(ViewerHold::Viewed(900)))
             .unwrap()
@@ -582,7 +556,6 @@ mod tests {
             .0
             .unwrap()
             .contains("open Task Session viewer"));
-        assert_eq!(close_requested(&store, "shell"), None);
         assert_eq!(
             store
                 .reconcile_task_retirement(&task, 920, None)
@@ -610,24 +583,14 @@ mod tests {
             .unwrap();
         assert_eq!(ended.due_at, lost.due_at);
         // A short reconnect may begin and end between cleanup passes,
-        // after retirement has already queued shell closes.
-        store
-            .create_desktop_shell("shell", &task, "/repo.task")
-            .unwrap();
-        store
-            .bind_desktop_shell("shell", &store.test_lf_process())
-            .unwrap();
+        // after retirement has already entered closing.
         store.retirement_progress(&lost, "closing", None).unwrap();
-        store
-            .begin_task_retirement(&task, store.close_revision().unwrap())
-            .unwrap();
         let returned = store
             .reconcile_task_retirement(&task, 1310, Some(ViewerHold::Absent(1300)))
             .unwrap()
             .unwrap();
         assert_eq!(returned.due_at, Some(2200));
         assert_eq!(returned.phase, "waiting");
-        assert_eq!(close_requested(&store, "shell"), None);
         store
             .reconcile_task_retirement(&task, 1950, Some(ViewerHold::Viewed(1950)))
             .unwrap();

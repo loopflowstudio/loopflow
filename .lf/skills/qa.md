@@ -351,8 +351,8 @@ Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
 schedules checkout cleanup in a private home; call `lf task retire <task>` to
 exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
 After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
-passed without a viewer and live work has settled. That pass requests conversation
-closure even without a checkout; the owner consumes the request.
+passed without a viewer and live work has settled. That pass signals the verified
+conversation owner directly, even without a checkout.
 
 A new conversation's stand-in reads its opening turn from stdin, then the
 terminal, as Claude does, but writes no transcript: before resuming one after

@@ -45,3 +45,30 @@ Follow-up, same conversation: "although we should look at what bare lf
   `logs/lf.log`. Not run: `mini` has lf 0.15.1 and rejects `--repo-id`.
 - Unchecked: on Linux, `systemctl --user` services stop at logout unless
   lingering is enabled.
+
+Clarified: "i guess what i mean is remote work with tasks should require reote
+servers". Bare `lf --machine M` stays bare: no server required, its gap
+closes when "Bare launches drop their hooks" lands. Task work on M (`lf
+--machine M task run`, `resume --task`) needs M's server, and today nothing on
+those paths starts it either: views use the server only when `LF_SERVER` is
+set (`transport.rs` → `client::bridge`), and Graph runs never ask. So a Task
+launch ensures its Machine's server (`installation::server::ensure`) before
+the agent starts, and fails naming the server if it can't come up.
+
+Then: "but it seems like lf --machine X should still be able to work for a
+simple skil or graph and basically anything that doesnt touch the work model".
+Only Task launches ensure the server. `lf --machine M <skill>` and a Graph with
+no Task run with or without M's server; their hooks fail at connect (no
+socket, no two-second wait) and record one gap line.
+
+Not built, and why (`loo-821-hooks.md`, Open): `installation::server::ensure`
+registers a supervised launchd or systemd job for the selected home, and the
+integration tests launch Task work under temporary homes with no server. Which
+is wanted: Task-launch fixtures each start and stop `lf server run`; the launch
+only checks that a server answers and names `lf install server`; or something
+else? Until answered, a Task launch with no server runs as a Task-less one
+does: one gap line, steers wait.
+
+- Pi's `pi-event` callback still opens the store each turn. Move it behind a
+  server operation in this Task, or leave it for the Task that turns observers
+  into server registrations? Left as is here.

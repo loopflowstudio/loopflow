@@ -402,8 +402,8 @@ the provider's hook output:
 ```text
 → {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null},"select":null}
-← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null}}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"]},"select":null}
+← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"waiting":false}}
 ```
 
 `moment` is `start`, `compact`, `tool` or `stop`. `delivery` is the Session's
@@ -412,19 +412,33 @@ JSON the provider sent the hook, unchanged. A conversation lf did not start,
 such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
-gap, `{first, last}`, or null.
+gap, `{first, last}`, or null. `printed` lists the steer batches this
+conversation's hooks printed since its last answered request.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
 scheduled wakeups Claude reports), the acknowledgement of the native input, and
-a `store-gap` observation for a non-null `gap`. `steers` is the text of the
-Session's pending steers, already rendered for the provider, or null when none
-are waiting; the server marks them delivered when it answers. At `stop` it
+a `store-gap` observation for a non-null `gap`. `steers` is the Session's
+pending steers as `{batch, text}`, the text already rendered for the provider,
+or null when none are ready. At `stop` it
 answers first and then refreshes the Session's planning and starts any pending
 Session move, so neither waits inside the turn.
 
+A steer counts as delivered once the hook says it printed it. The hook prints
+`steers.text`, appends `steers.batch` to a `.printed` file beside the delivery
+file, and its next request sends those batches as `printed`; the server marks
+them `emitted`. A batch no request has named two seconds after its answer, the
+hook's deadline, goes back to pending and is answered again, so a hook that
+gave up waiting loses nothing. A hook that printed and died before noting its
+batch has it answered again too: a steer can arrive twice, and cannot be lost.
+`waiting` is true while an earlier answer's batch is unconfirmed and younger
+than the deadline, as when two tools finish together; the hook then asks again
+at its next tool boundary.
+`lf session steers <session>` shows a batch `uncertain` between its answer and
+its confirmation.
+
 The hook renders the context block from the delivery file itself, prefixes
-`steers` and prints the result. Context comes from files in the checkout, so
+`steers.text` and prints the result. Context comes from files in the checkout, so
 a hook that gets no answer still prints the block.
 
 The hook resolves the server at its fixed path on every call; no address is
@@ -437,10 +451,7 @@ A server that has not yet reached this build answers `invalid {kind}` for
 
 A store the server cannot write, or a callback whose conversation the Session
 does not select, answers `unavailable`; the hook keeps its gap open and sends
-it again with its next request. Steers are marked delivered when the server
-writes the answer, so a hook that gave up at its deadline loses that batch:
-`lf session steers <session>` shows it `emitted`, and
-`lf session steers <session> --retry <steer>` sends it again.
+it again with its next request.
 
 A pending Session move starts two seconds after the `stop` answer, once the
 hook has exited and the provider has ended its turn. A move that fails stays

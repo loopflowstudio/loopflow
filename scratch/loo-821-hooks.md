@@ -2,62 +2,43 @@
 
 Built: the `start`, `compact`, `tool` and `stop` moments of
 `lf __context-block` make one `session.boundary` request and open no store.
-Docs describe it: `rust/loopflow/src/server/README.md` ("Turn and tool
-boundaries"), `rust/loopflow/src/harness/README.md`, `docs/troubleshooting.md`,
-`docs/dev/server-first.md` (header and Pieces row), one-line updates in
-`docs/dev/{codebase,reference}.md`.
+Described in `server/README.md` ("Turn and tool boundaries"),
+`harness/README.md`, `docs/troubleshooting.md` and `docs/dev/server-first.md`.
 
 Implement next (decided November 10; exact words in `questions.md`):
 
-- Steer confirmation, replacing deliver-on-answer: the answer names its batch,
-  the hook keeps the batch it printed beside the delivery file and sends it
-  with its next request, the server marks that batch `emitted` and returns
-  other unconfirmed batches older than the hook deadline to pending. A
-  duplicate after a hook dies before writing its marker is accepted.
-- Managed Sessions require the Machine server; no fallback to direct store
-  writes. The gap line and `lf session steers` name the server as the missing
-  piece.
+- Task launches (`lf task run` and its Graph steps, `resume --task`, Task and
+  Wave Sessions) start the Machine server before the agent starts and fail
+  naming the server when it cannot start. Not built: see Open.
 
 Looked at and left alone:
 
-- `moment` and `callback.hook_event_name` both describe the boundary, and
-  `tool` also means a prompt. The values are the `--moment` arguments of hooks
-  already installed in live conversations (`retained_hooks_survive_upgrade`);
-  renaming them breaks those.
-- The server opens a store connection per boundary. Every served read and
-  write does today; "the server is the only process that opens the store" is
-  its own open item in `server-first.md`.
+- `moment` and `callback.hook_event_name` both describe the boundary. The
+  values are `--moment` arguments of hooks installed in live conversations
+  (`retained_hooks_survive_upgrade`); renaming breaks those.
+- The server opens a store connection per boundary, as every served read and
+  write does; `server-first.md` has that as its own open item.
 - The server rewrites the delivery file after a checkout move and the hook
-  rereads it. Awkward, but the alternative is the mover rewriting every
-  delivery file, which is a different Task.
+  rereads it; the alternative is a different Task.
 
 Open, with why it matters:
 
-- A steer handed to a hook that had already given up is marked `emitted` and
-  nobody sees it until someone runs `--retry`. Before this Task `emitted`
-  meant the hook wrote it to the provider; now it means the server put it in
-  an answer. The loss needs a server slower than two seconds, and the Machine
-  this plan was measured on had load averages of 330 / 178 / 120 on November
-  10, so "slow" is the case the plan exists for. Stopped and slow servers
-  also behave differently for the same person: a steer saved while the server
-  is down arrives at the next answered boundary; one claimed by a late answer
-  does not. The repair is a confirmation: the answer names its batch, the
-  hook keeps the batch it printed beside the delivery file and sends it with
-  its next request, the server marks that batch `emitted` and puts any other
-  unconfirmed batch back to pending. Two traps in it: parallel `PostToolUse`
-  hooks arrive before the first has printed, so "unconfirmed" needs to mean
-  older than the hook's deadline; and a hook that printed but died before
-  writing its marker gets the steer twice. Built as deliver-on-answer; the
-  choice is between a steer that can be lost until retried and one that can
-  arrive twice.
-- A Machine whose server never runs (Background Items disabled, `lf` without
-  `lf install`) records no turns and delivers no steers, with one gap line in
-  `logs/lf.log`. `lf session steers` then reads "capability reserved; no
-  authenticated callback observed (hook may be unavailable or untrusted)",
-  which does not name the server. Before this Task those Machines recorded
-  and delivered. Whether lf is supported without its server is the question;
-  `server-first.md` says bare runs need none, and bare runs keep these hooks
-  until "Bare launches drop their hooks" lands.
+- Where a Task launch starts the server. `installation::server::ensure`
+  registers a launchd job (`com.loopflow.server.<home hash>`, `KeepAlive`) or
+  a systemd user unit for the selected home. Integration tests launch Task
+  work with the real `lf` under hundreds of temporary homes
+  (`transport_tests`, `local_planning`, `task_graph_launch_tests`, …) with no
+  server; only three `transport_tests` fixtures register a job, and they boot
+  it out. Wired where every launch reserves its hook capability
+  (`harness/agent_process.rs::steer_environment`; the Session's Task or Wave
+  is readable there), each test would leave a supervised server per temporary
+  home, and CI Linux has no `systemctl --user`. Ways through: every
+  Task-launch fixture starts and stops `lf server run`
+  (`session_steers.rs::MachineServer`); or the launch only checks that a
+  server answers and names `lf install server`; a tests-only switch is ruled
+  out by the style guide. On a person's Machine the call is
+  `readiness_command` (as `client::bridge`), not `ensure`: a branch build
+  calling `ensure` restarts the installed server under live Sessions.
 
 Remaining:
 
@@ -78,38 +59,54 @@ Choices taken (reversible):
 
 - `session.boundary` under revision 4; hello `client.kind` is `"hook"`. An older
   server answers `invalid {kind}`, which the hook treats as a gap.
-- Server answers `{steers}` only. The hook renders the block from checkout
+- Server answers `{steers: {batch, text}, waiting}`. The hook renders the block from checkout
   files; checkout relocation moved to the server, which rewrites the delivery
   file, and the hook rereads it after an answer.
-- One two-second deadline for connect, hello and answer (`client::hook_request`).
+- One two-second deadline for connect, hello and answer.
 - Server failures (store, foreign conversation) answer `unavailable`; the hook's
   marker is the only gap memory. No per-Session gap state in the server.
-- Steers are marked emitted when the server writes the answer (deliver-on-answer).
-  A hook past its deadline loses that batch; `lf session steers --retry` resends.
-- After a delivered batch the hook drops its seen marker, so the next tool
-  boundary asks once more (replaces the `remaining` signal).
+- Steer confirmation (replaces deliver-on-answer). An answered batch stays
+  `uncertain`; the hook prints it, appends its ID to `<delivery>.printed`, and
+  the conversation's next request sends those IDs as `printed`; the server
+  marks them `emitted` and returns every other `uncertain` batch of the
+  Session older than `HOOK_DEADLINE` to pending (`confirm_session_steers`).
+  No schema change: `uncertain`, `emitted` and `cancelled` already existed.
+  A request moves the `.printed` file aside (`.printed.<pid>`) while it asks,
+  so a hook printing beside it loses nothing; unanswered, it puts the IDs back.
+- `waiting` in the answer: an earlier batch is unconfirmed and younger than
+  the deadline. The hook then drops its seen marker like it does after a
+  delivered batch or no answer, so the next tool boundary asks again. Without
+  it a tool finishing within two seconds of a late answer would leave the
+  steer until the next prompt.
+- A `stop` confirms and returns batches to pending but delivers nothing; the
+  next prompt's hook always asks.
+- Upgrade: a store holding an old `uncertain` batch (an emitter that died
+  between writing and marking, before this change) answers that steer once
+  more at the Session's next boundary.
+- `lf session steers` prints the server's connect error and "Steers wait and
+  turns go unrecorded until it runs." when no server listens; the capability
+  line reads "the Machine server has recorded no callback from this
+  conversation". The gap line already named the server ("Loopflow server
+  unavailable; check `lf server status` and the selected installation") and is
+  unchanged.
 - `stop`: planning refresh and pending move run on a server blocking worker,
   spawned before the answer; the move waits 2 s for the turn to end.
-- PostToolUse / UserPromptSubmit hook timeouts 30 s → 10 s; start/compact stay 30 s.
+- PostToolUse / UserPromptSubmit hook timeouts 30 s → 10 s.
 
 Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 `deliver_steers`), `ContextMoment::Move`, `apply_session_move`,
 `start_pending_move`, `wait_for_hook_exit`, the hook path's Work binding in
-`bin/lf.rs`, and `linear_on_demand_native_hooks_share_freshness_across_processes`
-(+ its child). Compress: the wire's `SessionBoundary` struct is what the server answers
-(no server-side copy); `ContextDelivery::load` is the one decoder; the hook's
-answer is `Option<SessionBoundaryAnswer>` (None = unanswered). The checked-in
-schema now says `adapter` is nullable. Turn-end planning refresh now has no
-Linear-fixture test;
+`bin/lf.rs`, and `linear_on_demand_native_hooks_share_freshness_across_processes`.
+Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
 
 Checks:
 
-- `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block` — 34 pass after `reason` left `BoundaryGap`. `callbacks_select_exact_session…` failed once in that run: it set `LF_HOME` without `journal::test_env_lock` beside `tool_hook_starts_lf_only_after_a_newer_steer`; it takes the lock now.
-- `cargo test -p loopflow --test integration session_steers::` — 3 pass after the LOO-819 sync (server up, down, back; one gap line, one `store-gap` event)
+- `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block` — 35 pass with steer confirmation; `store::sqlite::steers` — 17 pass
+- `cargo test -p loopflow --test integration session_steers::` — 4 pass (server up, down, back; printed steer `uncertain` then `emitted` after the next hook; new `a_skill_with_no_task_runs_without_the_machine_server`). One earlier run failed two with 10 s provider-start timeouts at load average 416; same tree passed at 115.
+- `cargo test -p loopflow --test integration dto_fixtures` — 50 pass
 - `transport_tests` hook tests (`native_drafts…`, `retained_hooks_survive_upgrade`,
-  `continue_session…`, `native_work_survives…`) — pass before the sync; one run of 11 PTY tests
-  in parallel failed two under load, all pass rerun
+  `continue_session…`, `native_work_survives…`) — gate; last passed before the sync and before steer confirmation
 - Swift `ServerProtocolTests` (new `hookBoundarySharesTheRustServerContract`) — gate (`--swift`)
-- clippy — pass (after `reason` left `BoundaryGap`)
+- clippy — pass (with steer confirmation)
 - `context_launch_tests::`, `context_block_tests::`, `harness::` — gate

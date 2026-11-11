@@ -594,6 +594,7 @@ mod tests {
                     adapter: None,
                     callback: serde_json::json!({}),
                     gap: None,
+                    printed: Vec::new(),
                 },
             ),
         )

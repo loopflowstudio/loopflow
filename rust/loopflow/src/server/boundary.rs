@@ -1,17 +1,22 @@
 //! `session.boundary`: the store work a provider hook asks for at a turn or tool
 //! boundary. The hook opens nothing; the server records the boundary and
-//! answers the Session's pending steers.
+//! answers the Session's pending steers, which count as delivered once the
+//! hook's next request says it printed them.
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
 use crate::context_block::ContextDelivery;
-use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer};
+use crate::server::wire::{BoundaryMoment, SessionBoundary, SessionBoundaryAnswer, SteerBatch};
 use crate::steer::{NativeBoundary, SteerAdapter, SteerContext};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 
+/// How long a hook waits for the server before its turn goes on without it.
+/// An answer's steers the hook has not confirmed after this long are answered
+/// again.
+pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
 /// How long a pending Session move waits after its Stop is answered: the hook
 /// prints and exits, then the provider ends its turn.
 const MOVE_AFTER_STOP: Duration = Duration::from_secs(2);
@@ -37,6 +42,7 @@ pub(super) fn answer(
         adapter,
         callback,
         gap,
+        printed,
     } = boundary;
     let mut delivery = ContextDelivery::load(path)?;
     // A checkout moved since launch: the hook renders from the new place.
@@ -52,7 +58,11 @@ pub(super) fn answer(
             repo: delivery.repo,
             session: None,
         };
-        return Ok((SessionBoundaryAnswer { steers: None }, Some(after)));
+        let answer = SessionBoundaryAnswer {
+            steers: None,
+            waiting: false,
+        };
+        return Ok((answer, Some(after)));
     };
     let thread = callback["session_id"]
         .as_str()
@@ -88,14 +98,22 @@ pub(super) fn answer(
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
     if *moment == BoundaryMoment::Stop {
+        // A turn end delivers nothing, so what it returns to pending waits
+        // for the next prompt, whose hook always asks.
+        store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
         let after = AfterStop {
             repo: delivery.repo,
             session: Some(adapter.session.clone()),
         };
-        return Ok((SessionBoundaryAnswer { steers: None }, Some(after)));
+        let answer = SessionBoundaryAnswer {
+            steers: None,
+            waiting: false,
+        };
+        return Ok((answer, Some(after)));
     }
-    let steers = claim_steers(store, &delivery, adapter, thread, callback, event)?;
-    Ok((SessionBoundaryAnswer { steers }, None))
+    let (steers, waiting) =
+        claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
+    Ok((SessionBoundaryAnswer { steers, waiting }, None))
 }
 
 /// After a Stop's answer: refresh the Session's planning, whose changes become
@@ -136,8 +154,9 @@ pub(super) fn after_stop(after: AfterStop) {
     }
 }
 
-/// The Session's next batch of pending steers, rendered and marked delivered:
-/// the answer is the only write.
+/// Settle the batches earlier answers carried, then render the Session's next
+/// batch of pending steers. Also answers whether an earlier batch still waits
+/// for its hook.
 fn claim_steers(
     store: &SqliteStore,
     delivery: &ContextDelivery,
@@ -145,7 +164,8 @@ fn claim_steers(
     thread: &str,
     callback: &serde_json::Value,
     event: &str,
-) -> StoreResult<Option<String>> {
+    printed: &[crate::id::SteerBatchId],
+) -> StoreResult<(Option<SteerBatch>, bool)> {
     let boundary = match event {
         "SessionStart" => NativeBoundary::Select {
             source: callback["source"].as_str().unwrap_or("startup"),
@@ -155,6 +175,7 @@ fn claim_steers(
     };
     store.recover_prepared_steers(&adapter.session)?;
     store.with_provider_context(adapter, thread, boundary, || {
+        let waiting = store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
         let invocation = callback["tool_use_id"]
             .as_str()
             .or_else(|| callback["adapter_invocation_id"].as_str())
@@ -165,23 +186,31 @@ fn claim_steers(
             "{event}:{}:{invocation}",
             callback["turn_id"].as_str().unwrap_or("")
         );
-        let mut answer = None;
+        let mut batch = None;
+        let mut text = None;
         store.emit_session_steers(
             adapter,
             thread,
             &boundary,
-            |batch, steers, remaining| {
+            |id, steers, remaining| {
+                batch = Some(
+                    crate::id::SteerBatchId::parse(id)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                );
                 let (text, excerpts) =
-                    render_steers(delivery, &adapter.session, batch, steers, remaining)
+                    render_steers(delivery, &adapter.session, id, steers, remaining)
                         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
                 Ok(SteerContext { text, excerpts })
             },
-            |text| {
-                answer = Some(text.to_owned());
+            |rendered| {
+                text = Some(rendered.to_owned());
                 Ok(())
             },
         )?;
-        Ok(answer)
+        let answer = batch
+            .zip(text)
+            .map(|(batch, text)| SteerBatch { batch, text });
+        Ok((answer, waiting))
     })
 }
 
@@ -315,11 +344,49 @@ mod tests {
             adapter: Some(adapter.clone()),
             callback,
             gap: None,
+            printed: Vec::new(),
         }
     }
 
     #[test]
-    fn a_tool_boundary_answers_each_pending_steer_once() {
+    fn a_steer_is_delivered_once_the_hook_says_it_printed_it() {
+        let (_home, store, adapter, delivery) = fixture();
+        let tool = |id: &str, printed: &[crate::id::SteerBatchId]| {
+            let mut tool = boundary(
+                BoundaryMoment::Tool,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":id}),
+            );
+            tool.printed = printed.to_vec();
+            tool
+        };
+        let evidence = || {
+            store.session_steers("session", 0, 8).unwrap().items[0]
+                .evidence
+                .clone()
+        };
+        let (answered, after) = answer(&store, &tool("quiet", &[])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        assert!(after.is_none());
+        store
+            .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
+            .unwrap();
+        let (answered, _) = answer(&store, &tool("first", &[])).unwrap();
+        let steers = answered.steers.unwrap();
+        assert!(steers.text.contains("KEEP_THE_API_SMALL"));
+        assert_eq!(evidence(), "uncertain");
+        // A hook running beside the one still printing gets nothing new and
+        // is told to ask again.
+        let (answered, _) = answer(&store, &tool("beside", &[])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, true));
+        let (answered, _) = answer(&store, &tool("second", &[steers.batch])).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        assert_eq!(evidence(), "emitted");
+    }
+
+    #[test]
+    fn a_steer_whose_hook_gave_up_is_answered_again() {
         let (_home, store, adapter, delivery) = fixture();
         let tool = |id: &str| {
             boundary(
@@ -329,20 +396,31 @@ mod tests {
                 serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":id}),
             )
         };
-        let (answered, after) = answer(&store, &tool("quiet")).unwrap();
-        assert_eq!(answered.steers, None);
-        assert!(after.is_none());
         store
             .save_session_steer("session", "Fixture author", "KEEP_THE_API_SMALL")
             .unwrap();
-        let (answered, _) = answer(&store, &tool("first")).unwrap();
-        assert!(answered.steers.unwrap().contains("KEEP_THE_API_SMALL"));
+        let late = answer(&store, &tool("late")).unwrap().0.steers.unwrap();
+        // The hook stopped waiting before this answer; its deadline has passed.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE steer_batches SET created_at=created_at-10", [])
+            .unwrap();
+        let again = answer(&store, &tool("next")).unwrap().0.steers.unwrap();
+        assert!(again.text.contains("KEEP_THE_API_SMALL"));
+        assert_ne!(again.batch, late.batch);
+        // The first hook printed after all: the steer arrived twice, and its
+        // late confirmation changes nothing.
+        let mut both = tool("after");
+        both.printed = vec![late.batch, again.batch];
+        let (answered, _) = answer(&store, &both).unwrap();
+        assert_eq!((answered.steers, answered.waiting), (None, false));
+        let page = store.session_steers("session", 0, 8).unwrap();
         assert_eq!(
-            store.session_steers("session", 0, 8).unwrap().items[0].evidence,
-            "emitted"
+            (page.items[0].evidence.as_str(), page.pending),
+            ("emitted", 0)
         );
-        let (answered, _) = answer(&store, &tool("second")).unwrap();
-        assert_eq!(answered.steers, None);
     }
 
     #[test]
@@ -419,6 +497,7 @@ mod tests {
             adapter: None,
             callback: serde_json::json!({"session_id":"codex-thread","hook_event_name":"Stop"}),
             gap: None,
+            printed: Vec::new(),
         };
         let (answered, after) = answer(&store, &stop(BoundaryMoment::Stop)).unwrap();
         assert_eq!(answered.steers, None);

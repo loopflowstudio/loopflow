@@ -46,7 +46,8 @@ Every lf invocation at a turn or tool boundary is best-effort. `__context-block`
 from Claude hooks, the OpenCode plugin and the Pi extension opens no store: it
 sends one `session.boundary` request to the Machine server at `machine.sock`
 with a two-second deadline, and the server records the turn, acknowledges the
-native input, answers pending steers and, after a turn ends, refreshes planning
+native input, answers pending steers (delivered once the hook's next request
+says it printed them) and, after a turn ends, refreshes planning
 and starts a pending Session move ([Turn and tool boundaries](../server/README.md#turn-and-tool-boundaries)).
 When the server does not answer, the hook prints the context block without
 steers, exits 0 and records the gap once per native conversation in

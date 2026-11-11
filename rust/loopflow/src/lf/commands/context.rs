@@ -239,9 +239,6 @@ pub fn explain_task_checkout(
     }))
 }
 
-/// How long a hook waits for the Machine server before its turn goes on without it.
-const BOUNDARY_DEADLINE: Duration = Duration::from_secs(2);
-
 /// Provider callbacks use launch-owned authority rather than the current client.
 /// A turn or tool boundary opens no store: the Machine server records it and
 /// answers steers, and the context block comes from checkout files.
@@ -310,14 +307,30 @@ pub fn emit_block(
     }
     // A conversation lf did not start (a Codex app-server thread) has no
     // provider context; only its turn end asks, to refresh planning.
+    let printed = match &adapter {
+        Some(_) => PrintedBatches::claim(&path),
+        None => PrintedBatches::default(),
+    };
     let answered = if adapter.is_some() || boundary == BoundaryMoment::Stop {
-        ask_server(&path, &delivery.home, boundary, adapter.as_ref(), &input)
+        ask_server(
+            &path,
+            &delivery.home,
+            boundary,
+            adapter.as_ref(),
+            &input,
+            &printed.batches,
+        )
     } else {
         None
     };
-    // Steers just delivered may have more behind them, and an unanswered
-    // boundary delivered none: the next tool boundary asks again.
-    if let Some(seen) = seen.filter(|_| answered.as_ref().is_none_or(|a| a.steers.is_some())) {
+    printed.settle(answered.is_some());
+    // Steers just delivered may have more behind them, an earlier batch may
+    // still be waiting out its hook, and an unanswered boundary delivered
+    // none: the next tool boundary asks again.
+    let ask_again = answered
+        .as_ref()
+        .is_none_or(|answer| answer.steers.is_some() || answer.waiting);
+    if let Some(seen) = seen.filter(|_| ask_again) {
         let _ = std::fs::remove_file(seen);
     }
     if moment == ContextMoment::Stop {
@@ -327,17 +340,86 @@ pub fn emit_block(
     let (delivery, steers) = match answered {
         Some(answer) => (
             crate::context_block::ContextDelivery::load(&path)?,
-            answer.steers.unwrap_or_default(),
+            answer.steers,
         ),
-        None => (delivery, String::new()),
+        None => (delivery, None),
     };
-    let text = delivery.block_with_prefix(moment, &steers)?;
+    let prefix = steers.as_ref().map_or("", |steers| steers.text.as_str());
+    let text = delivery.block_with_prefix(moment, prefix)?;
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let output = serde_json::json!({"hookSpecificOutput": {
         "hookEventName": event, "additionalContext": text,
     }});
     write_output(format!("{output}\n").as_bytes())?;
+    // Printed first: a hook that dies between the two has its batch answered
+    // again, and a steer that arrives twice beats one that never arrives.
+    if let Some(steers) = steers {
+        PrintedBatches::add(&path, &steers.batch);
+    }
     Ok(())
+}
+
+/// Steer batches this conversation's hooks printed and no request has told
+/// the server about yet. Every hook is a fresh process, so they are lines in
+/// a file beside the delivery file.
+#[derive(Debug, Default)]
+struct PrintedBatches {
+    batches: Vec<crate::id::SteerBatchId>,
+    /// The file's lines moved aside for this request, so a hook printing in
+    /// parallel starts a new file and neither loses the other's batch.
+    claimed: Option<(std::path::PathBuf, std::path::PathBuf)>,
+}
+
+impl PrintedBatches {
+    fn file(delivery: &std::path::Path) -> std::path::PathBuf {
+        delivery.with_extension("printed")
+    }
+
+    fn claim(delivery: &std::path::Path) -> Self {
+        let file = Self::file(delivery);
+        let aside = file.with_extension(format!("printed.{}", std::process::id()));
+        if std::fs::rename(&file, &aside).is_err() {
+            return Self::default();
+        }
+        let batches = std::fs::read_to_string(&aside)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| crate::id::SteerBatchId::parse(line).ok())
+            .collect();
+        Self {
+            batches,
+            claimed: Some((file, aside)),
+        }
+    }
+
+    /// The server heard these, or it did not and the next request repeats them.
+    fn settle(self, answered: bool) {
+        let Some((file, aside)) = self.claimed else {
+            return;
+        };
+        if !answered {
+            for batch in &self.batches {
+                Self::append(&file, batch);
+            }
+        }
+        let _ = std::fs::remove_file(aside);
+    }
+
+    fn add(delivery: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        Self::append(&Self::file(delivery), batch);
+    }
+
+    fn append(file: &std::path::Path, batch: &crate::id::SteerBatchId) {
+        use std::io::Write;
+        let wrote = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file)
+            .and_then(|mut file| writeln!(file, "{batch}"));
+        if let Err(error) = wrote {
+            tracing::warn!(batch = %batch, error = %error, "printed steers not noted; they will arrive again");
+        }
+    }
 }
 
 /// One `session.boundary` request, or `None` when the server did not answer,
@@ -348,6 +430,7 @@ fn ask_server(
     moment: crate::server::wire::BoundaryMoment,
     adapter: Option<&crate::steer::SteerAdapter>,
     input: &serde_json::Value,
+    printed: &[crate::id::SteerBatchId],
 ) -> Option<crate::server::wire::SessionBoundaryAnswer> {
     use crate::server::wire::{BoundaryGap, Operation, ServerOperation, SessionBoundary};
     // Only a Session lf recorded has history to hold a gap; the server refuses
@@ -365,10 +448,15 @@ fn ask_server(
             first: span.first_miss,
             last: span.last_miss,
         }),
+        printed: printed.to_vec(),
     }));
     let answered = crate::server::socket_path()
         .and_then(|socket| {
-            crate::server::client::hook_request(&socket, operation, BOUNDARY_DEADLINE)
+            crate::server::client::hook_request(
+                &socket,
+                operation,
+                crate::server::boundary::HOOK_DEADLINE,
+            )
         })
         .and_then(|response| Ok(serde_json::from_value(response.result)?));
     match answered {
@@ -490,7 +578,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, PrintedBatches};
     use crate::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -510,6 +598,30 @@ mod tests {
         assert!(error.contains(&path.display().to_string()));
         assert!(error.contains("Decode provider context delivery"));
         assert!(!error.contains("PRIVATE_MALFORMED_CONTENT"));
+    }
+
+    #[test]
+    fn printed_batches_wait_for_a_request_the_server_answers() {
+        let home = tempfile::tempdir().unwrap();
+        let delivery = home.path().join("delivery.json");
+        let (one, two) = (
+            crate::id::SteerBatchId::new(),
+            crate::id::SteerBatchId::new(),
+        );
+        PrintedBatches::add(&delivery, &one);
+        // The request went unanswered; a hook beside it printed meanwhile.
+        let unanswered = PrintedBatches::claim(&delivery);
+        assert_eq!(unanswered.batches, std::slice::from_ref(&one));
+        PrintedBatches::add(&delivery, &two);
+        unanswered.settle(false);
+        let mut answered = PrintedBatches::claim(&delivery);
+        answered.batches.sort_by_key(|batch| batch.to_string());
+        let mut both = [one, two];
+        both.sort_by_key(|batch| batch.to_string());
+        assert_eq!(answered.batches, both);
+        answered.settle(true);
+        assert!(PrintedBatches::claim(&delivery).batches.is_empty());
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
     }
 
     #[test]

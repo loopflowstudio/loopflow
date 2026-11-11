@@ -1,5 +1,5 @@
 //! Standalone transport for shared reads and commands; owns no execution.
-mod boundary;
+pub(crate) mod boundary;
 pub mod client;
 pub(crate) mod events;
 mod outbox;

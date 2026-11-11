@@ -465,7 +465,7 @@ impl SqliteStore {
         let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'capability reserved; no authenticated callback observed (hook may be unavailable or untrusted)'
+            WHEN a.activated_at IS NULL THEN 'capability reserved; the Machine server has recorded no callback from this conversation'
             ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
             FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
             LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
@@ -525,8 +525,68 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Returns whether a payload was written, not whether it was accepted. Only
-    /// owned provider history containing the batch and hash could confirm it.
+    /// What a hook's request settles: batches it `printed` become `emitted`,
+    /// and any other batch an answer carried more than `deadline_secs` ago goes
+    /// back to pending, since the hook that asked for it had given up. Returns
+    /// whether a newer unconfirmed batch is still waiting for its hook.
+    pub(crate) fn confirm_session_steers(
+        &self,
+        adapter: &SteerAdapter,
+        printed: &[crate::id::SteerBatchId],
+        deadline_secs: u64,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owns: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_adapters a
+            JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                adapter.capability
+            ],
+            |row| row.get(0),
+        )?;
+        if !owns {
+            return Err(StoreError::InvalidAuthority(
+                "Context adapter no longer owns this provider".into(),
+            ));
+        }
+        for batch in printed {
+            tx.execute(
+                "UPDATE steer_batches SET evidence='emitted'
+                WHERE id=?1 AND session_id=?2 AND agent_process_id=?3 AND evidence='uncertain'",
+                params![batch, adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        // Whole seconds: a batch counts as older only once it is past the
+        // deadline whatever the fraction it was created at.
+        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?2";
+        tx.execute(
+            &format!(
+                "DELETE FROM steer_deliveries WHERE batch_id IN (
+                SELECT id FROM steer_batches WHERE {older})"
+            ),
+            params![adapter.session, deadline_secs as i64],
+        )?;
+        tx.execute(
+            &format!("UPDATE steer_batches SET evidence='cancelled' WHERE {older}"),
+            params![adapter.session, deadline_secs as i64],
+        )?;
+        let waiting = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_batches
+            WHERE session_id=?1 AND evidence='uncertain')",
+            [&adapter.session],
+            |row| row.get(0),
+        )?;
+        tx.commit()?;
+        Ok(waiting)
+    }
+
+    /// Returns whether a batch was handed to `write`, not whether a hook
+    /// printed it: the batch stays `uncertain` until a later request confirms
+    /// it through [`Self::confirm_session_steers`].
     pub(crate) fn emit_session_steers(
         &self,
         adapter: &SteerAdapter,
@@ -607,10 +667,6 @@ impl SqliteStore {
             }
         }
         write(&payload.text)?;
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE steer_batches SET evidence='emitted' WHERE id=?1",
-            [batch],
-        )?;
         Ok(true)
     }
 }

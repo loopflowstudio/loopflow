@@ -273,10 +273,16 @@ fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
             },
         )
         .unwrap();
+    // Handed to a hook, the batch is delivered once that hook says it printed it.
     let page = store.session_steers("session", 0, 32).unwrap();
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].evidence, "uncertain");
     assert_eq!(page.pending, 0);
     assert!(page.items[0].payload_hash.is_some());
+    let batch = page.items[0].batch_id.clone().unwrap();
+    assert!(store.confirm_session_steers(&adapter, &[], 2).unwrap());
+    assert!(!store.confirm_session_steers(&adapter, &[batch], 2).unwrap());
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.items[0].evidence, "emitted");
     store
         .emit_session_steers(
             &adapter,
@@ -431,7 +437,7 @@ fn only_abandoned_prewrite_reservations_return_to_pending() {
         .unwrap();
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
 }
 
@@ -467,7 +473,7 @@ fn source_revisions_supersede_only_pending_and_keep_complete_sources() {
     let latest = publish("latest", &"界".repeat(20_000));
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.items.len(), 2);
-    assert_eq!(page.items[0].evidence, "emitted");
+    assert_eq!(page.items[0].evidence, "uncertain");
     assert!(store.retry_session_steer("session", &edited.id).is_err());
     assert_eq!(
         store
@@ -750,7 +756,7 @@ fn a_cleared_conversation_becomes_the_selection_and_receives_steers() {
     assert!(emitted);
     assert_eq!(
         store.session_steers("session", 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
 }
 

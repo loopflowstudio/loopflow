@@ -107,8 +107,9 @@ slow, the hook gives up after two seconds and the conversation continues
 without it; `logs/lf.log` has one `recording gap` line for that conversation
 until the server answers again. A steer saved while the server was down is
 still waiting and arrives at the next boundary the server answers. One the
-server sent after the hook gave up shows `emitted` in
-`lf session steers <session>`; `--retry <steer>` sends it again. The missed turns show in the Session's
+server sent after the hook gave up shows `uncertain` in
+`lf session steers <session>` and is sent again at the next boundary; a steer
+can arrive twice this way, and is never dropped. The missed turns show in the Session's
 history as one `store-gap` entry, read as unknown rather than still running.
 
 Nothing needs relaunching. If `lf server status` reports no server or a

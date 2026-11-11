@@ -6,25 +6,18 @@ use std::process::{Command, Stdio};
 
 use loopflow_test_support::TestRepo;
 
-#[test]
-fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let _task =
-        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let account_home = home.path().join("accounts/claude/fixture");
+/// `lf skill startup-proof` on a stand-in Claude that runs its SessionStart
+/// hook, then answers. The stand-in expects a steer in the hook's block when
+/// `expect-steer` exists under `home`.
+fn launch_startup_proof(
+    repo: &TestRepo,
+    home: &std::path::Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+) -> std::process::Output {
+    let account_home = home.join("accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let steer = store
-        .save_repository_steer(
-            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
-            "Fixture author",
-            &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
-        )
-        .unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
         .upsert_provider_account(&loopflow::store::ProviderAccount {
@@ -53,7 +46,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
             updated_at: now,
         })
         .unwrap();
-    let bin = home.path().join("bin");
+    let bin = home.join("bin");
     fs::create_dir(&bin).unwrap();
     // Signing the shared Claude home in goes through the Keychain on macOS.
     fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
@@ -66,7 +59,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     )
     .unwrap();
     let clipboard = format!("CLIPBOARD_START{}CLIPBOARD_END", "界".repeat(50_000));
-    fs::write(home.path().join("clipboard"), &clipboard).unwrap();
+    fs::write(home.join("clipboard"), &clipboard).unwrap();
     for name in ["pbpaste", "xclip", "xsel"] {
         let path = bin.join(name);
         fs::write(&path, "#!/bin/sh\ncat \"$LF_HOME/clipboard\"\n").unwrap();
@@ -94,8 +87,9 @@ with open(lock, 'r+') as fence:
     output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
     context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
     assert len(context_text.encode()) <= 10000
-    assert 'STARTUP_DIRECTION' in context_text
-    assert '[excerpt; full source above]' in context_text
+    if (home / 'expect-steer').exists():
+        assert 'STARTUP_DIRECTION' in context_text
+        assert '[excerpt; full source above]' in context_text
     (home / 'startup-complete').touch()
 context = json.loads(sys.stdin.readline())
 query = json.loads(sys.stdin.readline())
@@ -112,14 +106,12 @@ print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-
 sys.stdin.read()
 "#).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
-    // The startup hook asks the Machine server for the steer.
-    let _server = MachineServer::start(home.path());
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+    Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
-        .env("HOME", home.path())
-        .env("LF_HOME", home.path())
+        .env("HOME", home)
+        .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
         // The Keychain item lf signs the shared home in with names its user.
         .env("USER", "fixture")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -136,15 +128,40 @@ sys.stdin.read()
         ])
         .stdin(Stdio::null())
         .output()
-        .unwrap();
+        .unwrap()
+}
+
+fn assert_launched(output: &std::process::Output, home: &std::path::Path) {
     assert!(
         output.status.success(),
         "{}\n{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
-        fs::read_to_string(home.path().join("provider-errors")).unwrap_or_default()
+        fs::read_to_string(home.join("provider-errors")).unwrap_or_default()
     );
-    assert!(home.path().join("startup-complete").exists());
+    assert!(home.join("startup-complete").exists());
+}
+
+#[test]
+fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let steer = store
+        .save_repository_steer(
+            &loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap(),
+            "Fixture author",
+            &format!("STARTUP_DIRECTION {}", "界<&>".repeat(20_000)),
+        )
+        .unwrap();
+    fs::write(home.path().join("expect-steer"), "").unwrap();
+    // The startup hook asks the Machine server for the steer.
+    let _server = MachineServer::start(home.path());
+    let output = launch_startup_proof(&repo, home.path(), &store);
+    assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (native, answer, turn): (String, String, String) = db
         .query_row(
@@ -166,7 +183,8 @@ sys.stdin.read()
         .unwrap();
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
-    assert_eq!(receipts.items[0].evidence, "emitted");
+    // No later hook ran to say the startup hook printed it.
+    assert_eq!(receipts.items[0].evidence, "uncertain");
     assert_eq!(receipts.items[0].excerpted, Some(true));
     assert_eq!(
         store
@@ -175,6 +193,21 @@ sys.stdin.read()
             .text,
         steer.text
     );
+}
+
+/// A skill with no Task needs no Machine server: its hooks find no socket,
+/// the provider still gets its context block, and lf logs the gap once.
+#[test]
+fn a_skill_with_no_task_runs_without_the_machine_server() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let output = launch_startup_proof(&repo, home.path(), &store);
+    assert_launched(&output, home.path());
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+    let down = "recording gap: session boundary: Loopflow server unavailable";
+    assert_eq!(log.matches(down).count(), 1, "{log}");
 }
 
 #[test]
@@ -340,9 +373,10 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         String::from_utf8_lossy(&received.stderr)
     );
     assert!(String::from_utf8_lossy(&received.stdout).contains("HANDOFF_DIRECTION"));
+    // Printed; the conversation's next hook tells the server so.
     assert_eq!(
         store.session_steers(session, 0, 32).unwrap().items[0].evidence,
-        "emitted"
+        "uncertain"
     );
     let pending = store
         .save_session_steer(session, "Fixture author", "NEXT_DIRECTION")
@@ -424,6 +458,15 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
             .unwrap()
             .attempt,
         0
+    );
+    assert_eq!(
+        page.items
+            .iter()
+            .find(|row| row.steer.id == direction.id)
+            .unwrap()
+            .evidence,
+        "emitted",
+        "a later hook named the batch the first one printed"
     );
     store
         .save_session_steer(session, "Fixture author", "FAILED_TOOL_DIRECTION")

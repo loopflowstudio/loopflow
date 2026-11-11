@@ -10110,7 +10110,10 @@
                 "last": 1794358020
               },
               "kind": "session.boundary",
-              "moment": "stop"
+              "moment": "stop",
+              "printed": [
+                "54dc6432-26f1-43fe-ad9d-20b7e91bad69"
+              ]
             }
           ],
           "properties": {
@@ -10150,6 +10153,13 @@
             },
             "moment": {
               "$ref": "#/$defs/BoundaryMoment"
+            },
+            "printed": {
+              "description": "Steer batches from earlier answers that this conversation's hooks\nprinted and have not yet told the server about.",
+              "items": {
+                "$ref": "#/$defs/SteerBatchId"
+              },
+              "type": "array"
             }
           },
           "required": [
@@ -10158,14 +10168,16 @@
             "delivery",
             "adapter",
             "callback",
-            "gap"
+            "gap",
+            "printed"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/SessionBoundaryAnswer"
           },
           "x-result-example": {
-            "steers": null
+            "steers": null,
+            "waiting": false
           }
         }
       ]
@@ -10264,15 +10276,24 @@
       "description": "What `session.boundary` answers.",
       "properties": {
         "steers": {
-          "description": "The pending steers rendered for the provider, already marked delivered;\nnull when none are waiting.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SteerBatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The next pending steers; null when none are ready."
+        },
+        "waiting": {
+          "description": "An earlier answer's batch is unconfirmed and its hook may still print\nit: the hook asks again at its next tool boundary.",
+          "type": "boolean"
         }
       },
       "required": [
-        "steers"
+        "steers",
+        "waiting"
       ],
       "type": "object"
     },
@@ -11522,6 +11543,26 @@
         "capability"
       ],
       "type": "object"
+    },
+    "SteerBatch": {
+      "additionalProperties": false,
+      "description": "Steers rendered for the provider. They count as delivered once a later\nrequest lists `batch` in `printed`; unconfirmed, they are answered again.",
+      "properties": {
+        "batch": {
+          "$ref": "#/$defs/SteerBatchId"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch",
+        "text"
+      ],
+      "type": "object"
+    },
+    "SteerBatchId": {
+      "type": "string"
     },
     "SteerId": {
       "type": "string"

@@ -132,13 +132,14 @@ public enum ServerOperation: Encodable, Sendable {
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
-    /// A provider hook's turn or tool boundary, answered `{steers}`. Desktop
-    /// never sends it; `lf __context-block` does.
-    case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?)
+    /// A provider hook's turn or tool boundary, answered `{steers, waiting}`.
+    /// Desktop never sends it; `lf __context-block` does.
+    case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
+                         printed: [String])
 
     private enum Keys: String, CodingKey {
         case kind, session, ownerLfProcessID = "owner_lf_process_id"
-        case moment, delivery, adapter, callback, gap
+        case moment, delivery, adapter, callback, gap, printed
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
@@ -151,7 +152,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(owner, forKey: .ownerLfProcessID)
-        case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap):
+        case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)
             try box.encode(moment, forKey: .moment)
@@ -159,6 +160,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(adapter, forKey: .adapter)
             try box.encode(callback, forKey: .callback)
             try box.encode(gap, forKey: .gap)
+            try box.encode(printed, forKey: .printed)
         }
     }
 }

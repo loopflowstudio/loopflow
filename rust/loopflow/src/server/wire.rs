@@ -133,6 +133,9 @@ pub struct SessionBoundary {
     /// Session's history as one `store-gap` observation.
     #[serde(deserialize_with = "Option::deserialize")]
     pub gap: Option<BoundaryGap>,
+    /// Steer batches from earlier answers that this conversation's hooks
+    /// printed and have not yet told the server about.
+    pub printed: Vec<crate::id::SteerBatchId>,
 }
 
 /// Where in a native conversation a hook fired.
@@ -157,9 +160,21 @@ pub struct BoundaryGap {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionBoundaryAnswer {
-    /// The pending steers rendered for the provider, already marked delivered;
-    /// null when none are waiting.
-    pub steers: Option<String>,
+    /// The next pending steers; null when none are ready.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub steers: Option<SteerBatch>,
+    /// An earlier answer's batch is unconfirmed and its hook may still print
+    /// it: the hook asks again at its next tool boundary.
+    pub waiting: bool,
+}
+
+/// Steers rendered for the provider. They count as delivered once a later
+/// request lists `batch` in `printed`; unconfirmed, they are answered again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SteerBatch {
+    pub batch: crate::id::SteerBatchId,
+    pub text: String,
 }
 
 /// What `session.attach` answers: a ticket that opens one bridge.

@@ -218,7 +218,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
 | `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
-| `session.attach` | `lf session attach` (every view of a held terminal, and Desktop panes' relay; ordinary CLI attachment to an owner reaches its socket directly) | server |
+| `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` and CLI attachment to an owner reaches its socket directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |

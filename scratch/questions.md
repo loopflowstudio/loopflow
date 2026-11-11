@@ -47,7 +47,7 @@ saying which conversations a killed holder took) are proposals in holder.md
 - Plain CLI views and the held child's own control requests reach the
   registry through `held.sock` directly; the `session.attach` ticket bridge
   to a held terminal exists for clients that only speak the server protocol
-  (Desktop). `server/README.md` says every view goes through `session.attach`.
+  (Desktop). `server/README.md`'s operation table now says so.
 - `bridged` and the attach ticket carry both `owner_lf_process_id` and
   `terminal_id`, one of them null, instead of two shapes under one name.
 - A lost `session.start` holder reply answers `outcome_unknown`; the caller

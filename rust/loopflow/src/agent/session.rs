@@ -23,6 +23,9 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
+    /// A Task or Wave command's launch (`AgentConfig::managed`): it starts
+    /// only beside the Machine server.
+    pub(crate) managed: bool,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -30,13 +33,6 @@ pub(crate) struct SessionCommand {
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
     pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
-}
-
-impl SessionCommand {
-    /// A Task or Wave command's launch (`AgentConfig::managed`).
-    pub(crate) fn managed(&self) -> bool {
-        self.launch.as_ref().is_some_and(|launch| launch.managed)
-    }
 }
 
 /// The native client joins this running conversation at the provider's own
@@ -57,8 +53,10 @@ pub(crate) fn native_connection_command(
         "--".into(),
         session_id.to_string(),
     ];
+    // The app-server it joins passed the managed launch's server check.
     SessionCommand {
         launch: None,
+        managed: false,
         input,
         program: "codex".into(),
         args,
@@ -165,6 +163,7 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
+        managed: config.managed,
         input,
         program: harness,
         args,

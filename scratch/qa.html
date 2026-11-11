@@ -11,6 +11,64 @@ table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px soli
 
 <h1>LOO-821 QA: bare launches, managed launches, OpenCode and Pi</h1>
 
+<h2>Third pass: managed by command (lf 0.15.3+f380f2f11)</h2>
+
+<p>Same private Machine, now opened by a build with this branch's steer-lookup migration (the store from the
+second pass migrated on first open; <code>lf session steers</code> on an old Session still listed its seven
+<code>emitted</code> steers). Server stopped at the start.</p>
+
+<table>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>F1. Managed interactive launch, server down<br><code>lf -i --task a9368e -a claude : 'QA round two'</code></td>
+<td>No server registered. All six hooks installed, but the start hook logged
+<code>session boundary: Loopflow server unavailable … Connection refused</code> and delivered nothing, including
+<code>QA_STEER_R2_PRE</code> posted just before. <code>SessionCommand::managed()</code> read <code>launch</code>, which only
+Codex and OpenCode commands carry, so interactive Claude and Pi Task launches skipped the server check.
+Transcript: <code>/tmp/lf-qa-821/r2-broken.out</code>.</td><td class="no">broken → fixed</td></tr>
+<tr><td>F1 again, after the fix</td>
+<td><code>com.loopflow.server.0d99b6f9fdeb7a88</code> registered at launch (ready 13:52:55). Start hook (0.52 s, exit 0)
+delivered <code>QA_STEER_R2_PRE</code> and <b>none</b> of the seven steers earlier Sessions of this Task already had.
+The only store holder during the hook was the Session owner.</td><td class="ok">works</td></tr>
+<tr><td>F2. Steer between turns</td><td><code>QA_STEER_R3_MID</code> arrived in turn 1's prompt hook (0.45 s); tool and stop
+hooks 0.40 s. Both steers <code>emitted</code>.</td><td class="ok">works</td></tr>
+<tr><td>F3. Server booted out under the live Session</td><td>Turn 2's prompt, tool and stop hooks exited 0 in 0.31–0.33 s.
+One gap line for the three.</td><td class="ok">works</td></tr>
+<tr><td>F4. Resume with the server still down<br><code>lf -i resume session_c3a0…</code>, then
+<code>lf -i --task a9368e resume</code></td>
+<td>Neither started the server. <code>QA_STEER_R3_DOWN</code> (posted while down) stayed pending; each start hook logged one
+gap. The second pass's C3 started it here because the check then read the Session row. <code>lf -i --task a9368e resume
+session_…</code> refuses: <code>select one Session, Task or Wave target</code>.</td><td class="no">open (plan: Remaining)</td></tr>
+<tr><td>F5. Real OpenCode, bare headless<br><code>lf -b -a opencode : 'List the files … one short sentence.'</code></td>
+<td>Two model requests, answer "This directory contains only <code>README.md</code>." One new manifest,
+<code>2e0fcba51ba85723-context-manifest.md</code> (the second pass wrote 20 for 20 steps). No gap line.</td><td class="ok">works</td></tr>
+</table>
+
+<h3>Fixed</h3>
+<p><code>SessionCommand</code> carries <code>managed</code> from <code>AgentConfig::managed</code>
+(<code>agent/session.rs</code>); the Codex client joining its app-server is <code>false</code>, since the app-server's
+spawn ran the check. Test <code>session_steers::an_interactive_task_launch_with_no_machine_server_fails_naming_it</code>
+fails without the fix (launch succeeded) and passes with it. The qa skill's hook section now says which commands are
+managed and to check launchd after a managed launch.</p>
+
+<h3>Checks</h3>
+<pre>cargo test -p loopflow --test integration -- session_steers::a        3 passed  (this step)
+cargo test -p loopflow --lib -- agent::session lf::commands::util harness::agent_process   38 passed (this step)
+cargo clippy -p loopflow --lib --tests -- -D warnings                 clean     (this step)
+transport_tests, context_launch_tests, harness::, full clippy        gate</pre>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>An interactive resume of a Task's conversation never starts a stopped server (F4), even through
+<code>lf -i --task &lt;id&gt; resume</code>. After a reboot, CLI resumes of Task work run unrecorded with steers waiting
+until something else starts the server. <code>resume_session_with_env</code> builds its config with
+<code>Cli::default()</code> in the process the owner execs, so the flag has to cross that hop.</li>
+<li>The second pass's unexplained SIGKILL of the private server during a resume was not seen again (no resume started
+the server this time, so the path was not exercised).</li>
+</ol>
+<p>Not reached: a real Claude or Codex login, Pi (no model key), headless managed launches (managed-account rule),
+remote <code>lf --machine</code>.</p>
+
+<h2>Second pass</h2>
 <p>Second pass, on <code>lf 0.15.3+b47fa2add</code>, after the bare/managed split landed. The private Machine is
 <code>/tmp/lf-qa-821</code>: its own HOME, LF_HOME and Claude config, a disposable repository with a Task checkout
 (<code>a9368e</code>), and the real server under a private launchd label. Claude is a stand-in that runs each installed hook

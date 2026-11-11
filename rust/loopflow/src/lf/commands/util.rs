@@ -622,7 +622,7 @@ fn run_native_session(
                     Some(owner) => crate::harness::agent_process::exec_native(
                         process,
                         owner,
-                        command.managed(),
+                        command.managed,
                         launch_lock,
                     ),
                     None => {
@@ -644,9 +644,7 @@ fn run_native_session(
         }
     }
     let spawned = match owned {
-        Some(owner) => {
-            crate::harness::agent_process::spawn_native(process, owner, command.managed())
-        }
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.managed),
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -1226,6 +1224,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             context: None,
             attachment: None,
@@ -1439,6 +1438,7 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             context: None,
             program: "/bin/sleep".into(),
@@ -1461,6 +1461,7 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
@@ -1568,6 +1569,7 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
+                managed: false,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -1650,6 +1652,7 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
+                managed: false,
                 input: None,
                 context: None,
                 attachment: capture.session_attachment(),

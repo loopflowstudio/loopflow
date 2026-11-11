@@ -300,9 +300,13 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
-Only managed launches (`--task`, `--wave`, `resume` of their Sessions) get turn
-hooks and the server check; plain `lf -b <skill>` gets the start and compact
-hooks only, and plain `lf -i` keeps turn hooks without the check. Real OpenCode
+Managed is decided by the command: `--task` or `--wave` (also with `-i`, and
+`lf -b resume --task`) gets turn hooks and the server check; plain
+`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and an
+interactive `lf -i resume` (even `lf -i --task <id> resume`) keep turn hooks
+without the check, so they never start a stopped server. A managed launch
+with the server down registers it before the agent starts: check
+`launchctl list | grep <label>` after launch, not only the hooks' output. Real OpenCode
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).

@@ -163,6 +163,10 @@ Remaining:
 - An interactive resume of an existing conversation (`lf resume`, Desktop
   reopening) runs no launch check: it gets every hook either way, and the
   resume path carries no command flag down to the native launch.
+  QA, November 11: `lf -i --task <id> resume` with the server stopped ran
+  the Task's conversation without starting it; a steer posted meanwhile
+  waited and the start hook logged one gap. `resume_session_with_env`
+  resolves its config with `Cli::default()` in the process the owner execs.
 
 Choices taken (reversible):
 
@@ -265,6 +269,14 @@ Before, boundaries queued on the write lock (p99 far past the hook's 2 s
 deadline: gap lines). After, they run side by side and the store open
 dominates: each open validates the whole migration history (5 ms alone).
 Added to `server-first.md` Open; not changed here.
+
+QA fix (November 11, after managed moved to the command):
+`SessionCommand::managed()` read `launch`, which `build_session_command`
+fills only for Codex and OpenCode, so `lf -i --task X -a claude` (and Pi) ran
+no server check: live, its start hook gapped and the server stayed down. The
+command now carries `managed` itself. Test:
+`session_steers::an_interactive_task_launch_with_no_machine_server_fails_naming_it`
+(fails without the fix).
 
 QA fixes (November 11; both were on main before this branch):
 

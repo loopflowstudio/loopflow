@@ -144,6 +144,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## macOS traps
 
+- The runner stops at sustained `syspolicyd` pressure, which can last as long
+  as other checkouts keep compiling. Run its printed Rust plan by hand (build,
+  the `nextest` line with the same `-E` filter, clippy), then each suite's
+  command, and record that the runner's pressure stop was bypassed.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.

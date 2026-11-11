@@ -413,3 +413,17 @@ Script: `/tmp/lfplan/bin/plan.py <db> <traced.json>` (not kept). Jack Heart:
 - `--lib -- session_record:: ops::human_session::` — 70 pass, 5 `capture_tests` fail together; all 25 `capture_tests` pass alone; gate (nextest isolates)
 - clippy — pass; `check_migrations.py` — only `unmerged: steer_delivery_lookups.sql`; `--lib store::migrations::` — 129 pass
 - Compress: the measured `sqlite_stat1` rows are one SQL `VALUES` list; `--lib -- server::boundary::` — 9 pass; clippy — pass
+
+Gate (November 11, at dde32ca97). `scripts/test.py` stopped after
+architecture (pass) and rustfmt (pass) at `syspolicyd` pressure (~240% CPU for
+over 30 minutes while other checkouts compiled), so its Rust plan and each
+suite ran by hand:
+
+- `nextest -p loopflow -E` over the changed modules and binaries (filter: `harness::`, `context_block::`, `server::`, `ops::run::`, `ops::human_session::`, `store::sqlite::{steers,provider_transitions,session_events,task_work}`, `store::migrations::`, `session_record::`, `prompt::`, `lf::tests::`, `task_graph_launch_tests::`, `graph_tests::`, the changed integration suites, `waited_task_landing_*`, `binary(golden_prompt|transport_tests|two_people|session_lifecycle_tests|session_launch_contract|lf)`, minus the two slow Linear fixtures) — 1273 run, 18 failed; 16 were an inherited `LF_CAPTURE_KEY`/`LF_TASK` (zsh `env $U` unsets nothing) and pass with `LF_*` cleared
+- `golden_prompts_match` — `builtin_implement` golden regenerated for the load paragraph in `implement.md`; passes
+- `contextual_resume_uses_scope_and_recovers_unassociated_checkouts` asserted main's refusal of `resume ID --wave X` / `--task missing resume ID`; updated to the recorded choice (the flag only makes the resume managed); passes
+- `a_running_claude_named_onto_another_login…` — fails from the checkout (Machine account routes), passes from an empty directory with a temp `HOME`
+- clippy `--all-targets -D warnings` — pass; `cargo fmt --check` — pass
+- website `dev.py test` — pass; Swift `test_desktop.sh` — 806 tests pass; Swift multiplatform boundaries — pass
+- `served_reads` with a resolved `TMPDIR` — 14 pass (the earlier `screen_reads…` failure was the unresolved path)
+- CI owns the full matrix; `--loopflow`, `release_tests`, `e2e` left to CI

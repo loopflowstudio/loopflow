@@ -75,7 +75,10 @@ fn interrupt_hooks() -> &'static Mutex<Vec<Box<dyn Fn() + Send>>> {
 }
 
 /// Register a cleanup to run on interrupt (SIGINT/SIGTERM/SIGHUP), before
-/// the process exits.
+/// the process exits. Cleanups run in reverse registration order, as
+/// destructors would: the Process record registered at startup completes
+/// only after later work (a shell's jobs, a Session attachment) has settled,
+/// so whoever waits for the Process to end reads settled state.
 pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
     interrupt_hooks()
         .lock()
@@ -88,7 +91,7 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
 pub fn exit_on_interrupt() -> ! {
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
     if let Some(hooks) = &hooks {
-        for hook in hooks.iter() {
+        for hook in hooks.iter().rev() {
             hook();
         }
     }

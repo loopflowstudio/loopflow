@@ -310,3 +310,21 @@ typed in a Task checkout)?
   its own process group and hand it the terminal. No argv0 or symlink naming.
 - Jack Heart: "shoudl be independent of provider too". One bare launch path for
   every harness (Claude, Codex, Pi, OpenCode, …); no per-provider branch.
+
+## Bare-direct moves to LOO-820, 2026-11-11
+
+LOO-820 ("Bare launches run the agent directly in the terminal") already owns
+bare-direct, with "lf resume of a bare Session whose process still runs
+elsewhere starts a second provider on the same thread; lf stops nothing".
+Jack Heart: "let 820 own it". This PR drops the bare-direct pass (the
+`bare_conversation`/`runs_in_terminal` launch branch, `os_process::foreground`,
+the bare transport test and their docs) and returns to the published bare
+lifetime: bare conversations run until their agent quits. The "1b", "2a", Rex
+icon and "independent of provider" answers above now apply to LOO-820. The PR
+body must not claim new Task-open holding; it leads with closed-Task cleanup,
+the removed two-minute rule and ledger, and the leak fixes.
+
+Jack Heart: "lets push wahtever is left to 824 or 820 so we can land this and get out of this complicated overlap".
+Moved by comment: bare-direct, resume-elsewhere, bare Graph targets, Desktop
+bare-pane owner → LOO-820; resident-limit suspension ("6a", "no opinion on 5")
+→ LOO-824; bare Codex observer → LOO-826. LOO-823 takes no new scope.

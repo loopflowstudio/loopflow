@@ -14,6 +14,7 @@
 
 import AppKit
 import Foundation
+import Loopflow
 import QuartzCore
 import Synchronization
 
@@ -70,7 +71,7 @@ final class LaunchJournal: @unchecked Sendable {
 
     /// Start this process's launch record. Release and Dev bundles share the
     /// journal; `bundle` and `pid` tell their launches apart.
-    func begin(app: String = LaunchJournal.appVersion, preMainMs: Double? = Perf.millisecondsSinceProcessStart(),
+    func begin(app: String = LaunchJournal.appVersion, preMainMs: Double? = PerfClock.millisecondsSinceProcessStart(),
                bundle: String = Bundle.main.bundleIdentifier ?? "unbundled",
                revision: String = DesktopLog.sourceRevision) {
         let at = ISO8601DateFormatter().string(from: Date())
@@ -92,7 +93,7 @@ final class LaunchJournal: @unchecked Sendable {
     /// Milliseconds are measured from kernel process start, so they include
     /// everything before `main`.
     func mark(_ milestone: Milestone, _ detail: [String: String] = [:],
-              ms: Double? = Perf.millisecondsSinceProcessStart()) {
+              ms: Double? = PerfClock.millisecondsSinceProcessStart()) {
         queue.async { [self] in write(milestone, detail, ms: ms) }
     }
 
@@ -148,7 +149,7 @@ final class LaunchJournal: @unchecked Sendable {
     /// One workspace refresh of `part`. A failure before the launch is fresh
     /// is also that launch's `refresh_failed`.
     func refreshed(_ part: String, ms: Double, ok: Bool) {
-        let sinceStart = Perf.millisecondsSinceProcessStart()
+        let sinceStart = PerfClock.millisecondsSinceProcessStart()
         queue.async { [self] in
             record("refresh", "part", part, ms: ms, ok: ok)
             if !ok, !marked.contains(.fresh) { write(.refreshFailed, ["part": part], ms: sinceStart) }

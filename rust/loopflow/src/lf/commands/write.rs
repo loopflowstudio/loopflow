@@ -1322,7 +1322,7 @@ mod tests {
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../../tests/fixtures/dto/server/task_shipping.json"
         ))
         .unwrap();
         for expected in [

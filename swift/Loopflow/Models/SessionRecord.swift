@@ -305,15 +305,15 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A conversation's current or last turn, from Loopflow's hooks or the
-/// provider's own transcript.
+/// A conversation's current or last turn, from the provider's live stream
+/// or its transcript.
 public struct SessionTurn: Codable, Sendable, Hashable {
     public enum State: String, Codable, Sendable, Hashable {
         case running, asking, ended, interrupted
     }
 
     public enum Source: String, Codable, Sendable, Hashable {
-        case hooks, transcript
+        case stream, transcript
     }
 
     public struct Usage: Codable, Sendable, Hashable {

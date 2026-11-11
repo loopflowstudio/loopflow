@@ -146,7 +146,7 @@ session_675c…   detached  LOO-472     CI under five          last turn ended 3
 
 This works for every conversation on the Machine: a Task's, one a bare
 `lf implement` started, and a plain `claude` or `codex` lf never launched.
-When lf has no hook report for a conversation, it reads the end of the
+When lf recorded no turns for a conversation, it reads the end of the
 provider's own transcript at the moment you ask: Claude's under
 `~/.claude/projects`, Codex's rollout files under `~/.codex/sessions`. Nothing
 runs between questions, and lf never writes into those directories.

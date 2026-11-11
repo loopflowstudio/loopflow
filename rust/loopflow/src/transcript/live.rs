@@ -64,8 +64,8 @@ pub enum TurnState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnSource {
-    /// A turn boundary Loopflow recorded.
-    Hooks,
+    /// A turn boundary Loopflow recorded from the provider's live stream.
+    Stream,
     /// The provider's own transcript.
     Transcript,
 }
@@ -134,8 +134,9 @@ impl SessionTurn {
         self.state != TurnState::Running
     }
 
-    /// A turn as Loopflow's hooks recorded its boundaries, in Unix seconds.
-    pub(crate) fn from_hooks(
+    /// A turn as Loopflow recorded its boundaries from the provider's live
+    /// stream, in Unix seconds.
+    pub(crate) fn from_stream(
         started_at: Option<i64>,
         settled_at: Option<i64>,
         status: Option<&str>,
@@ -147,7 +148,7 @@ impl SessionTurn {
         };
         Self {
             state,
-            source: TurnSource::Hooks,
+            source: TurnSource::Stream,
             started_at: started_at.and_then(rfc3339),
             ended_at: settled_at.and_then(rfc3339),
             model: None,
@@ -392,7 +393,7 @@ mod tests {
 
     #[test]
     fn hooks_turns_read_their_boundaries() {
-        let turn = SessionTurn::from_hooks(Some(1_794_327_900), None, None);
+        let turn = SessionTurn::from_stream(Some(1_794_327_900), None, None);
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00Z"));
         assert_eq!(turn.describe(1_794_327_900 + 134), "turn running 2m14s");
@@ -406,7 +407,7 @@ mod tests {
         };
         assert_eq!(asking.describe(0), "asked a question");
         assert!(asking.waits() && !turn.waits());
-        let ended = SessionTurn::from_hooks(Some(1), Some(2), Some("interrupted"));
+        let ended = SessionTurn::from_stream(Some(1), Some(2), Some("interrupted"));
         assert_eq!(ended.state, TurnState::Interrupted);
     }
 }

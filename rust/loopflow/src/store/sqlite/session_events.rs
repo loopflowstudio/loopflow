@@ -13,7 +13,7 @@ use super::SqliteStore;
 pub(crate) struct CurrentConversation {
     pub provider: String,
     pub thread: AgentSessionId,
-    /// The last turn Loopflow's hooks recorded in it.
+    /// The last turn Loopflow recorded in it from the provider's live stream.
     pub turn: Option<RecordedTurn>,
 }
 

@@ -14575,8 +14575,8 @@
       "description": "Where a turn reading came from.",
       "oneOf": [
         {
-          "const": "hooks",
-          "description": "A turn boundary Loopflow recorded.",
+          "const": "stream",
+          "description": "A turn boundary Loopflow recorded from the provider's live stream.",
           "type": "string"
         },
         {

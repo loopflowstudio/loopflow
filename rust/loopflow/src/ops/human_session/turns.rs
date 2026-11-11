@@ -1,5 +1,5 @@
-//! Each live conversation's current turn: from Loopflow's hooks when they
-//! recorded one, else from the end of the provider's transcript. Raw
+//! Each live conversation's current turn: as Loopflow recorded it from the
+//! provider's live stream, else from the end of the provider's transcript. Raw
 //! conversations, open here but never launched by Loopflow, list beside the
 //! Sessions with only what their transcript shows.
 
@@ -40,7 +40,7 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
         return Ok(None);
     };
     if let Some(turn) = &conversation.turn {
-        return Ok(Some(SessionTurn::from_hooks(
+        return Ok(Some(SessionTurn::from_stream(
             turn.started_at,
             turn.settled_at,
             turn.status.as_deref(),
@@ -163,7 +163,7 @@ mod tests {
             assert_eq!(availability(state), Some(SessionAvailability::Available));
         }
         // A turn lf recorded leaves that to the agent's own status reports.
-        assert!(!waits(&turn(TurnState::Ended, TurnSource::Hooks)));
+        assert!(!waits(&turn(TurnState::Ended, TurnSource::Stream)));
     }
 
     #[test]

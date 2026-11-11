@@ -137,7 +137,8 @@ transcript's rows into the turns `lf history show` prints and the runs those
 turns belong to: one run from what woke the agent until it hands back, with
 its model, usage, and whether it stopped on a question. On demand,
 `lf session list` and `lf session card` give that reader the transcript's tail
-for any conversation with no hook report (`transcript/live.rs`). Watched, the
+for any conversation with no turn recorded from the provider's live stream
+(`harness/fact_writer.rs`; `transcript/live.rs`). Watched, the
 server keeps one filesystem watch per provider home (`transcript/watch.rs`);
 an event makes the shared observation cache read that transcript within a
 second, a thirty-second reconcile catches a missed one, and every

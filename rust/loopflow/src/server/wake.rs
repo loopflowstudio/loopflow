@@ -343,6 +343,19 @@ mod tests {
     }
 
     impl Fixture {
+        fn store_path(&self) -> PathBuf {
+            self.home.path().join("store.db")
+        }
+
+        /// A Claude conversation whose turn ended, listening on its inbox.
+        fn idle_claude(&self) -> (UnixListener, PathBuf) {
+            let socket = self.home.path().join("inbox.sock");
+            let listener = UnixListener::bind(&socket).unwrap();
+            let inbox = self.claude(&socket);
+            self.stop(&self.store, &inbox);
+            (listener, inbox)
+        }
+
         /// A Claude inbox as Claude publishes it: the session record naming
         /// `socket` for conversation `native`, and the peer key beside it.
         fn claude(&self, socket: &Path) -> PathBuf {
@@ -404,10 +417,7 @@ mod tests {
     #[test]
     fn an_idle_claude_conversation_takes_direction_and_updates_in_its_inbox_once() {
         let fixture = fixture("wake-claude");
-        let socket = fixture.home.path().join("inbox.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let inbox = fixture.claude(&socket);
-        fixture.stop(&fixture.store, &inbox);
+        let (listener, inbox) = fixture.idle_claude();
         fixture.comment(&fixture.store, "c-1", "use the staging bucket");
         fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
         after_turn(&fixture.store, "wake-claude");
@@ -446,14 +456,11 @@ mod tests {
     #[test]
     fn a_restarted_server_still_wakes_a_conversation_idle_since_before() {
         let fixture = fixture("wake-restart");
-        let socket = fixture.home.path().join("inbox.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let inbox = fixture.claude(&socket);
-        fixture.stop(&fixture.store, &inbox);
+        let (listener, inbox) = fixture.idle_claude();
         // News lands while no server runs; a new server process carries over
         // nothing but the store, and its first reading delivers it.
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
-        let path = fixture.home.path().join("store.db");
+        let path = fixture.store_path();
         Watcher::default().read(&path);
         let content = received(&listener)[1]["message"]["content"].to_string();
         assert!(content.contains("pr/1"));
@@ -469,13 +476,10 @@ mod tests {
     #[test]
     fn a_revision_with_nothing_new_leaves_the_conversation_alone() {
         let fixture = fixture("wake-quiet");
-        let socket = fixture.home.path().join("inbox.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
+        let (listener, _) = fixture.idle_claude();
         listener.set_nonblocking(true).unwrap();
-        let inbox = fixture.claude(&socket);
-        fixture.stop(&fixture.store, &inbox);
         let mut watcher = Watcher::default();
-        let path = fixture.home.path().join("store.db");
+        let path = fixture.store_path();
         watcher.read(&path);
         // Another Task's Graph moves.
         fixture

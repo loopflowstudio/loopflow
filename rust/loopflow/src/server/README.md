@@ -402,11 +402,12 @@ checkout; that run still counts toward the Task. `WorkSource::is_managed`
 answers this for every launch path.
 
 For a managed launch, and for any conversation opened in a terminal, Claude
-and Codex hooks, the OpenCode plugin and the Pi extension run
-`lf __context-block --moment <moment>` at session start, compaction, each
-prompt, each tool and each turn end. That process opens no
+and Codex hooks run `lf __context-block --moment <moment>` at session start,
+compaction, each prompt, each tool and each turn end. That process opens no
 store. It makes one `session.boundary` request on `machine.sock` and prints
-the provider's hook output:
+the provider's hook output. The OpenCode plugin and the Pi extension send the
+same request from inside the provider over one connection they keep
+([below](#opencode-and-pi-keep-one-connection)):
 
 ```text
 → {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
@@ -415,7 +416,8 @@ the provider's hook output:
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"waiting":false}}
 ```
 
-`moment` is `start`, `compact`, `tool` or `stop`. `delivery` is the Session's
+`moment` is `start`, `compact`, `tool`, `stop` or, from the Pi extension,
+`event`. `delivery` is the Session's
 context delivery file, `adapter` the Session's provider context, `callback` the
 JSON the provider sent the hook, unchanged. A conversation lf did not start,
 such as a thread a Codex app-server opened, has no provider context: its hook
@@ -476,6 +478,55 @@ two-second deadline. A refused connection, a missing socket, a timeout,
 the block without steers, notes the gap once in `logs/lf.log` and exits 0.
 A server that has not yet reached this build answers `invalid {kind}` for
 `session.boundary`, which is the same gap.
+
+### OpenCode and Pi keep one connection
+
+A managed OpenCode or Pi turn with a dozen tool calls starts no `lf` process
+for its boundaries. The plugin runs inside the
+provider's own long-lived process, so it opens `machine.sock` once, sends the
+`hello` a hook sends and keeps the connection for the conversation:
+
+```text
+→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
+← {"type":"welcome",…}
+→ {"type":"request","id":"b-1","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[]},"select":null}
+← {"type":"response","id":"b-1","trace_id":"…","result":{"steers":{"batch":"54dc…","text":"…"},"waiting":false}}
+→ {"type":"request","id":"b-2","operation":{"kind":"session.boundary","moment":"event",…,"printed":["54dc…"]},"select":null}
+```
+
+Each boundary is one request on that connection, with the same fields,
+answer, deadline and steer confirmation as a hook's. The plugin keeps its
+open gap and the batches it printed in memory instead of the files beside
+the delivery file. Both still run `lf __context-block` once at session start
+and once after each compaction to render the context block from checkout
+files, and reuse that block for every model request until the next one.
+
+- **Pi** sends each event it reports (session start, each message end, tool
+  start and end, UI prompt start and end, and a `working` report at most
+  every five seconds while the model streams) as `moment: "event"`, with the
+  event as `callback`. The server records the turn from it as it did from
+  `pi-event`, and answers waiting steers like a `tool` boundary; the extension
+  hands them to Pi as a steer. There is no once-a-second poll: a steer saved
+  during a long tool arrives when the tool ends. Turn end is `stop`.
+- **OpenCode** sends `tool` on the connection before each model request and
+  puts any steer text ahead of the block. Turn end is `stop`.
+
+Pi's bash guard is unchanged: each bash tool still starts
+`lf __context-block --moment tool-group`, which joins the tool's process group
+to the watchdog and asks no server. Pi's Task-update watcher stays one `lf`
+child for the conversation.
+
+A connection that drops, or a request with no answer within two seconds,
+is a gap like a hook's: the boundary goes on without lf, the plugin writes
+one `recording gap` line to its log (`logs/pi-extension.log` for Pi,
+`opencode.stderr.log` beside the capture for OpenCode) and nothing to the
+conversation. The next boundary connects again with a new `hello`, sends the
+open gap and the printed batches, and logs one line when it is answered. A
+server restart, an upgrade and a stopped server all look like this; the
+conversation needs no relaunch. A bare headless run opens no connection: Pi
+keeps its context block and bash guard, OpenCode its context block. A bare
+conversation in a terminal keeps the connection while an owner process holds
+it, as its hooks do on Claude and Codex.
 
 A store the server cannot write, or a callback whose conversation the Session
 does not select, answers `unavailable`; the hook keeps its gap open and sends

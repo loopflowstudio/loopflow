@@ -83,3 +83,15 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   as built; interactive bare hooks go with the owner.
 - Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
   migration rewrites them.
+
+# LOO-835
+
+- Pi's bash guard starts `lf __context-block --moment tool-group` for every
+  bash tool. The Task's done line says "start no `lf` process after launch
+  (check with `ps` during the turn)"; with the guard, a Pi turn with bash
+  calls still starts one per call. The docs leave the guard as is (it asks no
+  server). Move the lifeline join into the extension (Node joins nothing to a
+  process group by itself), or accept one `lf` per bash tool?
+- Assumed (the Task lists it open): steers are asked for at each boundary on
+  the open connection, not pushed by a subscription. Pi asks with every
+  event it reports, so latency is bounded by the longest tool.

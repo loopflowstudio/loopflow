@@ -46,7 +46,7 @@ Every lf invocation at a turn or tool boundary is best-effort. A bare headless
 run ([which launches are managed](../server/README.md#turn-and-tool-boundaries))
 has no such boundaries: it runs `__context-block` only at session start and
 after a compaction, to print its context block, and asks no server. Otherwise
-`__context-block` from Claude hooks, the OpenCode plugin and the Pi extension opens no store: it
+`__context-block` from Claude hooks opens no store: it
 sends one `session.boundary` request to the Machine server at `machine.sock`
 with a two-second deadline, and the server records the turn, acknowledges the
 native input, answers pending steers (delivered once the hook's next request
@@ -65,9 +65,13 @@ the hook clears the marker, so a turn lf never saw reads as unknown rather than
 as still running. Work that can outlast a hook's timeout runs beside it: Claude's
 `StopFailure` hook starts `--moment record-limit` in its own OS session and exits,
 because a kill between a token reply and the profile write would lose a rotated
-grant. The Pi extension and OpenCode plugin behave like Claude's
-hooks: an lf they cannot run goes to their own log (`logs/pi-extension.log`,
-OpenCode's stderr beside the capture), never to the conversation. The PTY
+grant. The Pi extension and OpenCode plugin live inside the provider's
+process, so they send the same request over one `machine.sock` connection they
+keep for the conversation instead of starting `lf` at each boundary
+([OpenCode and Pi keep one connection](../server/README.md#opencode-and-pi-keep-one-connection)).
+A connection they cannot keep, or an lf they cannot run, goes to their own log
+(`logs/pi-extension.log`, `opencode.stderr.log` beside the capture), never to
+the conversation. The PTY
 owner delivers typed input even when it cannot record it, and holds the Session
 in memory instead. Quitting returns the provider's own exit within a second; exit
 records finish in the background or are lost. Nothing about lf's own state ends a

@@ -342,7 +342,7 @@ left running with a close error.
 Closing clears the live endpoint and retains the native thread ID and history.
 Native terminal providers own their own process exit. An observed
 normal or interrupted exit retires an unbound, non-primary conversation only
-when that LfProcess launched its AgentProcess. Task/Wave conversations, primary
+when that LfProcess launched its AgentProcess. Interactive Task/Wave conversations, primary
 Sessions, Asks and Graph reviews remain available. A headless conversation
 completes when its AgentProcess exits, whatever its Work, purpose or Graph:
 completion means it is no longer doing work, not that it cannot continue.

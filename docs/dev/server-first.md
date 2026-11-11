@@ -117,7 +117,8 @@ that cannot reach it logs a gap and lets the turn continue.
 
 Each is one Task and one PR. The first four do not depend on each other.
 Desktop already sends pane status as `session.status` writes on its server
-connection, with no process per pane.
+connection, with no process per pane. That operation is temporary: it is
+deleted when the server's emulator reads status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
@@ -141,11 +142,22 @@ A launch is managed when it comes through a Task or Wave command or from
 Desktop. A bare `lf` typed inside a Task's checkout stays bare and records the
 Task as its ancestry. One function answers this for every launch path.
 
+Any `lf` run in a Task's checkout counts toward that Task: its usage and time
+roll up into the Task's cost. Design the bare path on the assumption that most
+bare runs are subagents started by a Task's agent, not a person at a prompt:
+nobody is watching, the caller waits on the exit and reads the output, and the
+run ends with its parent.
+
 ## Open
 
 - Whether Codex history can be read from its rollout files or needs a short
   app-server call at turn end. If neither works, Codex keeps a recorder.
 - Whether Claude and Codex repaint fully on a size nudge.
+- When a run's checkout and its calling Session belong to different Tasks,
+  which one its cost counts toward.
+- Which per-turn facts (cost, model time, stop reason) each harness's
+  transcript carries. The cost-per-PR work (LOO-732) reads them from the
+  store, so a bare run must write them at exit.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

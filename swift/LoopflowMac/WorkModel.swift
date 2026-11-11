@@ -1538,8 +1538,10 @@ final class WorkModel {
                     guard !Task.isCancelled else { break }
                     retry.receive(frame, scope: workScope, at: .now)
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
+                    let (waited, started) = (frame.received.elapsedMs, ContinuousClock.now)
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
+                    LaunchJournal.home.applied(frame.content.part, waited: waited, ms: started.elapsedMs)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch {

@@ -155,6 +155,16 @@ final class LaunchJournal: @unchecked Sendable {
         }
     }
 
+    /// One reading that was slow to show: how long it waited for the main actor
+    /// after arriving, and how long applying it took. Fast ones are not recorded.
+    func applied(_ part: String, waited: Double, ms: Double) {
+        guard waited + ms >= 100 else { return }
+        queue.async { [self] in
+            record("frame_wait", "part", part, ms: waited, ok: true)
+            record("frame_apply", "part", part, ms: ms, ok: true)
+        }
+    }
+
     /// Wait for queued lines; tests only.
     func flush() { queue.sync {} }
 

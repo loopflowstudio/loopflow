@@ -160,6 +160,8 @@ public struct WorkFrame: Sendable {
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
     /// read would have printed them.
     public let wire: Wire?
+    /// When the observation handed this frame to its window.
+    public let received = ContinuousClock.now
 
     public struct Wire: Sendable {
         public let roadmap: String?

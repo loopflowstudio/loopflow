@@ -102,6 +102,8 @@ def summarize(directory: Path) -> dict:
             **_launches([record for record in launches if record.get("app", "") == app]),
             "reads": _durations(mine, "read", "verb"),
             "refreshes": _durations(mine, "refresh", "part"),
+            "frame_waits": _durations(mine, "frame_wait", "part"),
+            "frame_applies": _durations(mine, "frame_apply", "part"),
         }
     return {
         "source": str(directory),
@@ -110,7 +112,8 @@ def summarize(directory: Path) -> dict:
             "usable": "outline rows observed, next main-queue callback; saved or fresh by source",
             "fresh": "every part of the workspace read by this launch",
         },
-        "not_measured": ["CPU", "memory", "main-thread stalls", "on-glass presentation"],
+        "frames": "readings that took 100 ms or more to show: time queued behind the main actor, then time to apply",
+        "not_measured": ["CPU", "memory", "on-glass presentation"],
         "versions": versions,
     }
 
@@ -149,7 +152,12 @@ def render(report: dict) -> str:
             f"usable {version['never_usable']}, fresh {version['never_fresh']}; "
             f"refresh failed before fresh: {failed or 'none'}"
         )
-        for title, key in (("lf read", "reads"), ("refresh", "refreshes")):
+        for title, key in (
+            ("lf read", "reads"),
+            ("refresh", "refreshes"),
+            ("slow reading: waited", "frame_waits"),
+            ("slow reading: applied", "frame_applies"),
+        ):
             if version[key]:
                 lines += [
                     "",

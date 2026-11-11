@@ -416,16 +416,8 @@ that we want to do any overlay for raw lf".
   process started by resuming an ended Session gets a new one. A `read` or
   resume naming an id the holder does not hold is an error, never an answer
   from byte 0. Test both.
-- **Queries.** The server's emulator answers every cursor, device and mode
-  query, with or without views attached. Query replies arriving from a
-  view's terminal are dropped before they reach the PTY, including the late
-  ones a view produces while catching up from an old position. Today
-  (`transport/output.rs` `process`) the emulator's replies are discarded
-  while a view is attached and the view's terminal answers. Changed with
-  this: the agent sees the server emulator's answers for size, device
-  attributes and colors, not the viewing terminal's. Default colors follow
-  the viewer's theme today; implement states what a color query returns and
-  notes it in the transport README.
+- **Queries.** (First proposal, revised below.) The server's emulator
+  answers every query; view replies are dropped before the PTY.
 - **View drawing.** The plain-terminal relay draws nothing of its own into
   the screen while reconnecting, so its position stays exact and resume
   needs no repaint. Desktop keeps its overlay, which is outside the stream.
@@ -446,14 +438,22 @@ where several typing views make it necessary; telling a query reply from a
 keystroke in a view's input, and what color queries return, are designed
 there. `docs/dev/server-first.md` records it under that piece.
 
-Status: all three built. Position identity:
-`holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`,
-`transport::registry::tests::an_ended_terminal_is_settled_and_never_answers_again`.
-The catch-up discard: the relay drops terminal input until `live`, then
-writes `CSI 5 n` and drops input until the terminal's `CSI 0 n` (1 s cap);
-`transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`.
-Print-then-refresh: anything the relay prints clears its position, so the
-next reconnect is a fresh attach.
+Status: all three built.
+
+- Identity: `holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`
+  (`read`) and
+  `transport::registry::tests::a_resumed_session_gets_a_new_terminal_and_the_old_position_is_refused`
+  (a resumed Session gets a new `TerminalId`; attaching the ended one is
+  `NotFound`; the holder refuses a read from the old position).
+- Catch-up discard: the relay drops terminal input until `live`, then
+  writes `CSI 5 n` and drops input until the terminal's `CSI 0 n` (1 s cap);
+  `transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`.
+- View drawing: `reconnect_held` draws nothing; every line the relay prints
+  into a held screen calls `RelayOutput::drew`, so the next recovery attaches
+  fresh. Giving up exits the relay. Desktop draws only through its overlay.
+  `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued`.
+- `cargo test -p loopflow --lib -- transport::registry::tests:: holder::tests:: transport::tests::a_held_screen transport::tests::a_catching_up`:
+  21 passed.
 
 ## Implementation — November 10, 2026
 
@@ -699,30 +699,10 @@ Checks, each failing with the write removed:
   `retirement_ends_an_idle_held_conversation` fails "Process … still has live
   or unresolved work" without it.
 - `cargo test -p loopflow --lib journal::`: 35 passed.
-- Catch-up discard is covered by
-  `transport::tests::a_catching_up_views_terminal_answers_never_reach_the_agent`;
-  no new test.
 
 - Compress after the `held_terminal_id` write: nothing to reduce. The held
   terminal stays an explicit `record_process_in` argument (the store does not
-  read the transport handoff); `LfProcess` gains no field.
+  read the transport handoff); `LfProcess` gains no field. Compress after the
+  positions/queries/drawing tests: nothing to reduce in code; this plan's two
+  status records for them were merged.
 
-## Positions, queries and view drawing: checked — November 10, 2026
-
-- Identity: `holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`
-  is the `read` case. Resume by position is the new
-  `transport::registry::tests::a_resumed_session_gets_a_new_terminal_and_the_old_position_is_refused`:
-  a resumed Session's start gets a new `TerminalId`, attaching the ended one
-  is `NotFound`, and the holder refuses a read of it from the old position.
-- Queries: built already (`CatchingUp`, the fence after `live`); the
-  every-view-types row in `docs/dev/server-first.md` already says "the
-  server's emulator answers every terminal query and replies coming from a
-  view's terminal are dropped before the PTY". No code change.
-- View drawing: `reconnect_held` draws nothing; every line the relay prints
-  into a held screen ("Reconnected as a viewer", "Size and colors now
-  follow", hints) calls `RelayOutput::drew`, and "Retained output expired"
-  attaches fresh, so the next recovery repaints. Giving up exits the relay.
-  Desktop draws only through its status overlay. New test:
-  `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued`.
-- `cargo test -p loopflow --lib -- transport::registry::tests:: holder::tests:: transport::tests::a_held_screen transport::tests::a_catching_up`:
-  21 passed.

@@ -757,6 +757,40 @@ Its terminals are skipped too (`Registry::adopt` logs and continues), so
 that view is stuck until a server restart. Open choice: retry unanswered
 holders from the registry loop, or leave both.
 
+**Concept review, third pass — November 11, 2026: settled, retry.** Not a
+product choice; three settled rules decide it. "A dropped connection to a
+holder says nothing about its agents" and "a CPU-starved holder must not be
+displaced" rule out treating silence as an end, and the demo's "restart it:
+views return" fails for a slow holder. Today it is worse than stuck: a view
+of a terminal in that holder is answered `hosted:false`, `ended()` returns
+`NotFound` ("terminal … is not running"), and the relay exits, since an
+`engine::Error` is the one error `reconnect_held` does not retry. The
+agent is still running.
+
+Next implement direction:
+
+- `Registry::adopt` keeps a holder it could not list as pending (its
+  `Place`), instead of `continue`. The `run` loop retries pending holders
+  with backoff (the `Unsettled::retry_at` pattern); a holder that answers is
+  adopted exactly as at startup (row written, idle watch connection, its
+  terminals re-hosted and exits settled).
+- A pending holder whose socket refuses connection is gone: settle its
+  terminals as the store-recorded path already does (`recorded_exit`, else
+  unknown) and its LfProcess row with no outcome through
+  `holder::client::settle`. That closes the unfinished-row gap too. Pending
+  holders come from the sockets `holders()` finds and from the store's
+  unfinished holder rows, so one that died before this server started is
+  settled as well.
+- While a terminal's holder is pending, its views are not refused: the
+  entrance answers a retryable "waiting" (not `hosted:false`), so the relay
+  reads `reconnecting` and keeps trying, and Desktop shows its existing
+  "Reconnecting…" overlay. `ended()` stays the answer only for a terminal no
+  live or pending holder could hold.
+- Test: a holder that does not answer `list` at server startup (stopped
+  with SIGSTOP, then SIGCONT) — the view reads reconnecting rather than
+  ended, then continues from its position once the holder answers; and with
+  SIGKILL instead of SIGCONT, the holder row and its terminals settle.
+
 Checks (after 50ae64b2a): `transport_tests -- held_ a_held` 5 passed; `--lib --
 transport:: holder::` 85 passed; clippy clean; `documented_commands::` passed
 before 6dc4041fa (no command changed since).

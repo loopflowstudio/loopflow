@@ -105,9 +105,9 @@ The provider's transcript is the record of turns, tools and usage for every
 conversation: managed, bare and raw. Two signals sit beside it for managed
 Sessions:
 
-- The agent's own status reports in its output (working, blocked on a
-  permission or a question) give "waiting on you". The server's emulator reads
-  them; no per-pane status process is needed.
+- The agent's own status reports in its output show whether the Session is
+  working or available for a reply, including a permission or a question.
+  The server's emulator reads them; no per-pane status process is needed.
 - A hook at a turn boundary tells the server to read the transcript now.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook

@@ -13,6 +13,11 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+Markdown changes under `docs/`, builtins or skills, and README or AGENTS edits,
+also run `cargo test -p loopflow --test integration documented_commands::`.
+It checks command examples and maintained copy, including design documents;
+include `test(documented_commands::)` in the gate's Rust filter.
+
 After syncing, rerun affected tests when main changed APIs they call, even if
 Git merged cleanly. A passing check from before the sync does not cover that
 combination; renamed enum variants can leave new branch tests uncompilable.

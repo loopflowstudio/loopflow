@@ -12,3 +12,10 @@ following choices are proposals:
   watching until measurements justify another value.
 - Treat the CPU/latency numbers in `universal-server.md` as proposed completion
   targets, not measured improvements or quoted product requirements.
+
+# LOO-821
+
+- Steer delivery confirms on answer, not on a later hook request: a hook that
+  gave up at its two-second deadline loses that batch (shown `emitted`,
+  retryable). The alternative, confirming delivered IDs on the next request,
+  is open.

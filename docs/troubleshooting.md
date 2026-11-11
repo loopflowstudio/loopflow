@@ -91,6 +91,29 @@ change that setting. Use `lf install` for an installation/build mismatch; do not
 start a second foreground server. A server outage alone is no reason to relaunch
 the Task's Graph. See [Connect clients](server.md).
 
+## A steer arrived late, or a turn is missing from history
+
+**Symptom:** the agent kept working past a steer, or `lf session history`
+shows a gap where a turn should be.
+
+```bash
+lf server status                      # is the server listening, and on this build?
+grep 'recording gap' ~/.lf/logs/lf.log | tail
+```
+
+Hooks at each prompt, tool and turn end ask the Machine server to record the
+turn and hand over waiting steers. When the server is stopped, restarting or
+slow, the hook gives up after two seconds and the conversation continues
+without it; `logs/lf.log` has one `recording gap` line for that conversation
+until the server answers again. A steer saved while the server was down is
+still waiting and arrives at the next boundary the server answers. One the
+server sent after the hook gave up shows `emitted` in
+`lf session steers <session>`; `--retry <steer>` sends it again. The missed turns show in the Session's
+history as one `store-gap` entry, read as unknown rather than still running.
+
+Nothing needs relaunching. If `lf server status` reports no server or a
+mismatched build, run `lf install`.
+
 ## A creation has no confirmed answer
 
 Desktop retains submitted Task creations and new Session threads across app

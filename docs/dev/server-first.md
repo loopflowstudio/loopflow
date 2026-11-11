@@ -120,7 +120,7 @@ Each is one Task and one PR. The first five do not depend on each other.
 | Piece | Removes | Needs |
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs | |
-| Hooks call the server, not the store | Store opens inside turn boundaries | |
+| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)) | Store opens inside turn boundaries | |
 | Desktop sends pane status on its server connection | One `session observe-status` per pane | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |

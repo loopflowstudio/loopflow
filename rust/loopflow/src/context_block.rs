@@ -25,7 +25,9 @@ pub enum ContextMoment {
     Start,
     Compact,
     Tool,
-    /// A turn ended: acquire Linear changes, which become steers for the next boundary.
+    /// A turn ended: the Machine server records it, then refreshes planning
+    /// (whose changes become steers for the next boundary) and applies a
+    /// pending Session move.
     Stop,
     /// Observe Task movement from the native provider’s asynchronous hook.
     TaskUpdates,
@@ -39,9 +41,6 @@ pub enum ContextMoment {
     /// A Pi bash command is about to run: join its tool group to the watchdog
     /// that ends the group with its provider.
     ToolGroup,
-    /// Started by a Stop hook: once that hook exits, apply the Session's
-    /// pending move.
-    Move,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -133,18 +132,21 @@ impl ContextDelivery {
         })
     }
 
-    pub(crate) fn relocate(&mut self) -> anyhow::Result<()> {
+    /// Follow a moved checkout to where the store now places the repository;
+    /// returns whether anything moved.
+    pub(crate) fn relocate(
+        &mut self,
+        store: &crate::store::sqlite::SqliteStore,
+    ) -> anyhow::Result<bool> {
         let Some((id, source)) = &self.repository else {
-            return Ok(());
+            return Ok(false);
         };
-        let store =
-            crate::store::sqlite::SqliteStore::open_for_hook(&self.home.join("loopflow.db"))?;
         let Some(destination) = store.repository_path(id)? else {
-            return Ok(());
+            return Ok(false);
         };
         let destination = PathBuf::from(destination);
         if *source == destination {
-            return Ok(());
+            return Ok(false);
         }
         let update = |path: &mut PathBuf| {
             if let Ok(relative) = path.strip_prefix(source) {
@@ -162,7 +164,7 @@ impl ContextDelivery {
             update(path);
         }
         self.repository = Some((id.clone(), destination));
-        Ok(())
+        Ok(true)
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
@@ -241,7 +243,24 @@ impl ContextDelivery {
     /// App-server hooks inherit the server environment, not thread shell policy,
     /// so each conversation is bound by its native ID before its first turn.
     pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
-        let path = native_delivery_path(&self.home, session);
+        self.save(&native_delivery_path(&self.home, session))
+    }
+
+    /// The delivery file at `path`; errors name the file, never its contents.
+    pub(crate) fn load(path: &Path) -> anyhow::Result<Self> {
+        let bytes = fs::read(path).map_err(|error| {
+            anyhow::anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|error| {
+            anyhow::anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// Replace the delivery file at `path` whole, so a hook never reads half of it.
+    pub(crate) fn save(&self, path: &Path) -> anyhow::Result<()> {
         let parent = path.parent().expect("context binding has a parent");
         fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
@@ -270,8 +289,8 @@ impl ContextDelivery {
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10},
                 {"type":"command","command":format!("{command} task-updates"),"async":true}]}],
             "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
-            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":10}]}],
+            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":10}]}],
             "SessionStart": [
             {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}, {"type":"command", "command":format!("{command} task-updates"), "async":true}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}

@@ -43,16 +43,21 @@ by its reader floor, missing a column or gone; a hook that fails; a lock that
 cannot be read.
 
 Every lf invocation at a turn or tool boundary is best-effort. `__context-block`
-from Claude hooks, the OpenCode plugin and the Pi extension opens the store with
-a one-second busy timeout; on any store error it emits the context block without
+from Claude hooks, the OpenCode plugin and the Pi extension opens no store: it
+sends one `session.boundary` request to the Machine server at `machine.sock`
+with a two-second deadline, and the server records the turn, acknowledges the
+native input, answers pending steers and, after a turn ends, refreshes planning
+and starts a pending Session move ([Turn and tool boundaries](../server/README.md#turn-and-tool-boundaries)).
+When the server does not answer, the hook prints the context block without
 steers, exits 0 and records the gap once per native conversation in
 `logs/lf.log`. The turn or tool completes without it. A recording gap is one
-concept, `store::RecordingGap`: one log line per changed failure and one when the
-store answers again, whether the gap lives in an owner's or observer's memory or,
-for hooks that are a fresh process at every boundary, in a `.store-gap` marker
-beside the delivery file. When a hook reaches the store again it writes the gap
-into the Session's history as one `store-gap` observation (first and last miss)
-before clearing the marker, so a turn lf never saw reads as unknown rather than
+concept, `store::RecordingGap`: one log line per changed failure and one when
+lf's state answers again, whether the gap lives in an owner's or observer's
+memory or, for hooks that are a fresh process at every boundary, in a
+`.store-gap` marker beside the delivery file. The next hook that reaches
+the server sends the marker's gap with its request; the server writes it into
+the Session's history as one `store-gap` observation (first and last miss) and
+the hook clears the marker, so a turn lf never saw reads as unknown rather than
 as still running. Work that can outlast a hook's timeout runs beside it: Claude's
 `StopFailure` hook starts `--moment record-limit` in its own OS session and exits,
 because a kill between a token reply and the profile write would lose a rotated

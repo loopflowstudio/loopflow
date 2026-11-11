@@ -112,6 +112,8 @@ print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-
 sys.stdin.read()
 "#).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+    // The startup hook asks the Machine server for the steer.
+    let _server = MachineServer::start(home.path());
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home.path())
@@ -294,6 +296,8 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .unwrap();
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
+    // Hooks open no store: the Machine server records and delivers for them.
+    let mut server = Some(MachineServer::start(home.path()));
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -461,6 +465,47 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
         String::from_utf8_lossy(&after_clear.stderr)
     );
     assert!(String::from_utf8_lossy(&after_clear.stdout).contains("AFTER_CLEAR_DIRECTION"));
+    // With the server stopped the tool completes without its steer, and the
+    // conversation keeps one recording gap until the server answers again.
+    drop(server.take());
+    store
+        .save_session_steer(session, "Fixture author", "WAITED_DIRECTION")
+        .unwrap();
+    let unanswered = serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"PostToolUse","tool_use_id":"unanswered-tool"});
+    for _ in 0..2 {
+        let missed = hook(unanswered.clone());
+        assert!(
+            missed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&missed.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&missed.stdout).contains("WAITED_DIRECTION"));
+    }
+    let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
+    let down = "recording gap: session boundary: Loopflow server unavailable";
+    assert_eq!(log.matches(down).count(), 1, "{log}");
+    let _server = MachineServer::start(home.path());
+    let answered = hook(serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"PostToolUse","tool_use_id":"answered-tool"}));
+    assert!(String::from_utf8_lossy(&answered.stdout).contains("WAITED_DIRECTION"));
+    let gaps: i64 = db
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1
+             AND json_extract(payload,'$.source')='store-gap'",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(gaps, 1);
+    let marker = {
+        use sha2::Digest;
+        home.path().join("context-deliveries").join(format!(
+            "{:x}.store-gap",
+            sha2::Sha256::digest(b"cleared-native")
+        ))
+    };
+    assert!(!marker.exists(), "the answered hook closes its gap");
     let selected: String = db
         .query_row(
             "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events
@@ -579,4 +624,51 @@ fn public_commands_save_steers_without_launching_providers() {
         )
         .unwrap();
     assert_eq!(provider_count, 0);
+}
+
+/// The Machine server under a fixture home, stopped when dropped.
+struct MachineServer(std::process::Child);
+
+impl MachineServer {
+    fn start(home: &std::path::Path) -> Self {
+        let lf = |args: &[&str]| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
+                .env_clear()
+                .env("HOME", home)
+                .env("LF_HOME", home)
+                .env("PATH", "/usr/bin:/bin")
+                .args(args)
+                .stdin(Stdio::null());
+            command
+        };
+        let server = Self(
+            lf(&["server", "run"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let status = lf(&["server", "status"]).output().unwrap();
+            let status: serde_json::Value =
+                serde_json::from_slice(&status.stdout).unwrap_or_default();
+            if status["ready"] == true {
+                return server;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "server did not start: {status}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for MachineServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }

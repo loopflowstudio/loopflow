@@ -103,6 +103,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../../tests/fixtures/dto/server/repo_ci.json"),
     include_str!("../../../../tests/fixtures/dto/server/repo_release.json"),
     include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
+    include_str!("../../../../tests/fixtures/dto/server/session_boundary.json"),
     include_str!("../../../../tests/fixtures/dto/server/skill_list.json"),
     include_str!("../../../../tests/fixtures/dto/server/skill_run.json"),
     include_str!("../../../../tests/fixtures/dto/server/task_from_session.json"),
@@ -215,6 +216,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "response",
         "session.rename",
         include_str!("../../../../tests/fixtures/dto/server/response.json"),
+    ),
+    (
+        "session_boundary_answer",
+        "session.boundary",
+        include_str!("../../../../tests/fixtures/dto/server/session_boundary_answer.json"),
     ),
     (
         "session_steered",

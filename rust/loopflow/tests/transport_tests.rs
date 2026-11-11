@@ -29,6 +29,15 @@ struct Fixture {
 
 struct PausedOwner(libc::pid_t);
 
+struct MachineServer(Child);
+
+impl Drop for MachineServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 struct StopOwner<'a>(&'a Fixture, String);
 
 impl Drop for StopOwner<'_> {
@@ -206,6 +215,22 @@ impl Fixture {
             unsafe { libc::geteuid() },
             &digest[..16]
         ))
+    }
+    /// The Machine server under this home, stopped when dropped.
+    fn machine_server(&self) -> MachineServer {
+        let server = MachineServer(
+            self.command(&["server", "run"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while loopflow::server::client::Connection::open_at(&self.endpoint("machine")).is_err() {
+            assert!(Instant::now() < deadline, "Machine server did not start");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        server
     }
     #[track_caller]
     fn viewer(&self, id: &str, control: bool) -> Viewer {
@@ -3031,6 +3056,8 @@ fn detached_sessions_end_after_their_limit() {
 #[test]
 fn native_drafts_remain_editable_and_acknowledged_prompts_can_end() {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 2s\n",
@@ -3137,6 +3164,8 @@ while True:
 #[test]
 fn retained_hooks_survive_upgrade() {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
@@ -3272,6 +3301,8 @@ fn unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn() {
 
 fn continue_session_after_upgrade(unanswering: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time, tty
@@ -3530,6 +3561,8 @@ fn native_background_watches_survive_until_settlement() {
 
 fn native_work_survives_until_settlement(background: bool) {
     let fixture = Fixture::new();
+    // Hooks reach the Machine server, which records their turns.
+    let _server = fixture.machine_server();
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 2s\n",

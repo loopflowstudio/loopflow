@@ -220,6 +220,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
@@ -389,6 +390,60 @@ part of what a phone or bot client is offered.
   retain input and geometry. Unavailable keeps the last screen marked stale;
   Retry reconnects without preparing or resuming a provider. A connection
   failure alone never means the Session ended.
+
+## Turn and tool boundaries
+
+Claude hooks, the OpenCode plugin and the Pi extension run
+`lf __context-block --moment <moment>` at session start, compaction, each
+prompt, each tool and each turn end. That process opens no store. It makes one `session.boundary` request on `machine.sock` and prints
+the provider's hook output:
+
+```text
+→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
+← {"type":"welcome",…}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null},"select":null}
+← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null}}
+```
+
+`moment` is `start`, `compact`, `tool` or `stop`. `delivery` is the Session's
+context delivery file, `adapter` the Session's provider context, `callback` the
+JSON the provider sent the hook, unchanged. A conversation lf did not start,
+such as a thread a Codex app-server opened, has no provider context: its hook
+sends only `stop`, with a null `adapter`, and the server only refreshes
+planning. `gap` is the hook's open recording
+gap, `{first, last, reason}`, or null.
+
+Before answering, the server records what the boundary says: the native turn
+(started at a prompt, yielded at a turn end, with the open background tools and
+scheduled wakeups Claude reports), the acknowledgement of the native input, and
+a `store-gap` observation for a non-null `gap`. `steers` is the text of the
+Session's pending steers, already rendered for the provider, or null when none
+are waiting; the server marks them delivered when it answers. At `stop` it
+answers first and then refreshes the Session's planning and starts any pending
+Session move, so neither waits inside the turn.
+
+The hook renders the context block from the delivery file itself, prefixes
+`steers` and prints the result. Context comes from files in the checkout, so
+a hook that gets no answer still prints the block.
+
+The hook resolves the server at its fixed path on every call; no address is
+put in the agent's environment. Connecting, `hello` and the answer share a
+two-second deadline. A refused connection, a missing socket, a timeout,
+`incompatible`, `busy` or any `error` ends the hook the same way: it prints
+the block without steers, notes the gap once in `logs/lf.log` and exits 0.
+A server that has not yet reached this build answers `invalid {kind}` for
+`session.boundary`, which is the same gap.
+
+A store the server cannot write, or a callback whose conversation the Session
+does not select, answers `unavailable`; the hook keeps its gap open and sends
+it again with its next request. Steers are marked delivered when the server
+writes the answer, so a hook that gave up at its deadline loses that batch:
+`lf session steers <session>` shows it `emitted`, and
+`lf session steers <session> --retry <steer>` sends it again.
+
+A pending Session move starts two seconds after the `stop` answer, once the
+hook has exited and the provider has ended its turn. A move that fails stays
+pending for the next `stop`.
 
 ## Events alongside readings
 

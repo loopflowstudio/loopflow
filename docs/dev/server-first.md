@@ -5,8 +5,9 @@ title: Server-first Sessions
 
 # Server-first Sessions
 
-Planned in LOO-819. Reading a live turn from the transcript (LOO-822) is
-built; writing those turns to the store is not, nor is the rest.
+Planned in LOO-819. Reading a live turn from the transcript and writing a
+finished conversation's turns to the store at exit (LOO-822) are built; the
+rest is not.
 [Client API server](server.md)
 and the [transport README](../../rust/loopflow/src/transport/README.md)
 describe what runs today. Each piece below lands as its own Task and updates

@@ -165,4 +165,24 @@ mod tests {
         // A turn lf recorded leaves that to the agent's own status reports.
         assert!(!waits(&turn(TurnState::Ended, TurnSource::Hooks)));
     }
+
+    #[test]
+    fn the_card_for_a_raw_conversation_carries_its_turn() {
+        use crate::lf::commands::screens::{SessionCard, SessionLiveness};
+        let turn = turn(TurnState::Running, TurnSource::Transcript);
+        let raw = record(
+            HarnessKind::Claude,
+            "provider-id",
+            Path::new("/work"),
+            turn,
+            None,
+        );
+        let card = SessionCard::from(raw);
+        assert!(card.session.raw);
+        assert_eq!(card.session.id.as_str(), "provider-id");
+        assert_eq!(card.session.turn.unwrap().state, TurnState::Running);
+        assert_eq!(card.liveness, SessionLiveness::Live);
+        assert_eq!(card.control_holder, None);
+        assert_eq!(card.last_line, None);
+    }
 }

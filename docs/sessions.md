@@ -70,7 +70,7 @@ starts from that log and current instructions, and the old thread stays in
 ```bash
 lf session list                      # conversations you can still act on
 lf session list --interactive all    # with the headless runs still working
-lf session history --since 1d        # what finished, every headless run included
+lf session history --since 1d        # what Task and Wave work did, headless runs included
 ```
 
 A headless conversation (`-b`, a Graph step, a review) moves to history when

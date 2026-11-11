@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-844 QA: finished headless Sessions</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#222}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
+pre{background:#f6f6f4;padding:.75rem;overflow-x:auto;font-size:12.5px;border-radius:4px}
+.ok{color:#17663a;font-weight:600}.bad{color:#a32020;font-weight:600}
+td,th{padding:.3rem .6rem;border-bottom:1px solid #eee;text-align:left;vertical-align:top}table{border-collapse:collapse}
+</style></head><body>
+<h1>LOO-844 QA: finished headless Sessions read as history</h1>
+<p>Branch <code>lf</code> (debug build) in private homes under <code>/tmp/lf-qa-844*</code>. Each home had its own <code>HOME</code>, <code>LF_HOME</code>, git repo with a bare origin, git planning and private server. A stand-in <code>claude</code> on <code>PATH</code> speaks stream-json and can succeed, exit 1 or hang. For Task launches, a managed Claude login was stood in with the same <code>upsert_provider_account</code> call the test fixtures use (a throwaway example binary, deleted afterwards), because a real one needs OAuth.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>Plain headless run</td><td><code>lf -b : "Reply QA_OK"</code> in the repo</td><td class="ok">Completed at exit. <code>session list</code> (with and without <code>--interactive all</code>) shows nothing; <code>--history --interactive all</code> lists it as closed.</td></tr>
+<tr><td>Task headless runs</td><td><code>lf checkout</code>, then <code>lf -b --task dadb76</code> several times, including stand-in exit 1</td><td class="ok">Every run completed at exit. <code>session list --interactive all</code> shows only the Task's interactive primary conversation. <code>session history --task</code> shows each run; <code>lf task status</code> still references all of them.</td></tr>
+<tr><td>Failed before launch</td><td><code>lf -b --task</code> with no managed account (selection fails)</td><td class="ok">Session completed; not listed.</td></tr>
+<tr><td>Provider killed mid-turn</td><td>SIGKILL the stand-in <code>claude</code> while hanging</td><td class="ok">Its owner recorded the exit; Session completed at 22:28:41.</td></tr>
+<tr><td>Owner, provider and viewer killed</td><td>SIGKILL all three</td><td class="ok">Completed with the process at 22:29:48; leaves the list.</td></tr>
+<tr><td>Upgrade from installed 0.15.3</td><td>Fresh home driven by <code>/Applications/Loopflow.app/Contents/MacOS/lf</code>: Task, checkout, <code>lf -b --task</code>. Saved the store, then opened it with the branch build and ran <code>lf process prune</code></td><td><span class="bad">Before fix:</span> 0.15.3's failed launch records the attachment exit under the old rule but leaves the AgentProcess row <code>reserved</code>/unfinished. The migration skips the Session (unfinished agent row), then <code>prune_agent_processes</code> → <code>settle_agent_process</code> closes the row (<code>spawn_failed</code>), but nothing completes the Session, so it stays listed for good.<br><span class="ok">After fix:</span> replaying the saved store, prune completes the headless run (22:51:16) and only the interactive primary stays.</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>The reapers close a dead AgentProcess without going through the attachment exit. Both now complete the headless Session whose current AgentProcess they close, if it is not moved, in the same transaction: <code>complete_dead_headless_run_in</code> in <code>store/sqlite/processes.rs</code>, called from <code>settle_agent_process</code> and from retention's <code>close_dead_processes</code>. On the live store the query plan is <code>SEARCH agent_sessions USING INDEX agent_sessions_agent_process</code>.</p>
+<p>Tests: <code>prune_moves_a_headless_run_with_a_dead_agent_process_to_history</code>, <code>settling_a_dead_headless_run_moves_it_to_history</code>. Interactive Sessions are untouched in both. <code>cargo test -p loopflow --lib -- store::sqlite::retention:: store::sqlite::processes:: store::sqlite::session_events::</code>: 43 passed. <code>cargo clippy -p loopflow --all-targets -- -D warnings</code>: clean.</p>
+<pre>before fix, after branch open + prune (0.15.3 state):
+920181d1…|1||2026-11-11 22:37:26|spawn_failed       interactive primary
+session_92bb…|0||2026-11-11 22:37:26|spawn_failed   headless run, still open
+after fix, same saved store:
+920181d1…|1||spawn_failed
+session_92bb…|0|2026-11-11 22:51:16|spawn_failed   completed
+$ lf session list --interactive all
+920181d1abe442339c0d773b81b1ba58  closed  Repository  f8c601 Old headless</pre>
+
+<h2>Works now</h2>
+<p>Headless runs, Task-bound or not, that end successfully, fail, fail before launch, or are killed, all leave the open list and appear in <code>--history</code> and Task history. Runs a 0.15.3 lf left half-recorded settle on the first prune after upgrade.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>A Graph step correcting its own step (reattach reopens): covered by the branch's <code>session_events</code> tests, not driven end to end here. Graph launches need the same managed login.</li>
+<li>Desktop sidebar: no window was opened. It reads the same open set as <code>session list</code>.</li>
+<li>Real-store migration: the live store was only read (read-only <code>EXPLAIN</code> plus a look at its unfinished headless rows, all live). Post-landing install check is noted in <code>scratch/loo-844.md</code>.</li>
+</ul>
+
+<h2>Still odd, worst first</h2>
+<ul>
+<li>When the installed 0.15.3 <code>lf</code> launches with a private <code>HOME</code> and an account home, it tries to write a Claude Keychain credential in the login keychain (<code>write Claude Keychain credential: the item for account "jack" did not take the login</code>). It failed both times; no <code>Claude Code-credentials*</code> item changed today after 20:00 UTC (metadata checked, no values read). The branch build in the same setup did not hit this. Not in this change's scope.</li>
+<li><code>lf session list --history</code> without <code>--interactive all</code> omits headless runs, so "<code>--history</code> adds finished conversations" (docs/sessions.md) shows only interactive ones by default. LOO-822 may move <code>--history</code> anyway (scratch/questions.md).</li>
+<li><code>lf session history --since 1d</code> omits unbound runs (Work-tagged activity only); the new docs line said "every headless run included" and now says "what Task and Wave work did, headless runs included".</li>
+</ul>
+</body></html>

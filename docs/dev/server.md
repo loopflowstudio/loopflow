@@ -4,6 +4,9 @@ Machine routing, client access and installation have separate owners. The local
 client connection is implemented; LOO-718 covers the mobile client and remote
 admission.
 
+LOO-819 plans the server holding managed Sessions' processes:
+[Server-first Sessions](server-first.md).
+
 ## Start from the action
 
 | Action | Concept | Surface |

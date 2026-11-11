@@ -706,3 +706,23 @@ Checks, each failing with the write removed:
 - Compress after the `held_terminal_id` write: nothing to reduce. The held
   terminal stays an explicit `record_process_in` argument (the store does not
   read the transport handoff); `LfProcess` gains no field.
+
+## Positions, queries and view drawing: checked — November 10, 2026
+
+- Identity: `holder::tests::reading_a_terminal_the_holder_does_not_hold_is_an_error`
+  is the `read` case. Resume by position is the new
+  `transport::registry::tests::a_resumed_session_gets_a_new_terminal_and_the_old_position_is_refused`:
+  a resumed Session's start gets a new `TerminalId`, attaching the ended one
+  is `NotFound`, and the holder refuses a read of it from the old position.
+- Queries: built already (`CatchingUp`, the fence after `live`); the
+  every-view-types row in `docs/dev/server-first.md` already says "the
+  server's emulator answers every terminal query and replies coming from a
+  view's terminal are dropped before the PTY". No code change.
+- View drawing: `reconnect_held` draws nothing; every line the relay prints
+  into a held screen ("Reconnected as a viewer", "Size and colors now
+  follow", hints) calls `RelayOutput::drew`, and "Retained output expired"
+  attaches fresh, so the next recovery repaints. Giving up exits the relay.
+  Desktop draws only through its status overlay. New test:
+  `transport::tests::a_held_screen_the_relay_drew_into_is_refreshed_not_continued`.
+- `cargo test -p loopflow --lib -- transport::registry::tests:: holder::tests:: transport::tests::a_held_screen transport::tests::a_catching_up`:
+  21 passed.

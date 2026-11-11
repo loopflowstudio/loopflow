@@ -2945,7 +2945,7 @@ mod tests {
 
     use super::{
         carry_across_exec, output, place_events, wire, CatchingUp, Event, Handoff, Own, Ownership,
-        Viewer, CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
+        RelayOutput, Viewer, CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
 
@@ -2962,6 +2962,24 @@ mod tests {
         assert_eq!(catching.pass(b"nls\r"), Some(&b"ls\r"[..]));
         let mut catching = CatchingUp::fenced();
         assert_eq!(catching.pass(b"\x1b\x1b[0n"), Some(&b""[..]));
+    }
+
+    #[test]
+    fn a_held_screen_the_relay_drew_into_is_refreshed_not_continued() {
+        let from = |request: wire::Request| match request {
+            wire::Request::Attach { from, .. } => from,
+            other => panic!("not an attachment: {other:?}"),
+        };
+        let mut output = RelayOutput {
+            received: 42,
+            positioned: true,
+            ..RelayOutput::default()
+        };
+        assert_eq!(from(output.recover(true, true)), Some(42));
+        output.attached("token".into(), "nonce", 1);
+        // Any line the relay prints leaves the screen at no PTY position.
+        output.drew();
+        assert_eq!(from(output.recover(true, true)), None);
     }
 
     #[test]

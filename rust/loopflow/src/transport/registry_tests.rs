@@ -225,6 +225,49 @@ fn an_ended_terminal_is_settled_and_never_answers_again() {
 }
 
 #[test]
+fn a_resumed_session_gets_a_new_terminal_and_the_old_position_is_refused() {
+    let _ledger = TestLedgerGuard::new();
+    let registry = Registry::open(BUILD).unwrap();
+    let place = holder();
+    let session = LfSessionId::from("session_resumed");
+    let ended = registry
+        .start(shell(Some(&session), "request-1", "printf first; exit 0"))
+        .unwrap();
+    let mut view = View::attach(&ended);
+    view.wait_for("first");
+    let left = view.position.expect("a held view is told its position");
+    drop(view);
+    wait_until("the receipt to be removed", || {
+        !place.terminal(ended.as_str()).exists()
+    });
+
+    let resumed = registry
+        .start(shell(
+            Some(&session),
+            "request-2",
+            "printf second; read line",
+        ))
+        .unwrap();
+    assert_ne!(resumed, ended, "a terminal ID is never reused");
+    assert_eq!(registry.session_terminal(&session), Some(resumed.clone()));
+    // A view continuing the ended terminal from its position finds nothing
+    // to attach to; the holder answers neither from byte 0.
+    let refused = connect(&ended).unwrap_err();
+    let refused = refused.downcast_ref::<crate::engine::Error>().unwrap();
+    assert_eq!(refused.code, crate::engine::ErrorCode::NotFound);
+    let unheld = crate::holder::client::Client::connect(&place)
+        .unwrap()
+        .read(ended.as_str(), left)
+        .unwrap_err();
+    assert!(
+        unheld.to_string().contains("does not hold terminal"),
+        "{unheld:#}"
+    );
+    registry.close();
+    kill(&place, &resumed);
+}
+
+#[test]
 fn an_exit_with_no_server_running_is_settled_by_the_next_one() {
     let _ledger = TestLedgerGuard::new();
     let first = Registry::open(BUILD).unwrap();

@@ -259,12 +259,10 @@ struct TaskPatchLine: Equatable, Sendable {
         let source = patch as NSString
         source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byLines) { line, range, _, _ in
             guard let line else { return }
-            if line.hasPrefix("@@") {
-                inHunk = true
-            } else if line.hasPrefix("diff ") {
-                inHunk = false
-            } else if inHunk, line.hasPrefix("+") || line.hasPrefix("-") {
-                lines.append(TaskPatchLine(range: range, added: line.hasPrefix("+")))
+            switch PatchLineKind.next(line, inHunk: &inHunk) {
+            case .added: lines.append(TaskPatchLine(range: range, added: true))
+            case .removed: lines.append(TaskPatchLine(range: range, added: false))
+            case .header, .hunk, .context: break
             }
         }
         return lines

@@ -134,7 +134,7 @@ struct TaskFileView: View {
                             .padding(12)
                     }
                 } else {
-                    ContentUnavailableView("Can’t show this file", systemImage: "doc")
+                    ContentUnavailableView(file.state.title, systemImage: "doc")
                 }
             }
         }
@@ -169,14 +169,14 @@ struct TaskDiffView: View {
             case .value(let diff):
                 ScrollView([.vertical, .horizontal]) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        let lines = diff.patch.split(separator: "\n", omittingEmptySubsequences: false)
+                        let lines = Self.lines(diff.patch)
                         ForEach(lines.indices, id: \.self) { index in
-                            Text(lines[index].isEmpty ? " " : String(lines[index]))
+                            Text(lines[index].text.isEmpty ? " " : String(lines[index].text))
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(theme.palette.text)
                                 .padding(.horizontal, 12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(tint(lines[index]))
+                                .background(tint(lines[index].kind))
                         }
                         if diff.truncated {
                             Text("The rest of this diff is too long to show.")
@@ -206,10 +206,19 @@ struct TaskDiffView: View {
         }
     }
 
-    private func tint(_ line: Substring) -> Color {
-        if line.hasPrefix("+"), !line.hasPrefix("+++") { return Color.green.opacity(0.16) }
-        if line.hasPrefix("-"), !line.hasPrefix("---") { return Color.red.opacity(0.16) }
-        if line.hasPrefix("@@") { return theme.palette.surface }
-        return .clear
+    static func lines(_ patch: String) -> [(text: Substring, kind: PatchLineKind)] {
+        var inHunk = false
+        return patch.split(separator: "\n", omittingEmptySubsequences: false).map {
+            ($0, PatchLineKind.next($0, inHunk: &inHunk))
+        }
+    }
+
+    private func tint(_ kind: PatchLineKind) -> Color {
+        switch kind {
+        case .added: theme.palette.successTone.fill
+        case .removed: theme.palette.failureTone.fill
+        case .hunk: theme.palette.surface
+        case .header, .context: .clear
+        }
     }
 }

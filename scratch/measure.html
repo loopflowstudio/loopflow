@@ -18,13 +18,13 @@
 as alternating pairs and the claims rest on counts wherever a count exists.</p>
 
 <h2>Verdict</h2>
-<p id="verdict"><strong>Better, on counts.</strong> Two reads that launched <code>git</code> once per worktree no longer launch it:
-portfolio discovery 111 → 0 launches (3.5–4.6 s → 0.06–0.15 s, n=5 each side, alternating; branch side is an
-unoptimized build), and with it the phone's Task list read 120 → 9 launches (median 4.9 s → 1.3 s, ranges 3.8–17.9 s
-and 1.2–3.7 s, n=5 each; one run overlaps). Outputs match on both. <strong>Inconclusive</strong> for Desktop's 13 s
-to current planning: about 3 s is the Machine, one cause (about a hundred serial <code>git</code> launches) is removed
-but its share was not measured in the app, and the rest is unattributed. A launch on this build settles it, because
-the journal now records where each slow reading waited. Nothing here was run on a quiet Machine or a real phone.</p>
+<p id="verdict"><strong>Better; Desktop's wait now attributed.</strong> A launch on build 1eec57e47 wrote no slow-reading
+records: every reading showed within 100 ms of reaching Desktop, and fresh still landed at 16.0 s. The wait is in the
+Machine server, whose planning subscription took 18–39 s to its first reading (median 31 s, n=5) against about 3 s for
+the same read as a standalone process. Nearly all of the producer's sampled time was its event observer re-walking every
+Graph process once per Task. Batched in <code>c0f1d1ed0</code>: 4.1–6.9 s → 73–121 ms for that step on a copy of this
+store (n=5 each, alternating, release build, same steps found). Not yet measured end to end on the live server, which
+needs this build installed.</p>
 
 <h2>Where Desktop's time went, from its own journal</h2>
 <p>Source: <code>~/.lf/desktop-cache/timings/</code>, written by real use (1,762 reads, 254 launches). Last 40 launches,
@@ -49,6 +49,7 @@ Sessions p50 3.7 s (n=43). The Machine answers the same subscriptions in 2.9–3
   <tr><td><code>44ce87bbe</code></td><td class="n">~100 → 0 git launches at launch</td><td>keep</td><td>Desktop resolved each repository its first readings name (38 from planning, 6 from processes, 11 from the portfolio) with two serial <code>git rev-parse</code> each, before showing them.</td><td>Count from reading the code and the live readings; not timed in the app. Three origin tests pass on real repositories.</td></tr>
   <tr><td><code>23fd0fdd4</code></td><td class="n">16 ms (85 KB) / 48 ms (330 KB) of JSON per reading: 9 / 27 ms moved off main</td><td>keep</td><td>Each reading was decoded to a tree, re-encoded and decoded again on the main actor, then written to disk even when unchanged.</td><td>Timed on this Mac with a stand-in tree type, n=9; a phone is slower. The first pass (text → tree) is still on main, in the connection.</td></tr>
   <tr><td><code>44ce87bbe</code></td><td class="n">usable: 0 of 13 launches marked → marked</td><td>keep</td><td>The <code>usable</code> milestone and <code>cold_start</code> interval were dropped when the sidebar was rebuilt; <code>hierarchy_interaction</code> was never emitted.</td><td>Instrumentation only. Compiles; journal tests pass.</td></tr>
+  <tr><td><code>c0f1d1ed0</code></td><td class="n">4.1–6.9 s → 73–121 ms per planning reading<br>261 Graph walks → 1</td><td>keep</td><td>The server's event observer pairs each watched Task with its Graphs separately; the pairing walks every Graph process, so one reading walked them 261 times under the store lock.</td><td>Sampled on the live server: the planning producer spent nearly all its time in <code>Observer::read</code> → <code>task_graphs</code>. Timed against a backup copy of the store; observer test for step-finished events passes.</td></tr>
 </table>
 
 <h2>Measured and left alone</h2>

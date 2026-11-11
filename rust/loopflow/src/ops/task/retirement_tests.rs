@@ -191,6 +191,28 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
     });
 }
 
+#[test]
+fn retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        fixture
+            .sql()
+            .execute(
+                "DELETE FROM task_prs WHERE task_id=?1",
+                [fixture.task.id.as_str()],
+            )
+            .unwrap();
+        let owner = fixture.session_owner("pr-less", None);
+        fixture.due();
+        let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
+        assert!(error.to_string().contains("Retained PR-less checkout"));
+        assert_eq!(fixture.intent().phase, "closing");
+        assert!(super::owner_retiring(&fixture.store.sqlite, &owner).unwrap());
+        fixture.assert_retained();
+    });
+}
+
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)

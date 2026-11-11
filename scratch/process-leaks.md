@@ -135,6 +135,19 @@ Consequences of the rule, no change here:
   only endings; typed input holds nothing; an idle state under a resident limit
   is deferred (quotes in `questions.md`).
 
+## QA, 2026-11-11
+
+`scratch/qa.html`. A completed PR-less Task never ended its conversation:
+`retirement::advance` returned "Retained PR-less checkout" before the closing
+phase. The two-minute idle ending had hidden this. Fixed: the PR checks now
+gate only checkout deletion (`prepare_deletion`), so any completed Task's
+conversations and Desktop shells close after grace and settled work, and a
+PR-less or unresolved checkout stays. The real walkthrough with
+`lf-world one-task` saw the owner end at 03:56:17 with the checkout kept;
+regression test `retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout`.
+Seen but outside this change: keystrokes typed while a return is still opening
+the provider are dropped; attaching waits on a held store write lock.
+
 ## Remaining verification
 
 The branch contains the current local `origin/main` (`976b53db0`), including

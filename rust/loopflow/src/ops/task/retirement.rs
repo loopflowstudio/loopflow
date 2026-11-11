@@ -180,32 +180,15 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
-    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
-        return Err(task_error("Retained PR-less checkout"));
-    };
-    if pr.branch != intent.branch {
-        return Err(task_error(
-            "Task delivery branch changed; retained checkout",
-        ));
-    }
-    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
-        return Err(task_error("Delivery is unresolved"));
-    }
-    let repo = crate::git::worktrees::main_repo_root(&super::repository_for_task(store, task)?)?;
     let checkout = Path::new(&intent.checkout);
     let _mutation = checkout
         .is_dir()
         .then(|| super::lock_task_pr_mutation(checkout))
         .transpose()?;
-    // Prepare before closing anything. This preserves primary/persistent and
-    // changed committed refs while allowing uncommitted files to be discarded.
-    let deletion = crate::ops::wt::prepare_task_retirement(
-        &repo,
-        &intent.branch,
-        pr.head_sha()
-            .ok_or_else(|| task_error("Merged PR has no recorded head"))?,
-        checkout,
-    )?;
+    // A closed Task ends its conversations whether or not its checkout can go.
+    // Only checkout deletion needs merged delivery; a retained checkout keeps
+    // its files and commits and reports why on every pass.
+    let deletion = prepare_deletion(store, task, &intent).await;
     if let Err(error) = require_settled_work(store, task) {
         store
             .sqlite
@@ -231,6 +214,7 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
             .map_err(task_error)?;
         return Ok(());
     }
+    let deletion = deletion?;
     if !crate::desktop::shells::jobs_settled(&store.sqlite, &task.id).map_err(task_error)? {
         return Err(task_error(
             "Shell owner ended without confirmed job cleanup; retained checkout",
@@ -252,6 +236,34 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .retirement_progress(&intent, "retired", None)
         .map_err(task_error)?;
     Ok(())
+}
+
+/// The checkout deletion merged delivery allows. Preparation keeps
+/// primary/persistent and changed committed refs and lets uncommitted files go.
+async fn prepare_deletion(
+    store: &SharedStore,
+    task: &Task,
+    intent: &TaskRetirement,
+) -> OpsResult<crate::ops::wt::BranchDeletion> {
+    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
+        return Err(task_error("Retained PR-less checkout"));
+    };
+    if pr.branch != intent.branch {
+        return Err(task_error(
+            "Task delivery branch changed; retained checkout",
+        ));
+    }
+    if super::completion_refusal(Some(&pr), &task.identifier).is_some() {
+        return Err(task_error("Delivery is unresolved"));
+    }
+    let repo = crate::git::worktrees::main_repo_root(&super::repository_for_task(store, task)?)?;
+    crate::ops::wt::prepare_task_retirement(
+        &repo,
+        &intent.branch,
+        pr.head_sha()
+            .ok_or_else(|| task_error("Merged PR has no recorded head"))?,
+        Path::new(&intent.checkout),
+    )
 }
 
 fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {

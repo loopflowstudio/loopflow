@@ -340,3 +340,15 @@ identity, and capture again after startup settles. Attachment at the sign-in
 screen does not establish authenticated conversation behavior. Stop native
 servers and their terminal descendants, including detached owners recorded in
 the private store.
+
+## Task conversation lifetime
+
+`cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
+writes a private Machine whose `bin/claude` stand-in echoes each line; its
+printed environment holds `LF_HOME`, the provider homes and `PATH`. Attach the
+Task's Session in a PTY with `lf session resume <session>`, type a line without
+Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
+schedules cleanup in a private home; call `lf task retire <task>` once a minute
+yourself (the installed `com.loopflow.cleanup` job does the same). After
+`lf task complete`, it ends the owner once fifteen minutes have passed without
+a viewer.

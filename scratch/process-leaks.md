@@ -42,3 +42,23 @@ Checks:
   removes the observer child and its pipe; other pipe-inheritance fixes remain.
   `scripts/test_desktop.sh --skip-build --filter 'ProgramStatusTests|UninheritedPipeTests'`
   — 15 passed after `swift build --build-tests --package-path swift`; no rerun needed for sync.
+
+## Concept review (2026-11-10)
+
+Next implement direction, settled by the design:
+
+- One reaper. `rust/loopflow/tests/README.md` says to copy `transport_tests`'
+  `Fixture` Drop into new fixtures; that makes N copies of "end what my store
+  recorded". Move it to `loopflow-test-support` as a function of a home path
+  and the test `lf` path, call it from `Fixture::drop`, and have the README
+  name the function instead of "copy it".
+- `Pipe.uninherited()` covers every Desktop `Pipe()` today, but a new `Pipe()`
+  reintroduces the leak silently. Panes are forked by GhosttyKit, so the
+  one-place fix (pane children start with only their PTY) is not ours to make.
+  Leave the call-site form; no lint.
+
+Open product choice (returned Blocked): which input holds an owner. 78 of ~100
+resident owners are held by `native input`, and `Uncertain` clears only through
+`clear_owner_input`, so one stray key holds an owner until someone resumes it.
+Counterexample to "arrows aren't a draft": Up in Claude recalls the previous
+prompt into the editor, which is a draft on screen.

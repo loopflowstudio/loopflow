@@ -6,6 +6,8 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; acquisition supplies observations without proposing a second write.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -161,6 +163,14 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     }
     let repo = std::path::Path::new(repository);
     let team = super::planning_client::repository_scope(repo)?;
+    let mut scopes = HashMap::from([(repo.to_path_buf(), Some(team.clone()))]);
+    let mut same_scope = |repo: &Path| {
+        scopes
+            .entry(repo.to_path_buf())
+            .or_insert_with(|| super::planning_client::repository_scope(repo).ok())
+            .as_ref()
+            == Some(&team)
+    };
     let mut live = Vec::new();
     let mut finished = Vec::new();
     let waves: Vec<_> = store
@@ -168,20 +178,11 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         .await
         .map_err(message)?
         .into_iter()
-        .filter(|wave| {
-            super::planning_client::repository_scope(std::path::Path::new(wave.repo()))
-                .ok()
-                .as_ref()
-                == Some(&team)
-        })
+        .filter(|wave| same_scope(Path::new(wave.repo())))
         .collect();
     for task in store.list_tasks(None).await.map_err(message)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
-        if super::planning_client::repository_scope(&task_repo)
-            .ok()
-            .as_ref()
-            != Some(&team)
-        {
+        if !same_scope(&task_repo) {
             continue;
         }
         let Some(issue) = task.linear_id else {

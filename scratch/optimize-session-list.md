@@ -258,3 +258,11 @@ Gate owns wider Session/Task and planning suites; measure owns frozen full-JSON
 comparisons and attribution before retaining a performance claim.
 
 - Capacity: `cargo test -p loopflow --lib task_detail_reads_capacity_once_for_all_sessions` passed (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. LF variables unset, stdin closed; existing oversized unwind-table linker warning only. Initial test-counter compile failure used an unstable Cell API, replaced before this pass.
+
+- Scope: `cargo test -p loopflow --lib linear_scope_reads_each_repository_once_and_refreshes_next_check` passed (1), covering one resolution per repository, failed resolutions, live/finished selection and next-check config edits. Fixture borrow and column-name errors were corrected before this pass.
+- `cargo test -p loopflow --lib linear_on_demand_adopts_new_open_issues_without_allocating_execution` passed (1).
+- Scope fix: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; LF variables unset and stdin closed. Existing oversized unwind-table linker warning only.
+
+Remaining: measure both candidates against `761c28056` on sealed private stores,
+including complete JSON comparisons. No iteration-3 wall-time verdict yet.
+`scratch/loo-822.md` stayed byte-identical to the start of this iteration.

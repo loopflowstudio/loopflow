@@ -7,7 +7,7 @@ struct ServerProtocolTests {
         .deletingLastPathComponent().deletingLastPathComponent()
 
     private func fixture(_ name: String) throws -> Data {
-        try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
+        try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
     /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
@@ -396,7 +396,7 @@ struct ServerProtocolTests {
     @Test func everyFixtureIsMirrored() throws {
         let client = try arms("ClientMessage", tag: "type", of: schema())
         let tests = try source("swift/LoopflowTests/ServerProtocolTests.swift")
-        let directory = root.appendingPathComponent("tests/fixtures/dto/server")
+        let directory = root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server")
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             let name = url.deletingPathExtension().lastPathComponent
             let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])

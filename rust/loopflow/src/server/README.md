@@ -45,7 +45,7 @@ socket and its directory are private; remote proxies must never forward this
 endpoint. Remote admission is outside this revision.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
-mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
+mirrors them. Executable fixtures live in `rust/loopflow/tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
 
 `lf server describe --json` prints the protocol as one JSON Schema, generated

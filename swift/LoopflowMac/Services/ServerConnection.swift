@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Loopflow
+import Observation
 
 /// A surface's live presentation; it conveys no Session authority.
 struct ServerConnectionReading: Decodable, Equatable {
@@ -13,6 +14,14 @@ struct ServerConnectionReading: Decodable, Equatable {
     enum CodingKeys: String, CodingKey { case generation, state, input, message, transition; case nativeReady = "native_ready" }
     let message: String?
     let transition: ProviderTransition?
+
+    var attachment: DesktopOpening.Status {
+        switch state {
+        case .connecting, .moving, .reconnecting: .opening
+        case .unavailable, .ended: .failed
+        case .connected: !input ? .elsewhere : nativeReady ? .usable : .opening
+        }
+    }
 
     static let openingTitle = "Opening… Input paused."
     var acceptsInput: Bool { state == .connected && input && nativeReady }
@@ -32,6 +41,7 @@ struct ServerConnectionReading: Decodable, Equatable {
 }
 
 @MainActor
+@Observable
 final class ServerConnection {
     private let channel = Channel()
     var directory: URL { channel.directory }

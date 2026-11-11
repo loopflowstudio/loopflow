@@ -1,16 +1,12 @@
 # LOO-809
 
-At November 10 18:20 UTC, `lf open --host desktop --file docs/server.md --file
-rust/loopflow/src/server/README.md` reported both files opening in Loopflow
-Desktop. At 18:56, 19:33, 20:10, 20:47, 21:23, 22:00, 22:37, 23:14 and 23:51 UTC,
-and November 11 00:26, 01:02 and 02:12 UTC, the same command failed:
-`Error: Desktop did not answer within 10 seconds. Inspect again before retrying.`
-Visual inspection remains for QA. No product question is open.
+Visual inspection remains for QA; it does not block headless work. No product
+question is open.
 
-At November 11 02:49, 04:16, 04:53, 05:28, 06:04, 06:40, 07:16 and 07:52 UTC,
-the same command returned:
-`No Desktop Files view attached; nothing opened.` Both docs remain at their
-paths; the existing text needs no further change in this docs step.
+At November 11 07:52 UTC, `lf open --host desktop --file docs/server.md --file
+rust/loopflow/src/server/README.md` returned:
+`No Desktop Files view attached; nothing opened.`
 
-Earlier opening results and exact errors are in
-`811c6b703480f05513897ea264b44b2ecd72aeaf:scratch/questions.md`.
+The November 10 opening report, subsequent timeouts and repeated unattached-view
+results are in `578aff17ccb214ff9648153b5eb85802df62470f:scratch/questions.md`.
+Keep the latest result here; the repeated attempts do not change the QA work.

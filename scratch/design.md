@@ -25,9 +25,8 @@ with PR settlement not armed.
 
 Implementation and delivery wait for LOO-718 to land; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope.
-No product decision is missing; Desktop visual inspection remains for QA and
-does not hold up headless work. The absent remote transport prevents the
-authenticated connection acceptance checks.
+The absent remote transport prevents the authenticated connection acceptance
+checks. Desktop QA status is in `questions.md`.
 
 Earlier status reads and inspection references are in
 `1325549f96cb65e22e580d1e35095296fd43d5c0:scratch/design.md`, including the
@@ -63,7 +62,6 @@ the running-owner prerequisite and missing-owner error beside the remote example
 The phone overview keeps connection steps; the server README owns protocol
 details and shared owner recovery, avoiding duplicate contracts. The inspected
 transport speaks revision 5: update the remote example's `hello`/`welcome`
-anchor from revision 4 when integrating it. Desktop opening results are in
-`questions.md`.
+anchor from revision 4 when integrating it.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

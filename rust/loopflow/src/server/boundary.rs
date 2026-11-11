@@ -64,9 +64,10 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     };
-    let thread = callback["session_id"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Provider callback names no native conversation"))?;
+    // OpenCode's turn end names no conversation: it records no turn, and
+    // still confirms, refreshes planning and applies a pending move.
+    let thread = callback["session_id"].as_str();
+    let no_thread = || anyhow!("Provider callback names no native conversation");
     let event = callback["hook_event_name"]
         .as_str()
         .unwrap_or("SessionStart");
@@ -82,6 +83,7 @@ pub(super) fn answer(
             .as_array()
             .zip(callback["session_crons"].as_array())
             .map(|(tasks, crons)| tasks.len() + crons.len());
+        let thread = thread.ok_or_else(no_thread)?;
         store.record_native_turn(adapter, thread, yielded, open_tools)?;
         if let Some(prompt_id) = callback["prompt_id"].as_str().filter(|id| !id.is_empty()) {
             let prompt = if yielded {
@@ -107,6 +109,7 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     }
+    let thread = thread.ok_or_else(no_thread)?;
     let (steers, waiting) =
         claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
     Ok((SessionBoundaryAnswer { steers, waiting }, None))
@@ -497,6 +500,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gaps, 1);
+    }
+
+    /// OpenCode reports a managed turn end with no callback body.
+    #[test]
+    fn a_turn_end_naming_no_conversation_still_confirms_and_leaves_work_for_after() {
+        let (_home, store, adapter, delivery) = fixture();
+        store
+            .save_session_steer("session", "Fixture author", "PRINTED_BEFORE")
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t"}),
+        );
+        let printed = answer(&store, &tool).unwrap().0.steers.unwrap().batch;
+        let mut stop = boundary(
+            BoundaryMoment::Stop,
+            &adapter,
+            &delivery,
+            serde_json::json!({}),
+        );
+        stop.printed = vec![printed];
+        let (answered, after) = answer(&store, &stop).unwrap();
+        assert_eq!(answered.steers, None);
+        assert_eq!(after.unwrap().session.as_deref(), Some("session"));
+        assert_eq!(
+            store.session_steers("session", 0, 8).unwrap().items[0].evidence,
+            "emitted"
+        );
+        let bare_tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({}),
+        );
+        assert!(answer(&store, &bare_tool).is_err());
     }
 
     #[test]

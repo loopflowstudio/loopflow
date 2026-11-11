@@ -300,6 +300,16 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
+Only managed launches (`--task`, `--wave`, `resume` of their Sessions) get turn
+hooks and the server check; plain `lf -b <skill>` gets the start and compact
+hooks only, and plain `lf -i` keeps turn hooks without the check. Real OpenCode
+answers with no login (its free `opencode/big-pickle` model), so
+`lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
+its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
+The model runs tools in the checkout, so keep it disposable and stop the
+`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model
+key; a private home has none.
+
 A Task launch with no server runs `lf install server`, which registers
 `com.loopflow.server.<hash>` for the private home; boot it out with the label in
 `$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the

@@ -1,66 +1,102 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-821 QA: hooks call the Machine server</title>
+<meta charset="utf-8">
+<title>LOO-821 QA: bare and managed hooks</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#222}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
 pre{background:#f6f6f4;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:4px}
 table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px solid #ddd;padding:.3rem .5rem;text-align:left;vertical-align:top}
-.ok{color:#17702d;font-weight:600}.no{color:#a33;font-weight:600}
-</style></head><body>
-<h1>LOO-821 QA: managed Sessions' hooks call the Machine server</h1>
-<p>Branch build <code>lf 0.15.3+6c7acde28</code>, private Machine at <code>/tmp/lf-qa-821</code> (own <code>HOME</code>, <code>LF_HOME</code>, Claude config,
-fake Keychain), a fresh repository with a bare local origin and <code>planning: {provider: git, personal: true}</code>.
-The provider is a stand-in <code>claude</code> that reads lf's <code>--settings</code> and runs each installed hook command with Claude's callback JSON,
-one turn per marker file, sampling <code>lsof loopflow.db</code> while each hook runs. Drivers are in <code>scratch/qa/</code>.
-Everything else is the real CLI, the real server under launchd, and the real hook commands.</p>
+.ok{color:#17702d;font-weight:600}.no{color:#a33;font-weight:600}.fix{color:#8a5a00;font-weight:600}
+</style>
+
+<h1>LOO-821 QA: bare launches, managed launches, OpenCode and Pi</h1>
+
+<p>Second pass, on <code>lf 0.15.3+b47fa2add</code>, after the bare/managed split landed. The private Machine is
+<code>/tmp/lf-qa-821</code>: its own HOME, LF_HOME and Claude config, a disposable repository with a Task checkout
+(<code>a9368e</code>), and the real server under a private launchd label. Claude is a stand-in that runs each installed hook
+command with Claude's callback JSON and samples <code>lsof loopflow.db</code> while it runs. <b>OpenCode is real</b>: its free
+<code>opencode/big-pickle</code> model answers with no login. Drivers are in <code>scratch/qa/</code>.</p>
 
 <h2>Results</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th><th></th></tr>
-<tr><td>A. Skill with no Task, no server (<code>lf -b -a claude skill qa-proof</code> on main)</td>
-<td>7 hooks (start, 2×prompt/tool/stop), all exit 0, 0.32–0.49 s each. One gap line for the conversation:
-<code>Loopflow server unavailable; check `lf server status` …: No such file or directory</code></td><td class="ok">works</td></tr>
-<tr><td>B. Task launch, no server (<code>lf -i -a claude skill qa-proof</code> in the Task checkout)</td>
-<td>Launch ran <code>lf install server</code>; launchd gained <code>com.loopflow.server.0d99b6f9fdeb7a88</code> running the branch <code>lf server run</code>;
-<code>lf server status</code> → <code>ready:true</code>; then the agent started. Whole launch 3 s.</td><td class="ok">works</td></tr>
-<tr><td>C1. Server up, steer between turns</td>
-<td><code>lf session steer</code> → pending. Turn 1's UserPromptSubmit printed <code>&lt;lf:steers batch="278c96ff…"&gt; … QA_STEER_ONE</code>; the next hook named the batch and
-<code>lf session steers --json</code> showed <code>"evidence": "emitted"</code>. Hooks 0.34 s. During every hook the only process holding <code>loopflow.db</code>
-was the Session's own <code>lf session serve</code> owner (PID 33668); no hook <code>lf</code> opened the store.</td><td class="ok">works</td></tr>
-<tr><td>C2. Server frozen (SIGSTOP) during a turn, steer pending</td>
-<td>Prompt, tool, stop hooks each exit 0 after 2.15–2.19 s, empty context. One gap line:
-<code>Loopflow server did not welcome the connection within 2s</code>. Steer stayed <code>pending</code>.</td><td class="ok">works</td></tr>
-<tr><td>C3. Server thawed, next turn</td>
-<td>Prompt hook delivered QA_STEER_TWO; history gained <code>{"first_miss":1794375612,"last_miss":1794375616,"source":"store-gap"}</code>.</td><td class="ok">works</td></tr>
-<tr><td>C4. Server stopped (<code>launchctl bootout</code>), another turn</td>
-<td>Hooks exit 0 in 0.35–0.40 s; one new gap line. <code>lf session steers</code>:
-<pre>authenticated provider callback observed; output acceptance unconfirmed; 1 pending
-Loopflow server unavailable; check `lf server status` and the selected installation. Steers wait and turns go unrecorded until it runs.</pre></td><td class="ok">works</td></tr>
-<tr><td>D1. Resume the Task Session with no server</td>
-<td><code>lf resume &lt;session&gt;</code> re-registered the launchd server; the start hook delivered QA_STEER_FOUR (<code>uncertain</code> until the next hook confirmed it).</td><td class="ok">works</td></tr>
-<tr><td>D2. Printed, never confirmed ("arrive twice")</td>
-<td>Prompt hook printed QA_STEER_FIVE in batch <code>54d5c243</code>; the stand-in deleted <code>.printed</code> and waited 3 s; the tool hook got QA_STEER_FIVE again in a new batch <code>a6fe6da4</code>, then <code>emitted</code>.</td><td class="ok">works</td></tr>
-<tr><td>D3. Branch hooks beside the installed 0.15.2 server</td>
-<td>Hooks exit 0 in 0.33 s; gap line <code>this server has no operation `session.boundary`; update the selected installation</code>; steer stays pending.</td><td class="ok">works</td></tr>
+<tr><td>A. Bare headless skill on main, server down<br><code>lf -b -a claude qa-proof</code></td>
+<td>Settings carried exactly two hooks: <code>SessionStart startup|resume|clear → --moment start</code> and
+<code>SessionStart compact → --moment compact</code>. Start hook 0.37 s, exit 0. The hook PID never held the store (holders were
+the launcher and its owner). No gap line, no launchd job.</td><td class="ok">works</td></tr>
+<tr><td>B. Bare headless in the Task checkout</td>
+<td>Stops before the agent: <code>no eligible managed claude account: a connected managed account is required by this execution
+boundary</code>. This is the account boundary, as in the first pass, and unrelated to the hook split.</td><td>not reached</td></tr>
+<tr><td>B′. Bare interactive in the Task checkout, server down<br><code>lf -i -a claude qa-proof</code></td>
+<td>All six hook events installed (kept while an owner holds the Session). Hooks 0.35 s each, exit 0. No server started.
+One gap line: <code>session boundary: Loopflow server unavailable … Connection refused</code>.</td><td class="ok">as built</td></tr>
+<tr><td>C1. Managed launch, server down<br><code>lf -i --task a9368e -a claude qa-proof</code></td>
+<td>The launch registered <code>com.loopflow.server.0d99b6f9fdeb7a88</code>; server ready 2 s into the launch. Start hook delivered
+three pending Task steers including <code>QA_STEER_MANAGED</code>; all three became <code>emitted</code>. Hooks 0.33–0.58 s; only
+the Session owner held the store.</td><td class="ok">works</td></tr>
+<tr><td>C2. Steer between turns, then server booted out</td>
+<td><code>QA_STEER_MID</code>, posted while turn 2 was held, arrived in turn 2's prompt hook. After <code>launchctl bootout</code>,
+turn 3's hooks exited 0 in 0.48–0.56 s with one gap line.</td><td class="ok">works</td></tr>
+<tr><td>C3. Resume the managed Session, server down<br><code>lf -i resume session_2bb2…</code></td>
+<td>Server re-registered; start hook delivered <code>QA_STEER_DOWN</code> (posted while it was down); <code>emitted</code>.</td><td class="ok">works</td></tr>
+<tr><td>C4. Server SIGSTOPped during a turn</td>
+<td>Prompt, tool and stop hooks each exited 0 after 2.2–2.7 s. One gap line: <code>did not welcome the connection within 2s</code>.
+After SIGCONT the next turn's hooks took 0.7 s.</td><td class="ok">works</td></tr>
+<tr><td>D1. Real OpenCode, bare headless<br><code>lf -b -a opencode qa-proof</code></td>
+<td>The model ran 20 steps; the plugin's <code>context</code> hook ran on each one and added lf's context. No server call, no gap line,
+no turn-end report.</td><td class="ok">works</td></tr>
+<tr><td>D2. Real OpenCode, managed<br><code>lf -i --task a9368e -a opencode : 'Reply with one short sentence.'</code></td>
+<td>Server came up; the model's reasoning quoted <code>QA_STEER_OPENCODE</code>, so the steer reached it. Then, at the turn end:
+<pre>Server request failed … error=Provider callback names no native conversation
+recording gap: session boundary: Provider callback names no native conversation</pre>
+That Session's six delivered steers stayed <code>uncertain</code>. They would have gone back to pending and arrived again on the
+next prompt.</td><td class="no">broken → fixed</td></tr>
+<tr><td>D2 again, after the fix</td>
+<td>Same command: <code>QA_STEER_OC2</code> delivered, no gap line, all 7 steers <code>emitted</code>.</td><td class="ok">works</td></tr>
+<tr><td>E. Pi</td><td><code>No API key found for the selected model</code>. A private home has no Pi credential.</td><td>not reached</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p>Nothing in the product. Two driver mistakes, corrected: the stand-in waited for a second stdin line that only <code>-c</code> sends; and one
-<code>lf comment</code> ran from inside the loopflow checkout, so it resolved loopflow's Linear planning and asked for a Linear credential
-(the same command from the Task checkout works on the branch and on 0.15.2). The repository's qa skill gained a "Turn and tool hooks" section with the working steps.</p>
+<p class="fix">OpenCode's and Pi's managed turn end failed at the server.</p>
+<p>Both plugins call <code>__context-block --moment stop</code> with no callback body (<code>context_opencode.js</code> uses
+<code>stdio: "ignore"</code>; <code>context_pi.mjs</code> sends <code>{}</code> on <code>agent_settled</code>). On main,
+<code>emit_block</code> took a Stop with no <code>session_id</code> to mean "no turn evidence" and still refreshed planning.
+<code>server/boundary.rs::answer</code> asked for the native thread before checking the moment, so every OpenCode and Pi turn end
+logged a gap and skipped steer confirmation, the planning refresh and any pending Session move. Now only turn evidence and steer
+claims need the thread. Test:
+<code>a_turn_end_naming_no_conversation_still_confirms_and_leaves_work_for_after</code>. Live before and after: D2 above.</p>
+<p>The qa skill's "Turn and tool hooks" section now covers the bare/managed split, OpenCode's free model as a real provider,
+and why Pi isn't reachable here.</p>
+
+<h2>Checks</h2>
+<pre>cargo test -p loopflow --lib server::boundary::        7 passed            (this step)
+cargo clippy -p loopflow --lib --tests -- -D warnings   clean               (this step)
+cargo clippy --all-targets, context_launch_tests, harness::                 gate</pre>
 
 <h2>Not reached</h2>
 <ul>
-<li>A real Claude turn: the private home has no Claude login, and headless Task-checkout launches require a managed login. The stand-in runs the installed hook commands, so the lf side is real; Claude's own hook scheduling and timeouts are not.</li>
-<li><code>lf --machine M</code> Task work on a remote Machine: no reachable Machine with this build (<code>mini</code> has 0.15.1).</li>
-<li>Two tool hooks finishing together (<code>waiting: true</code>): the stand-in runs hooks serially; <code>server::boundary</code> unit tests cover it.</li>
-<li>Linux <code>systemctl --user</code> lingering after logout.</li>
+<li>A real Claude or Codex turn: the private home has no login. The stand-in runs the real hook commands, so lf's side is real;
+the provider's own hook scheduling isn't.</li>
+<li>Pi's extension end to end: no model key. The stop fix covers its call shape, and <code>pi-event</code> still opens the store,
+as the design notes.</li>
+<li>Bare headless in a Task checkout: blocked by the managed-account rule (B).</li>
+<li><code>lf --machine M</code> Task work on a remote Machine, and Linux <code>systemctl --user</code> lingering.</li>
 </ul>
 
-<h2>Still worth a look</h2>
-<ul>
-<li>A Task launch beside a server running another executable (D3's 0.15.2 server) is allowed to start, by design (the launch probes with the hook's hello, not <code>lf server status</code>), and then every boundary of that conversation is a gap. The gap line says to update the installation; nothing at launch says so.</li>
-<li>Task work from a private <code>LF_HOME</code> leaves a launchd job for that home (<code>KeepAlive</code>, <code>RunAtLoad</code>) until booted out, as the design notes accept.</li>
-<li><code>lf session steer</code> run from outside the Task's repository records author "attribution unresolved"; from the Task checkout <code>lf comment</code> records "QA". Not specific to this branch.</li>
-</ul>
-</body></html>
+<h2>Still worth a look, worst first</h2>
+<ol>
+<li><b>The private server was SIGKILLed during an OpenCode resume, cause unknown.</b> At 11:20:44 <code>lf -i resume</code> of the
+OpenCode Session started. At 11:21:09 launchd reported the running server (pid 98846, same binary) exited with -9 and started
+pid 22674. Nothing in <code>lf.log</code> or <code>server.log</code> says why. One path that fits: <code>installation::server::ensure</code>
+passes <code>replace = listening</code>, so a server that is listening but not <code>ready</code> gets <code>kickstart -k</code>.
+<code>status()</code> reports not ready when its 10 s handshake times out, and the 15-minute load average was 141 at the time. If
+that's the cause, a managed launch on a loaded Machine kills the server under every live Session. A repeat with a Claude Session
+at load 75 kept the same server PID.</li>
+<li>A new Session on a Task receives every steer the Task's other Sessions already got, under the same steer IDs
+(<code>steers.rs::reconcile</code>: Task steers apply to each member Session). This was true before this branch. Over a Task's
+life the start context grows by one block per comment.</li>
+<li>OpenCode writes a new <code>context-manifest.md</code> under <code>.lf/prompts/</code> on every model step: 20 files in 40 s
+for D1. That's the <code>context</code> hook from before this branch.</li>
+<li>Task work from a private <code>LF_HOME</code> leaves a KeepAlive launchd job for that home until it's booted out
+(the design accepts this).</li>
+</ol>

@@ -144,6 +144,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## macOS traps
 
+- The runner stops at sustained `syspolicyd` pressure, which can last as long
+  as other checkouts keep compiling. Run its printed Rust plan by hand (build,
+  the `nextest` line with the same `-E` filter, clippy), then each suite's
+  command, and record that the runner's pressure stop was bypassed.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
@@ -154,6 +158,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   and Graph fixtures see every installed harness ("No agent selected"). Rerun
   such failures from the built binary in an empty directory with a temp `HOME`
   and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  Fixtures that place a Task also read the Machine's `~/.lf/config.yaml`
+  unless `LF_HOME` is set (the OS supplies the real home); one rewritten by a
+  newer `lf` fails them with "unknown or ineligible setting". Set a temp
+  `LF_HOME` too.
   The test constructor supplies its private home with a fixture Git identity;
   repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
   repair a test: it hides missing setup in that private home.

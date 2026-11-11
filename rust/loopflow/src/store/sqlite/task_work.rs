@@ -54,9 +54,16 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
+/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
+/// that cwd or one of its ancestors as its worktree, so candidates come from
+/// `idx_tasks_worktree` rather than every Task; membership then decides.
 pub(super) fn session_tasks(session: &str) -> String {
     format!(
-        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
+        "SELECT tw.id FROM tasks tw WHERE (tw.id={session}.task_id OR tw.worktree IN (
+         WITH RECURSIVE up(path) AS (SELECT rtrim({session}.cwd,'/')
+           UNION ALL SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT path FROM up UNION ALL SELECT path||'/' FROM up))
+         AND {} ORDER BY tw.id",
         session_membership(session)
     )
 }
@@ -559,8 +566,9 @@ impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
-            session_membership("a")
+            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
+             WHERE a.id=?1 ORDER BY tw.id",
+            session_tasks("a")
         ))?;
         let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
         rows.map(|row| {

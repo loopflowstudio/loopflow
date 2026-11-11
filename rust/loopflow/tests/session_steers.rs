@@ -285,6 +285,174 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     );
     assert!(!home.path().join("startup-complete").exists());
 }
+/// A Task checkout with a connected account, a Claude stand-in that marks
+/// `provider-started` (and `provider-resumed` for `--resume`), and an `LF_BIN`
+/// whose `lf install server` fails, so no Machine server can start.
+struct InteractiveTask {
+    repo: TestRepo,
+    home: tempfile::TempDir,
+    lf: std::path::PathBuf,
+}
+
+impl InteractiveTask {
+    fn new() -> Self {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let _task =
+            support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        connect_fixture_account(home.path(), &store);
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
+        fs::write(
+            bin.join("claude"),
+            "#!/bin/sh
+[ \"$1\" = --version ] && { echo fixture; exit 0; }
+touch \"$LF_HOME/provider-started\"
+for arg in \"$@\"; do [ \"$arg\" = --resume ] && touch \"$LF_HOME/provider-resumed\"; done
+exit 0\n",
+        )
+        .unwrap();
+        let lf = home.path().join("lf");
+        fs::write(
+            &lf,
+            format!(
+                "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then\n  echo 'no supervisor here' >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+                env!("CARGO_BIN_EXE_lf")
+            ),
+        )
+        .unwrap();
+        for path in [bin.join("security"), bin.join("claude"), lf.clone()] {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        Self { repo, home, lf }
+    }
+
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        self.run_program(env!("CARGO_BIN_EXE_lf"), args)
+    }
+
+    fn run_program(
+        &self,
+        program: impl AsRef<std::ffi::OsStr>,
+        args: &[impl AsRef<std::ffi::OsStr>],
+    ) -> std::process::Output {
+        Command::new(program)
+            .env_clear()
+            .env("HOME", self.home.path())
+            .env("LF_HOME", self.home.path())
+            .env("LF_BIN", &self.lf)
+            .env("CLAUDE_CONFIG_DIR", self.home.path().join(".claude"))
+            .env("USER", "fixture")
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", self.home.path().join("bin").display()),
+            )
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .current_dir(self.repo.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    /// A Task whose Claude conversation launched beside a Machine server that
+    /// has since stopped.
+    fn launched_then_stopped() -> Self {
+        let task = Self::new();
+        let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
+        let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        drop(server);
+        task
+    }
+
+    /// The Session id and `open_argv` that `args --prepare --json` returns.
+    fn prepared(&self, args: &[&str]) -> (String, Vec<String>) {
+        let output = self.run(&[args, &["--prepare", "--json"]].concat());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (
+            record["id"].as_str().unwrap().to_string(),
+            serde_json::from_value(record["open_argv"].clone()).unwrap(),
+        )
+    }
+
+    fn marked(&self, name: &str) -> bool {
+        self.home.path().join(name).exists()
+    }
+}
+
+fn assert_names_missing_server(output: &std::process::Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Loopflow server is not running") && stderr.contains("lf install server"),
+        "{stderr}"
+    );
+}
+
+/// The same holds for a terminal launch: `lf -i --task` with Claude, whose
+/// native command carries no launch configuration, still checks the server.
+#[test]
+fn an_interactive_task_launch_with_no_machine_server_fails_naming_it() {
+    let task = InteractiveTask::new();
+    assert_names_missing_server(
+        &task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]),
+    );
+    assert!(!task.marked("provider-started"));
+}
+
+/// A Task resume is managed as its launch was: `lf -i --task X resume` of the
+/// Task's recorded Claude conversation, after the server stopped, fails naming
+/// it instead of continuing unrecorded.
+#[test]
+fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
+    let task = InteractiveTask::launched_then_stopped();
+    assert_names_missing_server(&task.run(&["-i", "--task", "INF-123", "resume"]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop opens a Task's conversation by preparing it, then running the
+/// returned `open_argv` in a terminal. A prepare naming the Task returns a
+/// command that resumes managed, so with the server stopped it fails naming it,
+/// as `lf resume --task` does.
+#[test]
+fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
+    let task = InteractiveTask::launched_then_stopped();
+    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    assert!(
+        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop's Task workspace reopens a pane that already has a Session by its
+/// id, naming the Task beside it: the id selects, the Task makes it managed.
+#[test]
+fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
+    let task = InteractiveTask::launched_then_stopped();
+    let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
+    assert!(
+        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
+    assert!(!task.marked("provider-resumed"));
+}
 
 #[test]
 fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {

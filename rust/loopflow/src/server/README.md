@@ -394,12 +394,13 @@ part of what a phone or bot client is offered.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task or Wave command names its Work: `lf task run`
-and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation, a
-Session bound with `lf session bind`. Every other launch is bare, including
+A launch is managed when a Task or Wave command starts it: `lf task run`
+and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation,
+`lf resume [ID] --task` or `--wave`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. `WorkSource::is_managed`
-answers this for every launch path.
+checkout; that run still counts toward the Task. The command decides
+(`Cli::names_work`) and sets `AgentConfig::managed` on the launch; nothing
+reads it back from the Session row.
 
 For a managed launch, and for any conversation opened in a terminal, Claude
 and Codex hooks run `lf __context-block --moment <moment>` at session start,
@@ -521,10 +522,10 @@ A server that has not yet reached this build answers `invalid {kind}` for
 ### OpenCode and Pi ask from inside the provider
 
 A managed OpenCode or Pi turn with a dozen tool calls starts no `lf` process
-at its boundaries. Two remain after launch: one `lf __context-block` after
-each compaction, and on Pi one long-lived `lf __context-block --moment
-task-updates` watcher per conversation, as Claude and Codex start from their
-session hooks. The plugin runs inside the provider's own long-lived process, so
+between model steps. Context rendering still starts `lf __context-block`:
+at OpenCode's first model request, at each Pi turn's first model request, and
+after compaction in either provider. The plugin runs inside the provider's
+own long-lived process, so
 at each boundary it does what a hook does without the process: it opens
 `machine.sock`, sends the `hello` a hook sends, makes one request and closes
 the connection when the answer arrives:
@@ -540,8 +541,8 @@ The request has the same fields, answer, deadline and steer confirmation as a
 hook's. Boundaries go to the server one at a time, in the order the provider
 reported them. The plugin keeps its open gap and the batches it printed in
 memory instead of the files beside the delivery file, and names them in the
-next request. At session start and after each compaction the plugin sends
-`start` or `compact`, then runs `lf __context-block` without
+next request. When context needs rendering, the plugin sends `start` or
+`compact`, then runs `lf __context-block` without
 `LF_PROVIDER_CONTEXT`, which renders the block from checkout files and asks no
 server; it reuses that block for every model request until the next one.
 

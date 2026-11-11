@@ -23,13 +23,14 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
+    /// A Task or Wave command's launch (`AgentConfig::managed`): it starts
+    /// only beside the Machine server.
+    pub(crate) managed: bool,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) context: Option<crate::context_block::ContextDelivery>,
-    /// A Task or Wave command named the launch's Work (`AgentConfig::managed`).
-    pub(crate) managed: bool,
     pub(crate) remote: Option<PathBuf>,
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
@@ -159,12 +160,12 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
+        managed: config.managed,
         input,
         program: harness,
         args,
         cwd,
         context: config.conversation_context.clone(),
-        managed: config.managed,
         remote: None,
         attachment: config.session_attachment.clone(),
     })
@@ -318,9 +319,6 @@ pub(crate) fn resolve_session_config(
             None
         },
         output_schema: cli.output_schema.clone(),
-        managed: session
-            .work_source
-            .is_some_and(crate::session::WorkSource::is_managed),
         ..Default::default()
     };
     let mut needs_execution_boundary = false;

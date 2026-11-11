@@ -152,12 +152,17 @@ one each.
 
 A launch is managed when it comes through a Task or Wave command, which is
 how Desktop opens a Task's or a Wave's conversation. A bare `lf` typed inside
-a Task's checkout stays bare and records the Task as its ancestry. One function answers this for every launch path:
-`WorkSource::is_managed`, over how the Session's Work was named. `declared`
-(`--task`, `--wave`, a step of `lf task run`, a Task or Wave conversation) and
-`bound` are managed; `checkout`, `inherited` (a child run started by a
-Session's agent, which that agent steers) and no Work at all are bare. Desktop adds no
-mark: an agent started from a Desktop shell is bare.
+a Task's checkout stays bare and records the Task as its ancestry. The
+command decides, not the Session row: `Cli::names_work` is true for
+`--task`, `--wave` (a Task or Wave conversation passes them), `lf resume
+--task`/`--wave` and a step of `lf task run`, and the launch carries it as
+`AgentConfig::managed`. Beside a Session id, `--task`/`--wave` make the
+resume managed and the id still selects: Desktop's Task and Wave workspaces
+prepare with `lf session resume [ID] --task X --prepare`, and the `open_argv`
+it gets back is `lf session resume ID --task X`. A Session link names no
+Work and opens bare. A child run started by a Session's agent, which that
+agent steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
+started from a Desktop shell is bare.
 
 Any `lf` run in a Task's checkout counts toward that Task: its usage and time
 roll up into the Task's cost. Design the bare path on the assumption that most
@@ -182,6 +187,11 @@ run ends with its parent.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.
+- How the server holds its store. Each `session.boundary` opens a connection,
+  and each open validates the whole migration history: 5 ms alone, and about
+  85% of a boundary's time when 50 Sessions take boundaries at once (p50
+  550 ms of 640 ms on a loaded Machine). Validating once per schema change, or
+  keeping connections, removes it.
 - Protocol negotiation between an `lf` and a server on another build. Today
   a server that speaks the same revision but lacks an operation welcomes the
   hook and answers `invalid {kind}`. Negotiation reuses the `hello`/`welcome`

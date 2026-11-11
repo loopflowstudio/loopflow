@@ -194,11 +194,12 @@ impl ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
+        let managed = config.managed;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner()?;
-        let mut child = super::agent_process::spawn(cmd, None, &owner)?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner, managed)?;
         drop(activation);
         let stdin = child
             .stdin

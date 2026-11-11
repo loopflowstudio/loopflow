@@ -802,3 +802,10 @@ QA's third-pass findings are fixed (qa.html); not yet re-QA'd by hand.
 Remaining: sync onto LOO-821's tip (three commits ahead, incl. e29031de4 on
 steers at Task Session start); then gate.
 Superseded explore candidates A–C: `a18d6a915:scratch/holder.md`.
+
+## Concept review, headless — November 11, 2026 (fifth)
+
+Since the fourth: `lf session list` offers a held Session one action, Open
+here or Reconnect (`lf resume`), with the labels the Detached rule already
+uses; Take back stays an owner's. Exit lines name the provider. Both follow
+"any number of views attach"; no design change, no open product choice.

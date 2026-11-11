@@ -137,88 +137,13 @@ kickoff probes above are recorded observations, not tests of these visions.
 These are correctness requirements for every candidate, not optional extras
 to trade against delivery time. Holder restart does not resurrect a process.
 
-### A — Move the loops
+### A, B, C — superseded
 
-One holder replaces per-Session owner processes; the server runs the existing
-viewer loop for each terminal, retaining its socket and controller behavior.
-Introduce a small held-terminal mapping (terminal id, holder process/build,
-child identity, Session, exit receipt); adapt the old endpoint resolver and
-handoff to it without pretending the mapping is an LfProcess.
-
-Appeal: most existing attach, input retry and viewer tests still apply.
-Cost: per-terminal server threads and sockets remain, and process-oriented
-transport signatures need adapters until later cleanup. Restart reconstructs
-every loop. This is the smallest viewer change, not a trivial thread move.
-
-### B — Model the held terminal
-
-The server owns a registry of held terminals keyed by a distinct TerminalId.
-Session -> TerminalId -> holder process + PTY; AgentProcess identifies the
-child, and launcher LfProcess records keep their existing provenance. Viewer
-tickets resolve the terminal in this registry. Preserve the viewer wire and
-single-controller rules, but dispatch its input/output directly to terminal
-state instead of bridging through another private socket per terminal.
-
-One server event loop schedules ready terminal work; bounded per-terminal
-queues prevent a noisy agent or stalled view delaying peers. The holder
-retains the small versioned byte protocol. Restart reconstructs terminal state
-from holder inventory and recording receipts, independently of viewer count.
-The registry is live state reconstructed from the store and receipts, not a
-second authoritative Work database.
-
-Appeal: process inventory describes real processes; one model supplies start,
-attach, recovery and exit. Cost: more transport extraction and DTO/schema
-migration now. Fair output draining, request attribution and cancellation need
-real tests. Current wire fields named owner_lf_process_id cannot secretly
-become TerminalIds: update the typed managed route and its consumers together;
-retain the current route only for Local owners until their separate removal.
-This does not take on every-view typing or size-policy changes.
-
-### C — Recover the working screen
-
-B plus a bounded server-side recovery journal: emulator checkpoints and the
-ordered output/resize events after them, all at known byte positions. The
-holder still keeps only a raw ring. After a server crash, combine the saved
-checkpoint and journal with the holder's ring before falling back to repaint.
-The ambition is returning to the same screen, modes and retained scrollback
-after a crash as well as an ordinary restart.
-
-Appeal: a conversation's working screen becomes recoverable, not just its
-provider process. Cost: continuous disk writes, terminal output retained on
-disk, retention limits, atomic checkpoints and crash/format migration tests.
-Neither a journal nor a snapshot can recover bytes overwritten while the
-server was offline. A new Ghostty revision may reject the checkpoint; a
-bounded suffix alone cannot rebuild arbitrary earlier terminal state. C must
-report that gap and repaint, or establish a portable checkpoint format as
-additional work. It cannot promise exact recovery universally.
-
-This is an expanded scope proposal, not required for LOO-824. Journal limits
-and retention policy would be designed before implementation; no numeric
-budget is selected by this page. The same single-controller behavior remains.
-
-### Recommendation and decisions still open
-
-Recommend **B**. The holder changes what owns a terminal; representing that
-directly avoids moving the old per-process assumptions into server threads.
-A remains reasonable if limiting the viewer refactor is the priority. C adds
-meaningful recovery at a substantial storage and protocol cost; defer it
-unless that experience is wanted now.
-
-1. Which cut should lead: **1a** move the loops; **1b** model held terminals;
-   **1c** expand to a recoverable working screen; or combine/revise them?
-2. When `lf resume SESSION` names an ended Task/Wave Session, should a new
-   process be **2a** managed, as kickoff proposes, or **2b** follow the entry
-   point (plain terminal bare; Task/Wave command or Desktop managed)? Attaching
-   to an already held terminal keeps that terminal in both cases. A bare
-   skill in a Task checkout remains bare in both cases.
-
-Before implementation, replace the candidate's slices with the selected cut.
-Regardless of cut, acceptance must cover ambiguous start replies (one child),
-store outage at child exit (receipt retained), old attachment settlement,
-Ghostty revision mismatch, ring overrun, and one Session exiting while another
-in the same holder remains active. Verify terminal modes with the production
-Ghostty emulator, not only text rows. Linux service replacement and macOS
-SMAppService unregister remain untested by the kickoff probe.
+A moved the owner loops into the server; B modeled the held terminal as a
+registry keyed by `TerminalId`; C added a disk recovery journal. B was taken
+(1b, below); the candidates' full text is at `a18d6a915:scratch/holder.md`.
+Question 2 (a fresh process for an ended Task/Wave Session: 2a managed, 2b
+by entry point) is answered under "Direction after explore".
 
 ### Competitor comparison — November 10, 2026
 
@@ -496,28 +421,14 @@ Status: all three built.
   `terminal_id`; tickets and `bridged` carry an owner or a terminal.
 - Relay by `Host`: `lf session attach --terminal ID`; a held view reconnects
   through the entrance by itself, draws nothing, discards input meanwhile.
-- `transport::managed` in `delegate`: a viewed launch is held when it is
-  `lf task run`, has `LF_SERVER`, or its Session belongs to a Task or Wave.
-  `start_held` is the client of `session.start`; the Task primary
-  conversation and `restore` use it. With no server a viewed launch fails;
-  the unviewed Task background conversation goes unstarted.
+- `transport::managed` in `delegate` (rule since replaced; see the last
+  Implementation section). `start_held` is the client of `session.start`;
+  the Task primary conversation and `restore` use it.
 
-Checks:
-
-- `cargo test -p loopflow --lib transport::registry`: 3 passed.
-- `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session
-  ops::task::retirement terminal_title`: 130 passed.
-- `cargo test -p loopflow --test transport_tests`: 105 of 107 before the
-  test below was updated; the other failure passed alone (timing).
-- `transport_tests resumed_session_completes_turns_after_build_replacement_and_viewer_return`:
-  passes with real binaries. A Task conversation moves to a held terminal,
-  the server is killed and started again mid-conversation, a new view
-  types the next turn into the same agent, and its exit is settled.
-- `cargo test -p loopflow --test session_lifecycle_tests`: 41 passed.
-- `cargo clippy -p loopflow --all-targets -- -D warnings`: clean.
-- Not run here: Swift tests (`ServerProtocol.swift` now encodes
-  `terminal_id: null` in `session.attach`),
-  Desktop suites, the full matrix. Gate/CI.
+Checks then: `resumed_session_completes_turns_after_build_replacement_and_viewer_return`
+passes with real binaries (Task conversation moved to a held terminal, server
+killed and restarted mid-conversation, next turn typed by a new view, exit
+settled). Pass counts from this and later passes are in git history.
 
 Found on the way: frames arriving with the holder's `reading` answer were
 left undecoded until more output came (fixed in `Source::read`). A test
@@ -538,21 +449,11 @@ does is in `transport/README.md` "Views".
   retained screen answers live queries until it is live.
 - A view continuing from a position gets no input hint again.
 
-Checks:
-
-- `cargo test -p loopflow --lib transport::registry transport::tests::a_catching`:
-  7 passed, including `a_view_continues_from_its_position_after_the_server_restarts`
-  (no snapshot, no position frame, out bytes equal the ring from `from`) and
-  `a_view_the_ring_no_longer_reaches_is_painted_afresh` (`from` before
-  `ring_start` and past `written`).
-- `cargo test -p loopflow --test transport_tests held_session_survives_server_restart`:
-  passes; with continuation disabled it fails showing the repaint.
-- `cargo test -p loopflow --lib -- transport:: holder:: ops::human_session terminal_title`: 129 passed.
-- `cargo test -p loopflow --test transport_tests`: 107 of 109; the two
-  build-replacement failures (`resume_takes_over_an_owner_from_another_build`,
-  `unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn`)
-  pass alone, as in the earlier pass (load timing). Gate reruns them.
-- `documented_commands::`: 4 passed. Clippy clean.
+Checks then: `held_session_survives_server_restart` fails showing the
+repaint with continuation disabled. `resume_takes_over_an_owner_from_another_build`
+and `unanswering_superseded_owner_preserves_uncertain_draft_and_pending_turn`
+(owner path) fail in full `transport_tests` runs under load and pass alone;
+gate reruns them.
 
 - Revision 5 (Rust `REVISION`/`MIN_REVISION`, Swift `ServerProtocol`,
   fixtures, server README); Swift `ServerMessage.bridged` decodes a
@@ -634,14 +535,8 @@ start-row paths). Graph steps receive the same handoff and name it too, as
 they sit under an owner. `require_settled_work` seeds its allowed set with
 `held_terminal_processes(terminal)`, as it seeds owners.
 
-Checks, each failing with the write removed:
-
-- `cargo test -p loopflow --test transport_tests a_graph_started_in_a_held_conversation_keeps_it`:
-  passed (fails "idle retention ended a conversation running a Graph").
-- `cargo test -p loopflow --lib ops::task::retirement::tests::`: 7 passed;
-  `retirement_ends_an_idle_held_conversation` fails "Process … still has live
-  or unresolved work" without it.
-- `cargo test -p loopflow --lib journal::`: 35 passed.
+Without the write, `retirement_ends_an_idle_held_conversation` fails
+"Process … still has live or unresolved work".
 
 ### Second pass, after the positions/queries/drawing steers — November 11, 2026
 
@@ -744,20 +639,11 @@ clean.
 Jack Heart ran `/concept-review` while run 1afadabb was on implement.
 [concept-review.html](concept-review.html). Proposals, none answered:
 
-- **Cross-build talk to the server.** After an install the holder, the
-  launcher beside each agent and every plain-terminal relay are still the old
-  build. The holder's protocol carries a revision; `held.sock` (viewer
-  frames, launcher control requests) was read without finding one
-  (`reconnect_held`, `wire.rs` header; not every handler was read). The gate
-  test restarts one binary. Proposed: a plain-terminal view that finds a
-  server of another build execs the installed `lf` as a view of the same
-  terminal from its position; an old launcher's unreadable report is a
-  recording gap. Test: install a build whose frames differ, mid-turn.
+- **Cross-build talk to the server.** Built as the `held.sock` revision
+  (last Implementation section).
 - Desktop Task shells as held terminals, so the owner has no caller left
   after LOO-820.
-- A managed launch gets the server ready itself before failing;
-  `lf task run` starts its Graph either way (troubleshooting.md and
-  sessions.md disagree today).
+- A managed launch gets the server ready itself before failing. Built.
 - Plain terminal while the server is away: title reads Reconnecting…, screen
   untouched.
 - One place listing the conversations a killed holder took.
@@ -770,38 +656,11 @@ recorded above and in `docs/dev/server-first.md`. troubleshooting.md and
 sessions.md now agree that a managed launch with the server stopped starts
 nothing.
 
-**Next implement direction: a versioned `held.sock` handshake.** The brief's
-demo is an install mid-turn with views reconnecting, and its rule is that a
-newer server speaks to an older holder. After that install every
-plain-terminal relay and every launcher control client is still the old
-build, speaking `held.sock` to the new server. Read today: `Named` is
-`{terminal}`, the answer is a bare `"hosted"`/`"waiting"`/`"ended"`
-(`registry::connect`), and neither carries a revision. When a later build
-changes that answer or the viewer frames, an old relay reads the line as noise.
-That error is not an `engine::Error`, so `reconnect_held` retries forever and
-the pane freezes while the agent runs. This answer has already changed once
-on this branch.
-
-- The first exchange is fixed for good: `Named` gains `revision` (the
-  sender's viewer-protocol revision), and the answer becomes
-  `{"answer":"hosted"|"waiting"|"ended","revision":N}`. Nothing after that
-  line is promised across revisions.
-- A plain-terminal relay that reads a different revision execs `lf` from the
-  path it was started from (now the installed build) as a fresh view of the
-  same terminal. A fresh view attaches and repaints from the server's
-  emulator. It does not resume by position, so the CLI gains no position flag.
-  If exec fails, it prints one line and exits. Desktop already handles skew
-  through the server protocol's `hello`.
-- A launcher control client that gets a different revision records a
-  `RecordingGap` and carries on. The agent and its turn never wait on it.
-- Test: a fixture server answering another revision. The relay's replacement
-  view receives a snapshot frame and reads live output, and the agent's
-  ticks continue across the switch.
-
-The other proposals from the session with a person (Desktop Task shells
-held, a managed launch readying the server, listing what a killed holder
-took) are still unanswered. They are additions beyond this cut and are not
-built here.
+**Next implement direction: a versioned `held.sock` handshake.** Built; see
+"Implementation — November 11, 2026" (direction text at
+`a18d6a915:scratch/holder.md`). Why: an old relay read a changed answer line as
+noise, not an `engine::Error`, so `reconnect_held` retried forever and the pane
+froze while the agent ran.
 
 ### Second round, against LOO-821/822/823 — November 11, 2026
 
@@ -810,25 +669,14 @@ progressed and the regenerate the concept-review". Read from their scratch
 plans and commits (PRs #1879, #1880, #1877); no run was messaged.
 [concept-review.html](concept-review.html). Unanswered:
 
-- **Two managed rules.** LOO-821 `WorkSource::is_managed` (Declared|Bound)
-  decides hooks, steers and its server check; this branch's
-  `transport::managed` decides holding (`task_run`, `LF_SERVER`, or the
-  Session has a Task/Wave). They differ on resume of a Checkout-attributed
-  Session (bare there, held here), on a Desktop conversation with no
-  Task/Wave (bare there, held here), and on a stopped server (821's
-  `require_server` runs readiness first; here `ServerMissing` at once).
-  Proposed: 821's rule and check are the one; `transport::managed` and
-  `ServerMissing` go. Open: is a Desktop conversation with no Task managed.
-- **Lifetime.** LOO-823's next pass deletes idle ending,
-  `end_detached_after`, `DetachedLimit`, `idle_retention` and the
-  native-input ledger; held terminals share `lifetime.rs`'s watcher
-  (e7198a3b7). Proposed: held terminals live until their scope closes or
-  the agent exits, no idle grace; sync onto 823 once it lands. 823's limit
-  suspension (input line from the server's emulator) is a follow-up.
-- Status reports read by the server for every held terminal (LOO-822 makes
-  availability come from them): proposed follow-up.
-- LOO-821's stale-server question is the same class as the `held.sock`
-  revision built here (d07928fef); proposed that hooks match it.
+- **Two managed rules.** LOO-821's `WorkSource::is_managed` (hooks, steers,
+  server check) and this branch's `transport::managed` (holding) differed on
+  a resumed Checkout Session, a Desktop conversation with no Task/Wave, and a
+  stopped server. Answered below.
+- **Lifetime.** LOO-823 deletes idle ending, `end_detached_after`,
+  `DetachedLimit`, `idle_retention` and the native-input ledger. Answered below.
+- Status read by the server for every held terminal (LOO-822 makes
+  availability come from it). Answered below.
 
 Jack Heart, after asking "what is managed vs eld?": "managed shoudl = held"
 
@@ -937,3 +785,7 @@ ops::human_session` 55 passed; `--lib -- transport::registry::` 10 passed
 after the last edit; `documented_commands::` 4 passed; clippy clean. Left
 for gate: Slice 0 mode probe, Swift/Desktop suites, Linux RunPod restart
 test, `session_lifecycle_tests`.
+
+Compress (November 11): `Handoff::connect` keeps one `LazyLock` gap;
+`Hosted::pass` got its doc back. `transport_tests -- a_held_view_meeting_another_build
+a_held_terminal_with_no_view a_held_conversation_has_no_idle` 3 passed; clippy clean.

@@ -31,7 +31,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -232,18 +232,14 @@ impl Handoff {
     /// A control connection to this execution's host. A server of another
     /// build is a recording gap: its reports go unrecorded and the agent goes on.
     fn connect(&self) -> Result<UnixStream> {
-        static GAP: Mutex<Option<crate::store::RecordingGap>> = Mutex::new(None);
+        static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
         let connected = self.owner.connect();
         let mut gap = GAP.lock().expect("control gap lock poisoned");
         match &connected {
-            Err(error) if error.is::<registry::OtherRevision>() => gap
-                .get_or_insert_with(Default::default)
-                .note("held terminal control", error),
-            Ok(_) => {
-                if let Some(gap) = gap.as_mut() {
-                    gap.recovered();
-                }
+            Err(error) if error.is::<registry::OtherRevision>() => {
+                gap.note("held terminal control", error)
             }
+            Ok(_) => gap.recovered(),
             Err(_) => {}
         }
         connected

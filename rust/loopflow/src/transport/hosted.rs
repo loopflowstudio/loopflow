@@ -419,7 +419,6 @@ impl Hosted {
         self.viewers.push(viewer);
     }
 
-    /// Serve every connection, move input and output, and judge the ending.
     /// The Program Status the execution's output reported, once it has a screen.
     pub fn program_status(&self) -> Option<&crate::program_status::Records> {
         self.output
@@ -427,6 +426,7 @@ impl Hosted {
             .map(|terminal| terminal.program_status())
     }
 
+    /// Serve every connection, move input and output, and judge the ending.
     pub fn pass(&mut self, child: &mut Child) -> Result<Pass> {
         let terminal = self.terminal;
         let child_pid = child.pid();

@@ -125,8 +125,9 @@ exit when the server returns; until then `lf session list` shows what it last
 knew.
 
 These conversations need the server. Opening one while it is stopped starts
-the server first; if it still does not answer, lf prints
-`Loopflow server is not running; run lf server status` and starts nothing.
+the server first; if it still does not answer, lf says
+`Loopflow server is not running`, with what starting it said, and starts
+nothing.
 No private process is started in its place. A Graph already running keeps
 going without it.
 

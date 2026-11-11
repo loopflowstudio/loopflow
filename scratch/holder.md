@@ -797,3 +797,13 @@ conversations remain Declared. LOO-821's scratch is left in git (top).
 After: clippy clean; `transport_tests` 7 passed (incl. LOO-821's
 `resumed_session_completes_turns_after_build_replacement_and_viewer_return`);
 `--lib` native_exit, agent_process, primary, moves 28 passed.
+
+## Concept review, headless — November 11, 2026 (fourth)
+
+All eight steers are built and recorded above; after the stack merge one
+predicate (`WorkSource::is_managed`, plus a Task run whose Session is not yet
+recorded) decides holding and hooks, and a managed launch readies the server
+before failing. `docs/sessions.md` quoted an error text `require_server` no
+longer prints; corrected. No design change, no open product choice. Waiting on
+other work, not on a choice: sync onto LOO-823 when it lands; LOO-830 for
+shells.

@@ -63,7 +63,8 @@ fn record_current(store: &SqliteStore, session: &str, moment: Moment) -> anyhow:
 /// Record the usage of each ended turn at the transcript's end; returns how
 /// many were written. A provider can report a turn's end before its
 /// transcript shows it, so the turn before is still due. One that began
-/// before the rows read shows part of its usage; the exit read has it whole.
+/// before the rows read shows only part of its usage, so it is left to the
+/// exit read, which has it whole.
 fn record_ended(
     store: &SqliteStore,
     session: &str,

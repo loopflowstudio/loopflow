@@ -2,6 +2,7 @@
 //! transcript. Raw conversations, provider processes open here that Loopflow
 //! is not holding, list beside the Sessions with what their transcript shows.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -66,25 +67,45 @@ fn close(
 
 /// Raw conversations open in `repo`, or anywhere when `None`. One a Session
 /// recorded, resumed outside Loopflow after that Session ended, keeps the
-/// Session's title.
+/// Session's title; one its Session wrote last is that Session's, not a raw
+/// process's.
 pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<SessionRecord>> {
     let open = crate::observe::raw_conversations();
     let recorded = store.sessions_of_provider_threads(
         &open
             .iter()
-            .map(|conversation| conversation.id.clone())
+            .flat_map(|directory| directory.ids())
+            .map(str::to_owned)
             .collect::<Vec<_>>(),
     )?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut summaries = HashMap::new();
+    for (thread, session) in &recorded {
+        if let Some(summary) = store.session_summary(session, now)? {
+            summaries.insert(thread.as_str(), summary);
+        }
+    }
+    let running =
+        |session: &crate::session::SessionSummary| super::is_running(super::session_state(session));
+    // Written no later than its Session ended; one that stopped with no end
+    // recorded, a failed launch, is taken for the Session's too.
+    let launched = |thread: &str, written: i64| {
+        summaries.get(thread).is_some_and(|session| {
+            running(session) || session.completed_at.is_none_or(|ended| written <= ended)
+        })
+    };
     let mut records = Vec::new();
-    for conversation in open {
+    for conversation in open
+        .iter()
+        .flat_map(|directory| directory.conversations(launched))
+    {
         let mut title = home_relative(&conversation.cwd);
         let mut title_source = SessionTitleSource::Generated;
-        if let Some(session) = recorded.get(&conversation.id) {
-            match store.session_summary(session, now)? {
+        if let Some(session) = summaries.get(conversation.id.as_str()) {
+            match session {
                 // Its Session lists it.
-                Some(session) if super::is_running(super::session_state(&session)) => continue,
-                Some(session) if !session.title.is_empty() => {
+                session if running(session) => continue,
+                session if !session.title.is_empty() => {
                     title = session.title.clone();
                     title_source = match session.title_source {
                         crate::session::TitleSource::Human => SessionTitleSource::Human,

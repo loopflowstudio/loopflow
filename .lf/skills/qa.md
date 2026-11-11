@@ -313,6 +313,16 @@ Claude process's conversation. Run a second `claude` and an lf run in the same
 directory to check pairing. Codex's first-run trust prompt writes into the real
 `~/.codex/config.toml`; quit it unless that write is acceptable.
 
+Plain `pi` and `opencode` need no trust answer and list the same way. A
+headless `lf -b -a pi : '<prompt>'` (or `opencode`) in the raw process's
+directory checks pairing against an lf-written conversation and writes
+`usage` rows with `cost_usd`. OpenCode's default headless model may fail
+upstream; name one that answered interactively, `-a opencode:opencode/<model>`.
+`pi --session <file>` resumes a recorded Pi conversation raw. To learn
+which filesystem events a provider home really sends, a throwaway ignored
+test holding a `notify` watcher on it shows them; FSEvents sent none for
+OpenCode's `opencode.db-wal` writes.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with

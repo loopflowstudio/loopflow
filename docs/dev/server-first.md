@@ -159,20 +159,27 @@ as does a CLI `lf session list --subscribe`, which reads in its own process;
 an event makes the shared observation cache read that transcript within a
 second, a thirty-second reconcile catches a missed one, and every
 subscription reading it shares the one reading. Pi's root is
-`~/.pi/agent/sessions`; OpenCode's whole home is watched, and any write to
-its store or its write-ahead log hints every OpenCode reading. Raw
+`~/.pi/agent/sessions`; OpenCode's whole home is watched, and any event in
+it hints every OpenCode reading: FSEvents reports no write to OpenCode's store
+while OpenCode holds it open, but OpenCode writes worktree snapshots under
+`snapshot/` as each step starts and finishes (seen 2026-11-11, OpenCode
+2.2.1). Raw
 conversations are `claude`, `codex`, `pi` or `opencode` processes with no
-`lf` or provider ancestor (`transcript/raw.rs`); Pi runs as `node` with Pi's
-CLI as its script. A Claude process is paired with the conversation its
-`sessions/<pid>.json` in Claude's home names; Claude rewrites that file on
-`/clear` and `/resume`. A process without one takes the newest transcript
-written in its directory since it started that no other live Claude process
-names. Codex, Pi and OpenCode have no such file, so the newest rule pairs
-them: Pi's newest session file under its directory's
-`sessions/--<path>--/`, OpenCode's newest `session_v2` row for the
-directory. One whose conversation an ended Session recorded lists
-under that Session's title. Claude's kernel process name is its version, so its
-executable path (`…/claude/versions/<version>`) identifies it. User docs:
+`lf` or provider ancestor (`transcript/raw.rs`); Pi runs as `node`, its
+arguments its CLI script until it retitles itself `pi`. A Claude process is
+paired with the conversation its `sessions/<pid>.json` in Claude's home
+names; Claude rewrites that file on `/clear` and `/resume`. A process without
+one takes the newest transcript written in its directory since it started
+that no other live Claude process names. Codex, Pi and OpenCode have no such
+file, so the newest rule pairs them: Pi's newest session file under its
+directory's `sessions/--<path>--/`, OpenCode's newest `session_v2` row for the
+directory. The rule skips a conversation a Session wrote last: one whose
+Session runs, or was last written before its Session ended (or stopped with
+no end recorded). It cannot see a raw process that exited: its conversation
+stays newest, so a second raw process idle in the same directory lists it
+until that process writes again. One written after the Session that
+recorded it ended lists under that Session's title. Claude's kernel process
+name is its version, so its executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
 
 A bare run in a Task's checkout counts toward that Task, and the cost-per-PR

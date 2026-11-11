@@ -1,7 +1,7 @@
 //! Conversations open on this Machine that Loopflow never launched: a
 //! `claude`, `codex`, `pi` or `opencode` process with no Loopflow or provider
 //! ancestor, paired with the newest conversation written in its directory
-//! since it started.
+//! since it started that no Loopflow launch wrote last.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -23,8 +23,62 @@ pub(crate) struct RawConversation {
     pub source: Source,
 }
 
-/// Every raw conversation open on this Machine.
-pub(crate) fn discover() -> Vec<RawConversation> {
+/// Conversations open on one harness in one directory: the ones live
+/// processes name as their own, and for the processes that name none, every
+/// conversation written there since the earliest of them started, newest
+/// first. Which of those a Loopflow launch wrote is the store's to say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RawDirectory {
+    harness: HarnessKind,
+    cwd: PathBuf,
+    named: Vec<(String, Source)>,
+    unnamed: usize,
+    written: Vec<Written>,
+}
+
+/// A conversation and when it was last written, in Unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Written {
+    id: String,
+    source: Source,
+    at: i64,
+}
+
+impl RawDirectory {
+    /// Every conversation it could list.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &str> {
+        let named = self.named.iter().map(|(id, _)| id.as_str());
+        named.chain(self.written.iter().map(|written| written.id.as_str()))
+    }
+
+    /// One conversation per live process: the ones they name, then the newest
+    /// written ones whose last write `launched(id, at)` says was Loopflow's.
+    pub(crate) fn conversations(
+        &self,
+        launched: impl Fn(&str, i64) -> bool,
+    ) -> Vec<RawConversation> {
+        let written = self
+            .written
+            .iter()
+            .filter(|written| !launched(&written.id, written.at))
+            .take(self.unnamed)
+            .map(|written| (&written.id, &written.source));
+        self.named
+            .iter()
+            .map(|(id, source)| (id, source))
+            .chain(written)
+            .map(|(id, source)| RawConversation {
+                harness: self.harness,
+                id: id.clone(),
+                cwd: self.cwd.clone(),
+                source: source.clone(),
+            })
+            .collect()
+    }
+}
+
+/// Every directory with raw provider processes open on this Machine.
+pub(crate) fn discover() -> Vec<RawDirectory> {
     let processes = match OsProcess::sample_names() {
         Ok(processes) => processes,
         Err(error) => {
@@ -37,9 +91,11 @@ pub(crate) fn discover() -> Vec<RawConversation> {
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
     let owners = claude_owners(&super::home(HarnessKind::Claude), &by_pid);
+    let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
     let mut found = Vec::new();
     for ((harness, cwd), open) in open(&processes, &by_pid) {
         let home = super::home(harness);
+        let mut named = Vec::new();
         let mut unnamed = Vec::new();
         for (pid, started) in open {
             let Some(id) = owners.get(&pid) else {
@@ -49,25 +105,20 @@ pub(crate) fn discover() -> Vec<RawConversation> {
             let transcript = super::live::claude_project(&home, &cwd).join(format!("{id}.jsonl"));
             // Claude writes no transcript before the first message.
             if transcript.is_file() {
-                found.push(RawConversation {
-                    harness,
-                    id: id.clone(),
-                    cwd: cwd.clone(),
-                    source: Source::File(transcript),
-                });
+                named.push((id.clone(), Source::File(transcript)));
             }
         }
-        let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
-        found.extend(
-            newest(harness, &home, &cwd, &unnamed, &owned)
-                .into_iter()
-                .map(|(id, source)| RawConversation {
-                    harness,
-                    id,
-                    cwd: cwd.clone(),
-                    source,
-                }),
-        );
+        let written = match unnamed.iter().min() {
+            Some(started) => written(harness, &home, &cwd, started - START_SLACK, &owned),
+            None => Vec::new(),
+        };
+        found.push(RawDirectory {
+            harness,
+            cwd,
+            named,
+            unnamed: unnamed.len(),
+            written,
+        });
     }
     found
 }
@@ -137,10 +188,7 @@ fn provider(process: &OsProcess) -> Option<HarnessKind> {
         "opencode" => return Some(HarnessKind::OpenCode),
         "node" => {
             let arguments = OsProcess::arguments(process.pid).ok()??;
-            return arguments
-                .get(1)
-                .is_some_and(|script| runs_pi(script))
-                .then_some(HarnessKind::Pi);
+            return runs_pi(&arguments).then_some(HarnessKind::Pi);
         }
         name if !is_version(name) => return None,
         _ => {}
@@ -151,10 +199,17 @@ fn provider(process: &OsProcess) -> Option<HarnessKind> {
         .then_some(HarnessKind::Claude)
 }
 
-/// Whether a Node script is Pi's: its `pi` link, or the CLI of the
-/// `pi-coding-agent` package it points at.
-fn runs_pi(script: &str) -> bool {
-    let script = Path::new(script);
+/// Whether a Node process's arguments are Pi's. Pi titles its process `pi`
+/// once it starts, which overwrites its arguments with that one word; before
+/// then the script is its `pi` link or the CLI of the `pi-coding-agent`
+/// package.
+fn runs_pi(arguments: &[String]) -> bool {
+    if arguments.first().is_some_and(|title| title == "pi") {
+        return true;
+    }
+    let Some(script) = arguments.get(1).map(Path::new) else {
+        return false;
+    };
     script.file_name().is_some_and(|name| name == "pi")
         || script.components().any(|part| {
             part.as_os_str()
@@ -194,27 +249,26 @@ fn launched_by_loopflow_or_provider(
     false
 }
 
-/// One conversation per process: the newest ones in `cwd` written since the
-/// earliest of them started that no other live process has open.
-fn newest(
+/// The conversations in `cwd` written since `since`, newest first, that no
+/// live process has open.
+fn written(
     harness: HarnessKind,
     home: &Path,
     cwd: &Path,
-    started: &[i64],
+    since: i64,
     owned: &HashSet<&str>,
-) -> Vec<(String, Source)> {
-    let since = started.iter().min().copied().unwrap_or(0) - START_SLACK;
+) -> Vec<Written> {
     if harness == HarnessKind::OpenCode {
         let store = super::opencode::store(home);
         return super::opencode::written_in(&store, cwd, since)
             .into_iter()
-            .take(started.len())
-            .map(|(id, _)| {
-                let source = Source::OpenCode {
+            .map(|(id, at)| Written {
+                source: Source::OpenCode {
                     store: store.clone(),
                     id: id.clone(),
-                };
-                (id, source)
+                },
+                id,
+                at,
             })
             .collect();
     }
@@ -238,8 +292,11 @@ fn newest(
         .filter(|(_, path, _)| {
             harness == HarnessKind::Claude || super::recorded_cwd(path).as_deref() == Some(cwd)
         })
-        .take(started.len())
-        .map(|(id, path, _)| (id, Source::File(path)))
+        .map(|(id, path, at)| Written {
+            id,
+            source: Source::File(path),
+            at,
+        })
         .collect()
 }
 
@@ -329,12 +386,18 @@ mod tests {
     }
 
     #[test]
-    fn pi_is_the_node_script_its_package_installs() {
-        assert!(runs_pi("/Users/me/.nvm/versions/node/v24/bin/pi"));
-        assert!(runs_pi(
+    fn pi_is_its_title_or_the_node_script_its_package_installs() {
+        let pi = |arguments: &[&str]| {
+            runs_pi(&arguments.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+        };
+        assert!(pi(&["pi"]), "Pi's own process title");
+        assert!(pi(&["node", "/Users/me/.nvm/versions/node/v24/bin/pi"]));
+        assert!(pi(&[
+            "node",
             "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
-        ));
-        assert!(!runs_pi("/usr/lib/node_modules/vite/bin/vite.js"));
+        ]));
+        assert!(!pi(&["node", "/usr/lib/node_modules/vite/bin/vite.js"]));
+        assert!(!pi(&["pi-rpc"]), "lf launches Pi under RPC");
     }
 
     #[test]
@@ -347,9 +410,37 @@ mod tests {
         let file = directory.join("2026-11-11T11-00-01-513Z_01a1ca43.jsonl");
         std::fs::write(&file, "{\"type\":\"session\",\"cwd\":\"/work/my.app\"}\n").unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let found = newest(HarnessKind::Pi, home.path(), cwd, &[now], &HashSet::new());
-        let id = file.to_str().unwrap().to_owned();
-        assert_eq!(found, [(id, Source::File(file))]);
+        let found = written(HarnessKind::Pi, home.path(), cwd, now - 5, &HashSet::new());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, file.to_str().unwrap());
+        assert_eq!(found[0].source, Source::File(file));
+    }
+
+    #[test]
+    fn a_raw_process_skips_conversations_a_loopflow_launch_wrote_last() {
+        let written = |id: &str, at: i64| Written {
+            id: id.into(),
+            source: Source::File(PathBuf::from(format!("/sessions/{id}.jsonl"))),
+            at,
+        };
+        let directory = RawDirectory {
+            harness: HarnessKind::Pi,
+            cwd: PathBuf::from("/work"),
+            named: Vec::new(),
+            unnamed: 1,
+            // Newest first: a headless lf run's, then the raw process's own.
+            written: vec![written("launched", 200), written("raw", 100)],
+        };
+        let ids = |launched: &dyn Fn(&str, i64) -> bool| {
+            directory
+                .conversations(launched)
+                .into_iter()
+                .map(|conversation| conversation.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&|_, _| false), ["launched"]);
+        assert_eq!(ids(&|id, _| id == "launched"), ["raw"]);
+        assert_eq!(directory.ids().collect::<Vec<_>>(), ["launched", "raw"]);
     }
 
     const STAND_IN: &str = "LOOPFLOW_TEST_RAW_STAND_IN";
@@ -404,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn each_claude_process_takes_the_newest_transcript_written_since_it_started() {
+    fn a_claude_directory_offers_transcripts_written_since_its_process_started() {
         let home = tempfile::tempdir().unwrap();
         let cwd = Path::new("/work/my.app");
         let project = home.path().join("projects/-work-my-app");
@@ -420,14 +511,27 @@ mod tests {
             .unwrap();
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let none = HashSet::new();
-        let found = newest(HarnessKind::Claude, home.path(), cwd, &[now], &none);
+        let found = written(
+            HarnessKind::Claude,
+            home.path(),
+            cwd,
+            now - START_SLACK,
+            &none,
+        );
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].0, "new");
-        assert_eq!(found[0].1, Source::File(project.join("new.jsonl")));
-        assert!(newest(HarnessKind::Claude, home.path(), cwd, &[now + 3600], &none).is_empty());
+        assert_eq!(found[0].id, "new");
+        assert_eq!(found[0].source, Source::File(project.join("new.jsonl")));
+        assert!(written(HarnessKind::Claude, home.path(), cwd, now + 3600, &none).is_empty());
         // Another live process's conversation is not this one's.
         let owned = HashSet::from(["new"]);
-        assert!(newest(HarnessKind::Claude, home.path(), cwd, &[now], &owned).is_empty());
+        assert!(written(
+            HarnessKind::Claude,
+            home.path(),
+            cwd,
+            now - START_SLACK,
+            &owned
+        )
+        .is_empty());
     }
 
     #[test]

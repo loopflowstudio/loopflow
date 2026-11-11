@@ -3,9 +3,11 @@
 //! transcript's turn again, and its reconcile interval catches what they miss.
 //! Every subscription reading that transcript shares the one reading.
 //!
-//! OpenCode writes every conversation into one SQLite store, so any write to
-//! it hints each OpenCode conversation read; one read costs a query on that
-//! store, a few milliseconds.
+//! OpenCode writes every conversation into one SQLite store, and FSEvents
+//! reports no write to it while OpenCode holds it open. OpenCode snapshots
+//! the worktree under the same home as each step starts and finishes, so any
+//! event under its home hints each OpenCode conversation read; one read costs
+//! a query on that store, a few milliseconds.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -19,63 +21,72 @@ use crate::observe::Cache;
 /// that is missing or cannot be watched is logged and left to the reconcile
 /// interval.
 pub(crate) fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
+    let opencode = super::home(HarnessKind::OpenCode);
     [
-        super::home(HarnessKind::Claude).join("projects"),
-        super::home(HarnessKind::Codex).join("sessions"),
-        super::home(HarnessKind::Pi).join("sessions"),
-        super::home(HarnessKind::OpenCode),
+        (super::home(HarnessKind::Claude).join("projects"), None),
+        (super::home(HarnessKind::Codex).join("sessions"), None),
+        (super::home(HarnessKind::Pi).join("sessions"), None),
+        (opencode.clone(), Some(super::opencode::store(&opencode))),
     ]
-    .iter()
-    .filter(|root| root.is_dir())
-    .filter_map(|root| match watch_root(root, Arc::downgrade(cache)) {
-        Ok(watcher) => Some(watcher),
-        Err(error) => {
-            tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
-            None
-        }
-    })
+    .into_iter()
+    .filter(|(root, _)| root.is_dir())
+    .filter_map(
+        |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
+            Ok(watcher) => Some(watcher),
+            Err(error) => {
+                tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
+                None
+            }
+        },
+    )
     .collect()
 }
 
-fn watch_root(root: &Path, cache: Weak<Cache>) -> notify::Result<notify::RecommendedWatcher> {
+/// Watch `root`; every event under it hints `store` when one is given, else
+/// the transcript files it names.
+fn watch_root(
+    root: &Path,
+    store: Option<PathBuf>,
+    cache: Weak<Cache>,
+) -> notify::Result<notify::RecommendedWatcher> {
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if let Some(cache) = cache.upgrade() {
-            hint(&cache, event);
+            hint(&cache, event, store.as_deref());
         }
     })?;
     watcher.watch(root, RecursiveMode::Recursive)?;
     Ok(watcher)
 }
 
-fn hint(cache: &Cache, event: notify::Result<notify::Event>) {
+fn hint(cache: &Cache, event: notify::Result<notify::Event>, store: Option<&Path>) {
     let event = match event {
         Ok(event) if event.kind.is_access() => return,
         Ok(event) if !event.need_rescan() => event,
         Ok(_) | Err(_) => return cache.hint_transcript(None, true),
     };
-    let created = event.kind.is_create();
-    for path in transcripts(&event.paths) {
-        // A new OpenCode conversation is a row, not a file; raw discovery
-        // finds it at its own interval.
-        let created = created && path.extension().is_some_and(|ext| ext == "jsonl");
+    // A new OpenCode conversation is a row, not a file; raw discovery finds
+    // it at its own interval.
+    let created = event.kind.is_create() && store.is_none();
+    for path in transcripts(&event.paths, store) {
         cache.hint_transcript(Some(&path), created);
     }
 }
 
-/// The transcripts `paths` change: a `.jsonl` file, or OpenCode's store for
-/// a write to it or its log. FSEvents may name a file by its resolved path;
-/// facts keep the spelling they were read with, so both are hinted.
-fn transcripts(paths: &[PathBuf]) -> Vec<PathBuf> {
-    paths
-        .iter()
-        .filter_map(|path| {
-            let name = path.file_name()?.to_str()?;
-            if name.ends_with(".jsonl") {
-                return Some(path.clone());
-            }
-            let store = name.strip_suffix("-wal").unwrap_or(name);
-            (store == "opencode.db").then(|| path.with_file_name(store))
-        })
+/// The transcripts an event on `paths` changes: `store` when the watch is
+/// OpenCode's, else the `.jsonl` files among them. FSEvents may name a file
+/// by its resolved path; facts keep the spelling they were read with, so both
+/// are hinted.
+fn transcripts(paths: &[PathBuf], store: Option<&Path>) -> Vec<PathBuf> {
+    let changed = match store {
+        Some(store) => vec![store.to_path_buf()],
+        None => paths
+            .iter()
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .cloned()
+            .collect(),
+    };
+    changed
+        .into_iter()
         .flat_map(|path| {
             let resolved = path
                 .canonicalize()
@@ -130,6 +141,7 @@ mod tests {
                 notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
                     .add_path(path.clone()),
             ),
+            None,
         );
         // The hint makes it due a second from now, not at once.
         std::thread::sleep(std::time::Duration::from_millis(1100));
@@ -143,19 +155,21 @@ mod tests {
 
     #[test]
     fn only_transcript_files_are_hinted() {
-        let found = transcripts(&[
-            PathBuf::from("/nowhere/a.jsonl"),
-            PathBuf::from("/nowhere/a"),
-            PathBuf::from("/nowhere/settings.json"),
-            PathBuf::from("/nowhere/opencode.db-wal"),
-            PathBuf::from("/nowhere/opencode.db-shm"),
-        ]);
-        assert_eq!(
-            found,
-            [
+        let found = transcripts(
+            &[
                 PathBuf::from("/nowhere/a.jsonl"),
-                PathBuf::from("/nowhere/opencode.db")
-            ]
+                PathBuf::from("/nowhere/a"),
+                PathBuf::from("/nowhere/settings.json"),
+            ],
+            None,
         );
+        assert_eq!(found, [PathBuf::from("/nowhere/a.jsonl")]);
+    }
+
+    #[test]
+    fn a_snapshot_under_opencodes_home_hints_its_store() {
+        let store = Path::new("/nowhere/opencode/opencode.db");
+        let snapshot = PathBuf::from("/nowhere/opencode/snapshot/e2c4/b0db/index");
+        assert_eq!(transcripts(&[snapshot], Some(store)), [store.to_path_buf()]);
     }
 }

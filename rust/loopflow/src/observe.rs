@@ -54,7 +54,7 @@ enum Answer {
     Time(i64),
     Process(Result<Option<OsProcess>, Failure>),
     Turn(Option<crate::transcript::live::SessionTurn>),
-    Raw(Vec<crate::transcript::raw::RawConversation>),
+    Raw(Vec<crate::transcript::raw::RawDirectory>),
 }
 
 impl PartialEq for Answer {
@@ -460,8 +460,9 @@ pub(crate) fn transcript_turn(
     answer
 }
 
-/// Conversations open on this Machine that Loopflow never launched.
-pub(crate) fn raw_conversations() -> Vec<crate::transcript::raw::RawConversation> {
+/// Directories with provider processes open on this Machine that Loopflow
+/// never launched.
+pub(crate) fn raw_conversations() -> Vec<crate::transcript::raw::RawDirectory> {
     let Answer::Raw(answer) = read(Fact::RawConversations) else {
         unreachable!("raw conversations return conversations")
     };

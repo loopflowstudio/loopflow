@@ -5765,6 +5765,107 @@ fn viewer_stream_over_pipes_preserves_terminal_input_size_and_exit() {
 }
 
 #[test]
+fn local_terminal_reconnects_without_replaying_input_or_taking_newer_claims() {
+    for (takeover, retry) in [(false, false), (true, false), (false, true)] {
+        let fixture = Fixture::new();
+        let owner = fixture.owner(fixture.serve(true, &[
+            "/bin/sh", "-c",
+            "stty -echo; printf '%s\\n' $$ >> \"$HOME/launches\"; printf 'ready-for-input\\n'; while IFS= read -r line; do printf '%s\\n' \"$line\" >> \"$HOME/input\"; printf '%s\\n' \"$line\"; done",
+        ]));
+        let _cleanup = StopOwner(&fixture, owner.clone());
+        let owner_pid = pid_of_process(&fixture, &owner);
+        let endpoint = fixture.endpoint(&owner);
+        let retained = endpoint.with_extension("retained");
+        std::fs::rename(&endpoint, &retained).unwrap();
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let (connections, connected) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let proxy = scope.spawn(|| {
+                let (mut downstream, _) = listener.accept().unwrap();
+                let mut upstream = UnixStream::connect(&retained).unwrap();
+                for socket in [&downstream, &upstream] {
+                    socket
+                        .set_read_timeout(Some(Duration::from_secs(15)))
+                        .unwrap();
+                    socket
+                        .set_write_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                }
+                let mut requests = downstream.try_clone().unwrap();
+                let mut destination = upstream.try_clone().unwrap();
+                connections
+                    .send((
+                        downstream.try_clone().unwrap(),
+                        upstream.try_clone().unwrap(),
+                    ))
+                    .unwrap();
+                let forward = scope.spawn(move || {
+                    let _ = std::io::copy(&mut requests, &mut destination);
+                });
+                let _ = std::io::copy(&mut upstream, &mut downstream);
+                forward.join().unwrap();
+            });
+            let mut relay = Terminal::spawn(fixture.command(&["session", "attach", &owner]));
+            let (downstream, upstream) = connected.recv_timeout(Duration::from_secs(10)).unwrap();
+            relay.wait_text("ready-for-input");
+            relay.input(b"before loss\n");
+            relay.wait_text("before loss");
+            // Pause only this fixture's viewer, then lose its old connection.
+            // This models an owner that expired the connection during sleep.
+            let paused = PausedOwner(relay.child.id() as libc::pid_t);
+            // SAFETY: the PID is this test's live relay child.
+            assert_eq!(unsafe { libc::kill(paused.0, libc::SIGSTOP) }, 0);
+            relay.input(b"typing during outage\n");
+            std::fs::remove_file(&endpoint).unwrap();
+            if !retry {
+                std::fs::rename(&retained, &endpoint).unwrap();
+            }
+            downstream.shutdown(std::net::Shutdown::Both).unwrap();
+            upstream.shutdown(std::net::Shutdown::Both).unwrap();
+            proxy.join().unwrap();
+            wait_hold(&fixture, &owner, Some("absent"));
+            let mut newer = takeover.then(|| {
+                fixture.attach(
+                    &owner,
+                    json!({
+                        "kind":"attach", "control":true, "replace":true,
+                        "own":"take", "rows":45, "cols":115,
+                    }),
+                )
+            });
+            drop(paused);
+            if retry {
+                relay.wait_text("Ctrl+R to reconnect");
+                relay.assert_viewing("Unavailable owner leaves retry in this terminal");
+                std::fs::rename(&retained, &endpoint).unwrap();
+                relay.input(b"more discarded typing\x12");
+            }
+            relay.wait_text(if takeover {
+                "Reconnected as a viewer"
+            } else {
+                "Reconnected to the same Session"
+            });
+            if let Some(newer) = &mut newer {
+                relay.input(b"must not reach provider\n");
+                let mut observer = fixture.connect(&owner);
+                observer.request(json!({"kind":"attach", "control":false, "replace":false, "rows":24, "cols":80}));
+                assert_eq!(observer.until_reply()["owner"], newer.id);
+                newer.input("after recovery\n");
+            } else {
+                relay.input(b"after recovery\n");
+            }
+            relay.wait_text("after recovery");
+            assert_eq!(fixture.wait_file("input"), "before loss\nafter recovery\n");
+            assert_eq!(fixture.wait_file("launches").lines().count(), 1);
+            assert_eq!(pid_of_process(&fixture, &owner), owner_pid);
+            relay.assert_viewing("Recovered local terminal");
+            relay.input(&[0x1d]);
+            assert!(relay.wait_exit().success());
+        });
+    }
+}
+
+#[test]
 fn viewer_stream_heartbeat_expires_only_the_silent_viewer_while_output_continues() {
     let fixture = Fixture::new();
     let owner = fixture.start(&[
@@ -7187,7 +7288,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
         assert_eq!(fixture.launches(1), first);
     }
     let screen = relay.screen.lock().unwrap().clone();
-    assert!(!String::from_utf8_lossy(&screen).contains("Server connection lost"));
+    assert!(!String::from_utf8_lossy(&screen).contains("Session connection lost"));
     relay.input(b" kept\n");
     fixture.launches(2); // The existing Graph advanced exactly once.
     relay.input(b"done\n");

@@ -1806,7 +1806,7 @@ pub enum SessionCommand {
         #[arg(long)]
         source: Option<String>,
     },
-    /// Observe validated Program Status snapshots from an active local terminal
+    /// Record one validated Program Status snapshot, read from stdin, from an active local terminal
     ObserveStatus {
         id: String,
         /// The terminal marker in the current provider client receipt
@@ -1815,6 +1815,14 @@ pub enum SessionCommand {
         /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
         agent_process: Option<String>,
+        /// The observer this snapshot belongs to; a new one replaces the last
+        #[arg(long)]
+        stream: String,
+        /// Position in the stream, from 1; an older snapshot never replaces a newer one
+        #[arg(long)]
+        sequence: i64,
+        #[arg(long)]
+        json: bool,
     },
     /// Read what Sessions did, tagged with their Work; with an ID, one
     /// conversation's native start, usage and completion receipts

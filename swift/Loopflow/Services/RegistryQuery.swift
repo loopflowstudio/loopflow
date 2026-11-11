@@ -324,6 +324,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Session of the repository reads at its next boundary.
     case sessionSteer(directory: String, session: String?, wave: String?, message: String)
     case sessionRename(directory: String, id: String, name: String)
+    /// One Program Status reading from the terminal showing a Session. `stream`
+    /// names the observer and `sequence` counts its readings from 1.
+    case sessionStatus(directory: String, id: String, terminal: String, agentProcess: String?, stream: String,
+                       sequence: Int, records: ProgramStatusRecords)
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// The repository's conversation when it names no Session, Task or Wave.
@@ -432,6 +436,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionSteer(_, let session, let wave, let message):
             return argument("--wave", wave) + ["session", "steer"] + [session].compactMap { $0 } + [message, "--json"]
         case .sessionRename(_, let id, let name): return ["session", "rename", "--json", "--", id, name]
+        case .sessionStatus(_, let id, let terminal, let agentProcess, let stream, let sequence, _):
+            return ["session", "observe-status", "--json", id, "--terminal", terminal, "--stream", stream,
+                    "--sequence", String(sequence)] + argument("--agent-process", agentProcess)
         case .sessionBind(_, let id, let task, let preview):
             return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
@@ -590,6 +597,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
+        case .sessionStatus(_, _, _, _, _, _, let records):
+            (try? JSONEncoder().encode(records)).map { String(decoding: $0, as: UTF8.self) }
         case .desktopDashboardSlots(_, _, _, let slots): slots
         case .desktopLayoutSave(_, _, let layout): layout
         default: nil
@@ -635,6 +644,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session.steer", ["directory": directory, "session": session, "wave": wave, "message": message])
         case .sessionRename(let directory, let id, let name):
             TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
+        case .sessionStatus(let directory, let id, let terminal, let agentProcess, let stream, let sequence, let records):
+            TaggedFields("session.status", ["directory": directory, "id": id, "terminal": terminal,
+                                            "agent_process": agentProcess, "stream": stream, "sequence": sequence,
+                                            "records": records])
         case .sessionBind(let directory, let id, let task, let preview):
             TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
         case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):

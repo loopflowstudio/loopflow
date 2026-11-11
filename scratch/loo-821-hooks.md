@@ -19,7 +19,7 @@ Looked at and left alone:
 - The server opens a store connection per boundary, as every served read and
   write does; `server-first.md` has that as its own open item.
 - The server rewrites the delivery file after a checkout move and the hook
-  rereads it; the alternative is a different Task.
+  rereads it; changing that is another Task.
 
 Open, with why it matters:
 
@@ -62,7 +62,7 @@ Choices taken (reversible):
 - Server answers `{steers: {batch, text}, waiting}`. The hook renders the block from checkout
   files; checkout relocation moved to the server, which rewrites the delivery
   file, and the hook rereads it after an answer.
-- One two-second deadline for connect, hello and answer.
+- One two-second deadline for connect, hello, answer.
 - Server failures (store, foreign conversation) answer `unavailable`; the hook's
   marker is the only gap memory. No per-Session gap state in the server.
 - Steer confirmation (replaces deliver-on-answer). An answered batch stays

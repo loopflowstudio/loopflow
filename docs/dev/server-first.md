@@ -5,8 +5,9 @@ title: Server-first Sessions
 
 # Server-first Sessions
 
-Planned in LOO-819. Transcript telemetry (LOO-822) is built; the rest is
-not yet. [Client API server](server.md)
+Planned in LOO-819. Reading a live turn from the transcript (LOO-822) is
+built; writing those turns to the store is not, nor is the rest.
+[Client API server](server.md)
 and the [transport README](../../rust/loopflow/src/transport/README.md)
 describe what runs today. Each piece below lands as its own Task and updates
 those documents when it does. Delete this page when the last piece lands.
@@ -114,6 +115,10 @@ Sessions:
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue.
 
+Bare and raw conversations have neither signal. For them "waiting on you" is
+what the transcript shows: a question with no answer yet, or a turn that
+ended. Not built: such a turn reads as running today.
+
 Codex history reads from its rollout files; no app-server call is needed for
 turn state or usage. Rollouts under `~/.codex/sessions` read on November 10,
 2026 carry `event_msg` records of type `task_started`, `task_complete` (with
@@ -137,6 +142,27 @@ the newest transcript written in their directory since they started
 (`transcript/raw.rs`). Claude's kernel process name is its version, so its
 executable path (`…/claude/versions/<version>`) identifies it. User docs:
 [Sessions](../sessions.md#see-what-each-one-is-doing).
+
+Provider transcripts expire, and the cost-per-PR work (LOO-732) reads per-turn
+`usage` and `completed` rows from the store, so a transcript read also has to
+write them; a bare run gets its rows from the read at exit. Not built. What
+each transcript carried on November 10, 2026 (Claude Code 2.1.322, Codex
+0.167.0):
+
+| Fact | Claude | Codex |
+| --- | --- | --- |
+| Tokens | each `assistant` message's `usage` | `token_count`, last and total |
+| Model | `message.model` | `turn_context.model` |
+| Turn wall time | `turn_duration.durationMs`, not on every turn | `task_complete.duration_ms`, `turn_aborted.duration_ms` |
+| Stop reason | `message.stop_reason`, `system` rows of subtype `api_error` | `turn_aborted` |
+| Provider version | `version` on every row | `session_meta.cli_version` |
+| Cost, model time | none per turn; totals in `cost-state` | none |
+
+Claude's `cost-state` row holds `totalCostUSD`, `totalAPIDuration` and
+per-model usage and cost. It was the last row of 24 of the 60 newest
+transcripts and absent from 35; a resumed one held six. What it totals and
+when Claude writes it are not established. Per-turn `cost_usd` and
+`duration_api_ms` come only from the live `result`.
 
 ## Pieces
 
@@ -178,9 +204,10 @@ run ends with its parent.
 - Whether Claude and Codex repaint fully on a size nudge.
 - When a run's checkout and its calling Session belong to different Tasks,
   which one its cost counts toward.
-- Which per-turn facts (cost, model time, stop reason) each harness's
-  transcript carries. The cost-per-PR work (LOO-732) reads them from the
-  store, so a bare run must write them at exit.
+- Where a transcript-read Claude turn gets its cost: the `cost-state` total
+  on a run's last turn, or none.
+- Whether a raw conversation's turns reach the store, which holds turns only
+  for a Session.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

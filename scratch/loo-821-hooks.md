@@ -103,7 +103,12 @@ Turn-end planning refresh now has no Linear-fixture test;
 Checks:
 
 - `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block store::sqlite::steers` — 53 pass after compress
-- `cargo test -p loopflow --test integration session_steers::` — 4 pass (server up, down, back; printed steer `uncertain` then `emitted` after the next hook; new `a_skill_with_no_task_runs_without_the_machine_server`). One earlier run failed two with 10 s provider-start timeouts at load average 416; same tree passed at 115.
+- `cargo test -p loopflow --test integration session_steers::` — 4 pass before merge b8460d66f (server up, down, back; printed steer `uncertain` then `emitted` after the next hook; new `a_skill_with_no_task_runs_without_the_machine_server`). One earlier run failed two with 10 s provider-start timeouts at load average 416; same tree passed at 115.
+  On b8460d66f, load average ~150: 3 pass, and
+  `public_context_capability_survives_claim_changes_and_rejects_children_and_replacement`
+  failed twice then passed alone, each failure "provider did not start within
+  10s" with `preparing launch prompt` the last log line (before any hook
+  runs). Not settled whether that is load or the merge; gate reruns it.
 - `cargo test -p loopflow --test integration dto_fixtures` — 50 pass
 - `transport_tests` hook tests (`native_drafts…`, `retained_hooks_survive_upgrade`,
   `continue_session…`, `native_work_survives…`) — gate; last passed before the sync and before steer confirmation

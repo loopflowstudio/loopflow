@@ -125,12 +125,12 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   (b) No: updates ride the next `session.boundary` answer like steers, no
   process waits, and an idle agent hears of a Task change on its next turn.
   Left for the watcher's Task.
-- Open: with the server frozen (SIGSTOP), every Pi report waits the full 2 s
+- With the server frozen (SIGSTOP), every Pi report waited the full 2 s
   deadline, serialized. qa measured a 4 s tool step taking 8-10 s (message
   end, tool start, tool end, each awaited); OpenCode's step took 6 s (one
-  boundary); Claude pays 2 s per hook. Left as built ("same rules as hooks").
-  Alternative: while a gap is open, report only the boundaries that can carry
-  steers (tool start) and fold the rest into the next answered one.
+  boundary); Claude pays 2 s per hook. Jack Heart, November 11: "4b" (while
+  a gap is open, report only the boundaries that can carry steers). Built:
+  session start, tool start and turn end still wait; the rest fall into the gap.
 - Seen in qa, not this branch's code: a comment made during a managed Pi or
   OpenCode turn arrives twice, as a steer at the next boundary and again as an
   `<lf:task-update>` prompt that starts a new turn when the first ends

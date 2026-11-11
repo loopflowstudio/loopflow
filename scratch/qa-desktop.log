@@ -1,0 +1,41 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+[0/1] Planning build
+Building for debugging...
+[0/5] Copying ThirdPartyNotices
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (3.55s)
+[0/1] Planning build
+Test Suite 'Selected tests' started at 2026-11-10 21:51:14.661.
+Test Suite 'LoopflowSwiftPackageTests.xctest' started at 2026-11-10 21:51:14.661.
+Test Suite 'LoopflowSwiftPackageTests.xctest' passed at 2026-11-10 21:51:14.661.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-10 21:51:14.661.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite "Desktop without a display" started.
+◇ Test "Loading, unavailable, empty and selected Work have distinct content" started.
+✔ Test "Loading, unavailable, empty and selected Work have distinct content" passed after 0.407 seconds.
+✔ Suite "Desktop without a display" passed after 0.407 seconds.
+◇ Suite ServerConnectionTests started.
+◇ Test openingWaitsForNativeReadinessAndRecoversInPlace() started.
+✔ Test openingWaitsForNativeReadinessAndRecoversInPlace() passed after 0.058 seconds.
+✔ Suite ServerConnectionTests passed after 0.058 seconds.
+◇ Suite "Work destinations" started.
+◇ Test composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "usable" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "connection" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "surface" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "comparison" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "closed" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "hidden" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "zoomed" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+◇ Test case passing 1 argument outcome → "replaced" to composedOpeningWaitsForNativeSessionAndComparison(outcome:) started.
+✔ Test composedOpeningWaitsForNativeSessionAndComparison(outcome:) with 8 test cases passed after 0.147 seconds.
+◇ Test "Repeating a failed opening retries the same Session in its retained pane" started.
+✔ Test "Repeating a failed opening retries the same Session in its retained pane" passed after 0.021 seconds.
+◇ Test "A conversation held elsewhere never confirms local attachment" started.
+✔ Test "A conversation held elsewhere never confirms local attachment" passed after 0.002 seconds.
+✔ Suite "Work destinations" passed after 0.172 seconds.
+✔ Test run with 5 tests in 3 suites passed after 0.638 seconds.

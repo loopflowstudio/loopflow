@@ -2397,6 +2397,36 @@ fn failed_attachment_returns_failure_and_the_same_command_can_retry() {
         .as_str()
         .unwrap()
         .contains("provider launch failed"));
+    // A provider configuration error can leave a reservation after its
+    // transport removes the socket. That retired owner cannot block a retry.
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let session: String = db
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let owner = loopflow::id::LfProcessId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&owner],
+    )
+    .unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    store
+        .claim_session_attachment(&session, None, &owner, true)
+        .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![session, owner],
+    )
+    .unwrap();
+    let focus = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", "--session", &session, "--focus", "--json"],
+    );
+    assert!(!focus.status.success());
+    assert!(String::from_utf8_lossy(&focus.stdout).contains("Not open"));
     std::fs::write(ack, success).unwrap();
     let report = json(&lf(home.path(), repo.path(), Some(bin.path()), &args));
     assert_eq!(report["receipts"][0]["status"], "usable");

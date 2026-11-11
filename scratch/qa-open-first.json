@@ -1,0 +1,152 @@
+[
+  {
+    "command": "git init -b main",
+    "code": 0,
+    "stdout": "Initialized empty Git repository in /private/tmp/lf-qa-open-ucukbtlu/repo/.git/\n",
+    "stderr": ""
+  },
+  {
+    "command": "git config user.name Opening QA",
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": "git config user.email qa@example.invalid",
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": "git init --bare /tmp/lf-qa-open-ucukbtlu/origin.git",
+    "code": 0,
+    "stdout": "Initialized empty Git repository in /private/tmp/lf-qa-open-ucukbtlu/origin.git/\n",
+    "stderr": ""
+  },
+  {
+    "command": "git remote add origin /tmp/lf-qa-open-ucukbtlu/origin.git",
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": "git add .",
+    "code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": "git commit -m Initialize opening QA",
+    "code": 0,
+    "stdout": "[main (root-commit) 2116723] Initialize opening QA\n 2 files changed, 3 insertions(+)\n create mode 100644 .lf/config.yaml\n create mode 100644 README.md\n",
+    "stderr": ""
+  },
+  {
+    "command": "git push -u origin main",
+    "code": 0,
+    "stdout": "branch 'main' set up to track 'origin/main'.\n",
+    "stderr": "To /tmp/lf-qa-open-ucukbtlu/origin.git\n * [new branch]      main -> main\n"
+  },
+  {
+    "command": "lf task create --title Recover a report --request-id qa-report --json",
+    "code": 0,
+    "stdout": "{\n  \"task\": {\n    \"id\": \"task_641567cc3ae840d49ba89beffd6c4449\",\n    \"revision\": 1,\n    \"identifier\": \"641567\",\n    \"title\": \"Recover a report\",\n    \"description\": \"Recover a report\",\n    \"rank\": 0,\n    \"assignee\": null,\n    \"due_date\": null,\n    \"state\": \"unstarted\",\n    \"completed_at\": null,\n    \"linear_id\": null,\n    \"pm_snapshot_synced_at\": null,\n    \"pm_writeback\": {\n      \"state\": \"current\"\n    },\n    \"wave_id\": null,\n    \"repo_id\": \"repo_be0ff0763596405e935bb5ecb980011b\",\n    \"project_id\": null,\n    \"worktree\": null,\n    \"workspace_slug\": \"\",\n    \"branch\": \"\",\n    \"base_commit\": \"\",\n    \"parent_pr_id\": null,\n    \"created_at\": \"2026-11-11T05:49:49Z\",\n    \"updated_at\": \"2026-11-11T05:49:49Z\"\n  },\n  \"graph\": null,\n  \"session_id\": null,\n  \"milestone\": \"filed\"\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf server status",
+    "code": 0,
+    "stdout": "{\"socket\":\"/private/tmp/lf-501-e101bd88c0169256/machine.sock\",\"ready\":false,\"listening\":false,\"instance\":null,\"revision\":null,\"clients\":[],\"error\":\"Loopflow server unavailable; check `lf server status` and the selected installation\"}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf server status",
+    "code": 0,
+    "stdout": "{\"socket\":\"/private/tmp/lf-501-e101bd88c0169256/machine.sock\",\"ready\":true,\"listening\":true,\"instance\":\"012e6fea-762c-4326-988e-237d2e0bd79a\",\"revision\":4,\"clients\":[],\"error\":null}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf help open",
+    "code": 0,
+    "stdout": "Open one conversation here, in a sibling tab, or focus its existing view\n\nUsage: lf open [OPTIONS] [URL]\n\nArguments:\n  [URL]  Work address, such as loopflow://loopflow/task/LOO-507\n\nOptions:\n      --host <HOST>         Destination host; auto uses the calling terminal, never a fallback host [default: auto] [possible values: auto, desktop, cmux, herdr, tmux, rex, terminal]\n      --session <SESSION>   Open this exact Session rather than its scope's primary\n      --diff                Show the Task's Changes browser beside its conversation (Desktop)\n      --link                Print a link without opening or preparing anything\n      --format <FORMAT>     [possible values: text, markdown]\n      --json                \n      --server <SERVER>     Rex Unix socket endpoint\n      --here                Attach in this terminal (direct CLI default)\n      --tab                 Attach in a sibling tab (agent default)\n      --focus               Reveal an existing conversation view; create nothing\n      --file <PATH>         Present original files in an attached Desktop Files view\n  -a, --agent <AGENT>       Select this conversation or all agent steps of this Graph (harness[:model])\n      --setting <SETTINGS>  Override a typed preference for this invocation (KEY=YAML); repeatable\n  -v, --verbose             Show context accounting and diagnostic logs\n  -h, --help                Print help\n\nDirect CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Layouts and overviews: lf workspace.\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf open --focus --json",
+    "code": 1,
+    "stdout": "{\n  \"receipts\": [\n    {\n      \"label\": \"repo\",\n      \"url\": \"loopflow://repo\",\n      \"host\": null,\n      \"destination\": null,\n      \"container\": null,\n      \"status\": \"failed\",\n      \"reason\": \"Not open; retry with lf open loopflow://repo\",\n      \"fallback_argv\": [\n        \"lf\",\n        \"open\",\n        \"loopflow://repo\"\n      ]\n    }\n  ],\n  \"unknown\": []\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf session list --json",
+    "code": 0,
+    "stdout": "[]\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf open --tab --host terminal --json",
+    "code": 1,
+    "stdout": "{\n  \"receipts\": [\n    {\n      \"label\": \"repo\",\n      \"url\": \"loopflow://repo\",\n      \"host\": null,\n      \"destination\": null,\n      \"container\": null,\n      \"status\": \"failed\",\n      \"reason\": \"a terminal has no sibling-tab support. Open a terminal and run: lf open loopflow://repo --here; retry with lf open loopflow://repo\",\n      \"fallback_argv\": [\n        \"lf\",\n        \"open\",\n        \"loopflow://repo\"\n      ]\n    }\n  ],\n  \"unknown\": []\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf open --here --tab --json",
+    "code": 2,
+    "stdout": "",
+    "stderr": "error: the argument '--here' cannot be used with '--tab'\n\nUsage: lf open --here --json [URL]\n\nFor more information, try '--help'.\n"
+  },
+  {
+    "command": "lf resume --prepare --json",
+    "code": 0,
+    "stdout": "{\n  \"transition\": null,\n  \"preview\": null,\n  \"primary_scope\": \"repository\",\n  \"availability\": null,\n  \"program_status\": null,\n  \"agent_process_id\": null,\n  \"task_primary\": false,\n  \"task_ids\": [],\n  \"id\": \"89ece978a5014250a2732c8cc17dbf26\",\n  \"workspace\": {\n    \"machine_id\": \"home_a17b7b43391881be5ee8f10b045d0121\",\n    \"worktree\": \"/private/tmp/lf-qa-open-ucukbtlu/repo.repo\",\n    \"task_id\": null,\n    \"unavailable\": null\n  },\n  \"interactive\": true,\n  \"work\": null,\n  \"wave_id\": null,\n  \"work_path\": null,\n  \"actions\": [\n    {\n      \"kind\": \"open\",\n      \"label\": \"Start conversation\",\n      \"help\": \"No saved provider history; start this conversation explicitly\",\n      \"unavailable_reason\": null\n    },\n    {\n      \"kind\": \"reveal\",\n      \"label\": \"Show conversation\",\n      \"help\": \"Continue existing history without taking another terminal's input\",\n      \"unavailable_reason\": \"No saved provider history; start this conversation explicitly\"\n    }\n  ],\n  \"title\": \"repo\",\n  \"title_source\": \"generated\",\n  \"graph_membership\": {\n    \"kind\": \"unknown\",\n    \"reason\": \"Graph membership was not recorded\"\n  },\n  \"detail\": \"codex\",\n  \"provider\": \"codex\",\n  \"account\": null,\n  \"model\": null,\n  \"blocked\": false,\n  \"cwd\": \"/private/tmp/lf-qa-open-ucukbtlu/repo.repo\",\n  \"state\": \"unknown\",\n  \"ready_summary\": null,\n  \"open_argv\": [\n    \"/usr/bin/env\",\n    \"LF_BIN=/Users/jack/src/loopflow.loo-825-simplify-lf-open/target/debug/lf\",\n    \"LF_HOME=/private/tmp/lf-qa-open-ucukbtlu/machine\",\n    \"/Users/jack/src/loopflow.loo-825-simplify-lf-open/target/debug/lf\",\n    \"session\",\n    \"resume\",\n    \"89ece978a5014250a2732c8cc17dbf26\"\n  ],\n  \"terminal_ids\": []\n}\n",
+    "stderr": "Nothing to resume here; starting a new conversation.\n"
+  },
+  {
+    "command": "lf open --tab --host rex --server unix:///tmp/lf-qa-open-ucukbtlu/rex.sock --json",
+    "code": 0,
+    "stdout": "{\n  \"receipts\": [\n    {\n      \"label\": \"repo\",\n      \"url\": \"loopflow://repo\",\n      \"host\": \"rex\",\n      \"destination\": \"window:01a1c927-cc87-7f3e-baec-446acf509d3d\",\n      \"container\": \"session:01a1c927-cc49-7806-a742-acd64abcdb61\",\n      \"status\": \"usable\",\n      \"reason\": \"Materialized in Rex; app visibility is unconfirmed (no unique capable client)\",\n      \"fallback_argv\": [\n        \"lf\",\n        \"open\",\n        \"--session\",\n        \"89ece978a5014250a2732c8cc17dbf26\"\n      ]\n    }\n  ],\n  \"unknown\": []\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "/Users/jack/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex --autostart=false --timeout 5s -S unix:///tmp/lf-qa-open-ucukbtlu/rex.sock api call session.list_blocks {\"session_id\": \"session:01a1c927-cc49-7806-a742-acd64abcdb61\"}",
+    "code": 0,
+    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\",\"label\":\"Conversation\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"24159ed2-e058-4a56-b350-86d9e90c3692\",\"placement\":\"placed\",\"window_id\":\"window:01a1c927-cc87-7f3e-baec-446acf509d3d\"}]}\n",
+    "stderr": ""
+  },
+  {
+    "command": "/Users/jack/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex --autostart=false -S unix:///tmp/lf-qa-open-ucukbtlu/rex.sock block capture -s session:01a1c927-cc49-7806-a742-acd64abcdb61 -b block:01a1c927-cc85-7c21-b994-5a422bbce0ac",
+    "code": 0,
+    "stdout": "  Welcome to Codex, OpenAI's command-line coding agent\n \n  Sign in with ChatGPT to use Codex as part of your paid plan\n  or connect an API key for usage-based billing\n \n> 1. Sign in with ChatGPT\n     Usage included with Plus, Pro, Business, and Enterprise plans\n \n  2. Sign in with Device Code\n     Sign in from another device with a one-time code\n \n  3. Sign in another way\n     Use an OpenAI API key\n \n  Press enter to continue\n \n \n \n \n \n \n \n \n \n",
+    "stderr": ""
+  },
+  {
+    "command": "lf open --tab --host rex --server unix:///tmp/lf-qa-open-ucukbtlu/rex.sock --json",
+    "code": 0,
+    "stdout": "{\n  \"receipts\": [\n    {\n      \"label\": \"repo\",\n      \"url\": \"loopflow://repo\",\n      \"host\": \"rex\",\n      \"destination\": \"rex:{\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}\",\n      \"container\": null,\n      \"status\": \"elsewhere\",\n      \"reason\": \"Already open at rex:{\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}; reveal it with `lf open --session 89ece978a5014250a2732c8cc17dbf26 --focus`\",\n      \"fallback_argv\": [\n        \"lf\",\n        \"open\",\n        \"--session\",\n        \"89ece978a5014250a2732c8cc17dbf26\"\n      ]\n    }\n  ],\n  \"unknown\": []\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf open --focus --json",
+    "code": 1,
+    "stdout": "{\n  \"receipts\": [\n    {\n      \"label\": \"repo\",\n      \"url\": \"loopflow://repo\",\n      \"host\": null,\n      \"destination\": null,\n      \"container\": null,\n      \"status\": \"failed\",\n      \"reason\": \"Already open at rex:{\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}; reveal it with `lf open --session 89ece978a5014250a2732c8cc17dbf26 --focus`: Materialized in Rex; app visibility is unconfirmed (no unique capable client); retry with lf open --session 89ece978a5014250a2732c8cc17dbf26\",\n      \"fallback_argv\": [\n        \"lf\",\n        \"open\",\n        \"--session\",\n        \"89ece978a5014250a2732c8cc17dbf26\"\n      ]\n    }\n  ],\n  \"unknown\": []\n}\n",
+    "stderr": ""
+  },
+  {
+    "command": "lf session list --json",
+    "code": 0,
+    "stdout": "[\n  {\n    \"account\": null,\n    \"actions\": [\n      {\n        \"help\": \"Open this Session in a terminal\",\n        \"kind\": \"open\",\n        \"label\": \"Open here\",\n        \"unavailable_reason\": \"This conversation is open in Rex ({\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}); Take back transfers input here\"\n      },\n      {\n        \"help\": \"Continue here from Rex ({\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}); the previous terminal reports the move\",\n        \"kind\": \"move_here\",\n        \"label\": \"Take back\",\n        \"unavailable_reason\": null\n      },\n      {\n        \"help\": \"Continue existing history without taking another terminal's input\",\n        \"kind\": \"reveal\",\n        \"label\": \"Show conversation\",\n        \"unavailable_reason\": \"This conversation is controlled elsewhere; use Take back to continue here\"\n      }\n    ],\n    \"agent_process_id\": \"606f429d-33fb-4ba0-8daf-fab20228262a\",\n    \"availability\": null,\n    \"blocked\": false,\n    \"cwd\": \"/private/tmp/lf-qa-open-ucukbtlu/repo.repo\",\n    \"detail\": \"codex\",\n    \"graph_membership\": {\n      \"kind\": \"independent\"\n    },\n    \"id\": \"89ece978a5014250a2732c8cc17dbf26\",\n    \"interactive\": true,\n    \"model\": null,\n    \"open_argv\": [\n      \"/usr/bin/env\",\n      \"LF_BIN=/Users/jack/src/loopflow.loo-825-simplify-lf-open/target/debug/lf\",\n      \"LF_HOME=/private/tmp/lf-qa-open-ucukbtlu/machine\",\n      \"/Users/jack/src/loopflow.loo-825-simplify-lf-open/target/debug/lf\",\n      \"session\",\n      \"resume\",\n      \"89ece978a5014250a2732c8cc17dbf26\"\n    ],\n    \"preview\": null,\n    \"primary_scope\": \"repository\",\n    \"program_status\": null,\n    \"provider\": \"codex\",\n    \"ready_summary\": null,\n    \"state\": \"active\",\n    \"task_ids\": [],\n    \"task_primary\": false,\n    \"terminal_ids\": [\n      \"rex:{\\\"server\\\":\\\"unix:///tmp/lf-qa-open-ucukbtlu/rex.sock\\\",\\\"session\\\":\\\"session:01a1c927-cc49-7806-a742-acd64abcdb61\\\",\\\"block\\\":\\\"block:01a1c927-cc85-7c21-b994-5a422bbce0ac\\\"}\"\n    ],\n    \"title\": \"repo\",\n    \"title_source\": \"generated\",\n    \"transition\": {\n      \"from_agent_process\": null,\n      \"from_provider_session\": null,\n      \"kind\": \"started\",\n      \"observed_at\": 1794376192,\n      \"original_running\": null,\n      \"seed\": null,\n      \"to_agent_process\": \"606f429d-33fb-4ba0-8daf-fab20228262a\",\n      \"to_provider_session\": \"01a1c927-d0b9-74e1-ba8d-30c457d7a331\"\n    },\n    \"wave_id\": null,\n    \"work\": null,\n    \"work_path\": null,\n    \"workspace\": {\n      \"machine_id\": \"home_a17b7b43391881be5ee8f10b045d0121\",\n      \"task_id\": null,\n      \"unavailable\": null,\n      \"worktree\": \"/private/tmp/lf-qa-open-ucukbtlu/repo.repo\"\n    }\n  }\n]\n",
+    "stderr": ""
+  },
+  {
+    "log": "rex",
+    "text": "a742-acd64abcdb61 rpc_status=200 duration=73.5\u00b5s\n2026/11/10 21:49:51 INFO  terminal TERM decided command=\"rex server run\" term=xterm-256color reason=\"the xterm-rex entry is not installed on this host\" mode=\"\"\n2026/11/10 21:49:51 INFO  terminal ownership changed command=\"rex server run\" block_id=block:01a1c927-cc85-7c21-b994-5a422bbce0ac reason=create previous_owner=client:00000000-0000-0000-0000-000000000000 owner=client:01a1c927-cc85-7399-90e8-7f180b28d46c\n2026/11/10 21:49:51 INFO  terminal ownership changed command=\"rex server run\" block_id=block:01a1c927-cc85-7c21-b994-5a422bbce0ac reason=disconnect previous_owner=client:01a1c927-cc85-7399-90e8-7f180b28d46c owner=client:00000000-0000-0000-0000-000000000000\n2026/11/10 21:49:51 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=3.130375ms\n2026/11/10 21:49:51 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=3.215125ms principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=session.attach session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=95.958\u00b5s\n2026/11/10 21:49:51 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=8.598292ms\n2026/11/10 21:49:51 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=8.683833ms principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=client.list rpc_status=200 duration=61.708\u00b5s\n2026/11/10 21:49:51 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=883\u00b5s\n2026/11/10 21:49:51 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=1.16575ms principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:51 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=server.whoami rpc_status=200 duration=11.416\u00b5s\n2026/11/10 21:49:51 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-2 netapi_method=server.status rpc_status=200 duration=7.292\u00b5s\n2026/11/10 21:49:51 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-3 netapi_method=server.version rpc_status=200 duration=11.666\u00b5s\n2026/11/10 21:49:51 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=796.959\u00b5s\n2026/11/10 21:49:51 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=893.75\u00b5s principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:52 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:52 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=server.whoami rpc_status=200 duration=8\u00b5s\n2026/11/10 21:49:52 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-2 netapi_method=server.status rpc_status=200 duration=6.625\u00b5s\n2026/11/10 21:49:52 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-3 netapi_method=server.version rpc_status=200 duration=12.958\u00b5s\n2026/11/10 21:49:52 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=810.458\u00b5s\n2026/11/10 21:49:52 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=901.833\u00b5s principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=session.attach session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=61.833\u00b5s\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-2 netapi_method=session.list_blocks session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=85.958\u00b5s\n2026/11/10 21:49:54 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=817.75\u00b5s\n2026/11/10 21:49:54 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=903.958\u00b5s principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=target.resolve rpc_status=200 duration=65.458\u00b5s\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-2 netapi_method=session.attach session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=55.5\u00b5s\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-3 netapi_method=session.describe_block session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 block_id=block:01a1c927-cc85-7c21-b994-5a422bbce0ac rpc_status=200 duration=1.452875ms\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-4 netapi_method=block.method session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 block_id=block:01a1c927-cc85-7c21-b994-5a422bbce0ac rpc_status=200 duration=506.125\u00b5s\n2026/11/10 21:49:54 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=3.754584ms\n2026/11/10 21:49:54 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=3.861209ms principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=session.attach session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=56.625\u00b5s\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-2 netapi_method=session.view session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=227.708\u00b5s\n2026/11/10 21:49:54 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=1.276209ms\n2026/11/10 21:49:54 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=1.363625ms principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=session.attach session_id=session:01a1c927-cc49-7806-a742-acd64abcdb61 rpc_status=200 duration=61.583\u00b5s\n2026/11/10 21:49:54 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=680.791\u00b5s\n2026/11/10 21:49:54 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=769.041\u00b5s principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control opened command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  control request complete command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 request_id=control-1 netapi_method=client.list rpc_status=200 duration=9.208\u00b5s\n2026/11/10 21:49:54 INFO  control closed command=\"rex server run\" component=server/http transport=control protocol=rex.control.v1 principal=\"uid 501\" kind=peer listener=unix uid=501 duration=456.083\u00b5s\n2026/11/10 21:49:54 INFO  request complete command=\"rex server run\" component=server/http method=GET path=/api/control status=101 duration=549.167\u00b5s principal=\"uid 501\" kind=peer listener=unix uid=501\n2026/11/10 21:49:54 INFO  Rex server stopped command=\"rex server run\"\n"
+  },
+  {
+    "log": "lf-server",
+    "text": ""
+  },
+  {
+    "cleanup": "Stopped private servers and recorded process descendants",
+    "root": "/tmp/lf-qa-open-ucukbtlu"
+  }
+]

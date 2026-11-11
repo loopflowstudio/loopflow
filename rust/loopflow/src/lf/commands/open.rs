@@ -1071,7 +1071,13 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         return Ok(desktop);
     }
     let (viewed, ready) = if let Some(owner) = store.sqlite.session_transport(id)? {
-        crate::transport::attachment(&owner)?
+        match crate::transport::attachment(&owner) {
+            Ok(attachment) => attachment,
+            // A failed provider launch can leave its reservation while the
+            // transport has already returned the terminal and removed its socket.
+            Err(_) if crate::transport::leaving(&owner) => return Ok(desktop),
+            Err(error) => return Err(error).context("read conversation attachment"),
+        }
     } else {
         (
             summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live,

@@ -2,7 +2,9 @@
 
 Status: attachment-aware recovery is implemented. Gate still owns affected-suite
 checks, the earlier parallel host-request timeouts and isolated native-host
-acceptance.
+acceptance. Concept review at `1b8c46d8f` found no further design change or open
+product choice; loop-or-next can advance. The earlier recovery counterexample
+below remains the check against treating a retained surface as attachment.
 
 The Task brief delegates the remaining product decisions:
 
@@ -49,7 +51,8 @@ The removed layout routing, cached starting receipts and conversation-suppressio
 policies need no further implementation work. Their earlier inventory is in
 `b8510757c9:scratch/design.md`.
 
-On 2026-11-10, fetching `origin/main` found no commits absent from this branch.
+On 2026-11-10, realign fetched `origin/main` at `0766e9cbf` (v0.15.3) and found
+no commits absent from this branch.
 The base already includes #1876's Task subscription and sleep/wake reconnect
 changes, and #1875's Desktop Session status changes. No separate reconnect
 implementation remains in this Task.
@@ -84,16 +87,14 @@ Recovery behavior:
   must not claim that a failed or pending conversation became usable. With no
   view it still reports `Not open` and creates nothing.
 
-Derive view identity and attachment state from the existing Session/transport
-and Desktop owners, and let the shared opening decision consume both. Replace
-the presence-only `Live` decision; do not add a persisted opening lifecycle.
-Keep focus results distinct from attachment results in the receipt API and its
-wire fixtures. Each transient Desktop receipt has an identity: the previous
-failure cannot settle a retry before LaunchServices delivers its new request.
-Repository-window readiness cannot confirm Session attachment. Desktop's `.elsewhere` result must retain that meaning rather
-than confirm local attachment. Workspace Conversation panes use the same facts;
-successful tools and diagnostic panes survive failures. Transport input control
-alone, before input-ready Return, must not stand in for readiness on retry.
+The implementation derives view location and attachment state from the existing
+Session/transport and Desktop owners. Ordinary opening and workspace Conversation
+panes share those readings; failed attachment permits retry, while pending and
+ready attachment suppress another launch. No persisted opening lifecycle was
+added. `Focused` confirms only focus, and Desktop reports `.elsewhere` without
+claiming local attachment. Receipt revisions distinguish published results so a
+previous failure cannot settle a retry. Repository-window readiness and transport
+input ownership alone do not establish conversation readiness.
 
 The matching rule in `docs/workspaces.md`: “A view may still be opening or show
 an attachment error. `--focus` only reveals it. After correcting an attachment
@@ -107,7 +108,11 @@ Session identity, no prompt replay, no competing input owner, retained
 diagnostics and truthful receipts. Existing native-host acceptance remains.
 Desktop resolution before pane creation also remains pending through its existing
 opening receipt. A receipt revision distinguishes the last attempt from its retry.
-No open product questions. Review page: `scratch/concept-review.html`.
+No open product questions. Current review: `scratch/concept-review.html`.
+This review traced normal opening, failed attachment and retry through the shared
+resolver, view readings, transport acknowledgement and Desktop opening owner.
+It changed no code and reran no behavioral checks. Show the isolated native-host
+acceptance next; the recorded focused checks do not establish that result.
 
 ## Delete — do not maintain
 
@@ -123,6 +128,26 @@ No deletion targets remain. Removed paths stay removed:
 
 The conversation presenter handles existing views before launch. Desktop's
 receipt wait is separate from terminal presentation; both still require attachment.
+
+## QA walkthrough, 2026-11-10
+
+The real Rex/Codex walkthrough found a retry failure after invalid provider TOML:
+correcting it and repeating `lf open` returned “No such file or directory (os
+error 2)”. A failed reservation still named a retired transport. `open` now
+recognizes that transport's removed socket and continues through the existing
+Session resolver. The repeated walkthrough reached the sign-in screen with the
+same Session and provider thread; the expanded regression passed.
+
+`scratch/qa.html` records direct Task opening in Rex, agent-context sibling and
+own-Session routing, repository/Wave opening, already-open detection, absent and
+unfocusable focus, real attachment failure/retry, concurrent Herdr opening,
+Herdr focus, release-state preparation and cleanup. No authenticated provider
+turn or visible app window was exercised. A live delayed-readiness/timeout check
+and broader workspace acceptance remain outside this walkthrough.
+
+- `cargo test -p loopflow --test integration failed_attachment_returns_failure_and_the_same_command_can_retry` — passed; QA.
+- `scripts/test_desktop.sh --filter 'DesktopHeadlessTests/workStates|conversationAttachment|composedOpeningWaitsForNativeSessionAndComparison|ServerConnectionTests/openingWaitsForNativeReadinessAndRecoversInPlace'` — five passed, including eight composed cases; QA, before the Rust-only repair.
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` — passed; QA.
 
 ## Remaining verification
 
@@ -162,3 +187,7 @@ These socket/transport and headless model checks do not replace isolated
 Rex/Herdr acceptance. The autonomous choices in `questions.md` need no further
 product decision. Earlier file presentation returned “No Desktop Files view
 attached; nothing opened.” No fallback launched.
+
+Realign reused these results after inspecting the recovery paths and tests; no
+code changed and no behavioral checks were rerun. The parallel timeout cause
+remains unknown despite the later passing run.

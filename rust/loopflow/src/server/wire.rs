@@ -136,10 +136,13 @@ pub struct SessionBoundary {
     /// Steer batches from earlier answers that this conversation's hooks
     /// printed and have not yet told the server about.
     pub printed: Vec<crate::id::SteerBatchId>,
-    /// Where an idle Claude conversation takes a Task update; null for other
+    /// The key file Claude publishes for the conversation's cross-session
+    /// inbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory, where an idle conversation takes steers and Task updates.
+    /// A path; the server reads the key when it sends. Null for other
     /// providers and a Claude with no inbox.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub inbox: Option<ClaudeInbox>,
+    pub inbox: Option<std::path::PathBuf>,
 }
 
 /// Where in a native conversation a hook fired.
@@ -158,16 +161,6 @@ pub enum BoundaryMoment {
 pub struct BoundaryGap {
     pub first: i64,
     pub last: i64,
-}
-
-/// A Claude conversation's cross-session inbox: its socket and the key file
-/// Claude publishes beside its session record for peers. Paths only; the
-/// server reads the key when it sends.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ClaudeInbox {
-    pub socket: std::path::PathBuf,
-    pub key: std::path::PathBuf,
 }
 
 /// What `session.boundary` answers.

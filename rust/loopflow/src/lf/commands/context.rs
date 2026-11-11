@@ -450,11 +450,11 @@ fn ask_server(
     }
 }
 
-/// The cross-session inbox of the Claude conversation running this hook: the
-/// socket Claude names in its children's environment and the key Claude
-/// publishes for peers, `sessions/<pid>.<sha256 of socket>.key` in its
-/// configuration directory.
-fn claude_inbox() -> Option<crate::server::wire::ClaudeInbox> {
+/// The key the Claude conversation running this hook publishes for peers of
+/// its cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
+/// configuration directory, for the socket Claude names in its children's
+/// environment.
+fn claude_inbox() -> Option<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
     let socket = std::path::PathBuf::from(std::env::var_os("CLAUDE_CODE_MESSAGING_SOCKET")?);
     let config = std::env::var_os("CLAUDE_CONFIG_DIR")
@@ -466,15 +466,14 @@ fn claude_inbox() -> Option<crate::server::wire::ClaudeInbox> {
         ".{}.key",
         hex::encode(Sha256::digest(socket.as_os_str().as_encoded_bytes()))
     );
-    let key = std::fs::read_dir(config.join("sessions"))
+    std::fs::read_dir(config.join("sessions"))
         .ok()?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .find(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.ends_with(&suffix))
-        })?;
-    Some(crate::server::wire::ClaudeInbox { socket, key })
+        })
 }
 
 /// Every hook is a fresh process, so the native conversation keeps its open gap

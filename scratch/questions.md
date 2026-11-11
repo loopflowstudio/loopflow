@@ -45,8 +45,19 @@ Choices taken (reversible):
 - The watcher's only clock is `StoreChanges`' 60 s fallback (missed WAL event,
   checkpoint, sleep). On Linux `StoreChanges` has no vnode watch and polls at
   50 ms, as served subscriptions already do.
-- Registrations are server memory. After a server restart a conversation is
-  woken again only after its next boundary.
+- Wake candidates are read from the store, so a restart forgets none. The
+  watcher's first revision reading is a baseline: news that landed while no
+  server ran waits for each conversation's next boundary (matches
+  `docs/sessions.md`). Waking on startup instead is a one-line change.
+- Claude's `status` in `<pid>.json` is not consulted: the Stop hook can run
+  before Claude flips to `idle`, which would skip every turn-end wake, and
+  `priority: next` queues a message for a busy session anyway. Idle is
+  `session_activity.yielded` alone; `<pid>.json` must still name the thread.
+- The Claude inbox key path lives in a new `processes.inbox` column, not
+  `endpoint`: Codex and OpenCode readers (`session_connection`, remote client
+  checks) treat `endpoint` as an app-server address.
+- A wake renders steer sources into the Session's `cwd` (`.lf/prompts/`),
+  not the hook's delivery file, which the store does not record.
 - Codex wakes only when its last boundary was a Stop; a woken conversation is
   busy until its next Stop. A turn end delivers anything its turn missed.
 - An update is recorded `dispatched` before it is sent (after the Claude inbox

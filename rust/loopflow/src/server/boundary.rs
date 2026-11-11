@@ -106,17 +106,9 @@ pub(super) fn answer(
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
     let connection = store.session_connection(&adapter.session)?;
-    if store
-        .session(&adapter.session)?
-        .and_then(|session| session.work_source)
-        .is_some_and(crate::session::WorkSource::is_managed)
-    {
-        let wake = match (&connection, inbox) {
-            (Some((endpoint, _)), _) => Some(super::wake::Wake::Codex(endpoint.into())),
-            (None, Some(inbox)) => Some(super::wake::Wake::Claude(inbox.clone())),
-            (None, None) => None,
-        };
-        super::wake::register(adapter, thread, path, wake, *moment == BoundaryMoment::Stop);
+    // Where the server wakes this conversation once it is idle.
+    if let Some(inbox) = inbox {
+        store.record_agent_inbox(adapter, inbox)?;
     }
     if *moment == BoundaryMoment::Stop {
         // A turn end delivers nothing, so what it returns to pending waits
@@ -246,7 +238,7 @@ fn claim_steers(
             callback["turn_id"].as_str().unwrap_or("")
         );
         Ok((
-            emit_steers(store, delivery, adapter, thread, &boundary)?,
+            emit_steers(store, &delivery.repo, adapter, thread, &boundary)?,
             waiting,
         ))
     })
@@ -256,16 +248,15 @@ fn claim_steers(
 /// rendered as a hook would print it. The waker confirms it once sent.
 pub(super) fn wake_steers(
     store: &SqliteStore,
-    delivery: &std::path::Path,
+    repo: &std::path::Path,
     adapter: &SteerAdapter,
     thread: &str,
 ) -> Result<Option<SteerBatch>> {
-    let delivery = ContextDelivery::load(delivery)?;
     store.recover_prepared_steers(&adapter.session)?;
     let boundary = format!("wake:{}", uuid::Uuid::new_v4());
     Ok(
         store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            emit_steers(store, &delivery, adapter, thread, &boundary)
+            emit_steers(store, repo, adapter, thread, &boundary)
         })?,
     )
 }
@@ -273,14 +264,14 @@ pub(super) fn wake_steers(
 /// Render and record the Session's next batch of pending steers at `boundary`.
 fn emit_steers(
     store: &SqliteStore,
-    delivery: &ContextDelivery,
+    repo: &std::path::Path,
     adapter: &SteerAdapter,
     thread: &str,
     boundary: &str,
 ) -> StoreResult<Option<SteerBatch>> {
     let steers =
         store.emit_session_steers(adapter, thread, boundary, |id, steers, remaining| {
-            let (text, excerpts) = render_steers(delivery, &adapter.session, id, steers, remaining)
+            let (text, excerpts) = render_steers(repo, &adapter.session, id, steers, remaining)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             Ok(SteerContext { text, excerpts })
         })?;
@@ -296,7 +287,7 @@ fn excerpt(text: &str, bytes: usize) -> &str {
 }
 
 fn render_steers(
-    delivery: &ContextDelivery,
+    repo: &std::path::Path,
     session: &str,
     batch: &str,
     steers: &[crate::steer::Steer],
@@ -306,12 +297,12 @@ fn render_steers(
     let mut text = format!("<lf:steers batch=\"{batch}\">\n");
     for steer in steers {
         let path = crate::prompt::write_prompt_log(
-            &delivery.repo,
+            repo,
             &serde_json::to_string_pretty(steer)?,
             "steer",
             None,
         )?;
-        let path = path.strip_prefix(&delivery.repo).unwrap_or(&path);
+        let path = path.strip_prefix(repo).unwrap_or(&path);
         let mut item = format!(
             "Steer {}. Source {} revision {}; author {}. Complete source: {}\n",
             steer.id,

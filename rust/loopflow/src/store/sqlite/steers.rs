@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer, SteerAdapter, SteerContext,
+    IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
+    SteerAdapter, SteerContext,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -165,6 +166,108 @@ impl SqliteStore {
                 },
             )
         })
+    }
+
+    /// Save where an idle Claude conversation takes messages: the inbox key
+    /// file its hook found. Written only when it changes.
+    pub(crate) fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE processes SET inbox=?3 WHERE id=?2 AND inbox IS NOT ?3 AND EXISTS(
+                SELECT 1 FROM steer_adapters a JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+                WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?4)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                key.to_string_lossy(),
+                adapter.capability
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Managed conversations whose last boundary was a turn end, on a live
+    /// AgentProcess the server can reach; only `session` when given.
+    pub(crate) fn idle_conversations(
+        &self,
+        session: Option<&str>,
+    ) -> StoreResult<Vec<IdleConversation>> {
+        type Row = (
+            SteerAdapter,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            (Option<i64>, Option<u32>, Option<i64>),
+        );
+        let rows: Vec<Row> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut statement = conn.prepare(
+                "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,s.work_source,
+                    CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
+                    p.completed_at,p.pid,p.os_started_at
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+                 JOIN steer_adapters a ON a.agent_process_id=p.id
+                 JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
+                 WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+                   AND (?1 IS NULL OR s.id=?1)",
+            )?;
+            let rows = statement.query_map([session], |row| {
+                Ok((
+                    SteerAdapter {
+                        session: row.get(0)?,
+                        agent_process_id: row.get(1)?,
+                        capability: row.get(2)?,
+                    },
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    (row.get(8)?, row.get(9)?, row.get(10)?),
+                ))
+            })?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut idle = Vec::new();
+        for (adapter, thread, cwd, source, endpoint, inbox, (completed, pid, start)) in rows {
+            let source: Option<crate::session::WorkSource> = source
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()?;
+            let reach = match (endpoint, inbox) {
+                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(inbox)) => IdleReach::Claude(inbox.into()),
+                (None, None) => continue,
+            };
+            let live = crate::journal::agent_process_evidence(
+                completed,
+                pid,
+                start,
+                None,
+                crate::journal::process_identity_evidence,
+            ) == crate::journal::ProcessIdentityEvidence::Live;
+            if live && source.is_some_and(crate::session::WorkSource::is_managed) {
+                idle.push(IdleConversation {
+                    adapter,
+                    thread,
+                    cwd: cwd.into(),
+                    reach,
+                });
+            }
+        }
+        Ok(idle)
+    }
+
+    /// A woken conversation is in a turn until its next Stop says otherwise.
+    pub(crate) fn record_woken(&self, adapter: &SteerAdapter) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_activity SET yielded=0,observed_at=unixepoch()
+             WHERE session_id=?1 AND agent_process_id=?2",
+            params![adapter.session, adapter.agent_process_id],
+        )?;
+        Ok(())
     }
 
     /// The Session's published resume reference with the input it belongs to.

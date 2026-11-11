@@ -1,22 +1,20 @@
 //! Steers and Task updates for idle managed conversations, pushed by the
-//! Machine server. Each managed Session's boundaries register it here; when a
-//! steer is saved or the store's `task_updates` revision moves, one watcher
-//! reads every idle registration and wakes the conversations it has news for.
-//! No process or clock per Session: Claude takes the message in its
-//! cross-session inbox, Codex as a turn its app-server starts. A conversation
-//! the server cannot reach hears it at its next boundary.
-use std::collections::HashMap;
+//! Machine server. The store says which conversations are idle and how to
+//! reach them (`SqliteStore::idle_conversations`); when a steer is saved or
+//! the store's `task_updates` revision moves, one watcher reads them and wakes
+//! each one it has news for. A server restart forgets nothing. No process or
+//! clock per Session: Claude takes the message in its cross-session inbox,
+//! Codex as a turn its app-server starts. A conversation the server cannot
+//! reach hears it at its next boundary.
 use std::io::Write;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
-use crate::server::wire::ClaudeInbox;
-use crate::steer::SteerAdapter;
+use crate::steer::{IdleConversation, IdleReach};
 use crate::store::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
@@ -26,68 +24,10 @@ const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A Codex turn start loads nothing new; it answers once the turn exists.
 const CODEX_DEADLINE: Duration = Duration::from_secs(15);
 
-/// How the server reaches a conversation that is not in a turn.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Wake {
-    Claude(ClaudeInbox),
-    /// The Session's private app-server.
-    Codex(PathBuf),
-}
-
-#[derive(Debug, Clone)]
-struct Registration {
-    adapter: SteerAdapter,
-    thread: String,
-    /// The Session's context delivery file, where rendered steers point.
-    delivery: PathBuf,
-    wake: Wake,
-    /// The last boundary was a turn end.
-    idle: bool,
-}
-
-static REGISTRATIONS: LazyLock<Mutex<HashMap<String, Registration>>> =
-    LazyLock::new(Default::default);
-
-fn registrations() -> std::sync::MutexGuard<'static, HashMap<String, Registration>> {
-    REGISTRATIONS.lock().expect("wake registrations poisoned")
-}
-
-/// Record what a managed Session's boundary says about reaching it. A
-/// conversation with no way to wake it is forgotten.
-pub(super) fn register(
-    adapter: &SteerAdapter,
-    thread: &str,
-    delivery: &std::path::Path,
-    wake: Option<Wake>,
-    idle: bool,
-) {
-    let mut registered = registrations();
-    match wake {
-        Some(wake) => {
-            registered.insert(
-                adapter.session.clone(),
-                Registration {
-                    adapter: adapter.clone(),
-                    thread: thread.to_owned(),
-                    delivery: delivery.to_owned(),
-                    wake,
-                    idle,
-                },
-            );
-        }
-        None => {
-            registered.remove(&adapter.session);
-        }
-    }
-}
-
-/// Wake `session` now if it is registered, idle and has news: a turn just
-/// ended, so an update that arrived during it waits no longer. Blocking.
+/// Wake `session` now if it is idle and has news: a turn just ended, so an
+/// update that arrived during it waits no longer. Blocking.
 pub(super) fn after_turn(store: &SqliteStore, session: &str) {
-    let registration = registrations().get(session).cloned();
-    if let Some(registration) = registration.filter(|registration| registration.idle) {
-        wake(store, &registration);
-    }
+    wake_idle(store, Some(session));
 }
 
 /// Start the Machine's one watcher. It runs as long as the server.
@@ -108,66 +48,71 @@ fn watch() {
     let mut store = None;
     let mut seen = None;
     loop {
-        changes.wait(UNSIGNALLED);
-        if registrations()
-            .values()
-            .all(|registration| !registration.idle)
-        {
-            continue;
-        }
         if store.is_none() && path.exists() {
             store = SqliteStore::new(&path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
                 .ok();
         }
-        let Some(open) = &store else {
-            continue;
-        };
-        let revision = match open
-            .task_update_revision()
-            .and_then(|updates| Ok((updates, open.steer_revision()?)))
-        {
-            Ok(revision) => revision,
-            Err(error) => {
-                tracing::warn!(%error, "steer and Task update revisions unread");
-                store = None;
-                continue;
+        if let Some(open) = &store {
+            match open
+                .task_update_revision()
+                .and_then(|updates| Ok((updates, open.steer_revision()?)))
+            {
+                // The first reading is a baseline: what arrived while no
+                // server ran waits for each conversation's next boundary.
+                Ok(revision) if seen.is_none() => seen = Some(revision),
+                Ok(revision) if seen != Some(revision) => {
+                    seen = Some(revision);
+                    wake_idle(open, None);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "steer and Task update revisions unread");
+                    store = None;
+                }
             }
-        };
-        if seen == Some(revision) {
-            continue;
         }
-        seen = Some(revision);
-        let idle: Vec<Registration> = registrations()
-            .values()
-            .filter(|registration| registration.idle)
-            .cloned()
-            .collect();
-        for registration in idle {
-            wake(open, &registration);
-        }
+        changes.wait(UNSIGNALLED);
     }
 }
 
-/// Deliver `registration`'s pending steers and Task update, if any. The
+fn wake_idle(store: &SqliteStore, session: Option<&str>) {
+    match store.idle_conversations(session) {
+        Ok(idle) => {
+            for conversation in idle {
+                wake(store, &conversation);
+            }
+        }
+        Err(error) => tracing::warn!(session, %error, "idle conversations unread"),
+    }
+}
+
+/// Deliver `conversation`'s pending steers and Task update, if any. The
 /// update is recorded as dispatched before it is sent; the steer batch is
 /// confirmed once sent, so a failed send returns it to pending for the next
-/// boundary. A conversation that cannot be reached is forgotten; its next
-/// boundary registers it again and hears the news there.
-fn wake(store: &SqliteStore, registration: &Registration) {
-    let session = &registration.adapter.session;
-    let (adapter, thread) = (&registration.adapter, registration.thread.as_str());
-    let delivered = (|| -> Result<bool> {
+/// boundary. Once sent, the conversation is recorded as in a turn, so the
+/// next revision starts no second one.
+fn wake(store: &SqliteStore, conversation: &IdleConversation) {
+    let IdleConversation {
+        adapter,
+        thread,
+        cwd,
+        reach,
+    } = conversation;
+    let delivered = (|| -> Result<()> {
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
-        let reach = match &registration.wake {
-            Wake::Claude(inbox) => Reach::Inbox(open_inbox(inbox)?),
-            Wake::Codex(endpoint) => Reach::Codex(endpoint),
+        let reach = match reach {
+            IdleReach::Claude(key) => match open_inbox(key, thread)? {
+                Some(inbox) => Reach::Inbox(inbox),
+                None => return Ok(()),
+            },
+            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
         };
-        let steers = super::boundary::wake_steers(store, &registration.delivery, adapter, thread)?;
+        let steers = super::boundary::wake_steers(store, cwd, adapter, thread)?;
         let update = crate::harness::task_updates::claim(store, adapter, thread)?;
         let text = match (&steers, &update) {
-            (None, None) => return Ok(false),
+            (None, None) => return Ok(()),
             (Some(steers), Some(update)) => format!("{}{update}", steers.text),
             (Some(steers), None) => steers.text.clone(),
             (None, Some(update)) => update.clone(),
@@ -176,6 +121,7 @@ fn wake(store: &SqliteStore, registration: &Registration) {
             Reach::Inbox((mut socket, token)) => send_inbox(&mut socket, &token, thread, &text)?,
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &text)?,
         }
+        store.record_woken(adapter)?;
         if let Some(steers) = steers {
             store.confirm_session_steers(
                 adapter,
@@ -183,38 +129,50 @@ fn wake(store: &SqliteStore, registration: &Registration) {
                 super::boundary::HOOK_DEADLINE.as_secs(),
             )?;
         }
-        Ok(true)
+        Ok(())
     })();
-    match delivered {
-        Ok(true) => {
-            // A woken conversation is in a turn until its Stop says otherwise.
-            if let Some(current) = registrations().get_mut(session) {
-                current.idle = false;
-            }
-        }
-        Ok(false) => {}
-        Err(error) => {
-            tracing::warn!(session, error = %format!("{error:#}"), "idle conversation not woken; its next turn hears the update");
-            registrations().remove(session);
-        }
+    if let Err(error) = delivered {
+        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its next turn hears the update");
     }
 }
 
 enum Reach<'a> {
     Inbox((UnixStream, String)),
-    Codex(&'a std::path::Path),
+    Codex(&'a Path),
 }
 
-fn open_inbox(inbox: &ClaudeInbox) -> Result<(UnixStream, String)> {
-    let token = std::fs::read_to_string(&inbox.key)
-        .with_context(|| format!("Claude inbox key {} unreadable", inbox.key.display()))?;
-    let socket = UnixStream::connect(&inbox.socket)
-        .with_context(|| format!("Claude inbox {} unreachable", inbox.socket.display()))?;
+/// Claude's inbox socket and key for `thread`, from the key it publishes
+/// beside its session record, `<config>/sessions/<pid>.<sha256 of socket>.key`;
+/// `<pid>.json` names the socket. `None` once that Claude exited or moved to
+/// another conversation, whose own boundary records it.
+fn open_inbox(key: &Path, thread: &str) -> Result<Option<(UnixStream, String)>> {
+    let pid = key
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.split('.').next())
+        .ok_or_else(|| anyhow!("Claude inbox key {} names no process", key.display()))?;
+    let record = key.with_file_name(format!("{pid}.json"));
+    let record: serde_json::Value = match std::fs::read(&record) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("Claude session record {} unreadable", record.display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if record["sessionId"].as_str() != Some(thread) {
+        return Ok(None);
+    }
+    let socket = record["messagingSocketPath"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Claude session record {pid}.json names no inbox"))?;
+    let token = std::fs::read_to_string(key)
+        .with_context(|| format!("Claude inbox key {} unreadable", key.display()))?;
+    let socket = UnixStream::connect(socket)
+        .with_context(|| format!("Claude inbox {socket} unreachable"))?;
     socket.set_write_timeout(Some(SEND_DEADLINE))?;
-    Ok((socket, token.trim().to_owned()))
+    Ok(Some((socket, token.trim().to_owned())))
 }
 
-fn start_codex_turn(endpoint: &std::path::Path, thread: &str, text: &str) -> Result<()> {
+fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -253,26 +211,26 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{after_turn, register, Wake};
+    use super::{after_turn, wake_idle};
     use crate::context_block::ContextDelivery;
-    use crate::server::wire::ClaudeInbox;
+    use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use crate::steer::{NativeBoundary, SteerAdapter};
     use crate::store::sqlite::SqliteStore;
     use std::io::Read;
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
 
-    /// An interactive Session bound to a Task, whose provider selected
+    struct Fixture {
+        home: tempfile::TempDir,
+        store: SqliteStore,
+        adapter: SteerAdapter,
+        task: crate::durable::TaskId,
+        delivery: PathBuf,
+    }
+
+    /// A live interactive Session bound to a Task, whose provider selected
     /// conversation `native`, and its delivery file.
-    fn fixture(
-        session: &str,
-    ) -> (
-        tempfile::TempDir,
-        SqliteStore,
-        SteerAdapter,
-        crate::durable::TaskId,
-        PathBuf,
-    ) {
+    fn fixture(session: &str) -> Fixture {
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session(session, &crate::session_record::new_artifact_key());
@@ -280,8 +238,14 @@ mod tests {
         let claim = store
             .claim_session_attachment(session, None, &process, false)
             .unwrap();
+        let pid = std::process::id();
         store
-            .record_agent_process_identity(session, &claim, std::process::id(), 1)
+            .record_agent_process_identity(
+                session,
+                &claim,
+                pid,
+                crate::journal::process_started_at(pid).unwrap().unwrap(),
+            )
             .unwrap();
         let adapter = store.reserve_steer_adapter(session, &claim).unwrap();
         store
@@ -303,15 +267,19 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
                 "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
                 [session],
             )
             .unwrap();
+            conn.execute(
+                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                [&adapter.agent_process_id],
+            )
+            .unwrap();
+        }
         let captured = store.session(session).unwrap().unwrap().captured;
         store.bind_session(session, captured, &task).unwrap();
         // The conversation's first boundary records what it already knows.
@@ -320,6 +288,15 @@ mod tests {
             .is_none());
         let repo = home.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+                rusqlite::params![session, repo.to_string_lossy()],
+            )
+            .unwrap();
         let delivery = home.path().join("delivery.json");
         ContextDelivery {
             repository: None,
@@ -332,30 +309,63 @@ mod tests {
         }
         .save(&delivery)
         .unwrap();
-        (home, store, adapter, task, delivery)
+        Fixture {
+            home,
+            store,
+            adapter,
+            task,
+            delivery,
+        }
     }
 
-    fn comment(store: &SqliteStore, task: &crate::durable::TaskId, id: &str, body: &str) {
-        store
-            .append_task_comment(
-                task,
-                &crate::work::task::comment::TaskComment {
-                    id: id.into(),
-                    body: body.into(),
-                    author: crate::work::task::comment::TaskCommentAuthor::Person {
-                        name: Some("jack".into()),
-                    },
-                    created_at: Some("2026-11-11T09:00:00Z".into()),
+    impl Fixture {
+        /// A Claude inbox as Claude publishes it: the session record naming
+        /// `socket` for conversation `native`, and the peer key beside it.
+        fn claude(&self, socket: &Path) -> PathBuf {
+            let sessions = self.home.path().join("sessions");
+            std::fs::create_dir_all(&sessions).unwrap();
+            std::fs::write(
+                sessions.join("4242.json"),
+                serde_json::json!({"pid":4242,"sessionId":"native","messagingSocketPath":socket,"status":"idle"}).to_string(),
+            )
+            .unwrap();
+            let key = sessions.join("4242.9c1d.key");
+            std::fs::write(&key, "peer-key\n").unwrap();
+            key
+        }
+
+        /// The conversation's turn ends; its hook names its inbox.
+        fn stop(&self, store: &SqliteStore, inbox: &Path) {
+            super::super::boundary::answer(
+                store,
+                &SessionBoundary {
+                    moment: BoundaryMoment::Stop,
+                    delivery: self.delivery.clone(),
+                    adapter: Some(self.adapter.clone()),
+                    callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
+                    gap: None,
+                    printed: Vec::new(),
+                    inbox: Some(inbox.to_owned()),
                 },
             )
             .unwrap();
-    }
+        }
 
-    fn inbox(home: &Path, name: &str) -> Wake {
-        Wake::Claude(ClaudeInbox {
-            socket: home.join(format!("{name}.sock")),
-            key: home.join(format!("{name}.key")),
-        })
+        fn comment(&self, store: &SqliteStore, id: &str, body: &str) {
+            store
+                .append_task_comment(
+                    &self.task,
+                    &crate::work::task::comment::TaskComment {
+                        id: id.into(),
+                        body: body.into(),
+                        author: crate::work::task::comment::TaskCommentAuthor::Person {
+                            name: Some("jack".into()),
+                        },
+                        created_at: Some("2026-11-11T09:00:00Z".into()),
+                    },
+                )
+                .unwrap();
+        }
     }
 
     fn received(listener: &UnixListener) -> Vec<serde_json::Value> {
@@ -369,19 +379,14 @@ mod tests {
 
     #[test]
     fn an_idle_claude_conversation_takes_direction_and_updates_in_its_inbox_once() {
-        let (home, store, adapter, task, delivery) = fixture("wake-claude");
-        let listener = UnixListener::bind(home.path().join("inbox.sock")).unwrap();
-        std::fs::write(home.path().join("inbox.key"), "peer-key\n").unwrap();
-        register(
-            &adapter,
-            "native",
-            &delivery,
-            Some(inbox(home.path(), "inbox")),
-            true,
-        );
-        comment(&store, &task, "c-1", "use the staging bucket");
-        comment(&store, &task, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&store, "wake-claude");
+        let fixture = fixture("wake-claude");
+        let socket = fixture.home.path().join("inbox.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let inbox = fixture.claude(&socket);
+        fixture.stop(&fixture.store, &inbox);
+        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+        fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
+        after_turn(&fixture.store, "wake-claude");
         let frames = received(&listener);
         assert_eq!(
             frames[0],
@@ -394,20 +399,18 @@ mod tests {
         assert!(content.contains("use the staging bucket"), "a steer wakes");
         assert!(content.contains("New comment from jack: PR: https://example.test/pr/1"));
         assert_eq!(
-            store.session_steers("wake-claude", 0, 8).unwrap().pending,
+            fixture
+                .store
+                .session_steers("wake-claude", 0, 8)
+                .unwrap()
+                .pending,
             0
         );
         // Woken, it is in a turn: nothing more goes out until its Stop.
-        comment(&store, &task, "c-3", "and the eu region");
-        after_turn(&store, "wake-claude");
-        register(
-            &adapter,
-            "native",
-            &delivery,
-            Some(inbox(home.path(), "inbox")),
-            true,
-        );
-        after_turn(&store, "wake-claude");
+        fixture.comment(&fixture.store, "c-3", "and the eu region");
+        wake_idle(&fixture.store, None);
+        fixture.stop(&fixture.store, &inbox);
+        after_turn(&fixture.store, "wake-claude");
         let wire = received(&listener)[1]["message"]["content"].to_string();
         assert!(wire.contains("and the eu region"));
         assert!(
@@ -417,22 +420,46 @@ mod tests {
     }
 
     #[test]
+    fn a_restarted_server_still_wakes_a_conversation_idle_since_before() {
+        let fixture = fixture("wake-restart");
+        let socket = fixture.home.path().join("inbox.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let inbox = fixture.claude(&socket);
+        fixture.stop(&fixture.store, &inbox);
+        // A new server process: nothing but the store carries over.
+        let restarted = SqliteStore::new(&fixture.home.path().join("store.db")).unwrap();
+        fixture.comment(&restarted, "c-1", "PR: https://example.test/pr/1");
+        wake_idle(&restarted, None);
+        let content = received(&listener)[1]["message"]["content"].to_string();
+        assert!(content.contains("pr/1"));
+    }
+
+    #[test]
     fn an_unreachable_inbox_leaves_its_news_for_the_next_boundary() {
-        let (home, store, adapter, task, delivery) = fixture("wake-gone");
-        std::fs::write(home.path().join("gone.key"), "peer-key").unwrap();
-        register(
-            &adapter,
-            "native",
-            &delivery,
-            Some(inbox(home.path(), "gone")),
-            true,
+        let fixture = fixture("wake-gone");
+        let inbox = fixture.claude(&fixture.home.path().join("gone.sock"));
+        fixture.stop(&fixture.store, &inbox);
+        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+        fixture.comment(&fixture.store, "c-2", "PR: https://example.test/pr/1");
+        after_turn(&fixture.store, "wake-gone");
+        assert_eq!(
+            fixture
+                .store
+                .idle_conversations(Some("wake-gone"))
+                .unwrap()
+                .len(),
+            1,
+            "still idle"
         );
-        comment(&store, &task, "c-1", "use the staging bucket");
-        comment(&store, &task, "c-2", "PR: https://example.test/pr/1");
-        after_turn(&store, "wake-gone");
-        assert!(super::registrations().get("wake-gone").is_none());
-        assert_eq!(store.session_steers("wake-gone", 0, 8).unwrap().pending, 1);
-        let update = crate::harness::task_updates::read(&store, "wake-gone")
+        assert_eq!(
+            fixture
+                .store
+                .session_steers("wake-gone", 0, 8)
+                .unwrap()
+                .pending,
+            1
+        );
+        let update = crate::harness::task_updates::read(&fixture.store, "wake-gone")
             .unwrap()
             .expect("still news at the next boundary");
         assert!(update.text.contains("pr/1"));

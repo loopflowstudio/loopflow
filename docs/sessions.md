@@ -173,7 +173,7 @@ lf process list       # one lf server, no process per conversation
 
 Leave Task conversations open while their Graphs run. Each managed
 conversation, one opened through a Task or Wave command or from Desktop, is
-registered with this Machine's lf server. When a Graph step settles, the Graph
+known to this Machine's lf server, through restarts. When a Graph step settles, the Graph
 moves, a comment arrives on its Task or a steer is saved for it, the server
 wakes the conversation if it is waiting for you: Claude takes the news as a
 message from `loopflow`, Codex as a turn of its own. A comment with direction
@@ -182,13 +182,14 @@ conversation in the middle of a turn hears it when that turn ends. Ten idle
 conversations cost nothing beyond the one server: no watcher per conversation
 and no clock tick.
 
-A conversation you start with a bare `lf <skill>` in a terminal is not
-registered and gets no Task progress.
+A conversation you start with a bare `lf <skill>` in a terminal is never woken
+and gets no Task progress.
 
 Locally saved comments reach a conversation even when planning connection
-settings are unavailable; sync badges stay in the Task thread. If the server is
-down or restarting, or cannot reach a conversation, the update waits for that
-conversation's next turn, and lf records the gap in `logs/lf.log`. Each update
+settings are unavailable; sync badges stay in the Task thread. An update that
+lands while the server is down, or one the server cannot reach a conversation
+with, waits for that conversation's next turn, and lf records the gap in
+`logs/lf.log`. Each update
 reaches a conversation once.
 
 ## One more headless turn

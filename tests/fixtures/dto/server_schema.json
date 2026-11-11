@@ -838,15 +838,11 @@
         "last": {
           "format": "int64",
           "type": "integer"
-        },
-        "reason": {
-          "type": "string"
         }
       },
       "required": [
         "first",
-        "last",
-        "reason"
+        "last"
       ],
       "type": "object"
     },
@@ -10111,8 +10107,7 @@
               "delivery": "/Users/maya/.lf/context-deliveries/0b9f2c1e.json",
               "gap": {
                 "first": 1794358000,
-                "last": 1794358020,
-                "reason": "session boundary: Loopflow server unavailable"
+                "last": 1794358020
               },
               "kind": "session.boundary",
               "moment": "stop"

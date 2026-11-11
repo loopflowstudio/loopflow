@@ -5,10 +5,13 @@ title: Server-first Sessions
 
 # Server-first Sessions
 
-Planned in LOO-819. None of this is built yet; [Client API server](server.md)
-and the [transport README](../../rust/loopflow/src/transport/README.md)
-describe what runs today. Each piece below lands as its own Task and updates
-those documents when it does. Delete this page when the last piece lands.
+Planned in LOO-819. Two parts run today: hooks call the Machine server
+([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)),
+and Desktop sends pane status as `session.status`. The rest is not built;
+[Client API server](server.md) and the
+[transport README](../../rust/loopflow/src/transport/README.md) describe what
+runs today. Each piece below lands as its own Task and updates those documents
+when it does. Delete this page when the last piece lands.
 
 How Paseo, T3 Code, Paradev and Rex handle the same questions, and the traps
 they hit, is in [Server protocols elsewhere](research/server-protocols.md).
@@ -40,7 +43,7 @@ agent, a child in your terminal       view --+
 | Started by | `lf <skill>`, `lf graph …`, `lf -i` in a terminal | Task and Wave commands, Desktop |
 | Holds the process | Your terminal | A holder the Machine server controls |
 | Resident `lf` processes | None beyond the launching parent | The server and its holders, shared by every Session |
-| Hooks | None | Steers and Task updates in; a wake-up to the server out |
+| Hooks | None | Steers and Task updates in; the provider's callback to the server out |
 | Views | The terminal it runs in | Any number, in Desktop or any terminal, all live |
 | Outlives its terminal | No | Yes |
 
@@ -108,7 +111,8 @@ Sessions:
 - The agent's own status reports in its output (working, blocked on a
   permission or a question) give "waiting on you". The server's emulator reads
   them; no per-pane status process is needed.
-- A hook at a turn boundary tells the server to read the transcript now.
+- A hook at a turn or tool boundary sends the server the provider's callback.
+  The server records the turn from it and answers with any steers waiting.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue.
@@ -158,6 +162,10 @@ run ends with its parent.
 - Which per-turn facts (cost, model time, stop reason) each harness's
   transcript carries. The cost-per-PR work (LOO-732) reads them from the
   store, so a bare run must write them at exit.
+- Whether hook-recorded turns stay a source of their own beside the
+  transcript, or the hook becomes a wake-up that tells the server to read the
+  transcript. `session.boundary` carries the whole callback, so it serves
+  either.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

@@ -384,7 +384,6 @@ mod tests {
         stop.gap = Some(BoundaryGap {
             first: 1_794_358_000,
             last: 1_794_358_020,
-            reason: "session boundary: server unavailable".into(),
         });
         let (answered, after) = answer(&store, &stop).unwrap();
         // A turn end delivers nothing; the steer waits for the next boundary.

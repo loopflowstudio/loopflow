@@ -412,7 +412,7 @@ JSON the provider sent the hook, unchanged. A conversation lf did not start,
 such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
-gap, `{first, last, reason}`, or null.
+gap, `{first, last}`, or null.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and

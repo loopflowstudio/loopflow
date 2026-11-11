@@ -137,8 +137,8 @@ subsequently removed that periodic projection policy. Quiet differences in those
 five pairs were inconclusive. Keep the raw receipts; never treat 7.33 seconds as
 this Task's current baseline.
 
-Source-only competitor findings remain in
-`coordination-competitor-performance.md`: shared computation before fan-out,
+Source-only competitor findings are in git at 92e8f0cd0
+(`scratch/coordination-competitor-performance.md`): shared computation before fan-out,
 one trailing refresh, canceled queued setup doing no work, and charges retained
 through blocked sends. They are test inspiration, not competitor CPU results.
 

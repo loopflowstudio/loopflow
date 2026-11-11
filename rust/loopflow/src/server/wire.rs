@@ -151,7 +151,6 @@ pub enum BoundaryMoment {
 pub struct BoundaryGap {
     pub first: i64,
     pub last: i64,
-    pub reason: String,
 }
 
 /// What `session.boundary` answers.

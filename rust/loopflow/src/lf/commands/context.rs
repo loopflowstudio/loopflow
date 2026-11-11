@@ -364,7 +364,6 @@ fn ask_server(
         gap: gap.span().map(|span| BoundaryGap {
             first: span.first_miss,
             last: span.last_miss,
-            reason: span.what.clone(),
         }),
     }));
     let answered = crate::server::socket_path()
@@ -515,6 +514,7 @@ mod tests {
 
     #[test]
     fn callbacks_select_exact_session_after_other_tasks_and_resume() {
+        let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_CONTEXT_DELIVERY", "LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());

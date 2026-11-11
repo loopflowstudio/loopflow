@@ -93,7 +93,9 @@ Integration test `held_session_survives_server_restart` (in
 3. Restart the server; viewer reconnects; its screen contains the newest
    counter and a counter value printed while the server was down.
 4. SIGKILL the server; the agent exits 3; restart: Session ended with code 3,
-   `<pty>/` gone.
+   `<pty>/` gone; the open view prints `The agent exited with 3.` and exits 3.
+5. `held_terminals_list_one_holder_process`: `lf ps --json` lists one holder
+   LfProcess and no owner row per held terminal.
 
 Linux: same test on the RunPod rental with the user unit's `KillMode=process`.
 
@@ -745,8 +747,11 @@ earlier draft of `a_held_pane_reads_reconnecting…` (an endless 0.2 s tick
 loop); the transport `Fixture` now kills every holder its store recorded on
 drop. Malformed `lf session attach` args name the expected form.
 
-Open: a holder adopted by a later server and idling out leaves its row
-unfinished; `lf ps` hides it by OS identity, nothing completes it.
+Remaining: a holder adopted by a later server and idling out leaves its row
+unfinished (only the spawning server waits on it); `lf ps` hides it by OS
+identity, but the row never gets `completed_at`. The fix is unchosen: the
+adopting server settles the row (outcome unknown) when the holder's socket goes
+away, or the holder writes its own exit before it leaves.
 
 Compress (after d695dacce): holder row writes share one `write`; rest kept.
 `transport_tests -- held_terminals_list_one_holder_process held_session_survives` 2 passed.

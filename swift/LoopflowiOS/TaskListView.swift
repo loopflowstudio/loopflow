@@ -114,18 +114,6 @@ final class TaskFeed {
 
 }
 
-extension WorkViewPlan.Content {
-    var mobileStatus: String {
-        if primarySession == nil { return "No conversation yet" }
-        if !unavailable.isEmpty { return "Unavailable" }
-        if states.contains(.blocked) { return "Needs a response" }
-        if states.contains(.busy) { return "Working" }
-        if states.contains(.available) { return "Ready" }
-        if states.contains(.shipping) { return "Shipping" }
-        return "Open"
-    }
-}
-
 struct TaskListView: View {
     let client: RemoteMobileClient
     let onForget: () -> Void
@@ -316,17 +304,10 @@ struct TaskListView: View {
             set: { drafts[task.work] = $0 }))
     }
 
-    private func statusColor(_ task: WorkViewPlan.Content) -> Color {
-        if task.primarySession == nil || !task.unavailable.isEmpty { return theme.palette.textSecondary }
-        if task.states.contains(.blocked) { return theme.palette.warning }
-        if task.states.contains(.busy) { return theme.palette.working }
-        return theme.palette.available
-    }
-
     private func row(_ task: WorkViewPlan.Content) -> some View {
         HStack(alignment: .top, spacing: 12) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(statusColor(task))
+                .fill(task.status.tone.ink(in: theme.palette))
                 .frame(width: 3)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
@@ -335,8 +316,8 @@ struct TaskListView: View {
                     .foregroundStyle(theme.palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
-                    Text(task.mobileStatus)
-                        .foregroundStyle(statusColor(task))
+                    Text(task.status.label)
+                        .foregroundStyle(task.status.tone.ink(in: theme.palette))
                     if let identifier = task.identifier {
                         Text(identifier).foregroundStyle(theme.palette.textSecondary)
                     }

@@ -55,9 +55,21 @@ pub(super) fn session_ids(selector: &str) -> String {
 }
 
 pub(super) fn session_tasks(session: &str) -> String {
+    // Probe checkout roots from the cwd outward. Keep paths lexical: repeated
+    // slashes and relative paths have the same meaning as in `checkout`. CROSS
+    // JOIN keeps ancestors outside the index probe instead of scanning Tasks.
     format!(
-        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
-        session_membership(session)
+        "WITH RECURSIVE up(path) AS (
+            SELECT rtrim({session}.cwd,'/') WHERE {session}.primary_scope IS NULL
+            UNION ALL
+            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT id FROM tasks WHERE id={session}.task_id AND {session}.primary_scope IS NULL
+         UNION
+         SELECT tw.id FROM up CROSS JOIN tasks tw
+            ON tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+            AND rtrim(tw.worktree,'/')=up.path AND tw.worktree!=''
+         WHERE up.path!='' OR substr({session}.cwd,1,1)='/' OR {session}.cwd=''
+         ORDER BY id"
     )
 }
 
@@ -559,8 +571,9 @@ impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
-            session_membership("a")
+            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
+             WHERE a.id=?1 ORDER BY tw.id",
+            session_tasks("a")
         ))?;
         let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
         rows.map(|row| {
@@ -943,6 +956,165 @@ mod tests {
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn session_membership_upgrade_probes_task_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)
+             INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at)
+             SELECT printf('task_%032x',i),'repo_11111111111111111111111111111111','FIX-'||i,'Task','/repo/'||i,
+                (SELECT id FROM machines WHERE is_local=1),1 FROM n;
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('probe','Probe','human',1,0,'/repo/999/sub','task_00000000000000000000000000000001');
+             UPDATE tasks SET primary_session_id='probe' WHERE worktree='/repo/999';"
+        ).unwrap();
+        let sql = format!(
+            "SELECT (SELECT json_group_array(id) FROM ({})),
+                EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=a.id)
+             FROM agent_sessions a WHERE id=?1",
+            super::session_tasks("a")
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let result: (String, bool) = query
+                .query_row(["probe"], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap();
+            (result, query.get_status(rusqlite::StatementStatus::VmStep))
+        };
+        let (before, before_steps) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps) = read();
+        assert_eq!(after, before);
+        assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["probe"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("tasks_checkout_root") && line.contains("<expr>=?")),
+            "{plans:?}"
+        );
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("tasks_primary_session")),
+            "{plans:?}"
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn reverse_session_membership_keeps_lexical_checkout_and_binding_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let repository = store.ensure_repository("/repo").unwrap();
+        let remote = crate::durable::MachineId::new();
+        store.add_machine(&remote, "remote", "remote").unwrap();
+        let roots = [
+            Some("/"),
+            Some("/repo"),
+            Some("/repo/task///"),
+            Some("/repo/task/nested"),
+            Some("/repo//task"),
+            Some("relative"),
+            Some("relative//nested/"),
+            Some("/literal%_"),
+            Some(""),
+            None,
+            Some("/foreign"),
+        ];
+        let tasks: Vec<_> = roots.iter().map(|_| TaskId::new()).collect();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (index, (id, root)) in tasks.iter().zip(roots).enumerate() {
+                conn.execute(
+                    "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at)
+                     VALUES(?1,?2,?1,'Task',?3,CASE WHEN ?4 THEN ?5 ELSE (SELECT id FROM machines WHERE is_local=1) END,1)",
+                    params![id.as_str(), repository.as_str(), root, index == 10, remote.as_str()],
+                ).unwrap();
+            }
+        }
+        let mut case = 0;
+        for (cwd, expected) in [
+            ("/repo/task/nested/file", vec![0, 1, 2, 3]),
+            ("/repo/task///", vec![0, 1, 2]),
+            ("/repo/task//nested/file", vec![0, 1, 2]),
+            ("/repo//task/file", vec![0, 1, 4]),
+            ("/repo/task-other", vec![0, 1]),
+            ("/repository", vec![0]),
+            ("relative//nested/file", vec![5, 6]),
+            ("relative/", vec![5]),
+            ("elsewhere", vec![]),
+            ("", vec![0]),
+            ("///", vec![0]),
+            ("/literal%_/file", vec![0, 7]),
+            ("/literalAB/file", vec![0]),
+            ("/foreign/file", vec![0]),
+        ] {
+            for binding in [None, Some(2), Some(8), Some(9), Some(10)] {
+                for scope in [None, Some("repository"), Some("wave")] {
+                    let session = format!("lexical-{case}");
+                    case += 1;
+                    {
+                        let conn = store.conn.lock().unwrap();
+                        conn.execute(
+                            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,primary_scope,interactive)
+                             VALUES(?1,'Lexical','human',1,0,?2,?3,?4,1)",
+                            params![session, cwd, binding.map(|index| tasks[index].as_str()), scope],
+                        ).unwrap();
+                        super::super::sessions::test_capture(
+                            &conn,
+                            &session,
+                            &crate::session_record::new_artifact_key(),
+                        );
+                        conn.execute(
+                            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+                            params![tasks[2].as_str(), session],
+                        )
+                        .unwrap();
+                    }
+                    let mut ids: Vec<_> = if scope.is_none() {
+                        expected
+                            .iter()
+                            .copied()
+                            .chain(binding)
+                            .map(|index| tasks[index].clone())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+                    ids.dedup();
+                    assert_eq!(
+                        store.session_task_ids(&session).unwrap(),
+                        ids,
+                        "{cwd:?}, {binding:?}, {scope:?}"
+                    );
+                    let summary = store.session_summary(&session, 0).unwrap().unwrap();
+                    assert_eq!(summary.task_ids, ids);
+                    assert!(summary.task_primary);
+                }
+            }
+        }
+        assert!(store.session_task_ids("missing").unwrap().is_empty());
+    }
 
     #[test]
     fn request_stop_retains_its_person_without_an_os_process() {

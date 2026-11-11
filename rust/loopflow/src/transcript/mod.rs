@@ -297,12 +297,9 @@ pub(crate) fn read(harness: HarnessKind, source: &Source) -> Result<Vec<Turn>> {
     Ok(reader(harness)(&rows(file).collect::<Vec<_>>()))
 }
 
-/// Reads a transcript's rows into its turns.
-type Reader = fn(&[Value]) -> Vec<Turn>;
-
-/// The reader of a harness's transcript rows. OpenCode keeps rows in SQLite,
-/// read as the messages `opencode session export` writes.
-fn reader(harness: HarnessKind) -> Reader {
+/// The reader of a harness's transcript rows; OpenCode's rows are the
+/// messages of its store.
+fn reader(harness: HarnessKind) -> fn(&[Value]) -> Vec<Turn> {
     match harness {
         HarnessKind::Claude => claude::read,
         HarnessKind::Codex => codex::read,
@@ -631,10 +628,21 @@ struct Calls {
 }
 
 impl Calls {
-    fn count(&mut self, turn: usize, counts: [u64; 5], cost: Option<f64>, model: Option<&str>) {
-        if self.turn != turn {
+    /// Add one model call to the turn `turns` is in, and put that turn's usage
+    /// so far on it and on its store row.
+    fn add<'a>(
+        &mut self,
+        turns: &'a mut Turns,
+        provider: &str,
+        counts: [u64; 5],
+        cost: Option<f64>,
+        model: Option<&str>,
+    ) -> &'a mut Turn {
+        turns.current();
+        let index = turns.turns.len();
+        if self.turn != index {
             *self = Self {
-                turn,
+                turn: index,
                 ..Self::default()
             };
         }
@@ -647,10 +655,8 @@ impl Calls {
         if let Some(model) = model {
             self.model = Some(model.to_owned());
         }
-    }
 
-    /// Put the turn's usage so far on `turn`, and the same as its store row.
-    fn write(&self, turn: &mut Turn, provider: &str) {
+        let turn = turns.current();
         let [input, cache_read, cache_write, output, reasoning] = self.counts;
         let total = input + cache_read + cache_write;
         turn.model = self.model.clone();
@@ -672,6 +678,7 @@ impl Calls {
         };
         turn.receipt.usage =
             serde_json::json!({"provider": provider, "final": true, "usage": usage});
+        turn
     }
 }
 

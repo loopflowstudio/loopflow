@@ -118,8 +118,9 @@ pub(crate) fn read(messages: &[Value]) -> Vec<Turn> {
                 parts(&mut turns, id, &message["content"]);
                 let tokens = &message["tokens"];
                 let count = |value: &Value| value.as_u64().unwrap_or(0);
-                calls.count(
-                    turns.turns.len(),
+                let turn = calls.add(
+                    &mut turns,
+                    "opencode",
                     [
                         count(&tokens["input"]),
                         count(&tokens["cache"]["read"]),
@@ -130,8 +131,6 @@ pub(crate) fn read(messages: &[Value]) -> Vec<Turn> {
                     message["cost"].as_f64(),
                     message["model"]["id"].as_str(),
                 );
-                let turn = turns.current();
-                calls.write(turn, "opencode");
                 if !message["error"].is_null() {
                     turn.receipt.errors.push(message["error"].clone());
                 }

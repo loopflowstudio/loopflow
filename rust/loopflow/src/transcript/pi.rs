@@ -54,8 +54,9 @@ pub(super) fn read(rows: &[Value]) -> Vec<Turn> {
                 }
                 let usage = &message["usage"];
                 let count = |key: &str| usage[key].as_u64().unwrap_or(0);
-                calls.count(
-                    turns.turns.len(),
+                let turn = calls.add(
+                    &mut turns,
+                    "pi",
                     [
                         count("input"),
                         count("cacheRead"),
@@ -66,8 +67,6 @@ pub(super) fn read(rows: &[Value]) -> Vec<Turn> {
                     usage["cost"]["total"].as_f64(),
                     message["model"].as_str(),
                 );
-                let turn = turns.current();
-                calls.write(turn, "pi");
                 match message["stopReason"].as_str() {
                     Some("toolUse") => {}
                     Some(stop @ ("aborted" | "error")) => {

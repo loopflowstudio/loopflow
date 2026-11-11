@@ -345,7 +345,11 @@ pub fn emit_block(
         None => (delivery, None),
     };
     let prefix = steers.as_ref().map_or("", |steers| steers.text.as_str());
-    let text = delivery.block_with_prefix(moment, prefix)?;
+    let text = if moment == ContextMoment::Tool {
+        prefix.to_owned()
+    } else {
+        delivery.block_with_prefix(moment, prefix)?.text
+    };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let output = serde_json::json!({"hookSpecificOutput": {
         "hookEventName": event, "additionalContext": text,
@@ -636,6 +640,7 @@ mod tests {
             let skill = repo.path().join("skill.md");
             std::fs::write(&skill, format!("SESSION_{index}_SKILL")).unwrap();
             let context = ContextDelivery {
+                identity: None,
                 repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),

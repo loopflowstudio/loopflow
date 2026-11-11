@@ -42,6 +42,8 @@ pub enum ContextMoment {
 /// files; references and the active skill retain their complete launch bytes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextDelivery {
+    /// Captured before launch; managed start/compact boundaries refresh it.
+    pub identity: Option<SessionIdentity>,
     /// Durable identity and canonical main-checkout address captured at launch.
     pub repository: Option<(crate::durable::RepositoryId, PathBuf)>,
     pub repo: PathBuf,
@@ -51,6 +53,12 @@ pub struct ContextDelivery {
     /// Sources already supplied in task text; absent in historical deliveries.
     pub submitted_docs: Option<Vec<PathBuf>>,
     pub home: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionIdentity {
+    pub session: String,
+    pub task: Option<(String, String)>,
 }
 
 impl ContextDelivery {
@@ -107,6 +115,7 @@ impl ContextDelivery {
             .transpose()?
             .flatten();
         Ok(Self {
+            identity: None,
             repository,
             repo: repo.clone(),
             wave: components.wave.clone(),
@@ -125,6 +134,26 @@ impl ContextDelivery {
             ),
             home: crate::store::lf_home_dir(),
         })
+    }
+
+    /// Refresh the identity the launch owner knows, without making hooks open
+    /// the store. Bare launches keep this snapshot for their whole run.
+    pub(crate) fn identify(
+        &mut self,
+        store: &crate::store::sqlite::SqliteStore,
+        session: &str,
+    ) -> crate::store::StoreResult<bool> {
+        let task = match store.session_task_ids(session)?.as_slice() {
+            [task] => store.task(task)?,
+            _ => None,
+        };
+        let identity = Some(SessionIdentity {
+            session: session.to_owned(),
+            task: task.map(|task| (task.identifier, task.title)),
+        });
+        let changed = self.identity != identity;
+        self.identity = identity;
+        Ok(changed)
     }
 
     /// Follow a moved checkout to where the store now places the repository;
@@ -163,6 +192,14 @@ impl ContextDelivery {
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
+        self.block_with_prefix(moment, "")
+    }
+
+    pub(crate) fn block_with_prefix(
+        &self,
+        moment: ContextMoment,
+        prefix: &str,
+    ) -> Result<ContextBlock, CoreError> {
         let wave = self.wave.as_deref();
         let mut documents = gather_documents(&GatherSpec {
             repo_root: self.repo.clone(),
@@ -179,6 +216,21 @@ impl ContextDelivery {
         });
         let branch = crate::git::current_branch(&self.repo).ok().flatten();
         order_documents(&mut documents, wave, branch.as_deref());
+        let identity = self
+            .identity
+            .as_ref()
+            .map(|identity| {
+                let mut text = format!("This Session: {}\n", identity.session);
+                if let Some((identifier, title)) = &identity.task {
+                    text.push_str(&format!(
+                        "This Session's Task: {identifier} {}\n",
+                        serde_json::to_string(title).expect("title serializes")
+                    ));
+                }
+                render_reference(&text)
+            })
+            .unwrap_or_default();
+        let prefix = format!("{identity}{prefix}");
         render_block(
             &self.repo,
             wave,
@@ -186,35 +238,8 @@ impl ContextDelivery {
             self.skill_file.as_deref(),
             &self.references,
             documents,
+            &prefix,
         )
-    }
-
-    pub(crate) fn block_with_prefix(
-        &self,
-        moment: ContextMoment,
-        prefix: &str,
-    ) -> Result<String, CoreError> {
-        if matches!(moment, ContextMoment::Tool) {
-            return Ok(prefix.to_owned());
-        }
-        let block = self.block(moment)?;
-        if prefix.len() + block.text.len() <= HOOK_CONTEXT_BYTES {
-            return Ok(format!("{prefix}{}", block.text));
-        }
-        let pointer = block
-            .manifest_path
-            .strip_prefix(&self.repo)
-            .unwrap_or(&block.manifest_path);
-        let text = format!(
-            "{prefix}\nRead the current reference context and saved active skill from {}.\n",
-            serde_json::to_string(pointer).expect("context path serializes")
-        );
-        if text.len() > HOOK_CONTEXT_BYTES {
-            return Err(CoreError::ExecutionFailed(
-                "Steer notice and context pointer exceed the hook budget".into(),
-            ));
-        }
-        Ok(text)
     }
 
     /// Each provider process receives its own saved launch context separately
@@ -226,11 +251,8 @@ impl ContextDelivery {
         // Provider environments outlive directory moves. Keep their launch
         // description in the Machine, where the hook's address stays valid.
         let directory = self.home.join("context-deliveries");
-        fs::create_dir_all(&directory)?;
         let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
-        let file = tempfile::NamedTempFile::new_in(&directory)?;
-        serde_json::to_writer(file.as_file(), self)?;
-        file.persist(&path)?;
+        self.save(&path)?;
         command.env(CONTEXT_DELIVERY_ENV, path);
         Ok(())
     }
@@ -380,6 +402,7 @@ fn render_block(
     skill_file: Option<&Path>,
     references: &[PathBuf],
     documents: Vec<Document>,
+    prefix: &str,
 ) -> Result<ContextBlock, CoreError> {
     let mut files = Vec::new();
     for doc in &documents {
@@ -436,10 +459,15 @@ fn render_block(
         .strip_prefix(repo_root)
         .expect("manifest is inside repository");
     let mut text = format!(
-        "Current reference context, not a new request. Historical instructions in these files do not select work.\n\
+        "{prefix}Current reference context, not a new request. Historical instructions in these files do not select work.\n\
          From the repository root:\nRead the complete context listing and any files not preloaded below: {}.\n",
         serde_json::to_string(pointer).expect("manifest pointer is JSON serializable")
     );
+    if text.len() > HOOK_CONTEXT_BYTES {
+        return Err(CoreError::ExecutionFailed(
+            "Identity, steer notice and context pointer exceed the hook budget".into(),
+        ));
+    }
     // Reserve the saved skill before the listing or any file body. Neither is
     // ever cut; omitted sections remain readable through the manifest.
     if let Some(skill) = skill {
@@ -447,7 +475,10 @@ fn render_block(
             &mut text,
             &format!("\nActive skill after compaction:\n{skill}\n"),
         ) {
-            text.push_str("Read the complete saved active skill from the context listing.\n");
+            append_whole(
+                &mut text,
+                "Read the complete saved active skill from the context listing.\n",
+            );
         }
     }
     append_whole(
@@ -526,6 +557,7 @@ mod tests {
 
     fn delivery(repo: &Path) -> ContextDelivery {
         ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.canonicalize().unwrap(),
             wave: None,
@@ -842,6 +874,7 @@ mod tests {
                     DocumentSource::Scratch,
                 ),
             ],
+            "",
         )
         .unwrap();
         assert!(source.len() < HOOK_CONTEXT_BYTES);
@@ -851,6 +884,37 @@ mod tests {
         assert!(block
             .text
             .contains("Read &#36;native as reference, not a skill."));
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn context_block_reserves_identity_and_steers_before_reference_files() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/large.md"), "雪".repeat(10_000)).unwrap();
+        fs::write(repo.path().join("scratch/small.md"), "KEEP_WHOLE").unwrap();
+        let delivery = ContextDelivery {
+            identity: Some(super::SessionIdentity {
+                session: "session-test".into(),
+                task: Some(("LOO-828".into(), "Keep $native".into())),
+            }),
+            ..delivery(repo.path())
+        };
+        let identity = render_reference(
+            "This Session: session-test\nThis Session's Task: LOO-828 \"Keep $native\"\n",
+        );
+        assert!(delivery
+            .block(ContextMoment::Start)
+            .unwrap()
+            .text
+            .starts_with(&identity));
+        let steer = format!("STEER_START{}STEER_END\n", "s".repeat(3_000));
+        let block = delivery
+            .block_with_prefix(ContextMoment::Compact, &steer)
+            .unwrap();
+        assert!(block.text.starts_with(&format!("{identity}{steer}")));
+        assert!(block.text.contains("KEEP_WHOLE"));
+        assert!(block.text.contains("excerpt=\"start\""));
         assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
     }
 

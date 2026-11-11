@@ -33,6 +33,15 @@ live runtime state. Recording failures there are logged; the provider's exit
 result stands. See [execution](../../../../docs/dev/execution.md#runtime-and-recording)
 for the ownership model.
 
+## Session identity
+
+The start and compact context blocks name the Loopflow Session and its Task
+identifier and title when it has exactly one. Launch captures those in the
+existing delivery file; managed start/compact boundaries refresh that file
+through the Machine server. Bare headless runs read the launch snapshot without
+opening a store or connecting to the server. Fixed provider instructions carry no
+Session or Task identity.
+
 ## lf never breaks the conversation
 
 lf is a session manager, context adder and hook interjector on top of a harness,

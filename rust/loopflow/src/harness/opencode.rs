@@ -162,6 +162,11 @@ impl OpenCodeHarness {
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = super::agent_process::open_owner(config.session_attachment.as_ref())?;
+        let mut config = config.clone();
+        if let Some(context) = &mut config.conversation_context {
+            context.identify(&owner.0, &owner.1)?;
+        }
+        let config = &config;
         self.owner = Some(owner.clone());
         self.password = uuid::Uuid::new_v4().simple().to_string();
         self.authorization = reqwest::header::HeaderValue::from_str(&format!(

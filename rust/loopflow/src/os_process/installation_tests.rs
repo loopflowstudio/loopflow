@@ -63,6 +63,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     );
     repo.create_file(".lf/graphs/inner.yaml", "- cmd: sync --plan\n");
     let delivery = crate::context_block::ContextDelivery {
+        identity: None,
         repository: None,
         repo: repo.path().to_path_buf(),
         home: home.clone(),

@@ -1199,6 +1199,8 @@ impl CodexHarness {
                 let (store, session, attachment) = &owner;
                 if let Some(context) = &launch.conversation_context {
                     store.with_session_attachment(session, attachment, || {
+                        let mut context = context.clone();
+                        context.identify(store, session)?;
                         Ok(context.bind_codex_session(thread_id.as_str()))
                     })??;
                 }

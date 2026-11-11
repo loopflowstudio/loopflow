@@ -734,7 +734,10 @@ against a thread-per-terminal build.
 Checks, November 11: `transport_tests -- held_ a_held session_attach_waits
 server_threads_do_not` 8 passed; `--lib -- transport:: holder::` 87 passed (the
 two `snapshot_preview_*` that failed in an earlier full run passed in this one);
-`documented_commands::` 4 passed; clippy clean.
+`documented_commands::` 4 passed; clippy clean. After compress (match on
+held/pending flattened, pending set before its retry threads start): `--lib --
+transport::registry::` 10 passed, the same transport filter 8 passed, clippy
+clean.
 
 ## Concept review with a person — November 11, 2026
 

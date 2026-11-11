@@ -281,13 +281,13 @@ pub(crate) struct Registry {
     /// The terminals hosted now and the Session each was started for.
     live: Live,
     /// The holders that have not answered this server yet.
-    pending: Waiting,
+    pending: PendingHolders,
     #[cfg(test)]
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 type Live = Arc<Mutex<HashMap<TerminalId, Option<LfSessionId>>>>;
-type Waiting = Arc<Mutex<Vec<Pending>>>;
+type PendingHolders = Arc<Mutex<Vec<Pending>>>;
 
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -327,19 +327,18 @@ impl Registry {
             watchers: Watchers::spawn(),
             started: Mutex::new(HashMap::new()),
             live: Live::default(),
-            pending: Waiting::default(),
+            pending: PendingHolders::default(),
             #[cfg(test)]
             thread: Mutex::new(None),
         });
         let mut unsettled = Vec::new();
         let (entries, pending) = registry.adopt(&mut unsettled);
-        let live = registry.live.clone();
-        for holder in &pending {
-            let (registry, holder) = (registry.clone(), holder.clone());
+        *registry.pending.lock().expect("registry lock poisoned") = pending.clone();
+        for holder in pending {
+            let registry = registry.clone();
             spawn_with_ledger("held-pending", move || registry.retry(holder))?;
         }
-        *registry.pending.lock().expect("registry lock poisoned") = pending;
-        let pending = registry.pending.clone();
+        let (pending, live) = (registry.pending.clone(), registry.live.clone());
         let _thread = spawn_with_ledger("held-terminals", move || {
             run(listener, wake, received, entries, pending, unsettled, live)
         })?;
@@ -748,7 +747,7 @@ fn run(
     wake: UnixStream,
     commands: mpsc::Receiver<Command>,
     adopted: Vec<(TerminalId, Entry)>,
-    pending: Waiting,
+    pending: PendingHolders,
     mut unsettled: Vec<Unsettled>,
     live: Live,
 ) {

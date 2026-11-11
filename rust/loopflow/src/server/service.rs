@@ -649,8 +649,8 @@ async fn session(
                         // A terminal whose holder has not answered this server yet.
                         let pending = terminals.and_then(|terminals| terminals.pending_terminal(&session, terminal_id.as_ref()));
                         if exact.is_none() && (terminal_id.is_some() || held.is_some() || pending.is_some()) {
-                            let message = match (terminal_id, held) {
-                                (wanted, Some(held)) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
+                            let message = match (terminal_id, held, pending) {
+                                (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
                                     let ticket = tickets.issue(Host::Terminal(held.clone()), uid, Instant::now());
                                     ServerMessage::Response { id, trace_id: crate::id::TraceId::default(), result: serde_json::to_value(SessionAttached {
                                         ticket,
@@ -659,13 +659,11 @@ async fn session(
                                         expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
                                     }).expect("a ticket serializes") }
                                 }
-                                (wanted, current) => match pending {
-                                    // Nothing ended; asking again later attaches.
-                                    Some(pending) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
-                                    None => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
-                                        "terminal has ended; nothing was started and no input replayed",
-                                    ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
-                                },
+                                // Nothing ended; asking again later attaches.
+                                (_, _, Some(pending)) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
+                                (wanted, current, None) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                                    "terminal has ended; nothing was started and no input replayed",
+                                ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
                             };
                             send(&mut lines, &message).await?;
                             continue;

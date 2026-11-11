@@ -145,8 +145,27 @@ public struct WorkLink: Codable, Equatable, Sendable {
     }
 
     public struct Route: Codable, Equatable, Sendable {
-        public let hosts: [Host]
+        public let host: Host?
         public let reason: String
+
+        enum CodingKeys: String, CodingKey { case host, reason }
+
+        public init(host: Host?, reason: String) {
+            self.host = host
+            self.reason = reason
+        }
+
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            host = try values.decode(Host?.self, forKey: .host)
+            reason = try values.decode(String.self, forKey: .reason)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(host, forKey: .host)
+            try values.encode(reason, forKey: .reason)
+        }
     }
 
     public let label: String

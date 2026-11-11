@@ -503,8 +503,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open Work in Desktop, this Rex/Herdr/cmux/tmux host or a terminal
+    /// Open one conversation here, in a sibling tab, or focus its existing view
     Open(commands::open::OpenArgs),
+    /// Open configured Task layouts or a repository/Wave overview
+    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -1178,6 +1180,7 @@ impl Commands {
             }
             Self::Ship { .. }
             | Self::Open(_)
+            | Self::Workspace(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -1818,7 +1821,7 @@ pub enum SessionCommand {
         #[arg(long)]
         source: Option<String>,
     },
-    /// Observe validated Program Status snapshots from an active local terminal
+    /// Record one validated Program Status snapshot, read from stdin, from an active local terminal
     ObserveStatus {
         id: String,
         /// The terminal marker in the current provider client receipt
@@ -1827,6 +1830,14 @@ pub enum SessionCommand {
         /// AgentProcess from the Session reading; omit when it reported none
         #[arg(long)]
         agent_process: Option<String>,
+        /// The observer this snapshot belongs to; a new one replaces the last
+        #[arg(long)]
+        stream: String,
+        /// Position in the stream, from 1; an older snapshot never replaces a newer one
+        #[arg(long)]
+        sequence: i64,
+        #[arg(long)]
+        json: bool,
     },
     /// Read what Sessions did, tagged with their Work; with an ID, one
     /// conversation's native start, usage and completion receipts
@@ -3542,6 +3553,22 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn conversation_modes_and_workspace_options_have_separate_commands() {
+        for flags in [
+            ["--here", "--tab"],
+            ["--here", "--focus"],
+            ["--tab", "--focus"],
+        ] {
+            assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
+        }
+        for option in ["--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
+            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        }
+        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
+    }
 
     #[test]
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {

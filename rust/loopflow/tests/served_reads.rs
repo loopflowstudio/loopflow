@@ -1361,6 +1361,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::SessionSteer { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
+        // program_status_cli_observes_available_without_completing_work drives its spelling.
+        | Write::SessionStatus { .. }
         | Write::SessionResume { .. }
         | Write::SessionNew { .. }
         | Write::SessionMove { .. }
@@ -2275,6 +2277,33 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["session", "rename", "--json", "--", id, name]),
         ),
+        Write::SessionStatus {
+            directory,
+            id,
+            terminal,
+            agent_process,
+            stream,
+            sequence,
+            ..
+        } => {
+            let sequence = sequence.to_string();
+            let mut spelled = words(&[
+                "session",
+                "observe-status",
+                "--json",
+                id,
+                "--terminal",
+                terminal,
+                "--stream",
+                stream,
+                "--sequence",
+                &sequence,
+            ]);
+            if let Some(agent_process) = agent_process {
+                spelled.extend(words(&["--agent-process", agent_process]));
+            }
+            (path(directory), spelled)
+        }
         Write::SessionBind {
             directory,
             id,

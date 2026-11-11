@@ -39,7 +39,7 @@ targets:
     platform: iOS
     sources:
       - path: LoopflowiOSTests
-      - path: ../tests/fixtures/dto/server
+      - path: ../rust/loopflow/tests/fixtures/dto/server
         type: folder
         buildPhase: resources
       - path: ../tests/fixtures/dto/owner

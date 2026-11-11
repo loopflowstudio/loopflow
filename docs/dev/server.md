@@ -4,6 +4,9 @@ Machine routing, client access and installation have separate owners. The local
 client connection is implemented; LOO-718 covers the mobile client and remote
 admission.
 
+LOO-819 plans the server holding managed Sessions' processes:
+[Server-first Sessions](server-first.md).
+
 ## Start from the action
 
 | Action | Concept | Surface |
@@ -157,7 +160,7 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `tests/fixtures/dto/server/` speak revision 5: one connection per client,
+under `rust/loopflow/tests/fixtures/dto/server/` speak revision 5: one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
 Unix socket and one text frame per message on the remote WebSocket carrier.
 Control messages are bounded at 1 MiB; terminals and larger messages travel on

@@ -9,7 +9,7 @@ struct MobilePairingTests {
     @Test func settingsDecodeTheMachinesConfiguration() throws {
         let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/server")
+            .appendingPathComponent("rust/loopflow/tests/fixtures/dto/server")
         let reply = try JSONDecoder().decode(JSONValue.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("remote.json")))
         let config = try JSONDecoder().decode(MobileSetup.Configuration.self,

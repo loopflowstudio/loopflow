@@ -2449,7 +2449,7 @@
       "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
     },
     "DesktopTaskPane": {
-      "description": "`lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,\nwhich keeps the pane current after the Task leaves the plan.",
+      "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
         "comments": {
           "anyOf": [
@@ -5732,20 +5732,24 @@
       "type": "string"
     },
     "OpenRoute": {
-      "description": "Destinations this invocation would try, in order, from its own context.",
+      "description": "The selected host, or no host when focusing a recorded view.",
       "properties": {
-        "hosts": {
-          "items": {
-            "$ref": "#/$defs/OpenHost"
-          },
-          "type": "array"
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenHost"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reason": {
           "type": "string"
         }
       },
       "required": [
-        "hosts",
+        "host",
         "reason"
       ],
       "type": "object"
@@ -11622,6 +11626,23 @@
       ],
       "type": "string"
     },
+    "StatusRecorded": {
+      "description": "The snapshot a Session's Program Status now holds.",
+      "properties": {
+        "sequence": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "sequence"
+      ],
+      "type": "object"
+    },
     "Steer": {
       "properties": {
         "author": {
@@ -16711,6 +16732,80 @@
               "unavailable": null,
               "worktree": "/src/loopflow.task"
             }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf session observe-status --json <id> --terminal <terminal> --stream\n<stream> --sequence <n> [--agent-process <id>]`, `records` on stdin: one\nProgram Status reading from the terminal showing the Session.",
+          "examples": [
+            {
+              "agent_process": "5e55105e-0000-4000-8000-000000000007",
+              "directory": "/",
+              "id": "session_5e55105e000040008000000000000001",
+              "kind": "session.status",
+              "records": {
+                "records": [
+                  {
+                    "app": null,
+                    "id": null,
+                    "kind": "question",
+                    "msg": "Proceed?",
+                    "progress": null,
+                    "state": "blocked",
+                    "title": null
+                  }
+                ],
+                "seen": true
+              },
+              "sequence": 1,
+              "stream": "5e55105e-0000-4000-8000-000000000008",
+              "terminal": "pane-1"
+            }
+          ],
+          "properties": {
+            "agent_process": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.status",
+              "type": "string"
+            },
+            "records": {
+              "$ref": "#/$defs/Records"
+            },
+            "sequence": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "terminal": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "id",
+            "terminal",
+            "agent_process",
+            "stream",
+            "sequence",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/StatusRecorded"
           }
         },
         {

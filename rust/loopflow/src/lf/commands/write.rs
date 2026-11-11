@@ -302,6 +302,30 @@ writes! {
     } => crate::ops::human_session::SessionRecord;
     { id, name, .. } => super::session::renamed(id, name)?,
 
+    /// `lf session observe-status --json <id> --terminal <terminal> --stream
+    /// <stream> --sequence <n> [--agent-process <id>]`, `records` on stdin: one
+    /// Program Status reading from the terminal showing the Session.
+    #[serde(rename = "session.status")]
+    SessionStatus {
+        directory: PathBuf,
+        id: String,
+        terminal: String,
+        agent_process: Option<String>,
+        stream: String,
+        sequence: i64,
+        records: crate::program_status::Records,
+    } => super::session::StatusRecorded;
+    {
+        id, terminal, agent_process, stream, sequence, records, ..
+    } => tokio::runtime::Runtime::new()?.block_on(super::session::status_recorded(
+        id,
+        terminal,
+        agent_process.as_deref(),
+        stream,
+        *sequence,
+        records,
+    ))?,
+
     /// `lf session bind --json --task <task> -- <id>`; with `preview`,
     /// `--dry-run`: the Task a bind would assign, assigning nothing.
     #[serde(rename = "session.bind")]
@@ -1243,6 +1267,7 @@ impl Write {
             | Self::SessionSteer { directory, .. }
             | Self::SessionRename { directory, .. }
             | Self::SessionBind { directory, .. }
+            | Self::SessionStatus { directory, .. }
             | Self::SessionResume { directory, .. }
             | Self::SessionNew { directory, .. }
             | Self::SessionMove { directory, .. }
@@ -1305,7 +1330,7 @@ mod tests {
         use serde_json::json;
 
         let shipping: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../../tests/fixtures/dto/server/task_shipping.json"
         ))
         .unwrap();
         for expected in [

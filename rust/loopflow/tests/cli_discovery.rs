@@ -610,7 +610,7 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
     ])
     .unwrap();
     assert!(
-        matches!(&composed.command, Some(Commands::Open(args)) if args.session.as_deref() == Some("session-exact") && args.diff && args.json)
+        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.diff && args.selection.json)
     );
     assert!(Cli::command()
         .find_subcommand("desktop")

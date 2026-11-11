@@ -1,56 +1,63 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>LOO-824 QA — held terminals</title>
+<title>LOO-824 QA — held terminals (second pass)</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
-pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
 td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
 table{border-collapse:collapse} .bad{color:#a12} .ok{color:#185}
 </style>
-<h1>LOO-824 QA: held terminals, November 11 2026</h1>
-<p>Branch build <code>lf 0.15.3+09b58ab55</code> (then the fix below). Private Machine:
-<code>HOME</code>, <code>LF_HOME</code>, <code>CODEX_HOME</code> under <code>/tmp/lfqa824</code>, inherited <code>LF_*</code> cleared,
-a Git repo with a local bare origin and <code>default_agent: codex</code>. Foreground <code>lf server run</code>.
-Views were real <code>lf resume --task</code> and <code>lf session attach --terminal</code> processes on PTYs (a Python driver
-recording every byte and answering <code>ESC[6n</code>). Codex 0.167.0, unauthenticated, so each agent sits at its sign-in screen.</p>
+<h1>LOO-824 QA: held terminals, November 11 2026 (second pass)</h1>
+<p>Branch <code>lf 0.15.3+5880b3eee</code> (build A), plus two simulated later builds: B with
+<code>registry::REVISION = 2</code>, and C, a re-signed copy of B (a third holder hash).
+Private Machine under <code>/tmp/lfq824</code>: <code>HOME</code>, <code>LF_HOME</code>, <code>CODEX_HOME</code>,
+<code>CLAUDE_CONFIG_DIR</code>; inherited <code>LF_*</code> and <code>REX_*</code> cleared; a Git repo with a local bare origin and
+<code>default_agent: claude</code>. The agent was a stand-in <code>claude</code> shell script on the private <code>PATH</code>
+(prints ticks, reports OSC 7501 working/blocked, reads an answer from <code>/dev/tty</code>, exits 3).
+Views were real <code>lf resume --task</code> and <code>lf session attach --terminal</code> processes on PTYs driven by
+<code>scratch/qa/pty.py</code>, which records every byte and answers <code>ESC[6n</code>.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Ten Task Sessions via <code>lf resume --task</code></td><td class="ok">OS <code>ps</code>: one <code>lf server run</code>, one <code>lf holder run</code> (parent of all ten codex agents), no <code>lf session serve</code>. Each view drew codex's sign-in screen.</td></tr>
-<tr><td>Server threads, 1 → 10 terminals</td><td>28 → 56, stable after a minute. By name: one <code>held-terminals</code>, one <code>lifetime</code>, 10 <code>planning-sync</code> (one per Task checkout, existing behavior, not this branch), 37 idle <code>tokio-rt-worker</code>. No per-terminal thread from the holder work.</td></tr>
-<tr><td><code>session.start</code> over the socket, repeated with the same <code>request</code> and a different argv</td><td class="ok">Same <code>terminal_id</code>; the second argv never ran.</td></tr>
-<tr><td>SIGTERM server, 6 s down, restart (same build)</td><td>Agents alive; counter kept advancing in the ring (relay received 0 bytes while down); after restart the relay got exactly ticks 34… onward, nothing skipped or repeated. <span class="bad">But first a mode reset and <code>ESC[H ESC[2J</code>: the screen was wiped.</span> Fixed, below.</td></tr>
-<tr><td>Same, after the fix, with a rebuilt <code>lf</code> (new build hash: a new server taking up an old build's holder, as after <code>lf install</code>)</td><td class="ok">Relay output after restart: <code>tick:838\r\ntick:839…</code> with the catch-up <code>ESC[5n</code> probe and nothing else; last tick before the stop was 837. The new server hosted the old holder's eleven terminals.</td></tr>
-<tr><td>Codex views across that restart</td><td>Old-build relays (started before the fix) cleared, then codex repainted from the rehost nudge; they stayed connected.</td></tr>
-<tr><td>Attach a well-formed unknown terminal id</td><td class="ok"><code>Error: terminal 0000… is not running; nothing was started and no input replayed</code>, exit 1, immediately.</td></tr>
-<tr><td>Attach a malformed id (<code>--terminal not-a-uuid</code>)</td><td class="bad"><code>error: unrecognized subcommand 'attach'</code> (the relay is matched before Clap; the owner form has the same behavior). Not changed.</td></tr>
-<tr><td><code>lf resume --task</code> with the server stopped</td><td class="ok"><code>Error: Loopflow server is not running; run lf server status</code>; no owner started.</td></tr>
-<tr><td>SIGKILL server, agent exits 3 while none runs, restart</td><td class="ok">Holder wrote <code>exit.json {"code":3,…}</code>; the next server recorded <code>held_terminals.exit_code = 3</code> and removed the terminal's directory. The open relay ended with "terminal … is not running; nothing was started and no input replayed".</td></tr>
-<tr><td><code>lf ps</code></td><td class="bad">Relays, launchers and codex rows; no holder row. The transport README says "<code>lf process list</code> shows it once" and the plan's gate acceptance counts holder LfProcess rows; nothing records one.</td></tr>
+<tr><td>Ten Task Sessions via <code>lf resume --task</code></td><td class="ok">OS <code>ps</code>: one <code>lf server run</code>, one <code>lf holder run</code> (parent of all ten agents), ten <code>lf session attach</code> views, no <code>lf session serve</code>.
+<code>lf ps</code> lists one <code>lf holder</code> row (the earlier pass's worst finding, now fixed).</td></tr>
+<tr><td>A held Task Session with no view asks a question</td><td class="ok"><code>lf session list --json --all</code>: <code>availability</code> null and <code>["working"]</code> before; <code>available</code> and <code>["blocked"]</code> within 3 s of the blocked report. A new <code>session attach</code> drew the question with the title <code>eabdc7 QA ask 14 · Available</code>; typing <code>yes</code> reached the agent (<code>got:yes</code>) and the Session read working again.</td></tr>
+<tr><td>The same, first try</td><td>Read <code>working</code> after the question. The cause was the stand-in: its stdin is lf's first-turn prompt file, so <code>read</code> got <code>&lt;lf:skill:task-session&gt;</code> at once and it went back to working. Recorded in the qa skill.</td></tr>
+<tr><td>Install that changes the <code>held.sock</code> revision: SIGTERM server A, point <code>LF_BIN</code>'s symlink at B, start B</td><td class="ok">Views whose <code>LF_BIN</code> followed the symlink reopened as B's <code>session attach</code> and repainted from the snapshot; ticks 1…61 with no gap, no <code>ESC[2J</code>. Views pinned to A ended with one line:
+<pre>Error: Loopflow server speaks held-terminal revision 2; this lf speaks 1 and the installed lf is this build; the agent keeps running. Run lf install, then lf session attach --terminal 76f41812-…</pre>
+Their agents kept running under holder A.</td></tr>
+<tr><td>A Session started after that</td><td class="ok">Went to a new holder on build B; holder A kept its twelve. <code>lf ps</code> showed both holder rows.</td></tr>
+<tr><td>SIGKILL server B twice with views open</td><td class="ok">Agents kept running. View 16: ticks 1…131, no gaps, no clears. A question asked while the server was down showed up after restart, with the title <code>· Available</code>.</td></tr>
+<tr><td>Agent exits 3 while the server is killed</td><td>The view ended after restart with the launcher's own lines:
+<pre>Left “7cfbe1 QA rev 15”. Continue with: lf resume 417f962e…  (Ctrl+] steps away without stopping)
+claude exited with exit status: 3. If another client still owns this session, close it and run `lf resume` again.</pre>
+<code>held_terminals.exit_code</code> is 1, the in-terminal <code>lf</code> launcher's exit, not the agent's 3.</td></tr>
+<tr><td>Managed launch with the server stopped</td><td class="ok"><code>lf resume --task</code> ran readiness, which registered <code>com.loopflow.server.58348c61bbd43704</code> under launchd (<code>LF_BIN</code> and <code>LF_HOME</code> from the private home), then opened the Session held.</td></tr>
+<tr><td>Install under launchd: build C behind the symlink, <code>launchctl kickstart -k</code> twice</td><td class="ok">The first restart's server spawned holder C (own process group, <code>setsid</code>). The second restart killed only the server; holder C and its agent survived, reparented to launchd. Views 16 and 18 stayed contiguous with no clears.</td></tr>
+<tr><td>Bare <code>lf -i -a claude</code> typed in a Task checkout</td><td class="ok">Its own <code>lf session serve --terminal</code> owner, <code>work_source = checkout</code>, no <code>held_terminal_id</code>.</td></tr>
+<tr><td><code>lf process rollover --dry-run</code> with three builds' holders</td><td class="ok">Moves nothing: holders, held agents and views all "keep their lf until it exits".</td></tr>
+<tr><td>Everything stopped while no server ran, then one server start</td><td class="ok">15 kept <code>exit.json</code> records; the next server recorded all 21 held terminals' exits (143, 1) and removed the records. Holders exited about a minute after their last child.</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p>A held view continuing from its PTY position still ran the relay's <code>handoff()</code> on the <code>Attached</code> reply:
-mode reset plus clear screen. The bytes after it were right, but the person saw an empty screen with only the output since the stop.
-<code>transport.rs</code> now skips the handoff when the attachment continues. <code>held_session_survives_server_restart</code>
-checked only for the snapshot's <code>?1047l</code> prefix; it now also refuses <code>ESC[2J</code>, and fails without the fix:</p>
-<pre>the view was repainted: "\u{1b}[&lt;65535u\u{1b}[&gt;4;0m … \u{1b}]8;;\u{1b}\\\u{1b}[H\u{1b}[2Jtick:…"</pre>
-<p>Checks: <code>cargo test -p loopflow --test transport_tests -- held_ a_held</code> 4 passed;
-<code>cargo test -p loopflow --lib -- transport:: holder::</code> 85 passed; clippy clean.</p>
+<p>Nothing in product code this pass. The <code>qa</code> skill gained a "Held terminals" section: clear <code>REX_*</code>, what a stand-in agent must do with stdin, and how to simulate installs (symlinked <code>LF_BIN</code>, re-signed copy, <code>launchctl kickstart -k</code>).</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Desktop windows: headless run, no Desktop launched. Swift and Desktop suites stay with gate.</li>
-<li>Authenticated Claude or Codex turns: none signed in here; a turn streaming across a restart was checked with a shell counter only.</li>
-<li>launchd/systemd replacement of the service (<code>lf install</code>) itself: simulated with SIGTERM plus a rebuilt binary in a foreground server.</li>
-<li>Linux.</li>
+<li>Desktop windows and Desktop's <code>session.attach</code> bridge across a revision change: headless; the Swift suites stay with gate.</li>
+<li>Real Claude or Codex turns, and whether they repaint on the size nudge: none signed in here.</li>
+<li>The real <code>lf install</code> binary swap: simulated with a symlinked <code>LF_BIN</code> and launchd restarts.</li>
+<li>Linux/systemd.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>No holder LfProcess is recorded, so <code>lf ps</code> never shows a holder, contrary to the transport README and the gate acceptance.</li>
-<li>A view whose agent exited while the server was down ends with "is not running; nothing was started and no input replayed", which reads as an attach failure rather than "the agent exited with 3".</li>
-<li><code>lf session attach --terminal &lt;malformed&gt;</code> reports "unrecognized subcommand 'attach'".</li>
-<li>A leaked holder from an earlier step of this Task (older build, cwd a deleted temp dir, child <code>/bin/sh</code> printing ticks every 0.2 s for over an hour) was still running; its script is in no committed test. Killed by PID.</li>
+<li><b>Steer a6a8449e is not built.</b> "repo and wave sessions should be managed": <code>primary.rs::repository_session</code> still records no WorkSource, and <code>transport::managed</code> still holds anything with <code>LF_SERVER</code>. Nine <code>transport_tests</code> call sites set <code>LF_SERVER=1</code>; the ones that use it to get a held terminal move to a managed launch. Left for implement.</li>
+<li>When a held agent exits, the store records the launcher's exit code (1), not the agent's (3). The view's last line, "If another client still owns this session, close it and run <code>lf resume</code> again", is wrong for a held terminal: nothing else owns it.</li>
+<li><code>lf session list</code> says "This conversation is open in another terminal on this Machine; Take back transfers input here" for a held Session no terminal is viewing, and labels Task Sessions <code>Repository</code>.</li>
+<li><code>lf ps</code>/rollover name a launcher row by its exec'd agent binary (<code>lf on bash</code>, here the stand-in script), and the BINARIES footer counts them as superseded and suggests <code>lf monitor rollover</code>, which then moves nothing.</li>
+<li>The snapshot's OSC 7 carries a NUL before ST (<code>…/repo.eabdc7-qa-ask-14/\x00\x1b\\</code>). It comes from Ghostty's formatter; <code>snapshot.rs</code>'s change on this branch doesn't touch it.</li>
+<li>From the earlier pass, unchanged: <code>lf session attach --terminal &lt;malformed&gt;</code> says "unrecognized subcommand 'attach'".</li>
+<li>About 25 <code>/tmp/lf-7501-*/bin/lf-* session serve --terminal</code> owners from test fixtures (several worktrees, names like <code>lf-busy</code>, <code>lf-replaced</code>, <code>lf-editor</code>) are still running under launchd's PID 1 on this Machine. Not stopped: not this run's.</li>
 </ol>

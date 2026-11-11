@@ -816,3 +816,25 @@ Open: is the repository conversation managed?
 Why it matters: (a) changes what LOO-821 delivers to a repository
 conversation; (b) keeps two answers to "is this held" for one conversation,
 depending on where it was opened. Built today: (b).
+
+Jack Heart, in the LOO-820 conversation (comment a6a8449e): "repo and wave sessions should be managed. you can tell 84 that". The repository primary records Declared, so is_managed holds it; managed() drops its LF_SERVER branch (held = task_run || is_managed).
+Then: "the repo is really secretly just the a wave".
+Then: "i just meant concpetually. whether we should give repo a wave project and stuff we dont need to wrory about". Not filed.
+
+Not built yet (QA, November 11): `repository_session` still records no
+WorkSource, and `managed()` still has the `LF_SERVER` branch. The
+`transport_tests` that set `LF_SERVER=1` to get a held terminal
+(`a_held_terminal_with_no_view_reports_that_it_waits` and its neighbours)
+need a managed launch instead. Existing repository primaries recorded with
+no WorkSource stay bare.
+
+## QA — November 11, 2026 (second pass)
+
+[qa.html](qa.html). Seen working: ten Task Sessions on one holder with one
+`lf holder` row in `lf ps`; unviewed Program Status reading `available`; a
+`held.sock` revision change (views on the new `lf` reopen, pinned ones end
+with one line); a second holder per build; SIGKILL and `launchctl kickstart -k`
+restarts with contiguous output; readiness from a stopped server; exits
+settled by the next server. Still wrong: a held agent's exit records the
+launcher's code (1, agent exited 3), and its view's last line tells the
+person to close "another client".

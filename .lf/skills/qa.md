@@ -317,3 +317,23 @@ identity, and capture again after startup settles. Attachment at the sign-in
 screen does not establish authenticated conversation behavior. Stop native
 servers and their terminal descendants, including detached owners recorded in
 the private store.
+
+## Held terminals
+
+Unset `REX_*` along with `LF_*`: an inherited Rex block makes every view
+report "open in Rex". A stand-in `claude` on the private `PATH` (answering
+`--version`) drives held Task Sessions with `lf resume --task <id>` on a PTY.
+Its stdin is lf's first-turn prompt file: drain it with `cat > /dev/null` and
+read answers from `/dev/tty`, or the agent answers its own question with the
+prompt. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
+`lf session list --json --all` reads (`availability`) with no view open.
+
+To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
+a relay replaced across a `held.sock` revision execs `LF_BIN`. A copy with a
+few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
+(its own holder). A managed launch with the server stopped readies
+`com.loopflow.server.<hash>` under launchd for the private home; `launchctl
+kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
+that label out afterwards. Kill stand-in agents by their holder parent PID;
+holders exit about a minute after their last child. Read the private store
+through a copy once the server stops: a read-only open finds no `-shm`.

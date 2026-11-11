@@ -516,7 +516,10 @@ server; it reuses that block for every model request until the next one.
   once-a-second poll: a steer saved during a long tool arrives when the tool
   ends. Turn end is `stop`. Under lf's RPC driver, which records Pi's events
   itself, the extension sends `tool` at the same events during a turn, for
-  steers only.
+  steers only. While a gap is open, only session start, tool start and the
+  turn end still wait up to two seconds; the other events are left out of
+  the record and fall into the gap, and later events repeat the turn, open
+  tools, pending input and assistant messages.
 - **OpenCode** sends `tool` before each model request and
   puts any steer text ahead of the block. Turn end is `stop`.
 

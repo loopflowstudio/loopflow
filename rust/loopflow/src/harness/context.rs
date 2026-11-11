@@ -357,8 +357,9 @@ mod tests {
     }
 
     /// A stand-in Machine server on the plugin's socket: it welcomes every
-    /// `hello`, answers the first `answer_steers` boundary with one batch, and
-    /// keeps each hello and request in `server.json`.
+    /// `hello` (a frozen one never does), answers the first `answer_steers`
+    /// boundary with one batch, and keeps each hello and request in
+    /// `server.json`.
     const STAND_IN_SERVER: &str = r#"import { createServer } from 'node:net';
 import { writeFileSync } from 'node:fs';
 const seen = { hellos: [], requests: [] };
@@ -374,6 +375,8 @@ const server = createServer((socket) => {
       buffer = buffer.slice(end + 1);
       if (message.type === 'hello') {
         seen.hellos.push(message);
+        keep();
+        if (FROZEN) continue;
         socket.write(JSON.stringify({ type: 'welcome' }) + '\n');
         continue;
       }
@@ -403,6 +406,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
     fn run_probe(
         directory: &std::path::Path,
         managed: bool,
+        frozen: bool,
         answer_steers: &str,
         source: &str,
     ) -> Probe {
@@ -411,7 +415,8 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         let server = STAND_IN_SERVER
             .replace("SEEN", &serde_json::to_string(&seen).unwrap())
             .replace("SOCKET", &serde_json::to_string(&socket).unwrap())
-            .replace("ANSWER_STEERS", answer_steers);
+            .replace("ANSWER_STEERS", answer_steers)
+            .replace("FROZEN", &frozen.to_string());
         let probe = directory.join("probe.mjs");
         std::fs::write(&probe, format!("{server}\n{source}\nprocess.exit(0);\n")).unwrap();
         let mut node = std::process::Command::new("node");
@@ -472,6 +477,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         run_probe(
             repo.path(),
             managed,
+            false,
             "(operation) => operation.moment === 'tool'",
             &format!(
                 r#"import assert from 'node:assert/strict';
@@ -541,7 +547,7 @@ await close();
 
     /// One headless Pi turn with two tool calls through the extension, with
     /// Pi's package stood in.
-    fn pi_turn(native: bool, managed: bool) -> Probe {
+    fn pi_turn(native: bool, managed: bool, frozen: bool) -> Probe {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
@@ -573,6 +579,7 @@ export const createLocalBashOperations = () => ({
         run_probe(
             home.path(),
             managed,
+            frozen,
             "(operation) => operation.moment !== 'start' && operation.callback.type === 'tool_execution_start'
   || operation.callback.hook_event_name === 'PiSteer'",
             &format!(
@@ -611,7 +618,7 @@ await fire('session_shutdown', {{}});
 assert.deepEqual(steers, {steers});
 "#,
                 extension = serde_json::to_string(&args[1]).unwrap(),
-                steers = if managed { r#"[["STEER ", "steer"]]"# } else { "[]" },
+                steers = if managed && !frozen { r#"[["STEER ", "steer"]]"# } else { "[]" },
                 ran = serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
             ),
         )
@@ -619,7 +626,7 @@ assert.deepEqual(steers, {steers});
 
     #[test]
     fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
-        let native = pi_turn(true, true);
+        let native = pi_turn(true, true, false);
         // One render at start, beside the conversation's Task-update watcher;
         // no lf per event, tool, steer check or bash command.
         let calls: Vec<_> = native
@@ -662,16 +669,26 @@ assert.deepEqual(steers, {steers});
 
     #[test]
     fn a_driven_pi_turn_asks_for_steers_and_a_bare_one_opens_no_connection() {
-        let driven = pi_turn(false, true);
+        let driven = pi_turn(false, true, false);
         assert_eq!(driven.calls, "__context-block --moment start\n");
         // Pi's RPC driver records the events; the extension asks only for steers.
         assert_eq!(
             moments(&driven),
             ["start", "tool", "tool", "tool", "tool", "tool", "tool", "stop"]
         );
-        let bare = pi_turn(false, false);
+        let bare = pi_turn(false, false, false);
         assert_eq!(bare.calls, "__context-block --moment start\n");
         assert!(moments(&bare).is_empty(), "{}", bare.server);
+    }
+
+    #[test]
+    fn a_native_pi_turn_against_a_frozen_server_waits_only_where_a_steer_can_land() {
+        let frozen = pi_turn(true, true, true);
+        // Nine boundaries reach a live server. With no answer, only session
+        // start, the start render, each tool start, the turn end and `stop`
+        // wait their two seconds; the rest fall into the open gap.
+        assert_eq!(frozen.server["hellos"].as_array().unwrap().len(), 6);
+        assert!(moments(&frozen).is_empty(), "{}", frozen.server);
     }
 
     /// Run `guard; <rest>` as Pi's local bash does: a shell leading its own

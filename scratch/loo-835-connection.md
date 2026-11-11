@@ -86,3 +86,36 @@ QA, November 11 (`scratch/qa.html`): the Done line holds with real Pi 1.3.0
 and OpenCode 2.2.1 against a scripted local model. Left for gate: affected
 suites once (`--swift` for the ServerProtocol comment). Open from qa:
 `questions.md` (frozen-server Pi slowdown, double comment delivery).
+
+## Concept review with a person, November 11 (at demo)
+
+Seen in this Task's own conversation: 25 `Loopflow worker progress` posts from
+11:41 to publish, one per settled step, each starting a full turn answered
+with one line; only "PR published" and "at demo" were actionable. `ps` at the
+review: 83 `--moment task-updates` watchers, 5,690 MB.
+
+Proposed, not decided: one Session inbox. Comments and settled run progress
+are items drained by every `session.boundary` answer with steer confirmation;
+wake is a per-item property (comment, run stopped or failed, interactive step,
+PR published), and the waiter is a `/bin/sh` on a server-written file, not an
+`lf`. Questions 1-4 in `scratch/concept-review.html`.
+
+Jack Heart, November 11, quoting the three "Proposed" paragraphs above (one
+Session inbox; wake as a per-item property for a person's comment, a run
+stopping, an interactive step, a PR published; a `/bin/sh` waiter for
+Claude): "this is ok with me". Not yet said: question 3 (ship #1889 and build
+the inbox in LOO-826, or here) and question 4 (frozen-server Pi).
+
+Answers to `concept-review.html`, Jack Heart, November 11: "1a 2a 3 dont care
+4b". Asked again about 1 (1a, wake on every step, against the inbox paragraph
+called ok), answered "Actionable + opt-in stream" (1c: actionable items wake
+by default; a Session can ask to be woken on every step).
+
+Built for 4b: while a gap is open, Pi skips every boundary except session
+start, tool start and the turn end (`server_connection.js` `skippable`);
+test `a_native_pi_turn_against_a_frozen_server_waits_only_where_a_steer_can_land`
+(6 waits instead of 9).
+
+The inbox (2a) and the wake rule (1c) go to LOO-826 (PR #1890), which already
+moves Task updates into the `session.boundary` answer and wakes idle
+conversations from the server.

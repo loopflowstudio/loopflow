@@ -50,9 +50,12 @@ function machineServer(delivery, log) {
       min_revision: spec.server.min_revision, client: { kind: "plugin", platform: spec.server.platform,
         name: spec.server.name, version: spec.server.version } })}\n`);
   });
-  const send = async (moment, callback) => {
+  const send = async (moment, callback, skippable) => {
     // Only a turn end needs no provider context.
     if (!adapter && moment !== "stop") return undefined;
+    // While the server doesn't answer, a boundary that can't carry a steer
+    // isn't worth another two seconds: it goes into the open gap instead.
+    if (skippable && gap) return undefined;
     const claimed = [...printed];
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
@@ -73,8 +76,9 @@ function machineServer(delivery, log) {
   };
   return {
     // Boundaries go to the server in the order the provider reported them.
-    boundary(moment, callback) {
-      const answer = queue.then(() => send(moment, callback));
+    // A `skippable` one is dropped while a gap is open.
+    boundary(moment, callback, { skippable = false } = {}) {
+      const answer = queue.then(() => send(moment, callback, skippable));
       queue = answer;
       return answer;
     },

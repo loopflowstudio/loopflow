@@ -123,16 +123,21 @@ export default function (pi) {
   };
   // Every event a native launch reports is recorded, and during a turn
   // answers steers; a launch Pi's RPC driver records asks only for steers.
+  // With the server not answering, only these still wait for it: Pi's identity,
+  // a tool start (where a steer lands) and the turn end. Later reports repeat
+  // the turn, open tools, pending input and assistant messages.
+  const kept = new Set(["session_start", "tool_execution_start", "agent_settled"]);
   const report = async (event, ctx, extra = {}) => {
     if (!server || (!started && event.type !== "session_start")) return;
     const sessionFile = ctx.sessionManager.getSessionFile();
+    const skippable = !kept.has(event.type);
     let answer;
     if (spec.native) {
       answer = await server.boundary("event", { ...event, ...extra, sessionFile,
-        turn, openTools: tools.size, pendingInput });
+        turn, openTools: tools.size, pendingInput }, { skippable });
     } else if (turn) {
       answer = await server.boundary("tool", { session_id: sessionFile, hook_event_name: "PiSteer",
-        adapter_invocation_id: randomUUID() });
+        adapter_invocation_id: randomUUID() }, { skippable });
     }
     if (!answer?.steers) return;
     // With triggerTurn omitted, Pi queues during streaming and only stores if

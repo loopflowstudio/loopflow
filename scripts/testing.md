@@ -60,6 +60,11 @@ Terminal-title changes run `test(transport::output::tests::)` and
 lookup completes in a deterministic output test; a live attachment can miss that
 startup race locally.
 
+Viewer readiness changes also run `test(transport::viewer_tests::)` and
+`test(session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts)`.
+A provider may exit before its viewer sends readiness; final output and exit
+status must survive that acknowledgement failing.
+
 Changes to `scripts/resource_envelope.py` or its imports also include
 `test(build_cleanup::)` in the gate's Rust filter. That suite invokes Python
 recovery outside pytest's configured import path. Use the gate's prepared CLI

@@ -114,29 +114,26 @@ impl Rex {
         let mut command = Command::new("rex");
         command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
         command.args(["api", "call", method, &serde_json::to_string(&args)?]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("Rex {method}: {}", error.reason()))?;
+        let output = super::run_host(command, "Rex").with_context(|| format!("Rex {method}"))?;
         serde_json::from_str(&output).context("Rex reply is unreadable; outcome is unknown")
     }
 
     /// The current viewer's Rex, else the caller's terminal, else `--server`.
     pub(super) fn local(server: Option<&str>) -> Result<Self> {
-        let location = if server.is_some() {
-            None
-        } else {
-            match super::viewed_placement() {
-                Some((OpenHost::Rex, value)) => Some(
-                    serde_json::from_str::<RexLocation>(&value)
-                        .context("Current Rex viewer placement is unreadable")?
-                        .resolve()?,
-                ),
-                Some(_) => None,
-                None if super::in_rex() && crate::journal::agent_caller().is_none() => {
-                    Some(RexLocation::current()?)
-                }
-                None => None,
+        let location = match super::viewed_placement() {
+            Some((OpenHost::Rex, value)) => Some(
+                serde_json::from_str::<RexLocation>(&value)
+                    .context("Current Rex viewer placement is unreadable")?
+                    .resolve()?,
+            ),
+            Some(_) => None,
+            None if super::in_rex() && crate::journal::agent_caller().is_none() => {
+                Some(RexLocation::current()?)
             }
+            None => None,
         };
+        let location =
+            location.filter(|location| server.is_none_or(|server| server == location.server));
         let endpoint = match &location {
             Some(location) => location.server.clone(),
             None => Self::endpoint(server)?,
@@ -169,8 +166,7 @@ impl Rex {
             command.args(["-S", server]);
         }
         command.args(["--autostart=false", "--timeout", "2s", "whoami", "--json"]);
-        let output = super::run_host(command, "Rex")
-            .map_err(|error| anyhow::anyhow!("{}", error.reason()))?;
+        let output = super::run_host(command, "Rex")?;
         let who: Value = serde_json::from_str(&output)?;
         let server = who["endpoint"]
             .as_str()
@@ -251,6 +247,32 @@ impl Rex {
         self.call("client.perform", json!({"client_id":candidates[0],"action":"session.select","args":{"session_id":container,"window_id":window}}))?;
         Ok("Rex accepted display selection".into())
     }
+}
+
+pub(super) fn focus_view(placement: &str) -> Result<()> {
+    let location: RexLocation = serde_json::from_str(placement)?;
+    let rex = Rex {
+        server: location.server,
+        caller: None,
+    };
+    let windows = rex.windows(&location.session)?;
+    let window = windows
+        .iter()
+        .find(|window| {
+            window["layers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|layer| layer["blocks"].as_array().into_iter().flatten())
+                .any(|block| block["block_id"] == location.block)
+        })
+        .context("The recorded Rex view no longer exists")?;
+    let id = window["window_id"]
+        .as_str()
+        .context("Rex view omitted window identity")?;
+    let result = rex.focus(&location.session, id)?;
+    anyhow::ensure!(!result.contains("unconfirmed"), "{result}");
+    Ok(())
 }
 
 pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {

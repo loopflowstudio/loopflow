@@ -1,26 +1,26 @@
 //! Render one Task's layout into a host's native split format. The source is the
 //! Task's saved Desktop layout, else its configured `task_layout`, else the
 //! builtin. Hosts own the result; nothing here is persisted.
+use crate::lf::commands::open::conversation::Attachment;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::{
-    lf_argv, tool_cwd, tools, wave_config, with_machine_home, Native, Presentation, Resume,
-    SqliteStore, TaskId, ViewContent,
+    lf_argv, tool_cwd, tools, with_machine_home, Native, Presentation, SqliteStore, ViewContent,
 };
-use crate::ops::human_session::primary::{task_resume, TaskResume};
 use crate::work::selection::{
     BrowserTab, ChangeComparison, PaneIntent, PaneTree, SplitAxis, TaskLayoutTemplate,
 };
 
 struct Tools<'a> {
-    store: &'a SqliteStore,
     host: &'a Native,
     content: &'a ViewContent,
     cwd: &'a Path,
-    resume: Resume,
+    conversations: bool,
+    // Task layouts contain exactly one Session pane.
+    attachment: Option<Attachment>,
 }
 
 /// The native layout for one Task, and how many fresh shells it starts.
@@ -31,17 +31,17 @@ pub(super) fn layout(
     template: Option<&TaskLayoutTemplate>,
     presentation: Presentation<'_>,
     host: &Native,
-) -> Result<(Value, usize)> {
+) -> Result<(Value, usize, Option<Attachment>)> {
     let cwd = tool_cwd(content, repo);
-    let tools = Tools {
-        store,
+    let mut tools = Tools {
         host,
         content,
         cwd,
-        resume: presentation.resume,
+        conversations: presentation.conversations,
+        attachment: None,
     };
     let Some(location) = &content.location else {
-        return Ok((tools.task_view()?, 0));
+        return Ok((tools.task_view()?, 0, None));
     };
     anyhow::ensure!(
         location.machine_id == store.local_machine()?.id.as_str(),
@@ -68,6 +68,7 @@ pub(super) fn layout(
                 conversation
             },
             0,
+            tools.attachment,
         ));
     }
     let source = match store.pane_layout(&content.work)? {
@@ -93,6 +94,7 @@ pub(super) fn layout(
                 None => host.split(SplitAxis::Vertical, 0.618, task_view, shell),
             },
             1,
+            tools.attachment,
         ));
     };
     let mut shells = 0;
@@ -103,6 +105,7 @@ pub(super) fn layout(
             None => tools.task_view()?,
         },
         shells,
+        tools.attachment,
     ))
 }
 
@@ -115,45 +118,48 @@ impl Tools<'_> {
         ))
     }
 
-    /// The named Session, else the Task's primary, else `lf resume --task`, which
-    /// ranks the Task's conversations and starts one when there are none.
-    fn conversation(&self, session: Option<&str>) -> Result<Option<Value>> {
-        let session = session.or(self.content.primary_session.as_deref());
-        if !self.resume.admits(self.store, session)? {
+    fn conversation(&mut self, session: Option<&str>) -> Result<Option<Value>> {
+        if !self.conversations {
             return Ok(None);
         }
-        if let Some(session) = session {
-            return self.host.conversation(self.cwd, &[session]).map(Some);
-        }
-        let id = TaskId::parse(&self.content.work.id)?;
-        let agent = match task_resume(self.store, &id)? {
-            TaskResume::Caller => return Ok(None),
-            TaskResume::Existing => None,
-            TaskResume::First => self.first_conversation_agent(&id)?,
+        let session = session.or(self.content.primary_session.as_deref());
+        let task = session.is_none().then_some(self.content.work.id.as_str());
+        let store = crate::store::read_existing_registry()?;
+        let context = super::super::work_context(self.cwd, task, None, session)?;
+        let mut target = super::super::describe(
+            store.as_ref(),
+            &context,
+            session.map(str::to_owned),
+            false,
+            None,
+        )?;
+        super::super::conversation::resolve(&mut target, true)?;
+        let argv = if let Some(live) =
+            super::super::conversation_view(&target)?.filter(|view| view.retains_attachment())
+        {
+            eprintln!("{}: {}", target.label, live.reason);
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                r#"printf '%s\n' "$1"; read -r answer"#.into(),
+                "lf-open".into(),
+                live.reason,
+            ]
+        } else {
+            let attachment = Attachment::new()?;
+            let lf = crate::os_process::resolve_lf_binary()?;
+            let argv = attachment.argv(target.resume_argv(&lf.to_string_lossy()));
+            self.attachment = Some(attachment);
+            argv
         };
-        let mut resume = vec!["--task", &self.content.work.id];
-        if let Some(agent) = &agent {
-            resume.extend(["--agent", agent]);
-        }
-        self.host.conversation(self.cwd, &resume).map(Some)
+        Ok(Some(self.host.block("Conversation", target.cwd(), argv)))
     }
 
-    fn conversation_pane(&self, session: Option<&str>) -> Result<Value> {
+    fn conversation_pane(&mut self, session: Option<&str>) -> Result<Value> {
         match self.conversation(session)? {
             Some(conversation) => Ok(conversation),
             None => self.task_view(),
         }
-    }
-
-    /// A first conversation needs a harness: without one the pane would exit and
-    /// its host would close it, so this opening reports the error instead. Returns
-    /// this invocation's explicit choice, which the pane does not inherit.
-    fn first_conversation_agent(&self, id: &TaskId) -> Result<Option<String>> {
-        let task = self.store.task(id)?.context("Task is unavailable")?;
-        wave_config(self.store, self.cwd, task.wave_id.as_ref())?
-            .unwrap_or_default()
-            .agent()?;
-        Ok(crate::config::agent_override())
     }
 
     fn shell(&self) -> Value {
@@ -186,7 +192,7 @@ impl Tools<'_> {
     }
 
     fn render_tree(
-        &self,
+        &mut self,
         tree: &PaneTree,
         hidden: &std::collections::BTreeSet<String>,
         shells: &mut usize,
@@ -213,7 +219,7 @@ impl Tools<'_> {
         })
     }
 
-    fn render_pane(&self, pane: &PaneIntent, shells: &mut usize) -> Result<Option<Value>> {
+    fn render_pane(&mut self, pane: &PaneIntent, shells: &mut usize) -> Result<Option<Value>> {
         Ok(Some(match pane {
             PaneIntent::Session { session_id, .. } => {
                 self.conversation_pane(session_id.as_deref())?
@@ -265,7 +271,7 @@ impl Tools<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Native, Resume, SqliteStore, Tools};
+    use super::{Native, Tools};
     use crate::lf::commands::open::rex::Rex;
     use crate::work::selection::{ViewContent, ViewLocation, WorkPaneLayout};
 
@@ -299,13 +305,12 @@ mod tests {
             server: "unix:///task.sock".into(),
             caller: None,
         });
-        let store = SqliteStore::open_ephemeral(&directory.path().join("store.db")).unwrap();
-        let tools = Tools {
-            store: &store,
+        let mut tools = Tools {
             host: &host,
             content: &content,
             cwd: &cwd,
-            resume: Resume::Any,
+            conversations: false,
+            attachment: None,
         };
         for (hidden, expected_shells) in [(saved.hidden.clone(), 0), (Default::default(), 1)] {
             let mut shells = 0;
@@ -348,9 +353,7 @@ mod tests {
                 assert!(!reports(shell), "a shell's own cwd must follow cd");
             }
             let viewing = conversation["command"].as_array().unwrap();
-            assert!(viewing
-                .windows(2)
-                .any(|args| args == ["resume", "session_primary"]));
+            assert!(viewing.windows(2).any(|args| args == ["task", "view"]));
             let editing = files["command"].as_array().unwrap();
             assert_eq!(
                 editing.last().unwrap(),
@@ -359,12 +362,8 @@ mod tests {
             assert!(!editing.iter().any(|arg| arg == "--checkout"));
             assert!(!secondary.to_string().contains("README.md"));
         }
-        // Background arrivals must not move input from an active terminal.
-        let background = Tools {
-            resume: Resume::None,
-            ..tools
-        };
-        let launch = background
+        // Overview panes never attach even when their saved layout names a Session.
+        let launch = tools
             .conversation_pane(Some("session_primary"))
             .unwrap()
             .to_string();

@@ -353,6 +353,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/dto/server/task_wait.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_steer.json"),
             include_str!("../../../../tests/fixtures/dto/server/session_boundary.json"),
+            include_str!("../../../../tests/fixtures/dto/server/session_status.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_plan_bind.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_plan_connect.json"),
             include_str!("../../../../tests/fixtures/dto/server/wave_plan_reteam.json"),

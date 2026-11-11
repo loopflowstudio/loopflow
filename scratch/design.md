@@ -9,27 +9,26 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-Inspected PR #1812 at `48bd007c13b7198844af56eaaf10fe3a8aac7db9`: both
+Inspected PR #1812 at `1eec57e47c4cdf1954c35da2dea9cb4718bb7b59`: both
 WebSocket paths authenticate with the planned node/user identity, but the
 shared ticket store leaves foreign attempts unconsumed and uses `Instant`.
 Only bulk tickets have direct store coverage; terminal consume-on-attempt
 coverage is missing. Background expiry already releases abandoned bulk
 reservations.
-The ticket store, remote carrier and service are unchanged from
-`6ad2a0a45c9f40e6cbc60febf3879fa34953a34d`. Mobile admission now permits
+The ticket store and service are unchanged from
+`48bd007c13b7198844af56eaaf10fe3a8aac7db9`; `mobile.rs` only reformats a test.
+Mobile admission permits
 the host's own node when the Machine opts in with `mobile-same-device`;
 ticket identity remains node/user.
 
-At November 11 10:20 UTC, GitHub still reports PR #1812 open and unmerged
-at that head. Freshly fetched main is
+At November 11 10:56 UTC, GitHub still reports PR #1812 open and unmerged
+at that head, with no auto-merge. Freshly fetched main is
 `976b53db0c5affa519af66bfe9bf58ee83fba347`,
 still without `server/mobile.rs` or `server/ticket.rs`.
-The 09:46 UTC read found main at
-`6d8fad3375a81890d00965ba46ea396360f7db2a`, no auto-merge, and LOO-718
-at `feature`'s `demo` step with PR settlement not armed.
-The 10:20 UTC Task-status refresh produced no result before cancellation;
-current Graph state is unknown. The GitHub and fetched-tree reads independently
-confirm the transport remains unmerged.
+The same pass's `lf task status LOO-718 --json` read succeeded: LOO-718
+remains at `feature`'s `demo` step with PR settlement not armed.
+The newer PR head does not change the missing transport dependency or the
+planned ticket changes.
 
 Implementation and delivery wait for LOO-718 to land; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope.
@@ -76,5 +75,7 @@ details and shared owner recovery. Desktop status and recovery controls live in
 the client guide, avoiding duplicate descriptions. The inspected
 transport speaks revision 5: update the remote example's `hello`/`welcome`
 anchor from revision 4 when integrating it.
+Keep the shared authentication requirement before the two-connection example
+so each step and retry can use it without repeating it.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

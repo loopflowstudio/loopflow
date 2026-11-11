@@ -575,8 +575,6 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 ## Remote attach contract
 
 This planned contract requires LOO-718's authenticated remote transport.
-Request a ticket, then redeem it on a separate connection to view a Session's
-running terminal.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
 owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
@@ -605,10 +603,9 @@ the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 ```
 
 After `bridged`, use the [binary owner protocol](../transport/README.md).
-Keep `/v1/machine` for requests and live Work updates; each terminal has its
-own bridge. If the terminal owner's endpoint disappears before the ticket is
-redeemed, attachment returns `not_found {owner_lf_process_id}`. For reconnection
-and exact-owner attachment, follow
+Keep `/v1/machine` for requests and live Work updates. If the owner's endpoint
+disappears before redemption, attachment returns `not_found {owner_lf_process_id}`.
+For reconnection and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 
 Each ticket opens one bridge and expires 60 seconds after issue, including host

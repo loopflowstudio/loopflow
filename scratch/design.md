@@ -9,19 +9,13 @@ expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 15:08 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
+At 15:42 UTC, PR #1812 remained open and unmerged, with no auto-merge, at
 `ac2cba2a3b6b28be3b1e3fb97d609221981f126e`. Fetched main was
 `49037487daf00729516d596f0d946252a7219dce`, still without `server/mobile.rs` or
 `server/ticket.rs`. `lf task status LOO-718 --json` reported `feature` / `demo`.
-Implementation and authenticated acceptance still require that transport to land.
-The 14:27 and 15:04 UTC observations are in
-`d15d8eef1c5ffb8a2961f0786ab5356e82e84733:scratch/design.md`.
-
-At 15:42 UTC, GitHub again reported PR #1812 open and unmerged at the same
-head; a fresh fetch returned the same main without either transport file.
-LOO-718 still reported `feature` / `demo`. Implementation remains blocked on
-that landing; the Graph decision must stop for this external dependency.
-The checkout and existing documentation remain ready for continuation.
+Implementation and authenticated acceptance require that landing; the Graph
+decision must stop for this external dependency. Landing PR #1812 is outside
+this Task's scope. Reinspect its shared store and endpoints after it lands.
 
 At that revision, both WebSocket paths authenticate with node/user identity,
 but foreign terminal attempts remain unconsumed and expiry uses `Instant`.
@@ -29,14 +23,10 @@ Only bulk tickets have direct store coverage; background expiry already releases
 abandoned bulk reservations. `mobile-same-device` permits the host's own node
 without changing ticket identity.
 
-Implementation and authenticated acceptance require LOO-718's transport.
-Landing that PR is outside this Task's scope; reinspect its shared store and
-endpoints after it lands. Desktop QA remains deferred in `questions.md`.
-
-The full dependency observations, PR description quote and compared revisions
-are in `91f7421d7efe2e5262be8414b393019cfd44b833:scratch/design.md`, which also
-links the older, conflicting 19:35 UTC status report. Keep that history in Git;
-this plan carries the remaining work.
+Earlier observations and references to the PR description quote and conflicting
+19:35 UTC status report remain in
+`abd082d510a6edba67139c2658a5fa4dca5ec7b2:scratch/design.md`.
+Desktop QA remains deferred in `questions.md`.
 
 ## Delete — do not maintain
 
@@ -71,14 +61,12 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-Keep `docs/server.md` and `rust/loopflow/src/server/README.md` clear about what
-this build provides: local UID-bound tickets today, the planned remote contract
-in its own section. Keep remote identity and sleep-aware expiry there rather
-than repeating unimplemented behavior in the local protocol or client guide.
+Keep the planned remote contract in `rust/loopflow/src/server/README.md` separate
+from today's local UID-bound protocol. `docs/server.md` links its authentication
+requirements and connection steps so they have one source.
 After integration, remove the planned wording and update the remote example's
 revision 4 anchor to revision 5 when the transport's protocol section arrives.
 Keep Desktop controls in the client guide and protocol details in the server
-README. The remote example keeps authentication and owner prerequisites beside
-the connection steps and links shared exact-owner recovery instead of repeating it.
+README; the remote example links shared exact-owner recovery.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

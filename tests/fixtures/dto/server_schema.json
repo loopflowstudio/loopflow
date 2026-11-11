@@ -10036,7 +10036,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's terminal: the server resolves the Session's\ncurrent owner LfProcess and answers `{ticket, owner_lf_process_id,\nexpires_in_ms}`. A new connection presents the ticket as its first\nmessage (`attach`) and becomes the bridge; this connection stays a\nclient. When the owner ends, the bridge closes; attaching again by the\nsame Session reaches its next owner. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
+          "description": "A ticket for the Session's terminal: the server resolves the Session's\nheld terminal, else its current owner LfProcess, and answers `{ticket,\nowner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A\nnew connection presents the ticket as its first message (`attach`) and\nbecomes the bridge; this connection stays a client. When the terminal\nor owner ends, the bridge closes; attaching again by the same Session\nreaches its next one. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
           "examples": [
             {
               "kind": "session.attach",

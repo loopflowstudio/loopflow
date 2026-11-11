@@ -92,11 +92,12 @@ pub enum Operation {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
     /// A ticket for the Session's terminal: the server resolves the Session's
-    /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
-    /// expires_in_ms}`. A new connection presents the ticket as its first
-    /// message (`attach`) and becomes the bridge; this connection stays a
-    /// client. When the owner ends, the bridge closes; attaching again by the
-    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// held terminal, else its current owner LfProcess, and answers `{ticket,
+    /// owner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A
+    /// new connection presents the ticket as its first message (`attach`) and
+    /// becomes the bridge; this connection stays a client. When the terminal
+    /// or owner ends, the bridge closes; attaching again by the same Session
+    /// reaches its next one. With `owner_lf_process_id`, the
     /// Session must still be owned by exactly that LfProcess, for a client that
     /// reconnects only to the owner it had.
     #[serde(rename = "session.attach")]

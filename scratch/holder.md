@@ -618,6 +618,10 @@ Checks:
   `hosted::remove_exit_record`; `paint` has its doc comment back.
   `cargo test -p loopflow --lib transport::`: 73 passed; clippy clean.
 
+- Realign after revision 5: the `session.attach` ticket was still described
+  without `terminal_id` (`ServerOperation::SessionAttach` doc, server README,
+  `server_schema.json`); fixed. `cargo test -p loopflow --lib server::schema`: 7 passed.
+
 **Remaining, in order:**
 
 1. Pane placement on a held start (`LF_TERMINAL_ID`, the TTY).

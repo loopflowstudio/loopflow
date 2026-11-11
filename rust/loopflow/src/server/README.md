@@ -128,7 +128,7 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
 operation's value: what its CLI spelling prints with `--json`, a ticket
-`{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
+`{ticket, owner_lf_process_id, terminal_id, expires_in_ms}` for `session.attach`, and null
 once a subscription is confirmed.
 A completed request's ID can be reused immediately after its response or error. A
 subscription keeps its ID after acknowledgement and readings, until `ended`,
@@ -379,7 +379,7 @@ part of what a phone or bot client is offered.
   The owner form below serves owners only, with `terminal_id` null in its
   ticket and its `bridged`; an owner ID is never a terminal ID.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
-  `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
+  `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first
   and only message is `{"type":"attach","ticket"}`; the server answers
   `bridged {owner_lf_process_id, terminal_id: null}`, and the connection then speaks the unchanged

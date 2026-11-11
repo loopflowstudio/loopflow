@@ -1,7 +1,7 @@
 //! One association rule for CLI and Desktop. Membership is additive to binding;
 //! it never rewrites event attribution or follows causal parent Processes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::durable::TaskId;
 use crate::graph::runner::ExecutionCursor;
@@ -154,6 +154,40 @@ pub(super) fn graphs_of_task(
         ),
         &[&task.as_str()],
     )
+}
+
+/// Each of `tasks`' completed Graph steps, by step process, for all of them in
+/// one reading: pairing Tasks with Graphs walks every Graph process, so asking
+/// per Task repeats that walk for each one.
+fn completed_graph_steps(
+    conn: &rusqlite::Connection,
+    tasks: &[&TaskId],
+) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT pairs.task_id, gs.lf_process_id FROM ({}) pairs
+         JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
+         JOIN processes s ON s.id=gs.lf_process_id
+         WHERE s.completed_at IS NOT NULL",
+        task_graph_pairs(
+            conn,
+            "SELECT id,worktree,checkout_machine_id FROM tasks
+             WHERE id IN (SELECT value FROM json_each(?1))"
+        )?
+    ))?;
+    let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
+    let mut completed = HashMap::<TaskId, HashSet<LfProcessId>>::new();
+    for row in query.query_map([&ids], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })? {
+        let (task, step) = row?;
+        let invalid = |error: &dyn std::fmt::Display| {
+            crate::store::StoreError::InvalidData(error.to_string())
+        };
+        let task = TaskId::parse(&task).map_err(|error| invalid(&error))?;
+        let step = LfProcessId::parse(&step).map_err(|error| invalid(&error))?;
+        completed.entry(task).or_default().insert(step);
+    }
+    Ok(completed)
 }
 
 /// Each of `tasks`' most recently launched Graph, for all of them in one reading.
@@ -924,6 +958,15 @@ impl SqliteStore {
     ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
+    }
+
+    /// Each of `tasks`' completed Graph steps, read for all of them at once.
+    pub(crate) fn completed_graph_steps(
+        &self,
+        tasks: &[&TaskId],
+    ) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        completed_graph_steps(&conn, tasks)
     }
 
     /// Every Graph among the Task's work, oldest first.

@@ -1321,15 +1321,20 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Prepare without launching. Resume transfers control; Start and reveal never
-    /// replace input. Only Start may create the first provider thread.
+    /// replace input. Only Start may create the first provider thread. Naming the
+    /// Session's Task or Wave as `work` makes its `open_argv` resume managed.
     public func prepareSession(
         id: String,
+        work: WorkReference? = nil,
         agent: String? = nil,
         cwd: String? = nil,
         intent: SessionOpenIntent = .start
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent, intent: intent)))
+            .sessionResume(directory: cwd ?? "/", id: id,
+                           task: work?.kind == .task ? work?.id : nil,
+                           wave: work?.kind == .wave ? work?.id : nil,
+                           agent: agent, intent: intent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative

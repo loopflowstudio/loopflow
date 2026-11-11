@@ -53,6 +53,33 @@ impl SqliteStore {
             NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
             _ => None,
         };
+        // A turn in the selected, activated, already observed conversation
+        // changes nothing; it takes no write lock. Any other answer goes
+        // through the transaction, which checks again.
+        if matches!(boundary, NativeBoundary::Turn) && !thread.is_empty() {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let current: Option<bool> = conn
+                .query_row(
+                    "SELECT s.provider_thread IS ?4 AND a.activated_at IS NOT NULL FROM steer_adapters a
+                 JOIN processes p ON p.id=a.agent_process_id
+                 JOIN agent_sessions s ON s.agent_process_id=p.id
+                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
+                    params![
+                        adapter.session,
+                        adapter.agent_process_id,
+                        adapter.capability,
+                        thread
+                    ],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if current == Some(true)
+                && super::provider_transitions::observed_in(&conn, &adapter.session, thread)?
+            {
+                drop(conn);
+                return write();
+            }
+        }
         {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -275,19 +302,12 @@ pub(super) fn save_in(
     Ok(result)
 }
 
-fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-        [session],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(StoreError::NotFound);
-    }
+/// The steers that apply to Session `?1`, as CTE `applicable`.
+fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
     // Reuse Task inventory's association rule, including explicit binds and
     // checkout membership. UNION terminates even in malformed cyclic ancestry.
-    let scopes = format!("WITH RECURSIVE member_tasks(id) AS (
+    format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
@@ -303,7 +323,35 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
         AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
          OR NOT EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
             WHERE d.steer_id=p.id AND d.session_id!=?1 AND b.evidence='emitted'))
-        )", super::task_work::session_tasks("s"));
+        )", super::task_work::session_tasks("s"))
+}
+
+/// Whether some applicable steer has no delivery at its current attempt: the
+/// only case in which [`reconcile`] leaves the Session anything to emit.
+fn undelivered(conn: &Connection, session: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "{} SELECT EXISTS(SELECT 1 FROM applicable a
+            LEFT JOIN session_steers s ON s.session_id=?1 AND s.steer_id=a.id
+            WHERE NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=?1
+            AND d.steer_id=a.id AND d.attempt=COALESCE(s.attempt,0)))",
+            scopes()
+        ),
+        [session],
+        |row| row.get(0),
+    )?)
+}
+
+fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+        [session],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::NotFound);
+    }
+    let scopes = scopes();
     conn.execute(
         &format!(
             "{scopes} UPDATE session_steers SET applicable=(steer_id IN applicable)
@@ -330,7 +378,7 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     )?;
     conn.execute(
         "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
-        SELECT id FROM steer_batches WHERE evidence='cancelled')",
+        SELECT id FROM steer_batches WHERE session_id=?1 AND evidence='cancelled')",
         [session],
     )?;
     // Emitted and uncertain receipts survive scope changes and corrections.
@@ -362,6 +410,15 @@ impl SqliteStore {
             return Ok(());
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nearly every boundary has nothing to recover; it takes no write lock.
+        let prepared: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='prepared')",
+            [session],
+            |row| row.get(0),
+        )?;
+        if !prepared {
+            return Ok(());
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "DELETE FROM steer_deliveries WHERE batch_id IN (
@@ -540,24 +597,45 @@ impl SqliteStore {
         printed: &[crate::id::SteerBatchId],
         deadline_secs: u64,
     ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let owns: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM steer_adapters a
+        // Whole seconds: a batch counts as older only once it is past the
+        // deadline whatever the fraction it was created at.
+        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?4";
+        let owns = "EXISTS(SELECT 1 FROM steer_adapters a
             JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
-            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)",
-            params![
-                adapter.session,
-                adapter.agent_process_id,
-                adapter.capability
-            ],
-            |row| row.get(0),
-        )?;
-        if !owns {
-            return Err(StoreError::InvalidAuthority(
-                "Context adapter no longer owns this provider".into(),
-            ));
+            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)";
+        let waiting =
+            "EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='uncertain')";
+        let identity = params![
+            adapter.session,
+            adapter.agent_process_id,
+            adapter.capability,
+            deadline_secs as i64
+        ];
+        // (whether a batch is past the deadline, whether one is unconfirmed)
+        let read = |conn: &Connection| -> StoreResult<(bool, bool)> {
+            let (owns, stale, waiting): (bool, bool, bool) = conn.query_row(
+                &format!(
+                    "SELECT {owns}, EXISTS(SELECT 1 FROM steer_batches WHERE {older}), {waiting}"
+                ),
+                identity,
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            if !owns {
+                return Err(StoreError::InvalidAuthority(
+                    "Context adapter no longer owns this provider".into(),
+                ));
+            }
+            Ok((stale, waiting))
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Most boundaries confirm and cancel nothing: answer them without the
+        // write lock every Session's writes share.
+        let (stale, waiting) = read(&conn)?;
+        if printed.is_empty() && !stale {
+            return Ok(waiting);
         }
+        // The closing read checks authority again; failing it rolls back.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for batch in printed {
             tx.execute(
                 "UPDATE steer_batches SET evidence='emitted'
@@ -565,26 +643,18 @@ impl SqliteStore {
                 params![batch, adapter.session, adapter.agent_process_id],
             )?;
         }
-        // Whole seconds: a batch counts as older only once it is past the
-        // deadline whatever the fraction it was created at.
-        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?2";
         tx.execute(
             &format!(
                 "DELETE FROM steer_deliveries WHERE batch_id IN (
                 SELECT id FROM steer_batches WHERE {older})"
             ),
-            params![adapter.session, deadline_secs as i64],
+            identity,
         )?;
         tx.execute(
             &format!("UPDATE steer_batches SET evidence='cancelled' WHERE {older}"),
-            params![adapter.session, deadline_secs as i64],
+            identity,
         )?;
-        let waiting = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM steer_batches
-            WHERE session_id=?1 AND evidence='uncertain')",
-            [&adapter.session],
-            |row| row.get(0),
-        )?;
+        let (_, waiting) = read(&tx)?;
         tx.commit()?;
         Ok(waiting)
     }
@@ -603,6 +673,11 @@ impl SqliteStore {
         let batch = crate::id::SteerBatchId::new();
         let (steers, remaining) = {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
+            // Nothing to emit at most boundaries: answer without the write
+            // lock. The caller already checked this adapter's authority.
+            if !undelivered(&conn, &adapter.session)? {
+                return Ok(None);
+            }
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
                 JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id

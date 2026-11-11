@@ -190,11 +190,12 @@ impl ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
+        let managed = config.managed;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner()?;
-        let mut child = super::agent_process::spawn(cmd, None, &owner)?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner, managed)?;
         drop(activation);
         let stdin = child
             .stdin
@@ -429,10 +430,7 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let model = config
-            .agent
-            .as_deref()
-            .and_then(|agent| crate::config::parse_agent(agent).1);
+        let model = crate::config::parse_agent(&config.resolved_agent()?).1;
         let account_route = resolve_provider_account_exact(
             Provider::Claude,
             requested_session.as_ref(),

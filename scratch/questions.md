@@ -91,6 +91,10 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 
 # LOO-835
 
+- November 11 sync assumption (reversible): keep this branch's
+  `concept-review.html`, `qa.html` and `questions.md` when main deletes them;
+  they contain LOO-835 findings and decisions added since LOO-821.
+
 - Pi's bash guard is a generated `/bin/sh` script, not an `lf` process
   (built; `loo-835-connection.md`). A Pi still running an older extension
   after upgrade calls the removed `--moment tool-group`: clap prints an error

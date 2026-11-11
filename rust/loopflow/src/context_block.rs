@@ -266,7 +266,7 @@ impl ContextDelivery {
 
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction. A managed launch
-    /// (`WorkSource::is_managed`) also reports its turn and tool boundaries
+    /// (`AgentConfig::managed`) also reports its turn and tool boundaries
     /// to the Machine server and watches its Task.
     pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;

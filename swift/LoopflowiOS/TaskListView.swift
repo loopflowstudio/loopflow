@@ -38,7 +38,14 @@ final class TaskFeed {
         let current = generation
         waiting = Perf.begin("tasks_current")
         // The last reading under each filter, shown at once while the Machine answers.
-        if let saved = try? JSONDecoder().decode([RepositoryTasks].self, from: Data(contentsOf: savedURL)) {
+        // It is kept as wire bytes and read by the live decoder, so a file an older
+        // app wrote fails to load instead of showing a stale shape.
+        let url = savedURL
+        let saved = await Task.detached(priority: .userInitiated) {
+            (try? RemoteTaskObservation.decode(frame: RawJSON(Data(contentsOf: url))).reading).flatMap { try? $0.get() }
+        }.value
+        guard current == generation else { return }
+        if let saved {
             repositories = saved
             loaded = true
             Perf.launch("tasks_saved")
@@ -50,9 +57,9 @@ final class TaskFeed {
         self.observation = observation
         reader = Task { [weak self] in
             do {
-                for try await reading in observation.readings {
+                for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
-                    switch reading {
+                    switch update.reading {
                     case .success(let repositories):
                         let changed = repositories != self.repositories || !self.loaded
                         if changed { self.repositories = repositories }
@@ -61,7 +68,7 @@ final class TaskFeed {
                         Perf.launch("tasks_current")
                         if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
                         self.waiting = nil
-                        if changed { self.save() }
+                        if changed { self.save(update.wire) }
                         if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                     case .failure(let error): self.error = error.message
                     }
@@ -104,11 +111,10 @@ final class TaskFeed {
         URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
     }
 
-    private func save() {
-        let (saved, url) = (repositories, savedURL)
+    private func save(_ wire: Data) {
+        let url = savedURL
         Task.detached(priority: .utility) {
-            try? JSONEncoder().encode(saved)
-                .write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            try? wire.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
     }
 

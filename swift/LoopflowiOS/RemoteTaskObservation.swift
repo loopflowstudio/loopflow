@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 /// One repository's Tasks in a reading, in the Machine's order.
-struct RepositoryTasks: Codable, Equatable {
+struct RepositoryTasks: Equatable {
     /// The repository's durable ID, as `WorkWorkspaceKey.repository` carries it.
     let repository: String
     /// Its path on the Machine, which is how Waves name their repository.
@@ -13,6 +13,12 @@ struct RepositoryTasks: Codable, Equatable {
 }
 
 typealias MobileTaskReading = Result<[RepositoryTasks], RegistryQueryError>
+
+/// A reading and the wire bytes it was decoded from, which is what the phone keeps.
+struct TaskListReading {
+    let reading: MobileTaskReading
+    let wire: Data
+}
 
 /// The Tasks a Work reading shows, in the Machine's order.
 func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
@@ -33,8 +39,8 @@ func mobileTasks(_ plan: WorkViewPlan) throws -> [WorkViewPlan.Content] {
 /// lost connection resumes the same reading on the next one.
 @MainActor
 final class RemoteTaskObservation {
-    let readings: AsyncThrowingStream<MobileTaskReading, any Error>
-    private let continuation: AsyncThrowingStream<MobileTaskReading, any Error>.Continuation
+    let readings: AsyncThrowingStream<TaskListReading, any Error>
+    private let continuation: AsyncThrowingStream<TaskListReading, any Error>.Continuation
     private let watch: ServerWatch<RawJSON>
     private var reader: Task<Void, Never>?
     private var nextCheckpoint: UInt64 = 0
@@ -55,7 +61,7 @@ final class RemoteTaskObservation {
                     // stall a scroll for each one.
                     let reading = try await Task.detached { try Self.decode(frame: frame) }.value
                     guard !self.closed else { return }
-                    self.receive(reading)
+                    self.receive(reading, wire: frame.bytes)
                 }
                 throw RegistryQueryError("Task updates ended. Refresh to reconnect.")
             } catch { self?.close(error: error) }
@@ -94,8 +100,8 @@ final class RemoteTaskObservation {
         refreshing = nil
     }
 
-    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading)) {
-        continuation.yield(reading.reading)
+    private func receive(_ reading: (answers: UInt64?, reading: MobileTaskReading), wire: Data) {
+        continuation.yield(TaskListReading(reading: reading.reading, wire: wire))
         if let refreshing, let answers = reading.answers, answers >= refreshing.id {
             self.refreshing = nil
             refreshing.continuation.resume()

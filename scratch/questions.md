@@ -100,3 +100,13 @@ replacing `open_through`'s reselect. Desktop's Task and Wave workspace stores
 Work on every prepare; `openSessionLink` and the repository store stay bare.
 The id is not checked against the Task: naming another Task only makes the
 resume managed.
+
+Jack Heart, November 11, after the PR review page and the scan steer: "ok, otherwise l2gm, ship it ocne the queries are fast". The operator ships (`lf ship`) after the scan pass reaches demo and a fresh `plan_steers.py` run shows no scan of a growing table.
+
+The scan steer asked for `applicable` as a UNION of indexed lookups. Measured
+on the Machine's store, the UNION alone still scanned (the cause was `ANALYZE`
+rating NULL-heavy owner indexes useless) and, once the owner indexes are
+partial, ran slower than the existing `OR` (0.135 against 0.087 ms). Kept the
+`OR` with partial indexes; switching to the UNION is a one-CTE change if the
+shape matters more than the measurement (`scratch/loo-821-hooks.md`, Boundary
+query plans).

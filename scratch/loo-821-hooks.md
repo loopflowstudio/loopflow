@@ -363,3 +363,44 @@ changed only release files):
 - `cargo test -p loopflow --test integration dto_fixtures` — 50 pass (before this pass)
 - Swift `ServerProtocolTests` (`hookBoundarySharesTheRustServerContract`) — gate (`--swift`)
 - `transport_tests` hook tests other than the two `continue_session…` ones, `harness::` — gate
+
+Boundary query plans (November 11), on a fresh copy of the Machine's store
+(3,027 steers, 10,417 batches, 40,864 deliveries, 41,523 `session_steers`,
+235,713 Session events), busiest Session `881aafe7…`, every statement the new
+`boundary_statements_never_scan_tables_that_grow_with_use` traces through
+SessionStart (resume), prompt, tool and Stop:
+
+- The live store has no `sqlite_stat1`; lf never runs `ANALYZE`. Unanalyzed,
+  `applicable` already plans MULTI-INDEX OR over all four owner indexes
+  (0.090 ms). The `SCAN p` (1.0 ms; 3.4 ms cold) appears only once analyzed:
+  a steer has one owner, so each owner column is mostly NULL, and `ANALYZE`
+  counts the NULLs as one key (`steers_repo` `3027 3027`, `steers_wave`
+  `3027 3027 1`), rating the index useless.
+- `applicable` as a UNION ALL of one lookup per scope, measured and not kept:
+  with the old indexes its wave and repo arms still `SCAN steers` (1.41 ms);
+  with partial indexes it takes 0.135 ms against the `OR`'s 0.087 ms. The
+  `OR` stays; `steer_delivery_lookups.sql` makes all four owner indexes
+  partial (`WHERE <owner> IS NOT NULL`, replacing main's `steers_task` and
+  `steers_wave`), so analyzed or not the plan is the same.
+- `resume_reference` → `input_provider_session` read the whole Session's
+  history through `read_history` (1.64 ms, planning wave and project scans
+  behind NULL filters). It now reads only the input's `<input>:` observation
+  key range on `session_observation_receipt` (0.002 ms). No non-observed row
+  on the Machine carries a `provider-session:` or `events.jsonl:` source.
+  `summary_for_input` is gone; its tests call `summary_for_input_matching`.
+- After: no statement scans `steers`, `steer_batches`, `steer_deliveries`,
+  `session_steers`, `session_events` or `tasks`, analyzed or not. The three
+  `applicable` statements take 0.07–0.11 ms; the slowest remaining is
+  `provider_transitions.rs:42`'s newest transition (0.15 ms), an indexed walk
+  back through one Session's events, growing with that Session, not the Machine.
+- The test plans each traced statement unanalyzed, then after `ANALYZE steers`
+  over 3,000 single-owner fixture steers with the Machine's measured
+  `sqlite_stat1` for every other table. With main's indexes restored it fails
+  (`analyzed: SCAN p`, seven statements).
+
+Script: `/tmp/lfplan/bin/plan.py <db> <traced.json>` (not kept). Jack Heart:
+"fix the remaining scans".
+
+- `--lib -- server::boundary:: store::sqlite::session_events:: store::sqlite::steers` — 48 pass
+- `--lib -- session_record:: ops::human_session::` — 70 pass, 5 `capture_tests` fail together; all 25 `capture_tests` pass alone; gate (nextest isolates)
+- clippy — pass; `check_migrations.py` — only `unmerged: steer_delivery_lookups.sql`; `--lib store::migrations::` — 129 pass

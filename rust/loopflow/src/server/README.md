@@ -366,10 +366,11 @@ part of what a phone or bot client is offered.
 A separate bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only
 JSON message. After `bridged {owner_lf_process_id}`, it speaks the
 [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
-as 22 base64url characters, opens one bridge and lasts 60 seconds. It is bound
-to the requesting client's Unix peer UID. Every redemption attempt consumes
-the ticket, including a UID mismatch. Remote identity and sleep-aware expiry
-are planned in the [remote attach contract](#remote-attach-contract).
+as 22 base64url characters, opens one bridge and lasts 60 seconds; expiry does
+not close an open bridge. Local tickets bind to the requesting client's Unix
+peer UID. Every redemption attempt consumes the ticket, including a UID mismatch.
+Remote identity and sleep-aware expiry are planned in the
+[remote attach contract](#remote-attach-contract).
 An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
 and closes the connection. Bridges do not occupy the 64 client slots.
 
@@ -674,8 +675,6 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-View a Session's running terminal from a phone: request a ticket on the control
-connection, then redeem it on a separate bridge from the same device and account.
 This planned contract requires LOO-718's authenticated remote transport.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
@@ -708,8 +707,7 @@ Keep `/v1/machine` for requests and live Work updates.
 For reconnection and exact-owner attachment, follow
 [terminal and provider recovery](#terminal-and-provider-recovery).
 
-Each ticket opens one bridge and expires 60 seconds after issue, including host
-sleep; expiry does not close an open bridge. Every admitted terminal redemption
+The 60-second ticket lifetime includes host sleep. Every admitted terminal redemption
 attempt consumes the ticket, including identity and local/remote mismatches.
 After a ticket failure, retry with a fresh ticket and bridge.
 

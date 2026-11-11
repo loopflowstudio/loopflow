@@ -1,16 +1,18 @@
 # LOO-809: remote attach tickets
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
-This checkout adds the planned contract only.
+This checkout currently adds documentation of the intended contract only;
+remote ticket behavior and authenticated acceptance remain unimplemented.
 The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 19:35 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
+At 19:39 and again at 20:13 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
 reported `OPEN`, `mergedAt: null`, and head
-`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main was
-`763da5c92f2ea4327a643c055e657e8defa8bf86`; `git ls-tree` confirmed neither
-`server/mobile.rs` nor `server/ticket.rs` was present. Implementation and
+`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main advanced from
+`763da5c92f2ea4327a643c055e657e8defa8bf86` to
+`1570bef610a0a0cee0402ecc37d3a31461b213a8`; `git ls-tree` confirmed neither
+`server/mobile.rs` nor `server/ticket.rs` was present in either revision. Implementation and
 authenticated acceptance depend on LOO-718 landing; landing PR #1812 is outside
 this Task. Reinspect its shared store and endpoints after it lands.
 
@@ -40,7 +42,7 @@ The transport represents local admission as `Admission::Local` after checking
 the socket peer UID against the server's effective UID. Keep that admission
 model; local/remote separation does not require a second per-ticket UID field.
 
-## Implementation and acceptance
+## Remaining implementation and acceptance
 
 Restore terminal consume-on-attempt in the shared store without changing bulk
 redemption policy. Test matching node/user success once, different node,
@@ -60,12 +62,10 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-After integration, remove the planned wording and update the remote example's
-revision 4 anchor to revision 5 when the transport's protocol section arrives.
-Keep Desktop controls and phone prerequisites in `docs/server.md`, and protocol
-details in the server README. The remote example links shared attachment and
-recovery rules so owner resolution and errors have one source. The compress
-pass retains that split and consolidates dependency history above; no runtime
-code is changed while the surviving ticket store is absent.
+Keep phone prerequisites and Desktop controls in `docs/server.md`, and protocol
+details in `rust/loopflow/src/server/README.md`. Shared attachment and recovery
+rules have one source; the remote contract adds identity and sleep-aware expiry.
+Keep pending behavior marked planned until integration, then update the remote
+example's revision 4 anchor to revision 5 with the transport's protocol section.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

@@ -32,7 +32,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -50,6 +50,7 @@ const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const TERMINAL_ENV: &str = "LF_TRANSPORT_TERMINAL";
 const LIMIT: usize = 4 * 1024 * 1024;
+// Short liveness timers use uptime: laptop sleep is not a silent connection.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -701,7 +702,7 @@ struct Viewer {
     /// The input claim, while this connection may type.
     token: Option<String>,
     attached: bool,
-    heartbeat_at: SystemTime,
+    heartbeat_at: Instant,
     seq: u64,
     /// Events awaiting a sequence boundary in the stream.
     events: Vec<Vec<u8>>,
@@ -729,7 +730,7 @@ impl Viewer {
             nonce: token()[..16].to_owned(),
             token: None,
             attached: false,
-            heartbeat_at: SystemTime::now(),
+            heartbeat_at: Instant::now(),
             seq: 0,
             events: Vec::new(),
             size: (24, 80),
@@ -746,10 +747,8 @@ impl Viewer {
         self.attached && !self.connection.is_dropped() && !self.leaving
     }
 
-    fn expire_heartbeat(&mut self, now: SystemTime) {
-        if self.live()
-            && now.duration_since(self.heartbeat_at).unwrap_or_default() >= HEARTBEAT_TIMEOUT
-        {
+    fn expire_heartbeat(&mut self, now: Instant) {
+        if self.live() && now.saturating_duration_since(self.heartbeat_at) >= HEARTBEAT_TIMEOUT {
             self.drop_connection();
         }
     }
@@ -874,7 +873,7 @@ impl Viewer {
         terminal: bool,
     ) {
         self.connection = Connection::Open(socket);
-        self.heartbeat_at = SystemTime::now();
+        self.heartbeat_at = Instant::now();
         self.decoder = Decoder::default();
         self.output.clear();
         self.reply(answers, self.attached_reply(owner, terminal));
@@ -1767,7 +1766,7 @@ fn attach_with_terminal(
     view(
         stream::Stream::socket(socket)?,
         Some(id),
-        Some(ServerRoute {
+        Some(RelayRoute {
             session,
             status,
             recovery,
@@ -1820,9 +1819,9 @@ pub fn relay_over(argv: &[String], replace: bool) -> Result<()> {
     result
 }
 
-/// A viewer of one owner through the server, which reconnects when the
-/// bridge drops. SSH and direct sockets have none: their loss ends the viewer.
-struct ServerRoute<'a> {
+/// A viewer of one known owner, directly or through the server.
+/// Command pipes (including SSH) have no local route to reconnect.
+struct RelayRoute<'a> {
     session: Option<&'a LfSessionId>,
     status: Option<connection::Status>,
     recovery: Option<Recovery>,
@@ -1838,7 +1837,7 @@ fn bridged_session(session: Option<&LfSessionId>) -> Result<&LfSessionId> {
 fn view(
     mut socket: stream::Stream,
     id: Option<&Host>,
-    route: Option<ServerRoute<'_>>,
+    route: Option<RelayRoute<'_>>,
     moved: Option<String>,
     mut terminal: Option<ViewerTerminal>,
     attach_timeout: Duration,
@@ -1877,9 +1876,13 @@ fn view(
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = id.map(crate::terminal_title::ViewerTitle::new);
-    let mut heartbeat = SystemTime::now() + HEARTBEAT_INTERVAL;
-    let mut last_response = SystemTime::now();
+    let mut heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
+    let mut last_response = Instant::now();
     'relay: loop {
+        let mut can_reconnect = server
+            || (id.is_some()
+                && terminal.is_some()
+                && (output.reconnect.is_some() || recovery.is_some()));
         if status.as_ref().is_some_and(connection::Status::closed) {
             return Ok(());
         }
@@ -1894,16 +1897,25 @@ fn view(
             } else {
                 match owner {
                     Host::Terminal(_) => reconnect_held(owner)?,
-                    Host::Owner(owner) => {
-                        reconnect_server(owner, bridged_session(session)?, &mut terminal, &reason)?
-                    }
+                    Host::Owner(owner) => reconnect(
+                        owner,
+                        if server {
+                            Some(bridged_session(session)?)
+                        } else {
+                            None
+                        },
+                        &mut terminal,
+                        &reason,
+                        !server && recovery.is_none(),
+                    )?,
                 }
             };
             let Some(next) = next else {
                 return Ok(());
             };
             socket = stream::Stream::socket(next)?;
-            last_response = SystemTime::now();
+            last_response = Instant::now();
+            heartbeat = last_response + HEARTBEAT_INTERVAL;
             decoder = Decoder::default();
             controlled = false;
             owned = false;
@@ -1917,10 +1929,10 @@ fn view(
         if let Some(title) = &mut title {
             title.tick();
         }
-        if SystemTime::now() >= heartbeat {
-            heartbeat = SystemTime::now() + HEARTBEAT_INTERVAL;
+        if Instant::now() >= heartbeat {
+            heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
             if let Err(error) = send(&mut socket, Request::Controlled) {
-                if !server {
+                if !can_reconnect {
                     return Err(error);
                 }
                 interrupted = Some(error.to_string());
@@ -1928,7 +1940,7 @@ fn view(
             }
         }
         if acknowledgement_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            if server {
+            if can_reconnect {
                 interrupted =
                     Some("Attachment was not acknowledged; its outcome is unknown".to_owned());
                 continue;
@@ -1962,7 +1974,7 @@ fn view(
             let mut bytes = [0; 16384];
             let n = match socket.read(&mut bytes) {
                 Ok(n) if n != 0 => n,
-                result if server => {
+                result if can_reconnect => {
                     interrupted = Some(match result {
                         Err(error) => error.to_string(),
                         _ => "The bridge closed".to_owned(),
@@ -1972,7 +1984,7 @@ fn view(
                 Ok(_) => bail!("Execution owner disconnected; outcome is unknown"),
                 Err(error) => return Err(error.into()),
             };
-            last_response = SystemTime::now();
+            last_response = Instant::now();
             decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 if tag != Tag::Reply {
@@ -1992,6 +2004,7 @@ fn view(
                                 ..
                             } => {
                                 acknowledgement_deadline = None;
+                                can_reconnect |= id.is_some() && is_terminal;
                                 controlled = claim.is_some();
                                 if controlled {
                                     if let Some(id) = id {
@@ -2016,8 +2029,10 @@ fn view(
                                 if recovered.is_some() && status.is_none() {
                                     write_output(&mut terminal, 2, if controlled {
                                         b"\r\nReconnected to the same Session.\r\n"
-                                    } else {
+                                    } else if server {
                                         b"\r\nReconnected as a viewer; input remains elsewhere. Use Move here to take control.\r\n"
+                                    } else {
+                                        b"\r\nReconnected as a viewer; input remains elsewhere. Attach again to take control.\r\n"
                                     })?;
                                 }
                                 if let Some(terminal) = &mut terminal {
@@ -2168,12 +2183,9 @@ fn view(
                 }
             }
         }
-        // Drain available replies before checking elapsed wall time: after sleep,
-        // a healthy connection may already have its heartbeat answer queued.
-        if acknowledgement_deadline.is_none()
-            && last_response.elapsed().unwrap_or_default() >= HEARTBEAT_TIMEOUT
-        {
-            if server {
+        // Drain available replies before judging an unanswered heartbeat.
+        if acknowledgement_deadline.is_none() && last_response.elapsed() >= HEARTBEAT_TIMEOUT {
+            if can_reconnect {
                 interrupted = Some("The bridge stopped answering".to_owned());
                 continue;
             }
@@ -2213,7 +2225,7 @@ fn view(
                 stdin_open = false;
                 if terminal.is_none() && controlled {
                     if let Err(error) = send(&mut socket, Request::EndInput) {
-                        if !server {
+                        if !can_reconnect {
                             return Err(error);
                         }
                         interrupted = Some(error.to_string());
@@ -2231,7 +2243,7 @@ fn view(
                 return Ok(());
             } else if controlled {
                 if let Err(error) = send_frame(&mut socket, Tag::Input, &bytes[..n]) {
-                    if !server {
+                    if !can_reconnect {
                         return Err(error);
                     }
                     // The write may have reached the owner. Never retain or resend it.
@@ -2251,7 +2263,7 @@ fn view(
                 },
             );
             if let Err(error) = resized {
-                if !server {
+                if !can_reconnect {
                     return Err(error);
                 }
                 interrupted = Some(error.to_string());
@@ -2262,12 +2274,23 @@ fn view(
 
 /// Deliberate connection recovery, retaining the exact owner in this relay.
 /// No Session preparation, provider command, or uncertain input is repeated.
-fn reconnect_server(
+fn reconnect(
     id: &LfProcessId,
-    session: &LfSessionId,
+    session: Option<&LfSessionId>,
     terminal: &mut Option<ViewerTerminal>,
     reason: &str,
+    automatic: bool,
 ) -> Result<Option<UnixStream>> {
+    let connect = || match session {
+        Some(session) => crate::server::client::bridge_existing(session, id),
+        None => UnixStream::connect(endpoint(id)?).map_err(Into::into),
+    };
+    discard_reconnect_input()?;
+    if automatic {
+        if let Ok(socket) = connect() {
+            return Ok(Some(socket));
+        }
+    }
     if terminal.is_none() && io::stdout().is_terminal() {
         *terminal = Some(ViewerTerminal::enter()?);
     }
@@ -2276,7 +2299,7 @@ fn reconnect_server(
         terminal.make_raw()?;
     }
     discard_reconnect_input()?;
-    write_output(terminal, 2, format!("\r\nServer connection lost: {reason}.\r\nCtrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.\r\n").as_bytes())?;
+    write_output(terminal, 2, format!("\r\nSession connection lost: {reason}.\r\nCtrl+R to reconnect; Ctrl+] to close. Typing while disconnected is discarded.\r\n").as_bytes())?;
     loop {
         let mut bytes = [0; 8192];
         let n = io::stdin().read(&mut bytes)?;
@@ -2286,7 +2309,7 @@ fn reconnect_server(
         if !bytes[..n].contains(&0x12) {
             continue;
         }
-        match crate::server::client::bridge_existing(session, id) {
+        match connect() {
             Ok(socket) => return Ok(Some(socket)),
             Err(error) if error.is::<crate::engine::Error>() => {
                 return Err(error);
@@ -2682,12 +2705,28 @@ mod tests {
     use std::ffi::OsStr;
     use std::os::unix::net::UnixStream;
     use std::process::Command;
+    use std::time::Duration;
 
     use super::{
         carry_across_exec, output, place_events, wire, Event, Handoff, Own, Ownership, Viewer,
         CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
+
+    #[test]
+    fn heartbeat_requires_thirty_seconds_of_uptime() {
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let mut viewer = Viewer::new(socket);
+        viewer.attached = true;
+        viewer.token = Some("input".into());
+        // Only uptime advances this deadline; wall time spent asleep is absent.
+        viewer.expire_heartbeat(viewer.heartbeat_at + Duration::from_secs(29));
+        assert!(viewer.live());
+        assert!(viewer.token.is_some());
+        viewer.expire_heartbeat(viewer.heartbeat_at + Duration::from_secs(30));
+        assert!(!viewer.live());
+        assert!(viewer.token.is_none());
+    }
 
     #[test]
     fn taking_ownership_fulfills_a_viewers_queued_request() {

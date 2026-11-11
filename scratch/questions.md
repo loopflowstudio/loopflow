@@ -65,3 +65,8 @@ Written into the docs as assumptions; none was said by anyone.
   `terminal_id`, one of them null, instead of two shapes under one name.
 - A lost `session.start` holder reply answers `outcome_unknown`; the caller
   repeats the same `request`.
+
+## Sync onto main — November 10, 2026
+
+Keep this Task’s `explore.html` and `questions.md`: main removed its scratch
+files, while these contain the holder design choices and exact replies.

@@ -9,7 +9,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::process::ExitStatus;
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
@@ -357,7 +357,7 @@ impl Hosted {
         // Observe every connection before admitting claims. A viewer earlier
         // in the list must not see Busy for a controller whose EOF is ready.
         self.viewers.retain_mut(|viewer| {
-            viewer.expire_heartbeat(SystemTime::now());
+            viewer.expire_heartbeat(Instant::now());
             match viewer.read() {
                 Ok(()) => !viewer.connection.expired(),
                 Err(error) => survive(viewer, &error),
@@ -440,7 +440,7 @@ impl Hosted {
                             }
                             Request::Controlled => {
                                 if viewer.attached {
-                                    viewer.heartbeat_at = SystemTime::now();
+                                    viewer.heartbeat_at = Instant::now();
                                 }
                                 viewer.reply(
                                     answers,
@@ -511,7 +511,7 @@ impl Hosted {
                                     viewer.token = None;
                                 }
                                 viewer.attached = true;
-                                viewer.heartbeat_at = SystemTime::now();
+                                viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
                                 owner_change |= ownership.claim(own, viewer);
                                 viewer
@@ -949,11 +949,9 @@ impl Hosted {
             .iter()
             .filter_map(|viewer| match viewer.connection {
                 Connection::Dropped(at) => Some(at + GRACE),
-                Connection::Open(_) | Connection::Draining(_) if viewer.live() => Some(
-                    Instant::now()
-                        + HEARTBEAT_TIMEOUT
-                            .saturating_sub(viewer.heartbeat_at.elapsed().unwrap_or_default()),
-                ),
+                Connection::Open(_) | Connection::Draining(_) if viewer.live() => {
+                    Some(viewer.heartbeat_at + HEARTBEAT_TIMEOUT)
+                }
                 Connection::Open(_) | Connection::Draining(_) => None,
             })
             .chain(deadline)

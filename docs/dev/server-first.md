@@ -109,9 +109,9 @@ The provider's transcript is the record of turns, tools and usage for every
 conversation: managed, bare and raw. Two signals sit beside it for managed
 Sessions:
 
-- The agent's own status reports in its output (working, blocked on a
-  permission or a question) give "waiting on you". The server's emulator reads
-  them; no per-pane status process is needed.
+- The agent's own status reports in its output show whether the Session is
+  working or available for a reply, including a permission or a question.
+  The server's emulator reads them; no per-pane status process is needed.
 - A hook at a turn boundary tells the server to read the transcript now.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
@@ -119,13 +119,15 @@ that cannot reach it logs a gap and lets the turn continue.
 
 ## Pieces
 
-Each is one Task and one PR. The first five do not depend on each other.
+Each is one Task and one PR. The first four do not depend on each other.
+Desktop already sends pane status as `session.status` writes on its server
+connection, with no process per pane. That operation is temporary: it is
+deleted when the server's emulator reads status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs | |
 | Hooks call the server, not the store | Store opens inside turn boundaries | |
-| Desktop sends pane status on its server connection | One `session observe-status` per pane | |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
@@ -145,10 +147,21 @@ Desktop. `lf resume SESSION` of a Session bound to a Task or Wave is managed
 too. A bare `lf` typed inside a Task's checkout stays bare and records the
 Task as its ancestry. One function answers this for every launch path.
 
+Any `lf` run in a Task's checkout counts toward that Task: its usage and time
+roll up into the Task's cost. Design the bare path on the assumption that most
+bare runs are subagents started by a Task's agent, not a person at a prompt:
+nobody is watching, the caller waits on the exit and reads the output, and the
+run ends with its parent.
+
 ## Open
 
 - Whether Codex history can be read from its rollout files or needs a short
   app-server call at turn end. If neither works, Codex keeps a recorder.
+- When a run's checkout and its calling Session belong to different Tasks,
+  which one its cost counts toward.
+- Which per-turn facts (cost, model time, stop reason) each harness's
+  transcript carries. The cost-per-PR work (LOO-732) reads them from the
+  store, so a bare run must write them at exit.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.

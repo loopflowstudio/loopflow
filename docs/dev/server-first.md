@@ -144,9 +144,21 @@ Task as its ancestry. One function answers this for every launch path.
 
 - Whether Codex history can be read from its rollout files or needs a short
   app-server call at turn end. If neither works, Codex keeps a recorder.
-- Whether Claude and Codex repaint fully on a size nudge.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.
-- How the holder is started on macOS and Linux so the service manager leaves
-  it alone when the server's service is replaced.
+- Whether Claude or Codex re-send terminal modes (bracketed paste, focus,
+  Kitty keyboard) on resize, which decides what a crashed server's rebuilt
+  emulator gets wrong.
+
+## Answered
+
+- **Size nudge.** Measured November 10, 2026 (Claude Code 2.1.322,
+  codex-cli 0.167.0, idle and after a 30-line answer): resizing one column
+  or row and back repainted every non-blank row of the visible screen and the
+  cursor from about 1.5–4 KB of output. Scrollback above the screen is not
+  repainted.
+- **Holder start.** A `setsid` child of a launchd agent survived
+  `launchctl bootout` with and without `AbandonProcessGroup`; the server's
+  plist sets it and its systemd unit uses `KillMode=process`. The server
+  spawns the holder with `setsid`; no separate service.

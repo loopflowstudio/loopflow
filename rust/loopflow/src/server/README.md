@@ -396,7 +396,7 @@ part of what a phone or bot client is offered.
 
 A launch is managed when a Task or Wave command starts it: `lf task run`
 and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation,
-`lf resume --task` or `--wave`. Every other launch is bare, including
+`lf resume [ID] --task` or `--wave`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
 checkout; that run still counts toward the Task. The command decides
 (`Cli::names_work`) and sets `AgentConfig::managed` on the launch; nothing

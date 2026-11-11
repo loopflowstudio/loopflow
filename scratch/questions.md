@@ -91,12 +91,12 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   Session during publish; `lf sync` checkpointed it into this branch. Kept in
   PR #1879; move it to its own PR if it shouldn't land with LOO-821.
 
-Taken (November 11, managed resume, reversible): Desktop opens a Task's
-conversation by running the prepare's `open_argv`. A prepare that named
-`--task`/`--wave` (`lf session resume --task X --prepare`) now returns
-`lf session resume --task X [intent flag]` in place of the Session id
-(`session.rs::open_through`), so running it reselects through the Task and
-resumes managed. The alternative, carrying the Session id and the Task
-together, needs `SessionTarget::from_selectors` to accept both. The reselect
-resolves the typed Task or Wave from the terminal's cwd; Desktop only prepares
-with `--task`. A Session-id prepare stays `lf session resume <id>`: bare.
+Taken (November 11, managed resume, reversible): a Session id and its Work
+on one command. `lf session resume ID --task X` selects ID and is managed
+because it names the Task; a prepare that named `--task`/`--wave` returns
+`open_argv` ending `resume ID [intent flag] --task X` (forks: the new id),
+replacing `open_through`'s reselect. Desktop's Task and Wave workspace stores
+(`SessionsStore.work`) and Task-run steps (`executionLocations`) name their
+Work on every prepare; `openSessionLink` and the repository store stay bare.
+The id is not checked against the Task: naming another Task only makes the
+resume managed.

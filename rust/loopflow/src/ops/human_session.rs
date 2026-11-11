@@ -58,17 +58,19 @@ pub enum SessionTarget<'a> {
 }
 
 impl<'a> SessionTarget<'a> {
+    /// A Session id selects that conversation even beside `--task` or
+    /// `--wave`; naming the Work there only makes the command managed.
     pub fn from_selectors(
         id: Option<&'a str>,
         task: Option<&'a str>,
         wave: Option<&'a str>,
     ) -> Result<Self> {
         match (id, task, wave) {
-            (None, None, None) => Ok(Self::Context),
-            (Some(id), None, None) => Ok(Self::Session(id)),
+            (_, Some(_), Some(_)) => bail!("select one Task or Wave"),
+            (Some(id), _, _) => Ok(Self::Session(id)),
             (None, Some(task), None) => Ok(Self::Task(task)),
             (None, None, Some(wave)) => Ok(Self::Wave(wave)),
-            _ => bail!("select one Session, Task or Wave target"),
+            (None, None, None) => Ok(Self::Context),
         }
     }
 }

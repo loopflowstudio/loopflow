@@ -155,6 +155,15 @@ prepare and open. A Session link (`openSessionLink`) names no Task and stays
 bare. Test: a Task workspace pane reopened by id with the server stopped fails
 naming it.
 
+Built (November 11): `from_selectors` lets the id win beside `--task`/`--wave`
+(Task and Wave together still fail); `SessionConnectionArgs::work_flag`
+decides managed and is appended to a prepare's `open_argv`; `open_through` is
+gone. Desktop: `prepareSession(id:work:)`, `SessionsStore.work` from its
+workspace key, `executionLocations` first. Checks: `session_steers::`
+9/9 (incl. `a_task_pane_reopened_by_session_id_fails_naming_a_missing_server`),
+`lf::tests::` 40/40, `scripts/test_desktop.sh --filter SessionsStoreTests`
+36/36.
+
 LOO-824 (its concept review, Jack Heart: "managed should = held") will read
 `AgentConfig::managed` and call `require_server` instead of keeping its own
 rule; whichever branch lands second makes the switch.

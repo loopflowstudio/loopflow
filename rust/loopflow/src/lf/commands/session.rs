@@ -667,7 +667,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let managed = resumes_work(&target);
+    let managed = resumes_work(cli, connection);
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -698,33 +698,10 @@ async fn resume(
     print_opened(connection.json || cli.json, &session)
 }
 
-/// A Task or Wave resume is managed, as `Cli::names_work` is for a launch.
-fn resumes_work(target: &crate::ops::human_session::SessionTarget<'_>) -> bool {
-    matches!(
-        target,
-        crate::ops::human_session::SessionTarget::Task(_)
-            | crate::ops::human_session::SessionTarget::Wave(_)
-    ) || crate::journal::task_run_step()
-}
-
-/// A prepared Task or Wave resume opens through that target, so the terminal
-/// that runs `open_argv` resumes managed, as the prepare command would have.
-fn open_through(record: &mut SessionRecord, target: crate::ops::human_session::SessionTarget<'_>) {
-    use crate::ops::human_session::SessionTarget;
-    let selector = match target {
-        SessionTarget::Task(task) => ["--task", task],
-        SessionTarget::Wave(wave) => ["--wave", wave],
-        _ => return,
-    };
-    if let Some(at) = record
-        .open_argv
-        .iter()
-        .position(|word| *word == record.id.as_str())
-    {
-        record
-            .open_argv
-            .splice(at..=at, selector.map(str::to_string));
-    }
+/// A resume naming its Task or Wave is managed, as `Cli::names_work` is for
+/// a launch.
+fn resumes_work(cli: &crate::lf::Cli, connection: &SessionConnectionArgs) -> bool {
+    connection.work_flag(cli).is_some() || crate::journal::task_run_step()
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -803,12 +780,15 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let managed = resumes_work(&target);
+                let managed = resumes_work(cli, connection);
                 let mut record =
                     reopen(&store, directory, target, connection, *fork, false, managed).await?;
-                // A fork is a new Session the target would not select again.
-                if !*fork {
-                    open_through(&mut record, target);
+                // The opening terminal resumes this Session by id, managed
+                // when the prepare named its Work.
+                if let (Some(flag), false) =
+                    (connection.work_flag(cli), record.open_argv.is_empty())
+                {
+                    record.open_argv.extend(flag.map(str::to_string));
                 }
                 Ok(record)
             }

@@ -153,9 +153,11 @@ a Task's checkout stays bare and records the Task as its ancestry. The
 command decides, not the Session row: `Cli::names_work` is true for
 `--task`, `--wave` (a Task or Wave conversation passes them), `lf resume
 --task`/`--wave` and a step of `lf task run`, and the launch carries it as
-`AgentConfig::managed`. Desktop prepares with `lf session resume --task X
---prepare`, and the `open_argv` it gets back resumes through `--task X`
-rather than the Session id. A child run started by a Session's agent, which that
+`AgentConfig::managed`. Beside a Session id, `--task`/`--wave` make the
+resume managed and the id still selects: Desktop's Task and Wave workspaces
+prepare with `lf session resume [ID] --task X --prepare`, and the `open_argv`
+it gets back is `lf session resume ID --task X`. A Session link names no
+Work and opens bare. A child run started by a Session's agent, which that
 agent steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
 started from a Desktop shell is bare.
 

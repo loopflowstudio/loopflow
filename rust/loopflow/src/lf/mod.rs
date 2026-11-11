@@ -1677,6 +1677,16 @@ impl SessionConnectionArgs {
         }
     }
 
+    /// The Task or Wave this command names, as the flag and value that name
+    /// it. Naming one makes the resume managed, as `Cli::names_work` does for
+    /// a launch, also beside a Session id.
+    pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
+        let task = self.task.as_deref().or(cli.task.as_deref());
+        let wave = self.wave.as_deref().or(cli.wave.as_deref());
+        task.map(|task| ["--task", task])
+            .or_else(|| wave.map(|wave| ["--wave", wave]))
+    }
+
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,
@@ -1868,8 +1878,8 @@ pub enum SessionCommand {
         after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn, draft or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
-        /// Session ID, Task identifier, or provider conversation ID
-        #[arg(conflicts_with_all = ["task", "wave"])]
+        /// Session ID, Task identifier, or provider conversation ID; beside
+        /// `--task`/`--wave` the ID selects and the Work makes it managed
         id: Option<String>,
         #[command(flatten)]
         connection: SessionConnectionArgs,
@@ -4551,14 +4561,30 @@ mod tests {
                 .may_launch_agent()
         );
         assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
+        // A Session id beside its Work selects the Session; Task and Wave
+        // together stay one selection too many.
         for argv in [
             vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
-            vec![
-                "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
-            ],
+            vec!["lf", "session", "resume", "session-id", "--wave", "infra"],
         ] {
-            assert!(Cli::try_parse_from(argv).and_then(Cli::checked).is_err());
+            let cli = checked(&argv);
+            let Some(Commands::Session {
+                cmd: SessionCommand::Resume { id, connection, .. },
+            }) = &cli.command
+            else {
+                panic!("not a resume");
+            };
+            assert!(matches!(
+                connection.target(&cli, id.as_deref()).unwrap(),
+                crate::ops::human_session::SessionTarget::Session("session-id")
+            ));
+            assert!(connection.work_flag(&cli).is_some());
         }
+        assert!(Cli::try_parse_from([
+            "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
+        ])
+        .and_then(Cli::checked)
+        .is_err());
     }
 
     #[test]

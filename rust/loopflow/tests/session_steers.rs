@@ -358,6 +358,33 @@ exit 0\n",
             .unwrap()
     }
 
+    /// A Task whose Claude conversation launched beside a Machine server that
+    /// has since stopped.
+    fn launched_then_stopped() -> Self {
+        let task = Self::new();
+        let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
+        let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        drop(server);
+        task
+    }
+
+    /// The `open_argv` that `args --prepare --json` returns.
+    fn prepared(&self, args: &[&str]) -> Vec<String> {
+        let output = self.run(&[args, &["--prepare", "--json"]].concat());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        serde_json::from_value(record["open_argv"].clone()).unwrap()
+    }
+
     fn marked(&self, name: &str) -> bool {
         self.home.path().join(name).exists()
     }
@@ -388,50 +415,37 @@ fn an_interactive_task_launch_with_no_machine_server_fails_naming_it() {
 /// it instead of continuing unrecorded.
 #[test]
 fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
-    let task = InteractiveTask::new();
-    let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
-    let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
-    assert!(
-        launched.status.success(),
-        "{}",
-        String::from_utf8_lossy(&launched.stderr)
-    );
-    drop(server);
+    let task = InteractiveTask::launched_then_stopped();
     assert_names_missing_server(&task.run(&["-i", "--task", "INF-123", "resume"]));
     assert!(!task.marked("provider-resumed"));
 }
 
 /// Desktop opens a Task's conversation by preparing it, then running the
-/// returned `open_argv` in a terminal. That command resumes through the Task,
-/// so with the server stopped it fails naming it, as `lf resume --task` does.
+/// returned `open_argv` in a terminal. A prepare naming the Task returns a
+/// command that resumes managed, so with the server stopped it fails naming it,
+/// as `lf resume --task` does.
 #[test]
 fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
-    let task = InteractiveTask::new();
-    let server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), task.home.path());
-    let launched = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
-    assert!(
-        launched.status.success(),
-        "{}",
-        String::from_utf8_lossy(&launched.stderr)
-    );
-    drop(server);
-    let prepared = task.run(&[
-        "session",
-        "resume",
-        "--task",
-        "INF-123",
-        "--prepare",
-        "--json",
-    ]);
-    assert!(
-        prepared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
-    );
-    let record: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let argv: Vec<String> = serde_json::from_value(record["open_argv"].clone()).unwrap();
+    let task = InteractiveTask::launched_then_stopped();
+    let argv = task.prepared(&["session", "resume", "--task", "INF-123"]);
     assert!(
         argv.ends_with(&["--task".into(), "INF-123".into()]),
+        "{argv:?}"
+    );
+    assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
+    assert!(!task.marked("provider-resumed"));
+}
+
+/// Desktop's Task workspace reopens a pane that already has a Session by its
+/// id, naming the Task beside it: the id selects, the Task makes it managed.
+#[test]
+fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
+    let task = InteractiveTask::launched_then_stopped();
+    let by_task = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let id = by_task[by_task.len() - 3].clone();
+    let argv = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
+    assert!(
+        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));

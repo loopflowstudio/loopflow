@@ -73,16 +73,15 @@ lf session list --interactive all    # with the headless runs still working
 lf session history --since 1d        # what finished, every headless run included
 ```
 
-Lists show open conversations. A headless conversation (`-b`, a Graph step, a
-review) finishes when its run ends, whatever Task or Wave it belongs to, and
-moves to history. An interactive one finishes when you quit it, unless it is a
-Task's, a Wave's or a scope's ongoing conversation; those stay listed until
-their Work closes. Desktop's sidebar shows the same open set.
+A headless conversation (`-b`, a Graph step, a review) moves to history when
+its run ends, whatever Task or Wave it belongs to. An interactive one moves when
+you quit it, unless it is a Task's, a Wave's or a scope's ongoing conversation.
+Desktop's sidebar shows the same open set, and `lf task status` still shows every
+conversation a Task had.
 
-A finished conversation can still continue. `lf resume <session>` reopens an
-interactive one. A Graph that corrects its own step's run reopens that run for
-the turn; it lists while the turn runs and returns to history when it ends.
-`lf task status` still shows every conversation a Task had.
+Finished conversations can continue: `lf resume <session>` reopens an interactive
+one, and a Graph correcting its own step reopens that step's run until the turn
+ends.
 
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.

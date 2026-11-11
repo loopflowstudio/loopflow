@@ -46,6 +46,7 @@ Desktop reconnects automatically to the same Session owner when the server is
 replaced or its connection drops. Its native status row shows **Reconnecting…**;
 the screen stays visible and input pauses until the connection is acknowledged.
 Selection, copy, Find and scrolling remain available.
+If recovery fails, the last screen remains visible and is marked stale.
 
 If another viewer has control, recovery leaves that viewer in control. The
 read-only pane offers **Move here** to request control explicitly. **Retry**

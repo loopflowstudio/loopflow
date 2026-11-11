@@ -3,6 +3,9 @@
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
 This checkout adds the planned contract only.
 The listener, mobile settings and bulk protocol are outside this Task.
+The existing local store consumes tickets on every attempt and checks the peer
+UID, but uses `Instant`; it does not implement remote identity or sleep-aware
+expiry.
 
 ## Transport dependency — November 11, 2026 UTC
 
@@ -17,12 +20,16 @@ The ticket store, remote carrier and service are unchanged from
 the host's own node when the Machine opts in with `mobile-same-device`;
 ticket identity remains node/user.
 
-At November 11 09:42 UTC, GitHub still reports PR #1812 open and unmerged
-at that head, with no auto-merge. Freshly fetched main is
-`6d8fad3375a81890d00965ba46ea396360f7db2a`,
+At November 11 10:20 UTC, GitHub still reports PR #1812 open and unmerged
+at that head. Freshly fetched main is
+`976b53db0c5affa519af66bfe9bf58ee83fba347`,
 still without `server/mobile.rs` or `server/ticket.rs`.
-`lf task status LOO-718 --json` still places it at `feature`'s `demo` step,
-with PR settlement not armed.
+The 09:46 UTC read found main at
+`6d8fad3375a81890d00965ba46ea396360f7db2a`, no auto-merge, and LOO-718
+at `feature`'s `demo` step with PR settlement not armed.
+The 10:20 UTC Task-status refresh produced no result before cancellation;
+current Graph state is unknown. The GitHub and fetched-tree reads independently
+confirm the transport remains unmerged.
 
 Implementation and delivery wait for LOO-718 to land; reinspect its shared store
 and authenticated endpoints then. Landing that PR is outside this Task's scope.
@@ -65,7 +72,8 @@ planned/local-only wording and describe local/remote admission binding.
 Keep exact-owner selection and recovery together for both transports; keep
 the running-owner prerequisite and missing-owner error beside the remote example.
 The phone overview keeps connection steps; the server README owns protocol
-details and shared owner recovery, avoiding duplicate contracts. The inspected
+details and shared owner recovery. Desktop status and recovery controls live in
+the client guide, avoiding duplicate descriptions. The inspected
 transport speaks revision 5: update the remote example's `hello`/`welcome`
 anchor from revision 4 when integrating it.
 

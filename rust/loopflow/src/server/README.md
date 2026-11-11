@@ -809,11 +809,9 @@ If the Session has a new owner, attachment returns `not_found` with
 Session's current owner; neither attachment starts or resumes a provider.
 A lost connection alone does not establish process death.
 
-Desktop reconnects to the exact owner with bounded backoff. Connection status
-stays outside terminal bytes; unavailability marks the last screen stale.
-Retry reconnects without preparing or resuming a provider. See
+Desktop reconnects to the exact owner with bounded backoff. See
 [connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
-for the Desktop controls.
+for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and viewer's
 control claims are distinct. `SessionRecord.transition` reports the latest

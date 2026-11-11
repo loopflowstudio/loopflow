@@ -61,6 +61,9 @@ exercise writers beyond the changed store module.
 
 Configuration file loading or filtering changes also run `binary(two_people)`:
 it checks that a shared Wave graph choice reaches another person's Task launch.
+Include `test(configuration_changes_reach_an_existing_subscription)`,
+`test(graph_defaults_follow_task_wave_and_repository)` and
+`test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name

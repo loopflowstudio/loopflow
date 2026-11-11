@@ -558,18 +558,20 @@ pub(crate) async fn list(
     }
     workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
+    let task = match &filter.task {
+        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        None => None,
+    };
+    let in_task = |session: &SessionRecord| {
+        filter.task.is_none()
+            || task
+                .as_ref()
+                .is_some_and(|task| session.task_ids.contains(task))
+    };
     if association_filter {
-        let task = if let Some(selector) = &filter.task {
-            store.sqlite.resolve_task_id(selector, None)?
-        } else {
-            None
-        };
         sessions.retain(|session| {
             (!filter.orphan || session.task_ids.is_empty())
-                && (filter.task.is_none()
-                    || task
-                        .as_ref()
-                        .is_some_and(|task| session.task_ids.contains(task)))
+                && in_task(session)
                 && (!filter.blocked || session.blocked)
                 && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
@@ -589,18 +591,11 @@ pub(crate) async fn list(
             .collect();
     }
     if lists_raw(filter) {
-        let task = match &filter.task {
-            Some(selector) => Some(store.sqlite.resolve_task_id(selector, None)?),
-            None => None,
-        };
         let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
-        sessions.extend(raw.into_iter().filter(|raw| {
-            (!filter.available || raw.availability.is_some())
-                && task.as_ref().is_none_or(|task| {
-                    task.as_ref()
-                        .is_some_and(|task| raw.task_ids.contains(task))
-                })
-        }));
+        sessions.extend(
+            raw.into_iter()
+                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_task(raw)),
+        );
     }
     Ok(sessions)
 }

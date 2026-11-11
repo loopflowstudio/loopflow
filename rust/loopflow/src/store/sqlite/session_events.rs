@@ -12,7 +12,7 @@ use super::SqliteStore;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CurrentConversation {
     pub provider: String,
-    pub thread: String,
+    pub thread: AgentSessionId,
     /// The last turn Loopflow's hooks recorded in it.
     pub turn: Option<RecordedTurn>,
 }
@@ -166,7 +166,7 @@ impl SqliteStore {
                 "SELECT provider,provider_thread FROM agent_sessions
                  WHERE id=?1 AND provider IS NOT NULL AND provider_thread IS NOT NULL",
                 [session],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, AgentSessionId>(1)?)),
             )
             .optional()?
         else {

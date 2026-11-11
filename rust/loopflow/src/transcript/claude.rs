@@ -19,6 +19,7 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
         }
         let content = &row["message"]["content"];
         let id = row["uuid"].as_str().unwrap_or_default();
+        let request = || row["uuid"].as_str().map(str::to_owned);
         let stamp = || row["timestamp"].as_str().map(str::to_owned);
         match row["type"].as_str() {
             Some("user") => {
@@ -26,7 +27,7 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
                 if is_user_input(row) {
                     turns.request(at, text_of(content), RequestSource::Person);
                     tally.asked.clear();
-                    runs.start(row["uuid"].as_str().map(str::to_owned), stamp());
+                    runs.start(request(), stamp());
                     continue;
                 }
                 let text = text_of(content);
@@ -52,7 +53,7 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
                 } else if answered {
                     runs.current().state = tally.state();
                 } else {
-                    runs.wake(row["uuid"].as_str().map(str::to_owned), stamp());
+                    runs.wake(request(), stamp());
                 }
             }
             Some("assistant") => {
@@ -81,9 +82,7 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
                 let run = runs.runs.last_mut().expect("the current run");
                 tally.count(at, message);
                 (run.usage, run.receipt) = tally.usage();
-                if let Some(model) = message["model"].as_str().filter(|m| *m != "<synthetic>") {
-                    run.model = Some(model.to_owned());
-                }
+                run.model = tally.model.clone();
                 if message["stop_reason"] == "end_turn" {
                     tally.asked.clear();
                     run.state = TurnState::Ended;

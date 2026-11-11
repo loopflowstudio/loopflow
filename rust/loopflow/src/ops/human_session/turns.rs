@@ -46,10 +46,8 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
             turn.status.as_deref(),
         )));
     }
-    Ok(
-        crate::transcript::live::locate(store, &conversation.provider, &conversation.thread, cwd)?
-            .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path)),
-    )
+    Ok(crate::transcript::live::locate(store, &conversation, cwd)?
+        .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path)))
 }
 
 /// Raw conversations open in `repo`, or anywhere when `None`.

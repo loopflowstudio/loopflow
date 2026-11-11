@@ -66,7 +66,7 @@ pub(super) fn read(rows: &[Value]) -> Transcript {
 struct Tally {
     /// The total when the run started; absent until one is known.
     before: Option<Value>,
-    total: Option<Value>,
+    total: Value,
     last: Value,
     window: Value,
     peak: u64,
@@ -74,7 +74,7 @@ struct Tally {
 
 impl Tally {
     fn start(&mut self) {
-        self.before = Some(self.total.clone().unwrap_or(Value::Null));
+        self.before = Some(self.total.clone());
         self.peak = 0;
     }
 
@@ -89,7 +89,7 @@ impl Tally {
             }));
         }
         self.peak = self.peak.max(last["input_tokens"].as_u64().unwrap_or(0));
-        self.total = Some(total.clone());
+        self.total = total.clone();
         self.last = last.clone();
         self.window = info["model_context_window"].clone();
     }
@@ -97,7 +97,7 @@ impl Tally {
     /// The run's usage so far, and the same as the live stream's receipt:
     /// Codex's app-server names these counters in camel case.
     fn usage(&self) -> (TurnUsage, Value) {
-        let total = self.total.as_ref().unwrap_or(&Value::Null);
+        let total = &self.total;
         let before = self.before.as_ref().unwrap_or(&Value::Null);
         let grown = |key: &str| {
             let count = |from: &Value| from[key].as_u64().unwrap_or(0);

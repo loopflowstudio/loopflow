@@ -43,12 +43,8 @@ fn record_transcript_turns(store: &SqliteStore, exit: &NativeExit) -> Result<usi
     let Some(conversation) = store.current_conversation(&exit.session)? else {
         return Ok(0);
     };
-    let Some((harness, transcript)) = crate::transcript::live::locate(
-        store,
-        &conversation.provider,
-        &conversation.thread,
-        &exit.cwd,
-    )?
+    let Some((harness, transcript)) =
+        crate::transcript::live::locate(store, &conversation, &exit.cwd)?
     else {
         return Ok(0);
     };
@@ -56,7 +52,7 @@ fn record_transcript_turns(store: &SqliteStore, exit: &NativeExit) -> Result<usi
         store,
         &exit.session,
         harness,
-        &conversation.thread.as_str().into(),
+        &conversation.thread,
         &transcript,
     )?)
 }

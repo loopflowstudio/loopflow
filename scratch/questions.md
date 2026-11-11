@@ -17,10 +17,6 @@ following choices are proposals:
 
 - Live raw `claude`/`codex` conversations list in plain `lf session list` for
   their checkout, marked `raw`, without creating a Session.
-- Session JSON gains `turn` (`state` running|asking|ended|interrupted, `source`
-  hooks|transcript, `started_at`, `ended_at`, `model`, `usage`) and `raw`.
-  Shape written into `docs/surfaces.md`; change it there if implementation
-  needs another.
 - Raw rows carry no actions and empty `open_argv`; they join an unpaged list,
   and `--task` (their checkout's Task) and `--available` (turn not running),
   but not `--orphan`, `--blocked`, `--on`, `--search`, `--history`, `--page`.
@@ -36,13 +32,5 @@ following choices are proposals:
   or was observed within 2 s after a run that began at or after its own turn.
 - `lf` ancestors are recognized by name: `lf`, `lf-*`, `*-lf`. A provider
   started by another app (Paseo, Codex Desktop) lists as raw.
-- Turn usage sums the turn's model calls, the last row of each message
-  counting; `input_tokens` includes cached
-  input for both providers (Claude's cache reads and writes are added in).
-- Tail window starts at 128 KiB and grows fourfold to 8 MiB until it holds
-  the turn's start. Reconcile 30 s; an event makes a reread due in 1 s.
-- Changed docs: `docs/sessions.md#see-what-each-one-is-doing`,
-  `docs/surfaces.md` (Session record), `docs/dev/server-first.md` (Telemetry,
-  Codex question answered and removed from Open).
 
 Steers after kickoff, what remains and open choices: `loo-822.md`.

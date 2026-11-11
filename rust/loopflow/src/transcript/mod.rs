@@ -209,11 +209,17 @@ pub(crate) fn read(harness: HarnessKind, source: &Source) -> Result<Vec<Turn>> {
 /// Every run in the transcript at `path`, oldest first; none for a harness
 /// whose transcript keeps no run boundaries, or a file that cannot be read.
 pub(crate) fn runs(harness: HarnessKind, path: &Path) -> Vec<Run> {
-    let rows = json_lines(path).collect::<Vec<_>>();
+    run_reader(harness).map_or_else(Vec::new, |read| {
+        read(&json_lines(path).collect::<Vec<_>>()).runs
+    })
+}
+
+/// The reader for a harness whose transcript keeps run boundaries.
+fn run_reader(harness: HarnessKind) -> Option<fn(&[Value]) -> Transcript> {
     match harness {
-        HarnessKind::Claude => claude::read(&rows).runs,
-        HarnessKind::Codex => codex::read(&rows).runs,
-        HarnessKind::Pi | HarnessKind::OpenCode => Vec::new(),
+        HarnessKind::Claude => Some(claude::read),
+        HarnessKind::Codex => Some(codex::read),
+        HarnessKind::Pi | HarnessKind::OpenCode => None,
     }
 }
 

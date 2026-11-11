@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use super::{unix_seconds, Run};
 use crate::harness::HarnessKind;
+use crate::store::sqlite::{CurrentConversation, SqliteStore};
 
 /// How much of a transcript's end is read first; the window grows fourfold
 /// until it holds the turn's start…
@@ -183,11 +184,7 @@ fn rfc3339(at: i64) -> Option<String> {
 /// The current or last turn of the transcript at `path`; `None` when it shows
 /// none or cannot be read.
 pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<SessionTurn> {
-    let read = match harness {
-        HarnessKind::Claude => super::claude::read,
-        HarnessKind::Codex => super::codex::read,
-        HarnessKind::Pi | HarnessKind::OpenCode => return None,
-    };
+    let read = super::run_reader(harness)?;
     let mut limit = FIRST;
     loop {
         let (rows, whole) = tail(path, limit).ok()?;
@@ -237,25 +234,24 @@ fn tail(path: &Path, limit: u64) -> std::io::Result<(Vec<Value>, bool)> {
 /// Where each conversation's transcript was found; a transcript never moves.
 static FOUND: LazyLock<Mutex<HashMap<(String, PathBuf), PathBuf>>> = LazyLock::new(Mutex::default);
 
-/// The transcript of `provider`'s conversation `thread`, which a Session ran
-/// in `cwd`; `None` when its harness keeps none or its home is gone.
+/// The transcript of `conversation`, which a Session ran in `cwd`; `None`
+/// when its harness keeps none or its home is gone.
 pub(crate) fn locate(
-    store: &crate::store::sqlite::SqliteStore,
-    provider: &str,
-    thread: &str,
+    store: &SqliteStore,
+    conversation: &CurrentConversation,
     cwd: &Path,
 ) -> anyhow::Result<Option<(HarnessKind, PathBuf)>> {
-    let Some(harness) = HarnessKind::parse(provider) else {
+    let Some(harness) = HarnessKind::parse(&conversation.provider) else {
         return Ok(None);
     };
     let Some(provider) = harness.provider() else {
         return Ok(None);
     };
-    let id = crate::id::AgentSessionId::from(thread);
-    let Some(home) = super::conversation_home(store, provider, &id)? else {
+    let thread = &conversation.thread;
+    let Some(home) = super::conversation_home(store, provider, thread)? else {
         return Ok(None);
     };
-    Ok(find(harness, &home, thread, cwd).map(|path| (harness, path)))
+    Ok(find(harness, &home, thread.as_str(), cwd).map(|path| (harness, path)))
 }
 
 /// Conversation `id`'s transcript in `home`, which ran in `cwd`.
@@ -275,8 +271,8 @@ pub(crate) fn find(harness: HarnessKind, home: &Path, id: &str, cwd: &Path) -> O
     Some(path)
 }
 
-/// Claude keeps a directory's conversations under its path with every `/`
-/// and `.` turned into `-`.
+/// Claude keeps a directory's conversations under its absolute path, every
+/// character other than a letter or digit replaced by `-`.
 pub(crate) fn claude_project(home: &Path, cwd: &Path) -> PathBuf {
     let name = cwd
         .to_string_lossy()

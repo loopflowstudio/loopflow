@@ -2350,7 +2350,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             cmd: TaskCommand::Run { .. }
         })
     );
-    if execution && loopflow::transport::delegate_current(cli.batch, task_run)? {
+    if execution && loopflow::transport::delegate_current(cli.batch, task_run || cli.names_work())?
+    {
         return Ok(());
     }
     // Only the operation a launcher started reports; an execution owner in

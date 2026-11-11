@@ -281,11 +281,12 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 ///
-/// `task_run` says the command starts a Task's Graph, whose conversation is
-/// held for the Machine server when a terminal views it.
-pub fn delegate_current(batch: bool, task_run: bool) -> Result<bool> {
+/// `managed` says the command is a Task or Wave command (`Cli::names_work`)
+/// or starts a Task's Graph; its conversation is held for the Machine server
+/// when a terminal views it.
+pub fn delegate_current(batch: bool, managed: bool) -> Result<bool> {
     let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, task_run)
+    delegate(batch, None, None, argv, true, managed)
 }
 
 pub(crate) fn delegate_session(
@@ -321,7 +322,7 @@ fn delegate(
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
-    task_run: bool,
+    managed: bool,
 ) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
@@ -335,7 +336,7 @@ fn delegate(
             preview_session,
             &mut argv,
             replace,
-            task_run,
+            managed,
         );
         Ok(false)
     }
@@ -363,9 +364,9 @@ fn delegate(
         };
         let session = preview_session.map(LfSessionId::from);
         let cwd = std::env::current_dir()?;
-        let owner = if managed(
+        let owner = if held(
             terminal && !batch,
-            task_run,
+            managed,
             preview_session.or(json_session),
         ) {
             Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
@@ -386,17 +387,18 @@ fn delegate(
 
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
 /// server, so that it outlives every lf process that views it. A held launch
-/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too:
-/// Task, Wave and repository conversations) or a Task run, with a terminal
-/// viewing it, wherever it is opened. A bare launch, one attributed only by
-/// its checkout, a piped or `-b` execution and a Desktop Task shell keep an
-/// owner process of their own.
+/// is a managed one with a terminal viewing it: a Task or Wave command or a
+/// Task run (`managed`, the rule hooks follow), or the reopening of a
+/// conversation recorded as Task, Wave or repository work
+/// (`WorkSource::is_managed`), wherever it is opened. A bare launch, one
+/// attributed only by its checkout, a piped or `-b` execution and a Desktop
+/// Task shell keep an owner process of their own.
 #[cfg_attr(test, allow(dead_code))]
-fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
+fn held(viewed: bool, managed: bool, session: Option<&str>) -> bool {
     if !viewed {
         return false;
     }
-    if task_run {
+    if managed {
         return true;
     }
     let Some(session) = session else {

@@ -845,6 +845,7 @@ impl CodexHarness {
                 command,
                 Some(&lifeline),
                 &owner,
+                launch.managed,
             )?)
         } else {
             None

@@ -32,6 +32,13 @@ pub(crate) struct SessionCommand {
     pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
 }
 
+impl SessionCommand {
+    /// A Task or Wave command's launch (`AgentConfig::managed`).
+    pub(crate) fn managed(&self) -> bool {
+        self.launch.as_ref().is_some_and(|launch| launch.managed)
+    }
+}
+
 /// The native client joins this running conversation at the provider's own
 /// endpoint. `input` is its first turn, for the observer to submit: a turn has
 /// no size limit where an argument does, and Codex replays pending approvals to
@@ -316,9 +323,6 @@ pub(crate) fn resolve_session_config(
             None
         },
         output_schema: cli.output_schema.clone(),
-        managed: session
-            .work_source
-            .is_some_and(crate::session::WorkSource::is_managed),
         ..Default::default()
     };
     let mut needs_execution_boundary = false;

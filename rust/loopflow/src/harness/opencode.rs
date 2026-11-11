@@ -209,7 +209,12 @@ impl OpenCodeHarness {
             tempfile::tempfile()?
         };
         command.stderr(diagnostics.try_clone()?);
-        self.child = Some(super::agent_process::spawn(command, None, &owner)?);
+        self.child = Some(super::agent_process::spawn(
+            command,
+            None,
+            &owner,
+            config.managed,
+        )?);
         let child = self.child.as_mut().expect("server was spawned");
         let mut endpoint = String::new();
         let startup = tokio::time::timeout(
@@ -1088,7 +1093,7 @@ mod tests {
         let owner = (store.clone(), "stop".to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let child = super::super::agent_process::spawn(command, None, &owner).unwrap();
+        let child = super::super::agent_process::spawn(command, None, &owner, false).unwrap();
         let pid = child.id().unwrap();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();

@@ -265,6 +265,11 @@ plan, code and memory and keeps open findings with the work.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
 
+**Load:** one Machine runs hundreds of concurrent agents over about 10,000
+recorded Tasks and every steer, turn and event they wrote. Every agent shares
+one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
+store that size.
+
 **Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the

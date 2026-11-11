@@ -809,3 +809,16 @@ Since the fourth: `lf session list` offers a held Session one action, Open
 here or Reconnect (`lf resume`), with the labels the Detached rule already
 uses; Take back stays an owner's. Exit lines name the provider. Both follow
 "any number of views attach"; no design change, no open product choice.
+
+## Second stack merge — November 11, 2026
+
+Merged LOO-821 at `e3a86b13d`. LOO-821 now decides managed by the command
+(`Cli::names_work` → `AgentConfig::managed`) and deleted the Session-row read.
+Holding follows it for fresh launches (`delegate_current(batch, task_run ||
+cli.names_work())`). Reopening a recorded conversation names no Work, so
+`transport::held` and `require_server_for(owner, managed)` still read
+`WorkSource::is_managed` there; the open choice is in `questions.md`.
+
+Checks after the merge: clippy `--all-targets` clean; `--lib transport::
+harness::agent_process steers` 119 ok; `transport_tests held` 9 ok;
+`integration held` 1 ok; `--lib task_graph_launch_tests::` 47 ok.

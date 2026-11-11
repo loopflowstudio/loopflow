@@ -25,3 +25,21 @@ direction built from them are in `holder.md`. Options as offered:
 - A replaced view (another `held.sock` revision) does not carry `--moved` or
   `--session-json` into the installed `lf`.
 - Nothing yet lists which conversations a killed holder took.
+
+## Open: holding a conversation reopened by id
+
+LOO-821 (`1217ff206`) now decides managed by the command (`Cli::names_work`,
+`AgentConfig::managed`) and deleted `WorkSource::is_managed`; its notes quote
+"the cli comamnd used should direct down different codepaths". LOO-824's
+steers say "managed should = held" and "repo and wave sessions should be
+managed". `lf session resume <id>` (how Desktop reopens a conversation)
+names no Work, so a pure command rule leaves a cold reopen of a Task
+conversation unheld.
+
+Taken (reversible): fresh launches hold by the command
+(`task_run || cli.names_work()`); reopening a recorded conversation holds,
+and needs the server, when its row is `declared` or `bound`
+(`transport::held`, `agent_process::require_server_for`). `is_managed` stays
+for that one read. Alternative: thread the resume target into
+`human_session::open` and hold only `--task`/`--wave`/repository targets,
+leaving `resume <id>` unheld.

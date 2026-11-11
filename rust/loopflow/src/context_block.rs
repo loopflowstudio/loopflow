@@ -271,7 +271,7 @@ impl ContextDelivery {
 
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction. A managed launch
-    /// (`WorkSource::is_managed`) also reports its turn and tool boundaries
+    /// (`AgentConfig::managed`) also reports its turn and tool boundaries
     /// to the Machine server and watches its Task.
     pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
@@ -361,6 +361,23 @@ fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Optio
     });
 }
 
+/// Named by its content: a hook that runs on every model request with the same
+/// checkout files reuses one manifest instead of writing another.
+fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError> {
+    let digest = hex::encode(Sha256::digest(manifest.as_bytes()));
+    let prompts = repo_root.join(".lf/prompts");
+    let path = prompts.join(format!("{}-context-manifest.md", &digest[..16]));
+    if path.exists() {
+        return Ok(path);
+    }
+    fs::create_dir_all(&prompts)?;
+    crate::prompt::ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
+    std::io::Write::write_all(&mut file, manifest.as_bytes())?;
+    file.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
+}
+
 fn render_block(
     repo_root: &Path,
     wave: Option<&str>,
@@ -418,7 +435,7 @@ fn render_block(
         "files": files,
     }))
     .expect("context manifest is JSON serializable");
-    let manifest_path = write_prompt_log(repo_root, &manifest, "context-manifest", None)?;
+    let manifest_path = write_manifest(repo_root, &manifest)?;
     // A repository-relative pointer leaves room for context even with long roots.
     let pointer = manifest_path
         .strip_prefix(repo_root)
@@ -645,6 +662,38 @@ mod tests {
         assert!(compact.text.contains("UPDATED_START"));
         assert!(!compact.text.contains("WHOLE_START"));
         assert!(!compact.text.contains("fresh one"));
+    }
+
+    #[test]
+    fn repeated_requests_over_unchanged_files_write_one_manifest() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "the plan").unwrap();
+        let delivery = delivery(repo.path());
+        let manifests = || {
+            fs::read_dir(repo.path().join(".lf/prompts"))
+                .unwrap()
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("context-manifest")
+                })
+                .count()
+        };
+        let first = delivery.block(ContextMoment::Tool).unwrap();
+        for _ in 0..20 {
+            assert_eq!(
+                delivery.block(ContextMoment::Tool).unwrap().manifest_path,
+                first.manifest_path
+            );
+        }
+        assert_eq!(manifests(), 1);
+        fs::write(repo.path().join("scratch/plan.md"), "the new plan").unwrap();
+        delivery.block(ContextMoment::Tool).unwrap();
+        assert_eq!(manifests(), 2);
     }
 
     #[test]

@@ -919,6 +919,56 @@ fn succeed(command: &mut Command) -> String {
 }
 
 #[test]
+fn saved_claude_model_is_used_by_new_sessions_but_not_changed_on_resume() {
+    for (agent, saved, expected) in [
+        ("claude", None, None),
+        ("claude", Some("opus"), Some("opus")),
+        ("claude:fable", Some("opus"), Some("fable")),
+    ] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let script = "printf '%s\\n' \"$@\" > \"$HOME/args\"\ncat >/dev/null";
+        let run = |args: &[&str]| {
+            succeed(
+                claude_launch(home.path(), script)
+                    .current_dir(repo.path())
+                    .args(args),
+            )
+        };
+        if let Some(saved) = saved {
+            run(&["set", "--global", "claude.model", saved]);
+        }
+        run(&["set", "--global", "default_agent", "claude"]);
+        let launched_model = || {
+            let args = fs::read_to_string(home.path().join("args")).unwrap();
+            let args: Vec<_> = args.lines().collect();
+            args.windows(2)
+                .find(|pair| pair[0] == "--model")
+                .map(|pair| pair[1].to_owned())
+        };
+        run(&["-i", "-a", agent, ":", "model probe"]);
+        assert_eq!(launched_model().as_deref(), expected);
+        let database = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
+        assert_eq!(settled_live_agents(&database), 0);
+        let (session, model): (String, Option<String>) = database
+            .query_row(
+                "SELECT id, model FROM agent_sessions WHERE interactive=1 LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(model.as_deref(), expected);
+        run(&["set", "--global", "claude.model", "sonnet"]);
+        run(&["-i", "resume", &session]);
+        assert_eq!(launched_model().as_deref(), expected);
+        assert_eq!(settled_live_agents(&database), 0);
+        run(&["-i", "-a", "claude", "resume", &session]);
+        assert_eq!(launched_model().as_deref(), Some("sonnet"));
+        assert_eq!(settled_live_agents(&database), 0);
+    }
+}
+
+#[test]
 fn claude_opens_a_task_checkout_already_trusted() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

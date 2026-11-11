@@ -359,9 +359,14 @@ only a preference list (`lf set default_agent claude,codex`, no explicit
 `agent`) lets a step change provider. Nothing is written to your preferences.
 Commit messages and PR text fail at once, because someone is waiting for them.
 
+A [saved Claude model](config.md#claude-model) supplies bare `claude`'s starting
+model without pinning it. For example, `claude.model=opus` makes routing check
+Opus capacity while keeping the model and provider fallthrough described above.
+
 A limit the provider scopes to one model, such as Claude's weekly Opus or Fable
 limit, holds back only launches of that model: Sonnet on the same account keeps
-going, and a launch that names no model waits for every scope on the account.
+going, and a launch with neither an explicit nor a saved model waits for every
+scope on the account.
 A limit Claude only states in words ("You've reached your Fable limit") is
 scoped the same way. Loopflow then reads that account's usage once, and when
 the read fails the account rests for 15 minutes. Any usage read that finds a

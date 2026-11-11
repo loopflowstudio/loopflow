@@ -7,12 +7,12 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 19:39 and again at 20:13 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
+At 20:50 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url`
 reported `OPEN`, `mergedAt: null`, and head
-`bfd4244858864279ca13450c9f5f102c5554643c`. Fetched main advanced from
-`763da5c92f2ea4327a643c055e657e8defa8bf86` to
+`bfd4244858864279ca13450c9f5f102c5554643c`, unchanged from 20:16 UTC.
+Fetched main remained at
 `1570bef610a0a0cee0402ecc37d3a31461b213a8`; `git ls-tree` confirmed neither
-`server/mobile.rs` nor `server/ticket.rs` was present in either revision. Implementation and
+`server/mobile.rs` nor `server/ticket.rs` was present. Implementation and
 authenticated acceptance depend on LOO-718 landing; landing PR #1812 is outside
 this Task. Reinspect its shared store and endpoints after it lands.
 
@@ -62,9 +62,12 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-Keep phone prerequisites and Desktop controls in `docs/server.md`, and protocol
-details in `rust/loopflow/src/server/README.md`. Shared attachment and recovery
+Read the shipping docs before implementation: `docs/server.md` contains phone
+prerequisites and Desktop controls; `rust/loopflow/src/server/README.md` contains
+the ticket exchange and protocol details. Shared attachment and recovery
 rules have one source; the remote contract adds identity and sleep-aware expiry.
+Its example describes the WebSocket endpoints and links to shared semantics,
+avoiding a second description of the binary protocol and recovery behavior.
 Keep pending behavior marked planned until integration, then update the remote
 example's revision 4 anchor to revision 5 with the transport's protocol section.
 

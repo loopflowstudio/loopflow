@@ -739,20 +739,14 @@ diagnostics. Individual reads and subscription frames are not logged by default.
 
 ## Remote attach contract
 
-This planned contract requires LOO-718's authenticated remote transport.
-
-Both WebSocket endpoints authenticate before upgrade and admit only the host
-owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
-binds the two connections to the same Tailscale node stable ID and user ID, so
-another device on the same account cannot redeem it. Neither a ticket,
-client-supplied identity nor a proxy's Unix UID substitutes for authentication.
-Local and remote tickets are not interchangeable.
+This planned contract extends [terminal attachment](#terminal-attachment) to
+LOO-718's authenticated remote transport. Owner resolution, bridge protocol,
+errors and [recovery](#terminal-and-provider-recovery) follow the shared contract.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
-with a Session ID from `session.list`. Owner resolution, bridge protocol and errors follow
-[terminal attachment](#terminal-attachment). A null `owner_lf_process_id`
-selects the current terminal owner:
+with a Session ID from `session.list`. A null `owner_lf_process_id` selects the
+current terminal owner:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
@@ -767,9 +761,15 @@ the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 ← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
 ```
 
-Keep `/v1/machine` for requests and live Work updates.
-For reconnection and exact-owner attachment, follow
-[terminal and provider recovery](#terminal-and-provider-recovery).
+After `bridged`, `/v1/ticket` carries the binary terminal stream. Keep
+`/v1/machine` for requests and live Work updates.
+
+Both WebSocket endpoints authenticate before upgrade and admit only the host
+owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
+binds the two connections to the same Tailscale node stable ID and user ID, so
+another device on the same account cannot redeem it. Neither a ticket,
+client-supplied identity nor a proxy's Unix UID substitutes for authentication.
+Local and remote tickets are not interchangeable.
 
 The 60-second ticket lifetime includes host sleep. Every admitted terminal redemption
 attempt consumes the ticket, including identity and local/remote mismatches.

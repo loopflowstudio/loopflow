@@ -11,6 +11,69 @@ table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px soli
 
 <h1>LOO-821 QA: bare launches, managed launches, OpenCode and Pi</h1>
 
+<h2>Fourth pass: managed resume and Desktop's prepared argv (lf 0.15.3+0d9e955ff)</h2>
+
+<p>Same private Machine (<code>/tmp/lf-qa-821</code>), same stand-in Claude running the installed hook commands and sampling
+<code>lsof loopflow.db</code> during each one. Server booted out before every scenario. Drivers:
+<code>/tmp/lf-qa-821/run1.sh</code> (one turn) and <code>run3.sh</code> (three turns, steer after turn 1, server booted
+out after turn 2), both on <code>scratch/qa/bg.sh</code>.</p>
+
+<table>
+<tr><th>Scenario</th><th>What happened</th><th></th></tr>
+<tr><td>G1. Bare resume by id, server down<br><code>lf -i resume session_c3a0…</code></td>
+<td>No server registered. Start hook 0.49 s, exit 0; one gap line (<code>Connection refused</code>). The pending
+<code>QA_STEER_R3_DOWN</code> stayed pending.</td><td class="ok">as built (bare)</td></tr>
+<tr><td>G2. Task resume, server down (third pass F4)<br><code>lf -i --task a9368e resume</code></td>
+<td><code>com.loopflow.server.0d99b6f9fdeb7a88</code> registered at launch (ready 15:00:18). Start hook (0.30 s) delivered
+<code>QA_STEER_R3_DOWN</code> and <code>QA_STEER_R4_BEFORE_TASK_RESUME</code>; both <code>emitted</code>. Prompt, tool, stop
+0.31–0.38 s. Only the Session owner held the store.</td><td class="ok">fixed since F4</td></tr>
+<tr><td>G3. A Session id and its Task<br><code>lf -i resume session_da0c… --task a9368e</code></td>
+<td>Resumed <code>da0c…</code> (the round-two Session, not the Task's latest), server registered (15:00:31), start hook
+delivered four steers: the new <code>QA_STEER_R4_ID_AND_TASK</code> plus <code>R3_MID</code>, <code>R3_DOWN</code> and
+<code>R4_BEFORE…</code>, which <code>c3a0…</code> had already <code>emitted</code>. All three were saved after
+<code>da0c…</code> started, so the reconcile rule delivers them. See below.</td><td class="ok">works</td></tr>
+<tr><td>G4. Prepare, as Desktop does<br><code>lf session resume --prepare --json …</code></td>
+<td><code>--task a9368e</code> → <code>open_argv … session resume session_c3a0… --task a9368e</code>.
+<code>session_da0c… --task a9368e</code> → <code>… resume session_da0c… --task a9368e</code>.
+<code>session_da0c…</code> alone → <code>… resume session_da0c…</code>, no Work flag.
+Wrong input: <code>--task</code> with <code>--wave</code> fails in Clap; <code>--task zzzzzz</code> →
+<code>Task "zzzzzz" is not registered</code>; <code>session_nope --task a9368e</code> →
+<code>Session session_nope was not found</code>.</td><td class="ok">works</td></tr>
+<tr><td>G5. Run that <code>open_argv</code>, server down<br><code>lf session resume session_da0c… --task a9368e</code></td>
+<td>Server registered (15:00:58); start hook delivered <code>QA_STEER_R4_PREPARED_ARGV</code>. This is the argv a reopened
+Desktop Task pane runs.</td><td class="ok">works</td></tr>
+<tr><td>G6. Core demo on this build<br><code>lf -i --task a9368e -a claude : 'QA round four'</code></td>
+<td>New Session <code>4451…</code>: start hook delivered nothing (every earlier Task steer was already handed out before it
+started). <code>QA_STEER_R4_MID</code>, posted after turn 1, arrived in turn 2's prompt hook and is <code>emitted</code>.
+After <code>launchctl bootout</code>, turn 3's hooks exited 0 in 0.29–0.38 s with one gap line. Store holders during every
+hook: the owner and the server, never a hook PID. <code>lf session steers</code> then names the server and says
+"Steers wait and turns go unrecorded until it runs."</td><td class="ok">works</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>Nothing this pass.</p>
+
+<h2>Checks</h2>
+<pre>G1–G6 live against the branch lf and a launchd server              this step
+SessionsStoreTests (Desktop names its Work), session_steers::       implement step; gate</pre>
+
+<h2>Not reached</h2>
+<ul>
+<li>A Desktop window reopening a Task pane: headless run. G4–G5 run the CLI half Desktop calls; the Swift half is
+<code>SessionsStoreTests</code>.</li>
+<li><code>--wave</code> resume: the private Machine has no Wave.</li>
+<li>A real Claude, Codex or Pi login; headless managed launches (managed-account rule); remote <code>lf --machine</code>.</li>
+</ul>
+
+<h2>Still worth a look</h2>
+<ul>
+<li>G3: resuming an older Session of a Task delivers every Task steer saved since that Session started, including ones
+another Session already got. That conversation never saw them, so this may be right; it is also a burst of
+duplicates in the Task as a whole. The rule in <code>store/sqlite/steers.rs</code> keys on the Session's start time,
+not on when it last ran.</li>
+<li><code>lf comment</code> prints the Task's whole comment thread after posting (about 80 lines here).</li>
+</ul>
+
 <h2>Third pass: managed by command (lf 0.15.3+f380f2f11)</h2>
 
 <p>Same private Machine, now opened by a build with this branch's steer-lookup migration (the store from the

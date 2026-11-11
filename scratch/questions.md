@@ -43,3 +43,10 @@ and needs the server, when its row is `declared` or `bound`
 for that one read. Alternative: thread the resume target into
 `human_session::open` and hold only `--task`/`--wave`/repository targets,
 leaving `resume <id>` unheld.
+
+## Stack parent not recorded
+
+`lf sync --plan` reads base `main` after `lf sync
+jack/loo-821-managed-sessions-hooks-call-the-machine-server`, and `lf pr
+publish` retargets #1887 to `main` each time. Base set back to LOO-821's
+branch with `gh pr edit --base`; the next publish will move it again.

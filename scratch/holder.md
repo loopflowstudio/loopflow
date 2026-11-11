@@ -59,7 +59,7 @@ Superseded kickoff candidate A: `06532757c:scratch/holder.md`.
 | Second holder steals the socket | Kernel lock; unlink only under it; spawn is idempotent |
 | Server's launchd environment lacks the person's PATH/auth env | `start` carries the caller's complete environment; server-initiated starts (`primary.rs` under served `task.run`) use the environment the served operation already uses for Graph launches; implement confirms which |
 | Output while server is down blocks the agent | Holder drains into the ring; ring loss is only scrollback |
-| Lost modes after a crash restart | Snapshot on SIGTERM covers installs; crash path unknown, see probe |
+| Lost modes after any server restart | No snapshot; ring replay plus nudge. Modes set before the ring's start are unverified (slice 0 probe, not run) |
 | One panicking owner loop takes the server down | Each loop thread runs under `catch_unwind`; the Session stays held and the loop restarts from the ring |
 | 95 loops in one process | Today's loops idle in `poll`; threads, not processes. Measure `ps` RSS/CPU at gate against today's 95 × `session serve` (4.4 GB, 55%) |
 
@@ -337,8 +337,8 @@ identity, start reconciliation, exit receipts) stand.
   confirms nothing depends on their in-stream order beyond the title
   update).
 - After a server restart, open views resume by position with no repaint;
-  the emulator is rebuilt from `screen.ghostsnp` when its revision and
-  position line up with the ring, else ring replay plus one size nudge.
+  the emulator is rebuilt by ring replay plus one size nudge (no snapshot
+  file; see the concept review's second pass).
 
 **Slices**
 
@@ -363,8 +363,8 @@ identity, start reconciliation, exit receipts) stand.
   the bytes between are the ones printed while the server was down.
 - A viewer whose position is older than `ring_start` receives one snapshot
   whose position is inside the ring.
-- With ten held terminals the server has no per-terminal thread or socket
-  (thread count and open sockets do not grow with terminals).
+- Server thread count does not grow with held terminals (sockets do: one
+  holder connection per terminal and per view). Not automated yet.
 - `lf ps --json` lists one holder LfProcess per build and no owner row per
   held terminal.
 
@@ -601,17 +601,18 @@ Checks:
 
 **Remaining, in order:**
 
-1. Slice 0 mode probe (resize nudge through production Ghostty with real
+1. `session.attach` for a pending holder's terminal (QA section, "Remaining
+   from this gap").
+2. A test that server thread count does not grow with held terminals.
+3. Slice 0 mode probe (resize nudge through production Ghostty with real
    Claude and Codex): not run; does not block gate.
-2. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
+4. Revision 5 has no revision-4 fallback: a Desktop or CLI on either side
    of the bump answers `incompatible` until both are installed.
 
 **Not as planned, open without a slot:**
 
 - The gate test's `ps` step checks the agent's parent is `lf holder run`,
-  not a whole-process-group count; ten-terminal thread/socket counts are
-  not automated (one socket per viewer and per held source).
-- No snapshot file on graceful stop; rebuild is ring replay plus nudge.
+  not a whole-process-group count.
 - `attaches` for a held terminal is "its child runs": a superseded build in
   a holder is never moved onto the installed lf by `lf resume`.
 - `lf ship` interactive steps and Wave session commands are held only
@@ -662,7 +663,8 @@ match the design that follows from 4a, and are settled here:
   connection per terminal and one per view, on one thread. The load the brief
   named is processes and threads. The acceptance line becomes: server thread
   count does not grow with held terminals; `lf ps --json` lists one holder
-  LfProcess per build and no owner row per held terminal. Gate automates both.
+  LfProcess per build and no owner row per held terminal. The second is
+  `held_terminals_list_one_holder_process`; no test counts threads.
 
 No open product choice.
 
@@ -691,22 +693,43 @@ November 11: "settled, retry", since a dropped holder connection says nothing
 about its agents and a CPU-starved holder must not be displaced). Before this
 its views got `hosted:false` and the relay exited while the agent ran.
 
-Built (November 11): a holder that accepts and does not answer `hello`/`list`
-within 1 s at startup is `Pending` (its directory's terminals plus the store's
-running ones for its build); the entrance answers those `"waiting"`, which the
-relay retries. Deviation: each pending holder is retried on its own thread
-(`Registry::retry`, backoff to 5 s), not in `run`, since a stopped holder would
-block the loop for the client's 10 s answer; `Command::Resolved` lets the loop
-alone drop it. Refused = gone: terminals settle via `recorded_exit`, else
-unknown; `holder::client::settle_departed` completes unfinished holder rows
-whose process is dead (also at every startup). Test:
-`a_held_view_waits_for_a_holder_stopped_at_server_startup`.
+Built (November 11): a holder that keeps its lock and does not answer
+`hello`/`list` within 1 s at startup is `Pending` (its directory's terminals
+plus the store's running ones for its build); the entrance answers those
+`"waiting"`, which the relay retries. Deviation: each pending holder is retried
+on its own thread (`Registry::retry`, backoff to 5 s), not in `run`, since a
+stopped holder would block the loop for the client's 10 s answer;
+`Command::Resolved` lets the loop alone drop it. Gone: terminals settle via
+`recorded_exit`, else unknown; `holder::client::settle_departed` completes
+unfinished holder rows whose process is dead (also at every startup). Test:
+`a_held_view_waits_for_a_holder_stopped_at_server_startup` (SIGSTOP/SIGCONT
+continues tick by tick; SIGKILL settles the terminal and the row).
 
-Checks (after this pass): `transport_tests -- held_ a_held` 6 passed; `--lib --
-transport:: holder::` 86 passed; clippy clean; `documented_commands::` 4 passed.
+**Gone is a free lock, not a refused socket** (realign, November 11). The
+first build read a refused connection as gone. Probe on this Mac
+(`kern.ipc.somaxconn` 128): a unix listener that never accepts took 128
+connect-and-close attempts and refused the 129th with ECONNREFUSED. Every
+retry, server startup and `session.start` adds one, so a holder stopped long
+enough would have had its running terminals settled as ended. Now
+`Place::claimed` (the holder's kernel lock) decides in `adopt`, `retry` and
+`held::Source`; a refusing holder that keeps its lock stays pending. Linux
+queue behavior not probed. Test:
+`a_holder_that_refuses_connections_and_keeps_its_lock_is_waited_for` (not run
+against the old code).
 
-- Compress passes (history in git): nothing further to reduce; the last inlined
-  one binding in `Registry::retry`. `cargo test -p loopflow --lib -- transport::registry::`: 9 passed.
+Checks after this: `--lib -- transport::registry::` 10 passed;
+`transport_tests -- held_ a_held` 6 passed; clippy clean. `--lib -- transport::
+holder::` 85 of 87: two owner-path `viewer_tests::snapshot_preview_*` failed in
+the full run and passed alone twice (8 of 8); gate reruns them.
+
+**Remaining from this gap:** the server-protocol route does not know pending
+holders. `session.attach` for a terminal whose holder is pending answers
+`not_found` "terminal has ended" (`Registry::session_terminal` reads hosted
+terminals only), and the ticket bridge forwards the entrance's
+`"waiting"`/`"ended"` line to its client unread. No client presents a terminal
+ticket today (the relay and Desktop panes use `held.sock`). Needs a retryable
+answer for a pending terminal, or the route removed for held terminals; which
+is undecided.
 
 ## Concept review with a person — November 11, 2026
 

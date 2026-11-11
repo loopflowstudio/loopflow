@@ -233,9 +233,9 @@ impl Unsettled {
     }
 }
 
-/// A holder that accepted a connection at startup and did not answer: alive
-/// and slow, or stopped. Its terminals are neither hosted nor ended; their
-/// views wait until it answers, or until its socket refuses and it is gone.
+/// A holder that keeps its lock and did not answer at startup: alive and slow,
+/// or stopped. Its terminals are neither hosted nor ended; their views wait
+/// until it answers, or until its lock is free and it is gone.
 #[derive(Clone)]
 struct Pending {
     place: Place,
@@ -459,23 +459,23 @@ impl Registry {
 
     /// Take up what the holders keep: running terminals are hosted again under
     /// their ids, and exits that happened with no server running are settled.
-    /// A holder that does not answer in time is pending, never given up.
+    /// A holder that keeps its lock and does not answer is pending, never given up.
     fn adopt(&self, unsettled: &mut Vec<Unsettled>) -> (Vec<(TerminalId, Entry)>, Vec<Pending>) {
         let mut entries = Vec::new();
         let mut pending = Vec::new();
         let mut known = Vec::new();
         for place in holders() {
-            // A refused socket is a holder that is gone; the store's running
-            // terminals below settle what it held.
-            let Ok(client) = Client::connect_within(&place, STARTUP_ANSWER) else {
-                continue;
-            };
-            match self.take_up(&place, client) {
+            let taken = Client::connect_within(&place, STARTUP_ANSWER)
+                .map_err(anyhow::Error::from)
+                .and_then(|client| self.take_up(&place, client));
+            match taken {
                 Ok(taken) => {
                     entries.extend(taken.entries);
                     unsettled.extend(taken.unsettled);
                     known.extend(taken.known);
                 }
+                // Gone; the store's running terminals below settle what it held.
+                Err(_) if !place.claimed() => {}
                 Err(error) => {
                     tracing::warn!(%error, socket = %place.socket.display(), "holder did not answer at startup; retrying");
                     let terminals = kept(&place);
@@ -499,7 +499,7 @@ impl Registry {
                 holder.terminals.push(terminal);
                 continue;
             }
-            if Client::connect(&place).is_ok() {
+            if place.claimed() {
                 // Its holder answered and did not list it; leave it.
                 continue;
             }
@@ -544,12 +544,16 @@ impl Registry {
     }
 
     /// Ask a pending holder again, waiting longer each time, until it answers
-    /// and is taken up as at startup, or refuses and is gone.
+    /// and is taken up as at startup, or has let go of its lock and is gone.
     fn retry(&self, holder: Pending) {
         let mut wait = Duration::from_millis(200);
         loop {
             std::thread::sleep(wait);
             let (entries, unsettled) = match Client::connect(&holder.place) {
+                Err(_) if holder.place.claimed() => {
+                    wait = (wait * 2).min(PENDING_RETRY);
+                    continue;
+                }
                 Err(_) => {
                     // Gone: what it held ended with nobody watching.
                     let unsettled = holder

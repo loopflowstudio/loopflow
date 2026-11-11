@@ -434,10 +434,11 @@ reported as such, never given an invented exit code.
 Every connection to a held terminal enters the server at
 `<private dir>/held.sock`: a first line `{"terminal":ID}`, the answer
 `"hosted"`, then the viewer protocol above, unchanged. `"waiting"` means the
-terminal's holder has not answered this server yet: one that accepts a
-connection at startup and does not list in time is pending, asked again with
-backoff, and taken up when it answers; the view keeps reconnecting. A pending
-holder whose socket refuses is gone, and its terminals and its LfProcess row
+terminal's holder has not answered this server yet: one that keeps its lock
+and does not list in time at startup is pending, asked again with backoff, and
+taken up when it answers; the view keeps reconnecting. A refused connection
+does not end it (a stopped holder refuses once its socket's queue is full);
+a holder whose lock is free is gone, and its terminals and its LfProcess row
 settle with what its records say, else an unknown outcome. `"ended"` means no
 live or pending holder could hold that terminal: it ended or never started,
 and the connection is refused as `not_found`. Attaching never starts anything. The

@@ -542,3 +542,27 @@ fn queries_replayed_from_the_ring_are_not_answered_again() {
     second.close();
     kill(&place, &terminal);
 }
+
+#[test]
+fn a_holder_that_refuses_connections_and_keeps_its_lock_is_waited_for() {
+    let _ledger = TestLedgerGuard::new();
+    let place = Place::of(BUILD).unwrap();
+    // A stopped holder whose queue is full refuses like this dead socket.
+    drop(std::os::unix::net::UnixListener::bind(&place.socket).unwrap());
+    let lock = std::fs::File::create(&place.lock).unwrap();
+    fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+    let terminal = TerminalId::new();
+    std::fs::create_dir_all(place.terminal(terminal.as_str())).unwrap();
+
+    let registry = Registry::open(BUILD).unwrap();
+    std::thread::sleep(Duration::from_millis(700));
+    let waiting = connect(&terminal).unwrap_err();
+    assert!(!waiting.is::<crate::engine::Error>(), "{waiting:#}");
+
+    // Its lock free, it is gone: the terminal ends with an unknown outcome.
+    drop(lock);
+    wait_until("the terminal to end", || {
+        connect(&terminal).is_err_and(|refused| refused.is::<crate::engine::Error>())
+    });
+    registry.close();
+}

@@ -237,19 +237,10 @@ impl Source {
         }
     }
 
-    /// No holder is listening. One that is alive holds its lock and is waited
-    /// for; with the lock free the holder is gone, and its children with it.
+    /// No holder is listening. One that is alive is waited for; otherwise the
+    /// holder is gone, and its children with it.
     fn unreachable(&mut self) {
-        let alive = std::fs::File::open(&self.place.lock)
-            .map(|lock| {
-                let held = fs2::FileExt::try_lock_exclusive(&lock).is_err();
-                if !held {
-                    let _ = fs2::FileExt::unlock(&lock);
-                }
-                held
-            })
-            .unwrap_or(false);
-        if alive {
+        if self.place.claimed() {
             self.lost();
         } else {
             self.settle_without_holder();

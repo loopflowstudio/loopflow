@@ -72,6 +72,19 @@ impl Place {
     pub fn terminal(&self, terminal: &str) -> PathBuf {
         self.state.join(terminal)
     }
+
+    /// Whether a live holder has this place. A holder that is stopped, or whose
+    /// unaccepted connections fill its socket's queue, refuses connections
+    /// like a dead one; only the lock tells them apart.
+    pub fn claimed(&self) -> bool {
+        std::fs::File::open(&self.lock).is_ok_and(|lock| {
+            let held = lock.try_lock_exclusive().is_err();
+            if !held {
+                let _ = fs2::FileExt::unlock(&lock);
+            }
+            held
+        })
+    }
 }
 
 /// SHA-256 of the running executable: what a holder is keyed by.

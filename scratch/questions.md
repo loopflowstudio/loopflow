@@ -49,3 +49,16 @@ Shown `scratch/simplification-opportunities.md` (opportunity 1: sync onto
 LOO-823 now), Jack Heart: "yes, you can stack on 823". Then: "821 is landed"
 (PR #1879 merged 2026-11-11 19:12 UTC, 763da5c92). New stack: main ← LOO-823
 (PR #1877) ← LOO-824.
+
+## Resident-limit suspension, handed over from LOO-823 (November 11)
+
+LOO-823's Session (comment b9d25c20) moved suspension of idle managed
+conversations to LOO-824, quoting Jack Heart: "i could be open to allowing
+soem sort of "idle" state for task and wave/repo sessions on the server, if we
+ahve some cache limit, as long as only cost is slightly slower spin up time
+next time youj switch to them"; "6a" (a per-Machine agent count in config,
+default unnamed); "no opinion on 5" (read an unsent draft off the server
+emulator before suspending). An earlier LOO-824 steer (8606000f) says
+suspension is not in this Task. Undecided: here or its own Task.
+Asked here, own Task / in LOO-824 after this demo / backlog; Jack Heart:
+"1b" (in LOO-824, after this demo).

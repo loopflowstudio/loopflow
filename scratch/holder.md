@@ -338,3 +338,16 @@ then main `1570bef61`, already here). `git merge-tree` conflicts in
 the next sync takes it, then `merge-base --stat` for reverted main changes.
 
 Compress (Nov 11): `cargo test -p loopflow --lib holder::` 10 passed; `cargo clippy --all-targets -D warnings` clean.
+
+## Concept review, headless — November 11, 2026 (fourth)
+
+No design change and nothing open for this run. Every steer up to f3ce0b2c is
+built or recorded: Desktop reopen names its Task (`RegistryQueryTests` argv
+`--task FIX-1`), and the row read covers Session links. Before demo, sync onto
+LOO-823's tip again (`8e1c71d6d` is not in this branch), then check
+`merge-base --stat`.
+
+Next implement pass, after demo: resident-limit suspension (questions.md).
+Its two open points have no stated preference: the default count ("6a",
+default unnamed) and reading an unsent draft first ("no opinion on 5").
+Implement takes the reversible call and notes it in questions.md.

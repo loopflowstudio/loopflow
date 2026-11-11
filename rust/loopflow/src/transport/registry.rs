@@ -25,7 +25,7 @@ use crate::holder::Place;
 use crate::id::{LfSessionId, TerminalId};
 
 use super::held::Source;
-use super::hosted::{Child, Hosted, Pass};
+use super::hosted::{Child, Hosted, Pass, Watchers};
 use super::{
     dimensions, drain, wait_for_activity, Host, CONTROL_ENV, HELD_ENV, OWNER_ENV, PARENT_ENV,
     STREAM_ENV, TERMINAL_ENV,
@@ -191,6 +191,8 @@ pub(crate) struct Registry {
     place: Place,
     commands: Mutex<mpsc::Sender<Command>>,
     waker: UnixStream,
+    /// One lifetime and title worker for every held terminal.
+    watchers: Watchers,
     /// Starts by request identity, so a repeated request starts nothing.
     started: Mutex<HashMap<String, TerminalId>>,
     /// The terminals hosted now and the Session each was started for.
@@ -235,6 +237,7 @@ impl Registry {
             place: Place::of(build)?,
             commands: Mutex::new(commands),
             waker: waker.try_clone()?,
+            watchers: Watchers::spawn(),
             started: Mutex::new(HashMap::new()),
             live: Live::default(),
             #[cfg(test)]
@@ -370,6 +373,7 @@ impl Registry {
             0,
             meta.control_key,
             &self.waker,
+            &self.watchers,
         )?;
         self.live
             .lock()
@@ -491,6 +495,7 @@ impl Registry {
             held.ring_start,
             meta.control_key,
             waker,
+            &self.watchers,
         )?;
         entry.hosted.take_up(held.rows, held.cols, held.written)?;
         // The screen is rebuilt from the ring, then the program repaints what
@@ -703,6 +708,7 @@ impl Entry {
         at: u64,
         control_key: String,
         waker: &UnixStream,
+        watchers: &Watchers,
     ) -> Result<Self> {
         Ok(Self {
             hosted: Hosted::new(
@@ -711,6 +717,7 @@ impl Entry {
                 None,
                 control_key,
                 waker.try_clone()?,
+                watchers,
             )?,
             child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
             place: place.clone(),

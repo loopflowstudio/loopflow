@@ -296,6 +296,23 @@ pub(super) struct Hosted {
     replayed_through: u64,
 }
 
+/// The threads every execution a host serves shares: lifetime judgments and
+/// Session-name reads. The Machine server's held terminals share one set.
+#[derive(Debug)]
+pub(super) struct Watchers {
+    lifetime: lifetime::Watcher,
+    titles: crate::terminal_title::TitleReader,
+}
+
+impl Watchers {
+    pub fn spawn() -> Self {
+        Self {
+            lifetime: lifetime::Watcher::spawn(),
+            titles: crate::terminal_title::TitleReader::spawn(),
+        }
+    }
+}
+
 impl Hosted {
     /// Host the execution known as `id`. `waker` wakes the host's wait when
     /// the lifetime policy or a settlement has something for it.
@@ -305,8 +322,11 @@ impl Hosted {
         shell: Option<String>,
         control_key: String,
         waker: UnixStream,
+        watchers: &Watchers,
     ) -> Result<Self> {
-        let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
+        let (activity, ending) = watchers
+            .lifetime
+            .watch(id.clone(), terminal, waker.try_clone()?);
         Ok(Self {
             terminal,
             shell,
@@ -335,7 +355,7 @@ impl Hosted {
             exit_record: None,
             execution_directory_reported: false,
             planning: None,
-            title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id)),
+            title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id, &watchers.titles)),
             replayed_through: 0,
             id,
         })

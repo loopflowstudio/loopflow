@@ -125,25 +125,46 @@ impl Ending {
     }
 }
 
-/// Record activity sent on the first channel. Once the owner has gone unviewed
-/// and quiet past its limit, send the second channel a candidate for the serve
-/// loop to confirm before ending the owner. Only a terminal owner (`terminal`)
-/// ends for want of viewers; a pipe owner is a headless Run.
-pub(super) fn spawn(
-    owner: Host,
-    terminal: bool,
-    waker: UnixStream,
-) -> (mpsc::Sender<Activity>, mpsc::Receiver<Ending>) {
-    #[cfg(test)]
-    if let Some(channels) = super::lifetime_tests::channels() {
-        return channels;
+/// One thread judging every owner a host watches: the Machine server's held
+/// terminals share one, a Session owner process has its own. It ends once its
+/// handle and every watched owner's activity channel are gone.
+#[derive(Debug)]
+pub(super) struct Watcher {
+    owners: mpsc::Sender<Watch>,
+}
+
+impl Watcher {
+    pub fn spawn() -> Self {
+        let (owners, added) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("lifetime".into())
+            .spawn(move || judge(&added))
+            .expect("spawn the lifetime thread");
+        Self { owners }
     }
-    let (activity, changes) = mpsc::channel();
-    let (end, ending) = mpsc::channel();
-    std::thread::spawn(move || {
-        watch(&owner, terminal, &changes, &end, &waker);
-    });
-    (activity, ending)
+
+    /// Record activity sent on the first channel. Once the owner has gone
+    /// unviewed and quiet past its limit, send the second channel a candidate
+    /// for the serve loop to confirm before ending the owner, then wake it
+    /// through `waker`. Only a terminal owner (`terminal`) ends for want of
+    /// viewers; a pipe owner is a headless Run.
+    pub fn watch(
+        &self,
+        owner: Host,
+        terminal: bool,
+        waker: UnixStream,
+    ) -> (mpsc::Sender<Activity>, mpsc::Receiver<Ending>) {
+        #[cfg(test)]
+        if let Some(channels) = super::lifetime_tests::channels() {
+            return channels;
+        }
+        let (activity, changes) = mpsc::channel();
+        let (end, ending) = mpsc::channel();
+        let _ = self
+            .owners
+            .send(Watch::new(owner, terminal, changes, end, waker));
+        (activity, ending)
+    }
 }
 
 /// When an unviewed, quiet owner is due to end, in wall time.
@@ -174,42 +195,34 @@ impl Grace {
     }
 }
 
-fn watch(
-    host: &Host,
-    terminal: bool,
-    changes: &mpsc::Receiver<Activity>,
-    end: &mpsc::Sender<Ending>,
-    mut waker: &UnixStream,
-) {
-    let owner = host.transport();
+/// Activity arrives at any rate but is read once per poll: it moves the clock,
+/// never the file or store work.
+fn judge(added: &mpsc::Receiver<Watch>) {
+    let mut watches: Vec<Watch> = Vec::new();
+    let mut adding = true;
     let mut store = None;
     let mut store_failure = RecordingGap::default();
-    // None means no observation has been committed, including initial absence.
-    let mut recorded_hold = None;
-    let mut hold_failure = RecordingGap::default();
-    let mut shell_failure = RecordingGap::default();
-    let mut repository_failure = RecordingGap::default();
-    let mut retention_failure = RecordingGap::default();
-    let mut abandonment_failure = RecordingGap::default();
-    let mut retained: Option<OwnerRetention> = None;
     let mut next_poll = Instant::now() + POLL;
-    let mut grace = Grace {
-        limit: None,
-        activity: Activity::default(),
-        quiet_since: SystemTime::now(),
-    };
     loop {
-        match changes.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
-            Ok(activity) => grace.note(activity, SystemTime::now()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        if adding {
+            match added.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
+                Ok(watch) => watches.push(watch),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => adding = false,
+            }
+        } else if watches.is_empty() {
+            return;
+        } else {
+            std::thread::sleep(next_poll.saturating_duration_since(Instant::now()));
         }
-        // Activity updates the clock immediately but never accelerates file or
-        // store work. Output can arrive much faster than the policy's poll.
         if Instant::now() < next_poll {
             continue;
         }
         next_poll = Instant::now() + POLL;
+        watches.retain_mut(Watch::receive);
+        if watches.is_empty() {
+            continue;
+        }
         if store.is_none() {
             store = report_result(
                 &mut store_failure,
@@ -220,20 +233,86 @@ fn watch(
         let Some(store) = store.as_ref() else {
             continue;
         };
-        let hold = grace.activity.hold;
-        if recorded_hold != Some(hold)
+        watches.retain_mut(|watch| watch.judge(store));
+    }
+}
+
+/// One watched owner's activity and the store reads that judge it.
+#[derive(Debug)]
+struct Watch {
+    host: Host,
+    terminal: bool,
+    changes: mpsc::Receiver<Activity>,
+    end: mpsc::Sender<Ending>,
+    waker: UnixStream,
+    grace: Grace,
+    /// None means no observation has been committed, including initial absence.
+    recorded_hold: Option<Option<ViewerHold>>,
+    retained: Option<OwnerRetention>,
+    hold_failure: RecordingGap,
+    shell_failure: RecordingGap,
+    repository_failure: RecordingGap,
+    retention_failure: RecordingGap,
+    abandonment_failure: RecordingGap,
+}
+
+impl Watch {
+    fn new(
+        host: Host,
+        terminal: bool,
+        changes: mpsc::Receiver<Activity>,
+        end: mpsc::Sender<Ending>,
+        waker: UnixStream,
+    ) -> Self {
+        Self {
+            host,
+            terminal,
+            changes,
+            end,
+            waker,
+            grace: Grace {
+                limit: None,
+                activity: Activity::default(),
+                quiet_since: SystemTime::now(),
+            },
+            recorded_hold: None,
+            retained: None,
+            hold_failure: RecordingGap::default(),
+            shell_failure: RecordingGap::default(),
+            repository_failure: RecordingGap::default(),
+            retention_failure: RecordingGap::default(),
+            abandonment_failure: RecordingGap::default(),
+        }
+    }
+
+    /// Note queued activity; false once the serving owner has gone.
+    fn receive(&mut self) -> bool {
+        loop {
+            match self.changes.try_recv() {
+                Ok(activity) => self.grace.note(activity, SystemTime::now()),
+                Err(mpsc::TryRecvError::Empty) => return true,
+                Err(mpsc::TryRecvError::Disconnected) => return false,
+            }
+        }
+    }
+
+    /// Offer an ending when one is due; false once the serving owner has gone.
+    fn judge(&mut self, store: &crate::store::sqlite::SqliteStore) -> bool {
+        let owner = self.host.transport();
+        let hold = self.grace.activity.hold;
+        if self.recorded_hold != Some(hold)
             && report_result(
-                &mut hold_failure,
+                &mut self.hold_failure,
                 "Session viewer hold",
                 store.record_owner_viewer_hold(owner, hold),
             )
             .is_some()
         {
-            recorded_hold = Some(hold);
+            self.recorded_hold = Some(hold);
         }
-        if terminal && grace.limit.is_none() {
-            grace.limit = report_result(
-                &mut repository_failure,
+        if self.terminal && self.grace.limit.is_none() {
+            self.grace.limit = report_result(
+                &mut self.repository_failure,
                 "Session repository",
                 store.host_repository(owner),
             )
@@ -241,68 +320,63 @@ fn watch(
         }
         // Shell purpose is fixed at creation. Running lf inside an ordinary
         // shell must never enroll it in the idle-agent policy.
-        let shell = match host.owner() {
+        let shell = match self.host.owner() {
             Some(owner) => store.shell_close_request(owner),
             None => Ok(None),
         };
-        match report_result(&mut shell_failure, "Shell close request", shell) {
-            Some(Some(1 | 2)) => {
-                if end
-                    .send(Ending {
-                        activity: grace.activity,
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-                let _ = waker.write_all(&[1]);
-                continue;
-            }
-            Some(Some(_)) | None => continue,
+        match report_result(&mut self.shell_failure, "Shell close request", shell) {
+            Some(Some(1 | 2)) => return self.offer(),
+            Some(Some(_)) | None => return true,
             Some(None) => {}
         }
         let now = SystemTime::now();
-        let abandoned = terminal
-            && !grace.activity.viewed
+        let abandoned = self.terminal
+            && !self.grace.activity.viewed
             && report_result(
-                &mut abandonment_failure,
+                &mut self.abandonment_failure,
                 "Task abandonment",
                 store.owner_task_abandoned(owner),
             )
             .unwrap_or(false);
         let retiring = owner_retiring(store, owner).unwrap_or(false);
-        if !abandoned && !retiring && !grace.expired(now) {
-            continue;
+        if !abandoned && !retiring && !self.grace.expired(now) {
+            return true;
         }
         let Some(retention) = report_result(
-            &mut retention_failure,
+            &mut self.retention_failure,
             "Session retention, retrying",
             store.idle_retention(owner),
         ) else {
-            continue;
+            return true;
         };
-        if retained != retention {
+        if self.retained != retention {
             if let Some(reason) = retention {
                 tracing::warn!(%owner, "retaining detached Session past its limit: {reason}");
             }
-            retained = retention;
+            self.retained = retention;
         }
         // Retained work counts as activity: the grace runs again from here.
         if !abandoned && retention.is_some() {
-            grace.quiet_since = now;
-            continue;
+            self.grace.quiet_since = now;
+            return true;
         }
-        if end
+        // Input accepted since the judgment can veto it in the serving owner.
+        // Keep judging until that owner exits or drops its channels.
+        self.offer()
+    }
+
+    fn offer(&mut self) -> bool {
+        if self
+            .end
             .send(Ending {
-                activity: grace.activity,
+                activity: self.grace.activity,
             })
             .is_err()
         {
-            return;
+            return false;
         }
-        let _ = waker.write_all(&[1]);
-        // Input accepted since the judgment can veto it in the serving owner.
-        // Keep judging until that owner exits or drops this channel.
+        let _ = (&self.waker).write_all(&[1]);
+        true
     }
 }
 
@@ -336,6 +410,22 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{Activity, DetachedLimit, Ending, Grace};
+
+    /// Judge one owner on this thread until its activity channel closes.
+    fn judge_alone(
+        host: super::Host,
+        terminal: bool,
+        changes: std::sync::mpsc::Receiver<Activity>,
+        end: std::sync::mpsc::Sender<Ending>,
+        waker: std::os::unix::net::UnixStream,
+    ) {
+        let (owners, added) = std::sync::mpsc::channel();
+        owners
+            .send(super::Watch::new(host, terminal, changes, end, waker))
+            .unwrap();
+        drop(owners);
+        super::judge(&added);
+    }
 
     #[test]
     fn abandonment_ends_background_output_but_keeps_viewed_or_queued_input() {
@@ -548,12 +638,12 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(
-                    &super::Host::Owner(watched.clone()),
+                judge_alone(
+                    super::Host::Owner(watched.clone()),
                     false,
-                    &changes,
-                    &end,
-                    &waker,
+                    changes,
+                    end,
+                    waker,
                 );
             });
         });
@@ -705,12 +795,12 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(
-                    &super::Host::Owner(watched.clone()),
+                judge_alone(
+                    super::Host::Owner(watched.clone()),
                     true,
-                    &changes,
-                    &end,
-                    &waker,
+                    changes,
+                    end,
+                    waker,
                 );
             });
         });
@@ -734,6 +824,58 @@ mod tests {
         let fresh = ending.recv_timeout(Duration::from_secs(8)).unwrap();
         assert!(fresh.may_end(observed, false));
         drop(activity);
+        policy.join().unwrap();
+    }
+
+    #[test]
+    fn one_watcher_ends_each_quiet_owner_and_keeps_the_viewed_one() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let db = guard.home().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        std::fs::write(
+            guard.home().join("config.yaml"),
+            "session:\n  end_detached_after: 2s\n",
+        )
+        .unwrap();
+        let (owners, added) = std::sync::mpsc::channel();
+        let mut watched = Vec::new();
+        for name in ["quiet", "viewed"] {
+            let owner = store.test_lf_process();
+            store.test_session(name, &crate::session_record::new_artifact_key());
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id=?2",
+                [owner.as_str(), name],
+            )
+            .unwrap();
+            let (activity, changes) = std::sync::mpsc::channel();
+            let (end, ending) = std::sync::mpsc::channel();
+            let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+            owners
+                .send(super::Watch::new(
+                    super::Host::Owner(owner),
+                    true,
+                    changes,
+                    end,
+                    waker,
+                ))
+                .unwrap();
+            watched.push((activity, ending, _wake));
+        }
+        drop(owners);
+        let mut viewed = Activity::default();
+        viewed.view(true);
+        watched[1].0.send(viewed).unwrap();
+        let policy = std::thread::spawn(move || {
+            crate::journal::with_test_ledger(db, || super::judge(&added))
+        });
+        assert!(watched[0].1.recv_timeout(Duration::from_secs(8)).is_ok());
+        assert!(matches!(
+            watched[1].1.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        // The thread ends once every owner it judged has gone.
+        drop(watched);
         policy.join().unwrap();
     }
 

@@ -1182,6 +1182,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         shell,
         control_key,
         waker.try_clone()?,
+        &hosted::Watchers::spawn(),
     )?;
     let pid = child.id();
     let (finished, exit) = mpsc::channel();

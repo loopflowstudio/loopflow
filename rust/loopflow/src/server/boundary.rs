@@ -367,6 +367,35 @@ mod tests {
         assert_eq!(evidence(), "emitted");
     }
 
+    /// A checkout that moved since launch: the server points the delivery
+    /// file at where the store now places the repository, and the hook
+    /// renders the saved skill from there.
+    #[test]
+    fn a_moved_checkouts_delivery_follows_the_repository() {
+        let (home, store, adapter, delivery) = fixture();
+        let old = home.path().join("repo");
+        let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+        let mut saved = ContextDelivery::load(&delivery).unwrap();
+        saved.repository = Some((id.clone(), old.clone()));
+        saved.skill_file = Some(old.join("active.md"));
+        saved.save(&delivery).unwrap();
+        let moved = home.path().join("moved");
+        std::fs::rename(&old, &moved).unwrap();
+        store
+            .relocate_repository(&id, moved.to_str().unwrap())
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"moved"}),
+        );
+        answer(&store, &tool).unwrap();
+        let followed = ContextDelivery::load(&delivery).unwrap();
+        assert_eq!(followed.repo, moved);
+        assert_eq!(followed.skill_file, Some(moved.join("active.md")));
+    }
+
     #[test]
     fn a_steer_whose_hook_gave_up_is_answered_again() {
         let (_home, store, adapter, delivery) = fixture();

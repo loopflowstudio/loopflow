@@ -441,6 +441,18 @@ The hook renders the context block from the delivery file itself, prefixes
 `steers.text` and prints the result. Context comes from files in the checkout, so
 a hook that gets no answer still prints the block.
 
+An agent for a Task or a Wave starts only once the server answers. The launch
+asks for the server's status; when nothing answers it runs `lf install server`
+through the selected installation, as a managed view does, and asks again.
+Still nothing, and the launch fails before the agent starts:
+
+```text
+Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
+```
+
+A skill or Graph with no Task or Wave, here or through `lf --machine`, asks
+nothing and runs without a server; its hooks log one gap.
+
 The hook resolves the server at its fixed path on every call; no address is
 put in the agent's environment. Connecting, `hello` and the answer share a
 two-second deadline. A refused connection, a missing socket, a timeout,

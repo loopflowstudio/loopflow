@@ -70,14 +70,14 @@ pub(crate) fn spawn(
     owner: &AttachmentOwner,
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
-    super::dispatch::off_reactor(|| {
+    super::dispatch::off_reactor(|| -> Result<tokio::process::Child> {
         steer_environment(command.as_std_mut(), owner)?;
         let program = command
             .as_std()
             .get_program()
             .to_string_lossy()
             .into_owned();
-        store.with_session_attachment(session, attachment, || {
+        Ok(store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned =
                 crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
@@ -87,9 +87,8 @@ pub(crate) fn spawn(
             spawned.map_err(|error| {
                 StoreError::InvalidData(format!("failed to spawn {program}: {error}"))
             })
-        })
+        })?)
     })
-    .map_err(Into::into)
 }
 
 /// Native terminals keep their foreground process group. Remote clients do not
@@ -129,11 +128,34 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
-fn steer_environment(
-    command: &mut std::process::Command,
-    owner: &AttachmentOwner,
-) -> StoreResult<()> {
+/// Task and Wave work is recorded and steered through the Machine server, so
+/// its agent starts only once that server welcomes a connection, as the hooks
+/// will need it to. Anything else runs with or without one. A stopped server
+/// is started the way a managed view starts it: by the selected installation,
+/// never by this build.
+fn require_server_for_work(store: &SqliteStore, session: &str) -> Result<()> {
+    use crate::server::client::Connection;
+    if !store.session_has_work(session)? || Connection::open().is_ok() {
+        return Ok(());
+    }
+    let setup = crate::installation::server::readiness_command()?.output()?;
+    let Err(down) = Connection::open() else {
+        return Ok(());
+    };
+    let setup = String::from_utf8_lossy(&setup.stderr);
+    let reason = match setup.trim() {
+        "" => format!("{down:#}"),
+        setup => setup.to_owned(),
+    };
+    anyhow::bail!(
+        "Loopflow server is not running, and Task and Wave work needs it ({reason}); \
+         run `lf install server`, then `lf server status`"
+    )
+}
+
+fn steer_environment(command: &mut std::process::Command, owner: &AttachmentOwner) -> Result<()> {
     let (store, session, attachment) = owner;
+    require_server_for_work(store, session)?;
     let capability = store.reserve_steer_adapter(session, attachment)?;
     command.env(
         crate::steer::PROVIDER_CONTEXT_ENV,

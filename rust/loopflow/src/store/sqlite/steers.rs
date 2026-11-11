@@ -12,6 +12,17 @@ use crate::steer::{
 use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
+    /// Whether the Session belongs to a Task or a Wave.
+    pub(crate) fn session_has_work(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions
+             WHERE id=?1 AND (task_id IS NOT NULL OR wave_id IS NOT NULL))",
+            [session],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn reserve_steer_adapter(
         &self,
         session: &str,

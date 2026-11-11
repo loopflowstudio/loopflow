@@ -46,13 +46,22 @@ Only Task launches ensure the server. `lf --machine M <skill>` and a Graph with
 no Task run with or without M's server; their hooks fail at connect (no
 socket, no two-second wait) and record one gap line.
 
-Not built, and why (`loo-821-hooks.md`, Open): `installation::server::ensure`
-registers a supervised launchd or systemd job for the selected home, and the
-integration tests launch Task work under temporary homes with no server. Which
-is wanted: Task-launch fixtures each start and stop `lf server run`; the launch
-only checks that a server answers and names `lf install server`; or something
-else? Until answered, a Task launch with no server runs as a Task-less one
-does: one gap line, steers wait.
+Assumption taken (reversible), where a Task launch starts the server: the
+launch opens a connection to the server (hello, welcome) where it reserves its hook capability
+(`harness/agent_process.rs`), only for a Session with a Task or a Wave
+(`agent_sessions.task_id` or `wave_id`). No answer: it runs
+`installation::server::readiness_command` (`lf install server` through the
+selected installation, as `client::bridge` does), never `ensure` in this
+build, then fails naming the server. Fixtures that launch Task or Wave agents
+start `lf server run` for their home (`loopflow_test_support::MachineServer`),
+so the supervisor is never asked in a test. The probe is the hello the hook
+itself needs, not `lf server status`: status reports not ready whenever the
+server runs another executable, which would refuse every launch from an
+upgraded or branch `lf` beside a working server
+(`resumed_session_completes_turns_after_build_replacement_and_viewer_return`
+showed it). A Session launched in a Task's
+checkout carries that Task (`work_source` checkout), so a skill run there is
+checked too.
 
 - Pi's `pi-event` callback still opens the store each turn. Move it behind a
   server operation in this Task, or leave it for the Task that turns observers

@@ -5,11 +5,10 @@ Built: the `start`, `compact`, `tool` and `stop` moments of
 Described in `server/README.md` ("Turn and tool boundaries"),
 `harness/README.md`, `docs/troubleshooting.md` and `docs/dev/server-first.md`.
 
-Implement next (decided November 10; exact words in `questions.md`):
-
-- Task launches (`lf task run` and its Graph steps, `resume --task`, Task and
-  Wave Sessions) start the Machine server before the agent starts and fail
-  naming the server when it cannot start. Not built: see Open.
+Built: a Task or Wave launch starts its agent only beside the Machine server
+(`harness/agent_process.rs::require_server_for_work`; words and the assumption
+taken in `questions.md`). Described in `server/README.md` and
+`docs/troubleshooting.md`.
 
 Looked at and left alone:
 
@@ -23,22 +22,10 @@ Looked at and left alone:
 
 Open, with why it matters:
 
-- Where a Task launch starts the server. `installation::server::ensure`
-  registers a launchd job (`com.loopflow.server.<home hash>`, `KeepAlive`) or
-  a systemd user unit for the selected home. Integration tests launch Task
-  work with the real `lf` under hundreds of temporary homes
-  (`transport_tests`, `local_planning`, `task_graph_launch_tests`, …) with no
-  server; only three `transport_tests` fixtures register a job, and they boot
-  it out. Wired where every launch reserves its hook capability
-  (`harness/agent_process.rs::steer_environment`; the Session's Task or Wave
-  is readable there), each test would leave a supervised server per temporary
-  home, and CI Linux has no `systemctl --user`. Ways through: every
-  Task-launch fixture starts and stops `lf server run`
-  (`session_steers.rs::MachineServer`); or the launch only checks that a
-  server answers and names `lf install server`; a tests-only switch is ruled
-  out by the style guide. On a person's Machine the call is
-  `readiness_command` (as `client::bridge`), not `ensure`: a branch build
-  calling `ensure` restarts the installed server under live Sessions.
+- Nothing on the launch check. A custom `LF_HOME` (a World, a source
+  experiment) with no server gets a launchd or systemd job for that home the
+  first time it launches Task work; that is what `lf install server` does
+  there.
 
 Remaining:
 
@@ -89,6 +76,17 @@ Choices taken (reversible):
   conversation". The gap line already named the server ("Loopflow server
   unavailable; check `lf server status` and the selected installation") and is
   unchanged.
+- Fixtures that launch Task or Wave agents hold a
+  `loopflow_test_support::MachineServer` for their home: the whole fixture in
+  `session_lifecycle_tests`, `session_launch_contract`, `world_recipes` and
+  `task_graph_launch_tests::GraphTask`, single tests elsewhere
+  (`graph_tests`, `context_launch_tests`, `settings_launch_tests`,
+  `session_cli_tests`, `land_tests`). Found by running every loopflow test
+  with the supervisor call stubbed out.
+- `context_block_tests::hook_after_repository_move…` is replaced by
+  `server::boundary::…a_moved_checkouts_delivery_follows_the_repository`: a
+  hook with no provider context no longer asks the server, and the store, not
+  the hook's cwd, says where a repository moved.
 - `stop`: planning refresh and pending move run on a server blocking worker,
   spawned before the answer; the move waits 2 s for the turn to end.
 - PostToolUse / UserPromptSubmit hook timeouts 30 s → 10 s.
@@ -100,18 +98,15 @@ Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
 
-Checks:
+Checks (November 10, on the launch check):
 
-- `cargo test -p loopflow --lib -- server::boundary server::client server::schema server::wire lf::commands::context context_block store::sqlite::steers` — 53 pass after compress
-- `cargo test -p loopflow --test integration session_steers::` — 4 pass before merge b8460d66f (server up, down, back; printed steer `uncertain` then `emitted` after the next hook; new `a_skill_with_no_task_runs_without_the_machine_server`). One earlier run failed two with 10 s provider-start timeouts at load average 416; same tree passed at 115.
-  On b8460d66f, load average ~150: 3 pass, and
-  `public_context_capability_survives_claim_changes_and_rejects_children_and_replacement`
-  failed twice then passed alone, each failure "provider did not start within
-  10s" with `preparing launch prompt` the last log line (before any hook
-  runs). Not settled whether that is load or the merge; gate reruns it.
-- `cargo test -p loopflow --test integration dto_fixtures` — 50 pass
-- `transport_tests` hook tests (`native_drafts…`, `retained_hooks_survive_upgrade`,
-  `continue_session…`, `native_work_survives…`) — gate; last passed before the sync and before steer confirmation
-- Swift `ServerProtocolTests` (new `hookBoundarySharesTheRustServerContract`) — gate (`--swift`)
-- clippy — pass (with steer confirmation)
-- `context_launch_tests::`, `context_block_tests::`, `harness::` — gate
+- `cargo test -p loopflow --lib -- server::boundary server::client lf::commands::context` — 18 pass
+- `session_steers::` — 5 pass (new `a_task_launch_with_no_machine_server_fails_naming_it`); `public_context_capability…` failed once at 10 s in a 17-test run and passed alone and in the last run: load
+- One Task-launch test from each converted suite, `binary(two_people)`, `world_recipes::`, `documented_commands::` — pass (51 in the last run)
+- `launchctl list | grep com.loopflow` labels before and after those runs — the same
+- Every loopflow test with `readiness_command` swapped for a marker file (3671 run): no test reaches the supervisor after the `two_people` fixture got its servers. Failures in that run that passed alone on the real code: `claude_body_activity…`, `real_process_cpu_sampling…`, `reconnect_preserves_live_credential…`, `an_interrupt_ends_the_running_agent_step…`, `release_run_repairs_failed_checks…`, `unanswering_superseded_owner…`
+- `served_reads screen_reads_are_compact_passive_and_match_cli` fails with or without the launch check (`tasks.items` empty); `scripts/testing.md` says to run `served_reads` with a resolved `TMPDIR`, not tried — gate
+- clippy — pass
+- `cargo test -p loopflow --test integration dto_fixtures` — 50 pass (before this pass)
+- Swift `ServerProtocolTests` (`hookBoundarySharesTheRustServerContract`) — gate (`--swift`)
+- `transport_tests` hook tests other than the two `continue_session…` ones, `harness::` — gate

@@ -115,7 +115,8 @@ Sessions:
   The server records the turn from it and answers with any steers waiting.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
-that cannot reach it logs a gap and lets the turn continue.
+that cannot reach it logs a gap and lets the turn continue. A Task or Wave
+launch starts the server before its agent and fails when none comes up.
 
 ## Pieces
 

@@ -318,6 +318,7 @@ them.
 - Every test binary runs with `HOME` under the temp directory (`support`'s ctor), so an inherited `lf` cannot reach `~/.codex` or `~/.claude`. A fixture that calls `env_clear` sets its own `HOME`: with none, `lf` asks the OS for the account's real one.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only under `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
+- A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

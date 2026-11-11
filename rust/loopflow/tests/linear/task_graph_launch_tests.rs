@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::work::task::{GithubPr, PrPublication};
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
@@ -682,6 +682,7 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     support::bind_task_planning(&repo);
     repo.create_branch("wave-setup");
     let home = tempfile::tempdir().unwrap();
+    let _server = MachineServer::start(loopflow_test_support::lf_binary(), home.path());
     let _env = support::EnvGuard::with_home(
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -769,6 +770,8 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
 
 /// A registered Task whose repository defines the Graphs below.
 struct GraphTask {
+    /// Agent steps start only once the Task's Machine server answers.
+    _server: MachineServer,
     repo: TestRepo,
     home: tempfile::TempDir,
     registered: support::RegisteredTask,
@@ -865,6 +868,7 @@ impl GraphTask {
             &repo.head_sha(),
         );
         let fixture = Self {
+            _server: MachineServer::start(loopflow_test_support::lf_binary(), home.path()),
             repo,
             home,
             registered,

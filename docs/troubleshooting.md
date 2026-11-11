@@ -115,6 +115,20 @@ history as one `store-gap` entry, read as unknown rather than still running.
 Nothing needs relaunching. If `lf server status` reports no server or a
 mismatched build, run `lf install`.
 
+## A Task run stops with "Loopflow server is not running"
+
+```bash
+lf install server                     # register and start the Machine's server
+lf server status
+```
+
+Agents working on a Task or a Wave start only once the Machine server answers,
+because their turns and steers go through it. A launch that finds none runs
+`lf install server` itself; the message appears when that did not bring one
+up, and carries what the install said. On another Machine, run the two
+commands there: `lf --machine <machine> install server`. A skill or Graph with
+no Task runs without a server.
+
 ## A creation has no confirmed answer
 
 Desktop retains submitted Task creations and new Session threads across app

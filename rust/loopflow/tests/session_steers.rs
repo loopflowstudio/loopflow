@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{MachineServer, TestRepo};
 
 /// `lf skill startup-proof` on a stand-in Claude that runs its SessionStart
 /// hook, then answers. The stand-in expects a steer in the hook's block when
@@ -13,6 +13,16 @@ fn launch_startup_proof(
     repo: &TestRepo,
     home: &std::path::Path,
     store: &loopflow::store::sqlite::SqliteStore,
+) -> std::process::Output {
+    launch_startup_proof_through(repo, home, store, env!("CARGO_BIN_EXE_lf").as_ref())
+}
+
+/// The same launch, with `lf_bin` as the `lf` it runs for its own commands.
+fn launch_startup_proof_through(
+    repo: &TestRepo,
+    home: &std::path::Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    lf_bin: &std::path::Path,
 ) -> std::process::Output {
     let account_home = home.join("accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
@@ -110,7 +120,7 @@ sys.stdin.read()
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", lf_bin)
         .env("CLAUDE_CONFIG_DIR", home.join(".claude"))
         // The Keychain item lf signs the shared home in with names its user.
         .env("USER", "fixture")
@@ -159,7 +169,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
         .unwrap();
     fs::write(home.path().join("expect-steer"), "").unwrap();
     // The startup hook asks the Machine server for the steer.
-    let _server = MachineServer::start(home.path());
+    let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let output = launch_startup_proof(&repo, home.path(), &store);
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -208,6 +218,40 @@ fn a_skill_with_no_task_runs_without_the_machine_server() {
     let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
     let down = "recording gap: session boundary: Loopflow server unavailable";
     assert_eq!(log.matches(down).count(), 1, "{log}");
+}
+
+/// Task work starts only with the Machine server: with none running and an
+/// installation that cannot start one, the launch stops before the agent and
+/// says which command brings the server up.
+#[test]
+fn a_task_launch_with_no_machine_server_fails_naming_it() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _task =
+        support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    // The selected installation's `lf install server` reaches no supervisor.
+    let lf = home.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"install server\" ]; then\n  echo 'no supervisor here' >&2\n  exit 1\nfi\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = launch_startup_proof_through(&repo, home.path(), &store, &lf);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Loopflow server is not running")
+            && stderr.contains("no supervisor here")
+            && stderr.contains("lf install server"),
+        "{stderr}"
+    );
+    assert!(!home.path().join("startup-complete").exists());
 }
 
 #[test]
@@ -330,7 +374,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert_eq!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
     // Hooks open no store: the Machine server records and delivers for them.
-    let mut server = Some(MachineServer::start(home.path()));
+    let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -528,7 +572,7 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
     let log = fs::read_to_string(home.path().join("logs/lf.log")).unwrap();
     let down = "recording gap: session boundary: Loopflow server unavailable";
     assert_eq!(log.matches(down).count(), 1, "{log}");
-    let _server = MachineServer::start(home.path());
+    let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let answered = hook(serde_json::json!({"session_id":"cleared-native",
         "hook_event_name":"PostToolUse","tool_use_id":"answered-tool"}));
     assert!(String::from_utf8_lossy(&answered.stdout).contains("WAITED_DIRECTION"));
@@ -667,51 +711,4 @@ fn public_commands_save_steers_without_launching_providers() {
         )
         .unwrap();
     assert_eq!(provider_count, 0);
-}
-
-/// The Machine server under a fixture home, stopped when dropped.
-struct MachineServer(std::process::Child);
-
-impl MachineServer {
-    fn start(home: &std::path::Path) -> Self {
-        let lf = |args: &[&str]| {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-            command
-                .env_clear()
-                .env("HOME", home)
-                .env("LF_HOME", home)
-                .env("PATH", "/usr/bin:/bin")
-                .args(args)
-                .stdin(Stdio::null());
-            command
-        };
-        let server = Self(
-            lf(&["server", "run"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap(),
-        );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            let status = lf(&["server", "status"]).output().unwrap();
-            let status: serde_json::Value =
-                serde_json::from_slice(&status.stdout).unwrap_or_default();
-            if status["ready"] == true {
-                return server;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "server did not start: {status}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-    }
-}
-
-impl Drop for MachineServer {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
 }

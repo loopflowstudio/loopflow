@@ -704,9 +704,10 @@ Checks:
   passes with real binaries. A Task conversation moves to a held terminal,
   the server is killed and started again mid-conversation, a new view
   types the next turn into the same agent, and its exit is settled.
+- `cargo test -p loopflow --test session_lifecycle_tests`: 41 passed.
 - `cargo clippy -p loopflow --all-targets -- -D warnings`: clean.
 - Not run here: Swift tests (`ServerProtocol.swift` now encodes
-  `terminal_id: null` in `session.attach`), `session_lifecycle_tests`,
+  `terminal_id: null` in `session.attach`),
   Desktop suites, the full matrix. Gate/CI.
 
 Found on the way: frames arriving with the holder's `reading` answer were

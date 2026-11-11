@@ -5,10 +5,13 @@
 
 mod claude;
 mod codex;
+pub mod live;
 pub(crate) mod opencode;
 mod pi;
+pub(crate) mod raw;
 mod session;
 pub mod summary;
+pub(crate) mod watch;
 
 pub(crate) use session::threads;
 pub use session::{

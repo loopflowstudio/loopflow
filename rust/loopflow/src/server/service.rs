@@ -162,7 +162,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
-    let _observations = crate::observe::Cache::shared();
+    let observations = crate::observe::Cache::shared();
+    let _transcripts = crate::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)

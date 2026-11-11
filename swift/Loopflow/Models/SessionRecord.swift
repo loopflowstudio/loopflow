@@ -246,6 +246,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let readySummary: String?
     public var openArgv: [String]
     public let terminalIds: [String]
+    /// Its current or last turn while it is live; nil when nothing says.
+    public let turn: SessionTurn?
+    /// Open here but never launched by Loopflow; `id` is the provider's conversation ID.
+    public let raw: Bool
 
     /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
@@ -297,6 +301,55 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
+        case turn, raw
+    }
+}
+
+/// A conversation's current or last turn, from Loopflow's hooks or the
+/// provider's own transcript.
+public struct SessionTurn: Codable, Sendable, Hashable {
+    public enum State: String, Codable, Sendable, Hashable {
+        case running, ended, interrupted
+    }
+
+    public enum Source: String, Codable, Sendable, Hashable {
+        case hooks, transcript
+    }
+
+    public struct Usage: Codable, Sendable, Hashable {
+        /// Every input token, cached ones included.
+        public let inputTokens: Int
+        public let cachedInputTokens: Int
+        public let outputTokens: Int
+
+        enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case cachedInputTokens = "cached_input_tokens"
+            case outputTokens = "output_tokens"
+        }
+    }
+
+    public let state: State
+    public let source: Source
+    public let startedAt: String?
+    public let endedAt: String?
+    public let model: String?
+    public let usage: Usage?
+
+    enum CodingKeys: String, CodingKey {
+        case state, source, model, usage
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(State.self, forKey: .state)
+        source = try values.decode(Source.self, forKey: .source)
+        startedAt = try values.decode(String?.self, forKey: .startedAt)
+        endedAt = try values.decode(String?.self, forKey: .endedAt)
+        model = try values.decode(String?.self, forKey: .model)
+        usage = try values.decode(Usage?.self, forKey: .usage)
     }
 }
 
@@ -378,5 +431,7 @@ extension SessionRecord {
         readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
+        turn = try values.decode(SessionTurn?.self, forKey: .turn)
+        raw = try values.decode(Bool.self, forKey: .raw)
     }
 }

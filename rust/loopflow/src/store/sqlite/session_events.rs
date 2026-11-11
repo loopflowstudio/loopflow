@@ -8,6 +8,23 @@ use crate::store::{ProviderAccountId, StoreError, StoreResult};
 
 use super::SqliteStore;
 
+/// A Session's current provider conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CurrentConversation {
+    pub provider: String,
+    pub thread: String,
+    /// The last turn Loopflow's hooks recorded in it.
+    pub turn: Option<RecordedTurn>,
+}
+
+/// One turn's recorded boundaries, in Unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecordedTurn {
+    pub started_at: Option<i64>,
+    pub settled_at: Option<i64>,
+    pub status: Option<String>,
+}
+
 impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
@@ -133,6 +150,91 @@ impl SqliteStore {
                 .and_then(|account| ProviderAccountId::parse(&account).ok());
         }
         Ok(threads)
+    }
+
+    /// `session`'s current provider conversation and the last turn Loopflow
+    /// recorded in it; `None` when it has none.
+    pub(crate) fn current_conversation(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<CurrentConversation>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let Some((provider, thread)) = conn
+            .query_row(
+                "SELECT provider,provider_thread FROM agent_sessions
+                 WHERE id=?1 AND provider IS NOT NULL AND provider_thread IS NOT NULL",
+                [session],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let latest = conn
+            .query_row(
+                "SELECT provider_turn,kind,observed_at,payload FROM session_events
+                 WHERE session_id=?1 AND provider_thread=?2 AND kind IN ('started','completed')
+                 ORDER BY seq DESC LIMIT 1",
+                params![session, thread],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let turn = match latest {
+            None => None,
+            Some((_, kind, at, _)) if kind == "started" => Some(RecordedTurn {
+                started_at: Some(at),
+                settled_at: None,
+                status: None,
+            }),
+            Some((turn, _, at, payload)) => {
+                let started_at = conn
+                    .query_row(
+                        "SELECT observed_at FROM session_events
+                         WHERE session_id=?1 AND provider_thread=?2 AND kind='started'
+                           AND provider_turn IS ?3
+                         ORDER BY seq DESC LIMIT 1",
+                        params![session, thread, turn],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?;
+                let payload: Value = serde_json::from_str(&payload)?;
+                Some(RecordedTurn {
+                    started_at,
+                    settled_at: Some(at),
+                    status: payload["status"].as_str().map(str::to_owned),
+                })
+            }
+        };
+        Ok(Some(CurrentConversation {
+            provider,
+            thread,
+            turn,
+        }))
+    }
+
+    /// Which of `threads` are some Session's current provider conversation.
+    pub(crate) fn recorded_provider_threads(
+        &self,
+        threads: &[String],
+    ) -> StoreResult<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare_cached("SELECT 1 FROM agent_sessions WHERE provider_thread=?1 LIMIT 1")?;
+        let mut recorded = std::collections::HashSet::new();
+        for thread in threads {
+            if query.exists([thread])? {
+                recorded.insert(thread.clone());
+            }
+        }
+        Ok(recorded)
     }
 
     /// Every Session with its current provider conversation and the account

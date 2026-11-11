@@ -528,8 +528,18 @@ async fn list(
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         for session in sessions {
-            println!(
+            let place = if session.raw {
+                format!("raw {}", session.provider.as_deref().unwrap_or_default())
+            } else {
+                session
+                    .work_path
+                    .as_deref()
+                    .unwrap_or("Repository")
+                    .to_owned()
+            };
+            let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
@@ -539,12 +549,16 @@ async fn list(
                     SessionState::Detached => "detached",
                     SessionState::Closed => "closed",
                 },
-                session.work_path.as_deref().unwrap_or("Repository"),
+                place,
                 match &session.account {
                     Some(account) => format!("{}  on {account}", session.title),
                     None => session.title.clone(),
                 }
             );
+            if let Some(turn) = &session.turn {
+                line.push_str(&format!("  {}", turn.describe(now)));
+            }
+            println!("{line}");
             for action in session.actions {
                 println!(
                     "  {} — {}",

@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use super::{conversation_home, scan, ExpiryPolicy, Indexed, RetentionState};
 use crate::harness::HarnessKind;
 use crate::id::AgentSessionId;
-use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
 use crate::store::ProviderAccountId;
 
@@ -134,10 +133,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                 None => (RetentionState::Facts, None, None),
             },
             (HarnessKind::Claude | HarnessKind::Codex, Some(thread)) => {
-                let provider = match harness {
-                    HarnessKind::Claude => Provider::Claude,
-                    _ => Provider::Codex,
-                };
+                let provider = harness.provider().expect("Claude and Codex have providers");
                 match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
@@ -235,6 +231,7 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_auth::Provider;
     use crate::session::SessionEventKind;
     use crate::transcript::session_transcript;
     use std::fs;

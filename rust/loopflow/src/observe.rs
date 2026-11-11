@@ -21,6 +21,10 @@ enum Fact {
     Process(u32),
     Deadline(i64),
     Clock,
+    /// A conversation's current turn from its transcript's end.
+    Turn(crate::harness::HarnessKind, PathBuf),
+    /// Conversations open on this Machine that Loopflow never launched.
+    RawConversations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +53,8 @@ enum Answer {
     Bool(bool),
     Time(i64),
     Process(Result<Option<OsProcess>, Failure>),
+    Turn(Option<crate::transcript::live::SessionTurn>),
+    Raw(Vec<crate::transcript::raw::RawConversation>),
 }
 
 impl PartialEq for Answer {
@@ -65,6 +71,8 @@ impl PartialEq for Answer {
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Time(a), Self::Time(b)) => a == b,
             (Self::Process(a), Self::Process(b)) => a == b,
+            (Self::Turn(a), Self::Turn(b)) => a == b,
+            (Self::Raw(a), Self::Raw(b)) => a == b,
             _ => false,
         }
     }
@@ -90,6 +98,9 @@ impl Fact {
         Duration::from_secs(match self {
             Self::Git(..) => 3,
             Self::Github(..) | Self::Clock => 60,
+            // Transcript watches say when to look sooner; these bound a missed event.
+            Self::Turn(..) => TURN_RECONCILE.as_secs(),
+            Self::RawConversations => 10,
             _ => 1,
         })
     }
@@ -134,9 +145,18 @@ impl Fact {
             Self::Deadline(at) => {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
+            Self::Turn(harness, path) => {
+                Answer::Turn(crate::transcript::live::read_turn(*harness, path))
+            }
+            Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
     }
 }
+
+/// How often a watched transcript is read again with no event.
+const TURN_RECONCILE: Duration = Duration::from_secs(30);
+/// A transcript growing steadily is read again at most this often.
+const TURN_HINTED: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 struct Entry {
@@ -219,6 +239,31 @@ impl Cache {
             }
             entry.checked = SystemTime::now();
         }
+    }
+
+    /// A transcript at `path` changed: read its turn again within a second.
+    /// `created` also looks again for raw conversations; `None` means events
+    /// were lost and every transcript is due.
+    pub(crate) fn hint_transcript(&self, path: Option<&Path>, created: bool) {
+        let due = SystemTime::now() - (TURN_RECONCILE - TURN_HINTED);
+        let entries = self.entries.lock().expect("observation cache");
+        for (fact, entry) in entries.iter() {
+            let hinted = match fact {
+                Fact::Turn(_, watched) => path.is_none_or(|path| watched == path),
+                Fact::RawConversations => created || path.is_none(),
+                _ => false,
+            };
+            if hinted {
+                let mut entry = entry.lock().expect("observed fact");
+                entry.checked = entry.checked.min(due);
+            }
+        }
+    }
+
+    /// Run one refresh of local facts now, as the background thread does.
+    #[cfg(test)]
+    pub(crate) fn refresh_local(&self) {
+        self.refresh(Source::Local);
     }
 
     pub(crate) fn capture<T>(self: &Arc<Self>, read: impl FnOnce() -> T) -> (T, Dependencies) {
@@ -394,6 +439,25 @@ pub(crate) fn process(pid: u32) -> io::Result<Option<OsProcess>> {
         unreachable!("process returns OS identity")
     };
     restored(answer)
+}
+
+/// The current or last turn of the transcript at `path`.
+pub(crate) fn transcript_turn(
+    harness: crate::harness::HarnessKind,
+    path: &Path,
+) -> Option<crate::transcript::live::SessionTurn> {
+    let Answer::Turn(answer) = read(Fact::Turn(harness, absolute(path))) else {
+        unreachable!("a transcript returns its turn")
+    };
+    answer
+}
+
+/// Conversations open on this Machine that Loopflow never launched.
+pub(crate) fn raw_conversations() -> Vec<crate::transcript::raw::RawConversation> {
+    let Answer::Raw(answer) = read(Fact::RawConversations) else {
+        unreachable!("raw conversations return conversations")
+    };
+    answer
 }
 
 /// Time for rolling history windows, observed at minute resolution when served.

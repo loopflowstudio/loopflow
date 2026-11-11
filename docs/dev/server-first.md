@@ -5,7 +5,8 @@ title: Server-first Sessions
 
 # Server-first Sessions
 
-Planned in LOO-819. None of this is built yet; [Client API server](server.md)
+Planned in LOO-819. Transcript telemetry (LOO-822) is built; the rest is
+not yet. [Client API server](server.md)
 and the [transport README](../../rust/loopflow/src/transport/README.md)
 describe what runs today. Each piece below lands as its own Task and updates
 those documents when it does. Delete this page when the last piece lands.
@@ -113,6 +114,30 @@ Sessions:
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue.
 
+Codex history reads from its rollout files; no app-server call is needed for
+turn state or usage. Rollouts under `~/.codex/sessions` read on November 10,
+2026 carry `event_msg` records of type `task_started`, `task_complete` (with
+`turn_id`, `started_at`, `completed_at`), `turn_aborted` and `token_count`
+(`info.last_token_usage`, `info.total_token_usage`). They carry no approval
+or input requests, so "waiting on you" stays with the status reports above.
+A Claude Code 2.1.322 transcript read the same day ends a turn with an
+`assistant` entry whose `stop_reason` is `end_turn`, usually followed by a
+`system` entry of subtype `turn_duration` (33 of 49 turns in one transcript),
+so `end_turn` with nothing after it is the signal and `turn_duration` a
+confirmation.
+
+On demand, `lf session list` and `lf session card` read the transcript's tail
+for any conversation with no hook report (`transcript/live.rs`). Watched, the
+server keeps one filesystem watch per provider home (`transcript/watch.rs`);
+an event makes the shared observation cache read that transcript within a
+second, a thirty-second reconcile catches a missed one, and every
+subscription reading it shares the one reading. Raw conversations are
+`claude` or `codex` processes with no `lf` or provider ancestor, paired with
+the newest transcript written in their directory since they started
+(`transcript/raw.rs`). Claude's kernel process name is its version, so its
+executable path (`…/claude/versions/<version>`) identifies it. User docs:
+[Sessions](../sessions.md#see-what-each-one-is-doing).
+
 ## Pieces
 
 Each is one Task and one PR. The first five do not depend on each other.
@@ -142,8 +167,6 @@ Task as its ancestry. One function answers this for every launch path.
 
 ## Open
 
-- Whether Codex history can be read from its rollout files or needs a short
-  app-server call at turn end. If neither works, Codex keeps a recorder.
 - Whether Claude and Codex repaint fully on a size nudge.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot

@@ -200,6 +200,20 @@ A Session record:
 `unknown`); `availability` is `"available"` when it is ready for your next
 turn and `null` while it works. `lf resume <id>` opens it.
 
+`turn` is its current or last turn, `null` when nothing is known:
+
+```json
+"turn": {"state": "ended", "source": "transcript", "started_at": "2026-11-10T16:25:37Z",
+         "ended_at": "2026-11-10T16:27:51Z", "model": "claude-opus-5-5",
+         "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100}}
+```
+
+`state` is `running`, `ended` or `interrupted`; `ended_at` and `usage` are
+`null` while it runs. `source` says where the reading came from: `hooks` for a
+turn boundary lf recorded, `transcript` for the provider's own transcript.
+A live conversation lf never launched lists with `"raw": true` and its provider
+conversation ID as `id`.
+
 Desktop reads the same records through `lf plan list`, `lf task show`,
 `lf wave plan`, `lf task list --closed` and `lf session list`, with the
 same `--subscribe`. `lf wave status` and `lf wave show` exchange planning with the

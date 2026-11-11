@@ -122,6 +122,47 @@ like any other.
 A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
 `--fork` to leave it running.
 
+While it is open, it shows up in `lf session list` for its checkout under its
+provider ID, marked `raw`, with its current turn (below). Listing it creates no
+Session.
+
+## See what each one is doing
+
+```bash
+lf session list                    # every conversation, with its current turn
+lf session card <session>          # one conversation: its turn, when the last one ended, its usage
+```
+
+```text
+$ lf session list
+session_21fe…   active    Repository  Agent platform craft   turn running 2m14s
+0199a213-81c0…  active    raw claude  ~/src/app              turn running 41s
+session_675c…   detached  LOO-472     CI under five          last turn ended 3m ago · 41.2k in (38.0k cached) · 1.1k out
+```
+
+This works for every conversation on the Machine: a Task's, one a bare
+`lf implement` started, and a plain `claude` or `codex` lf never launched.
+When lf has no hook report for a conversation, it reads the end of the
+provider's own transcript at the moment you ask: Claude's under
+`~/.claude/projects`, Codex's rollout files under `~/.codex/sessions`. Nothing
+runs between questions, and lf never writes into those directories.
+
+With the Machine server running (`lf server run`, or Desktop), it watches each
+provider's home once for all conversations and refreshes these readings as
+transcripts grow, so `lf session list --subscribe` and Desktop update while a
+turn runs. A missed filesystem event is caught by a periodic reread.
+
+| The transcript shows | It can't show |
+|---|---|
+| a turn running, and since when | whether that turn is waiting on a permission prompt or a question for you |
+| when the last turn ended, or that it was interrupted | a turn cut off by a crash, until the provider process is gone |
+| the last turn's input, cached and output tokens, and its model | |
+
+A turn waiting on you reads as `turn running`; lf doesn't guess otherwise.
+Sessions lf manages also get that state from the agent's own status reports.
+A transcript caught halfway through writing a line is read up to its last
+complete line.
+
 ## Switch agents mid-conversation
 
 ```bash

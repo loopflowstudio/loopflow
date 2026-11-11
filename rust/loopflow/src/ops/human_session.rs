@@ -3,6 +3,7 @@ mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
 pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
+mod turns;
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -425,6 +426,12 @@ pub struct SessionRecord {
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+    /// Its current or last turn while it is live; `null` when nothing says.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub turn: Option<crate::transcript::live::SessionTurn>,
+    /// A conversation open here that Loopflow never launched; `id` is the
+    /// provider's conversation ID and no Session records it.
+    pub raw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -550,6 +557,7 @@ pub(crate) async fn list(
         sessions.push(summary_surface(&session, &capacity));
     }
     workspace::associate(store, &mut sessions).await?;
+    turns::read(&store.sqlite, &mut sessions)?;
     if association_filter {
         let task = if let Some(selector) = &filter.task {
             store.sqlite.resolve_task_id(selector, None)?
@@ -580,7 +588,25 @@ pub(crate) async fn list(
             })
             .collect();
     }
+    if lists_raw(filter) {
+        sessions.extend(turns::raw(&store.sqlite, filter.repo.as_deref())?);
+    }
     Ok(sessions)
+}
+
+/// Raw conversations have no Task, account, history or page position, so a
+/// selection by any of those leaves them out.
+fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
+    !filter.available
+        && !filter.orphan
+        && !filter.blocked
+        && !filter.history
+        && filter.task.is_none()
+        && filter.on.is_none()
+        && filter.search.is_none()
+        && filter.interactive != Some(false)
+        && filter.after.is_none()
+        && filter.offset == 0
 }
 
 /// Where a Session's step stands in its Graph: the last one a still-open Graph
@@ -604,10 +630,15 @@ fn graph_occurrence(
 pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let capacity = LaunchCapacity::read(&store.sqlite)?;
-    Ok(store
+    let Some(mut session) = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity)))
+        .map(|session| summary_surface(&session, &capacity))
+    else {
+        return Ok(None);
+    };
+    turns::read(&store.sqlite, std::slice::from_mut(&mut session))?;
+    Ok(Some(session))
 }
 
 /// What `--on <account|harness[:model]>` names, resolved once before filtering.
@@ -769,6 +800,8 @@ fn summary_surface(
         ready_summary: session.ready_summary.clone(),
         open_argv,
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
+        turn: None,
+        raw: false,
     }
 }
 
@@ -1765,8 +1798,11 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv,
+        turn: None,
+        raw: false,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;
     Ok(reading)
 }
 

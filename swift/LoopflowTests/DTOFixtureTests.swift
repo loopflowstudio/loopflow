@@ -18,6 +18,9 @@ struct DTOFixtureTests {
         #expect(card.liveness == .unknown)
         #expect(card.controlHolder == nil)
         #expect(card.lastLine == nil)
+        #expect(card.session.turn?.state == .ended)
+        #expect(card.session.turn?.usage?.cachedInputTokens == 38000)
+        #expect(card.session.raw == false)
     }
 
     @Test func screenReadsRejectSelectedAnswers() throws {

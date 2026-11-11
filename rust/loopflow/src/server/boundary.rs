@@ -134,7 +134,7 @@ pub(super) fn answer(
     }
     let (steers, waiting) =
         claim_steers(store, &delivery, adapter, thread, callback, event, printed)?;
-    let update = claim_task_update(store, adapter, thread).unwrap_or_else(|error| {
+    let update = crate::harness::task_updates::claim(store, adapter, thread).unwrap_or_else(|error| {
         tracing::warn!(session = adapter.session, %error, "Task update unread at this boundary");
         None
     });
@@ -256,27 +256,6 @@ fn claim_steers(
             steers.map(|(batch, text)| SteerBatch { batch, text }),
             waiting,
         ))
-    })
-}
-
-/// What changed on the Session's Tasks since its last update, recorded as
-/// dispatched once: a second boundary answering the same reading gets none.
-fn claim_task_update(
-    store: &SqliteStore,
-    adapter: &SteerAdapter,
-    thread: &str,
-) -> StoreResult<Option<String>> {
-    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-        let Some(update) = crate::harness::task_updates::read(store, &adapter.session)? else {
-            return Ok(None);
-        };
-        let claimed = store.record_task_update(
-            &adapter.session,
-            &update.key,
-            "dispatched",
-            &update.observation,
-        )?;
-        Ok(claimed.then_some(update.text))
     })
 }
 

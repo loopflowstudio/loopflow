@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{GraphStepProcess, TaskId};
 use crate::id::LfProcessId;
+use crate::steer::{NativeBoundary, SteerAdapter};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use crate::task_graph::TaskGraphPosition;
@@ -174,6 +175,27 @@ pub(crate) fn read(store: &SqliteStore, session_id: &str) -> StoreResult<Option<
     }
     Ok(Some(TaskUpdate { key, observation, text: format!(
         "<lf:task-update>\n{body}Report this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.\n</lf:task-update>") }))
+}
+
+/// The update a boundary or a wake hands to `thread`, recorded as dispatched
+/// once: another claim on the same reading gets none.
+pub(crate) fn claim(
+    store: &SqliteStore,
+    adapter: &SteerAdapter,
+    thread: &str,
+) -> StoreResult<Option<String>> {
+    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
+        let Some(update) = read(store, &adapter.session)? else {
+            return Ok(None);
+        };
+        let claimed = store.record_task_update(
+            &adapter.session,
+            &update.key,
+            "dispatched",
+            &update.observation,
+        )?;
+        Ok(claimed.then_some(update.text))
+    })
 }
 
 fn written_here(author: &TaskCommentAuthor, session_id: &str) -> bool {

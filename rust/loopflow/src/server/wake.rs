@@ -16,9 +16,8 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
 use crate::server::wire::ClaudeInbox;
-use crate::steer::{NativeBoundary, SteerAdapter};
+use crate::steer::SteerAdapter;
 use crate::store::sqlite::SqliteStore;
-use crate::store::StoreResult;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
@@ -148,13 +147,15 @@ fn wake(store: &SqliteStore, registration: &Registration) {
         match &registration.wake {
             Wake::Claude(inbox) => {
                 let (mut socket, token) = open_inbox(inbox)?;
-                let Some(text) = claim(store, adapter, thread)? else {
+                let Some(text) = crate::harness::task_updates::claim(store, adapter, thread)?
+                else {
                     return Ok(false);
                 };
                 send_inbox(&mut socket, &token, thread, &text)?;
             }
             Wake::Codex(endpoint) => {
-                let Some(text) = claim(store, adapter, thread)? else {
+                let Some(text) = crate::harness::task_updates::claim(store, adapter, thread)?
+                else {
                     return Ok(false);
                 };
                 start_codex_turn(endpoint, thread, &text)?;
@@ -175,23 +176,6 @@ fn wake(store: &SqliteStore, registration: &Registration) {
             registrations().remove(session);
         }
     }
-}
-
-/// The Session's update since its last one, recorded as dispatched. Another
-/// boundary claiming the same reading gets none.
-fn claim(store: &SqliteStore, adapter: &SteerAdapter, thread: &str) -> StoreResult<Option<String>> {
-    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-        let Some(update) = crate::harness::task_updates::read(store, &adapter.session)? else {
-            return Ok(None);
-        };
-        let claimed = store.record_task_update(
-            &adapter.session,
-            &update.key,
-            "dispatched",
-            &update.observation,
-        )?;
-        Ok(claimed.then_some(update.text))
-    })
 }
 
 /// Connect before claiming, so an unreachable conversation keeps its update

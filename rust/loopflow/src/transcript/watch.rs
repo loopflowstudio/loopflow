@@ -89,7 +89,7 @@ mod tests {
         std::fs::write(&path, format!("{RUNNING}\n")).unwrap();
         let cache = Arc::new(Cache::default());
         let read =
-            || crate::observe::transcript_turn(HarnessKind::Claude, &path).map(|run| run.turn);
+            || crate::observe::transcript_run(HarnessKind::Claude, &path).map(|run| run.turn);
 
         let subscribers = (0..8).map(|_| cache.capture(read)).collect::<Vec<_>>();
         assert!(subscribers

@@ -1654,7 +1654,7 @@ fn transcript_run(rows: Option<usize>) -> crate::transcript::live::TranscriptRun
         .collect::<String>();
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), kept).unwrap();
-    crate::transcript::live::read_turn(crate::harness::HarnessKind::Claude, file.path()).unwrap()
+    crate::transcript::live::read_run(crate::harness::HarnessKind::Claude, file.path()).unwrap()
 }
 
 fn stream_turn(id: &str, started: i64, settled: Option<i64>) -> crate::store::sqlite::RecordedTurn {

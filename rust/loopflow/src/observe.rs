@@ -146,7 +146,7 @@ impl Fact {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
             Self::Turn(harness, path) => {
-                Answer::Turn(crate::transcript::live::read_turn(*harness, path))
+                Answer::Turn(crate::transcript::live::read_run(*harness, path))
             }
             Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
@@ -442,7 +442,7 @@ pub(crate) fn process(pid: u32) -> io::Result<Option<OsProcess>> {
 }
 
 /// The current or last run of the transcript at `path`.
-pub(crate) fn transcript_turn(
+pub(crate) fn transcript_run(
     harness: crate::harness::HarnessKind,
     path: &Path,
 ) -> Option<crate::transcript::live::TranscriptRun> {

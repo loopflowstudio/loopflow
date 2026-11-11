@@ -41,7 +41,7 @@ fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<Sess
         return Ok(None);
     };
     let run = crate::transcript::live::locate(store, &conversation, cwd)?
-        .and_then(|(harness, path)| crate::observe::transcript_turn(harness, &path));
+        .and_then(|(harness, path)| crate::observe::transcript_run(harness, &path));
     Ok(match &conversation.turn {
         Some(stream) => Some(crate::transcript::live::combine(stream, run)),
         None => run.map(|run| run.turn),
@@ -70,7 +70,7 @@ pub(super) fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<Session
                 continue;
             }
         }
-        let turn = crate::observe::transcript_turn(conversation.harness, &conversation.transcript)
+        let turn = crate::observe::transcript_run(conversation.harness, &conversation.transcript)
             .map(|run| run.turn);
         // A checkout two Tasks claim lists under neither.
         let task = crate::ops::task::counted_task(store, &conversation.cwd).unwrap_or(None);

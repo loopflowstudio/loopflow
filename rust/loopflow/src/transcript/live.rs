@@ -209,31 +209,13 @@ impl Order {
         }
         let start = seconds(&run.turn.started_at);
         let end = seconds(&run.turn.ended_at);
-        let before = |at: Option<i64>, from: i64| at.is_some_and(|at| at + LAG < from);
-        match (stream.settled_at, end) {
-            (None, _) => match stream.started_at {
-                Some(from) if before(start.or(end), from) => Self::Behind,
-                _ => Self::Same,
-            },
-            (Some(at), Some(end)) if end > at + LAG => Self::After,
-            (Some(at), Some(end)) => {
-                let older = match stream.started_at {
-                    Some(from) => before(start.or(Some(end)), from),
-                    None => before(Some(end), at),
-                };
-                if older {
-                    Self::Behind
-                } else {
-                    Self::Same
-                }
-            }
-            (Some(at), None) => {
-                if before(start, stream.started_at.unwrap_or(at)) {
-                    Self::Behind
-                } else {
-                    Self::After
-                }
-            }
+        let older = |at: Option<i64>, from: i64| at.is_some_and(|at| at + LAG < from);
+        match (stream.started_at, stream.settled_at) {
+            (_, Some(at)) if end.is_some_and(|end| end > at + LAG) => Self::After,
+            (Some(from), _) if older(start.or(end), from) => Self::Behind,
+            (None, Some(at)) if older(end.or(start), at) => Self::Behind,
+            (_, Some(_)) if end.is_none() => Self::After,
+            _ => Self::Same,
         }
     }
 }
@@ -265,7 +247,7 @@ fn rfc3339(at: i64) -> Option<String> {
 
 /// The current or last run of the transcript at `path`; `None` when it shows
 /// none or cannot be read.
-pub(crate) fn read_turn(harness: HarnessKind, path: &Path) -> Option<TranscriptRun> {
+pub(crate) fn read_run(harness: HarnessKind, path: &Path) -> Option<TranscriptRun> {
     let read = super::run_reader(harness)?;
     let mut limit = FIRST;
     loop {
@@ -389,7 +371,7 @@ mod tests {
 
     #[test]
     fn a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message() {
-        let turn = read_turn(HarnessKind::Claude, &fixture("claude_turn.jsonl"))
+        let turn = read_run(HarnessKind::Claude, &fixture("claude_turn.jsonl"))
             .unwrap()
             .turn;
         assert_eq!(
@@ -417,7 +399,7 @@ mod tests {
     fn a_claude_turn_waiting_on_a_tool_runs_even_with_its_last_line_half_written() {
         // Through the tool result, then half of the final answer's row.
         let file = cut("claude_turn.jsonl", 6, 120);
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap().turn;
+        let turn = read_run(HarnessKind::Claude, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:37.000Z"));
         assert_eq!((turn.ended_at, turn.usage), (None, None));
@@ -431,14 +413,14 @@ mod tests {
         text.push_str(r#"{"type":"user","userType":"external","timestamp":"2026-11-10T16:26:00.000Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#);
         text.push('\n');
         fs::write(file.path(), text).unwrap();
-        let turn = read_turn(HarnessKind::Claude, file.path()).unwrap().turn;
+        let turn = read_run(HarnessKind::Claude, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Interrupted);
         assert_eq!(turn.ended_at.as_deref(), Some("2026-11-10T16:26:00.000Z"));
     }
 
     #[test]
     fn a_codex_turn_counts_the_growth_of_its_running_total() {
-        let turn = read_turn(HarnessKind::Codex, &fixture("codex_rollout.jsonl"))
+        let turn = read_run(HarnessKind::Codex, &fixture("codex_rollout.jsonl"))
             .unwrap()
             .turn;
         assert_eq!(turn.state, TurnState::Ended);
@@ -458,7 +440,7 @@ mod tests {
     #[test]
     fn a_codex_turn_with_its_last_line_half_written_is_running() {
         let file = cut("codex_rollout.jsonl", 9, 40);
-        let turn = read_turn(HarnessKind::Codex, file.path()).unwrap().turn;
+        let turn = read_run(HarnessKind::Codex, file.path()).unwrap().turn;
         assert_eq!(turn.state, TurnState::Running);
         assert_eq!(turn.started_at.as_deref(), Some("2026-11-10T16:25:00.000Z"));
         assert_eq!(turn.usage, None);

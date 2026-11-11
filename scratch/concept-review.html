@@ -43,6 +43,8 @@
   .prop { background: var(--prop); border-left: 3px dashed var(--prop-edge); }
   .built > :last-child, .prop > :last-child { margin-bottom: 0; }
   .tag { font-weight: 600; }
+  .soft { color: var(--soft); }
+  tr.gap td:first-child { border-left: 3px solid var(--warn); padding-left: 8px; }
   ol.q > li { margin-bottom: 18px; }
   ol.q ol { list-style: lower-alpha; margin-top: 6px; }
   ol.q ol li { margin-bottom: 6px; }
@@ -54,15 +56,16 @@
 <main>
 
 <h1>Which conversations depend on the Machine server?</h1>
-<p class="meta">LOO-821 · concept review at the demo step, second pass (headless) · November 11, 2026 · PR #1879<br>
+<p class="meta">LOO-821 · concept review, third pass (headless) · November 11, 2026 · PR #1879<br>
 Built from <code>scratch/loo-821-hooks.md</code>, <code>scratch/questions.md</code>,
 <code>docs/dev/server-first.md</code>, <code>server/README.md</code>,
 <code>lf/mod.rs</code> (<code>Cli::names_work</code>), <code>journal/mod.rs</code>,
-<code>agent/mod.rs</code> (<code>AgentConfig::managed</code>), <code>lf/commands/graph.rs</code></p>
+<code>agent/mod.rs</code> (<code>AgentConfig::managed</code>), <code>lf/commands/graph.rs</code>,
+<code>lf/commands/session.rs</code> (<code>open_through</code>), <code>LoopflowMac/Views/SessionsView.swift</code>, <code>Loopflow/Services/RegistryQuery.swift</code></p>
 
-<p class="lead">No decision needed. The first pass found three rules drawing the
-line in three places; the branch now has one, decided by the command, and the
-docs say the same thing the code does.</p>
+<p class="lead">No product decision needed; one gap in the rule goes back to implement.
+Desktop opens a Task's conversation managed only the first time. Reopening a pane
+that already has a Session goes by Session id, and a Session id resumes bare.</p>
 
 <h2>What people do, as built</h2>
 <div class="scroll"><table>
@@ -75,6 +78,9 @@ docs say the same thing the code does.</p>
 <td>none from the hooks</td></tr>
 <tr><td><code>lf -i</code>, <code>lf implement</code> at a terminal, an agent started from a Desktop shell</td>
 <td>Bare, no server check, but keeps every hook while an owner process holds it. They go with the owner in “Bare launches go direct”.</td>
+<td><code>session.boundary</code>, a gap line when unanswered</td></tr>
+<tr class="gap"><td>Desktop: reopen a Task workspace pane that has a Session (restored layout, conversation that exited), or connect to a Task-run step's Session</td>
+<td>Bare today: <code>prepareSession(id:)</code> → <code>lf session resume &lt;id&gt; --prepare</code>. No server check; a steer waits unseen if the server is down.</td>
 <td><code>session.boundary</code>, a gap line when unanswered</td></tr>
 <tr><td><code>lf task steer LOO-1 "…"</code></td>
 <td>Reaches a managed agent at its next prompt or tool; waits while the server is down.</td>
@@ -93,6 +99,24 @@ reads <code>agent_sessions.work_source</code> to decide it; the column is still 
                                               OpenCode / Pi: spec.managed</code></pre>
 </div>
 
+<h2>The gap, and what closes it</h2>
+<p>The first open from a Task workspace goes through the Task:</p>
+<pre><code>lf session resume --task LOO-1 --prepare
+  open_argv: lf session resume --task LOO-1        <span class="soft"># open_through: id spliced out, reselected from cwd</span></code></pre>
+<p>Every later open of the same pane goes through its Session id:</p>
+<pre><code>lf session resume 3f2a… --prepare
+  open_argv: lf session resume 3f2a…               <span class="soft"># bare</span></code></pre>
+<div class="prop">
+<p><span class="tag">Proposed, next implement.</span> One command names both:</p>
+<pre><code>lf session resume 3f2a… --task LOO-1 --prepare
+  open_argv: lf session resume 3f2a… --task LOO-1  <span class="soft"># the id selects, --task makes it managed</span></code></pre>
+<p><code>SessionTarget::from_selectors</code> accepts an id with <code>--task</code> or
+<code>--wave</code>. Desktop passes the Task from its Task workspace and from
+<code>executionLocations</code>. <code>open_through</code>, its splice and its fork
+exception go, and the terminal stops reselecting the Task from its cwd between
+prepare and open. A Session link names no Task and stays bare.</p>
+</div>
+
 <h2>Looked at and left alone</h2>
 <p>A Task-run step knows it is one from <code>LF_GRAPH_STEP=task</code>, which the
 Graph sets on the child and <code>take_graph_step</code> clears, so the step's own
@@ -105,7 +129,8 @@ OpenCode never resetting <code>compacted</code>) stay recorded in the working
 design as seen, not changed here.</p>
 
 <h2>Questions</h2>
-<p>None open. The first pass's three were answered November 11 (1b with the start
+<p>None open. The gap above follows from the rule in <code>server-first.md</code>
+(“Desktop opening a Task's conversation” is managed). The first pass's three were answered November 11 (1b with the start
 and compact hooks kept for bare launches; 2 unchanged; 3a kept). Words in
 <code>scratch/loo-821-hooks.md</code>.</p>
 

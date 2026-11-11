@@ -132,6 +132,29 @@ command: the actions, the managed rule in `server/README.md` and
 to change, no open choice. `scratch/concept-review.html` now shows the rule as
 built.
 
+Concept review, third pass (November 11, headless, after `open_through`).
+Desktop opens a Task's conversation through `--task` only on the first
+prepare. Its Task workspace reopens a pane that already has a Session by id
+(`SessionsView.swift` `prepareSession(id:)` when
+`multiplexer.sessionPane?.sessionId` is set: a layout restored after a
+relaunch, a conversation reopened after it exited), and so does connecting to
+a Task-run step's Session (`executionLocations`, which has the `taskID`). Both
+resume bare: no server check, a steer waits unseen if the server is down.
+`server-first.md` says Desktop opening a Task's conversation is managed, so
+this is the rule's own gap, not a new choice.
+
+Next implement direction: a Session id and the Work it belongs to on one
+command. `SessionTarget::from_selectors` accepts `<id> --task X` (and
+`--wave`): the id selects, `--task` makes the command managed, as
+`Cli::names_work` already reads it. Desktop passes the Task (or Wave) beside
+the id from its Task workspace and from `executionLocations`. The prepare
+returns `open_argv` with the id and the selector together, so `open_through`,
+its splice and its fork exception go (a fork is `--fork` with the same
+selectors), and the terminal no longer reselects the Task from its cwd between
+prepare and open. A Session link (`openSessionLink`) names no Task and stays
+bare. Test: a Task workspace pane reopened by id with the server stopped fails
+naming it.
+
 LOO-824 (its concept review, Jack Heart: "managed should = held") will read
 `AgentConfig::managed` and call `require_server` instead of keeping its own
 rule; whichever branch lands second makes the switch.

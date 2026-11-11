@@ -34,10 +34,11 @@ Settled by the design (concept review, November 10):
 
 Remaining:
 
-- Demo with a real Claude turn in a Task Session (server up: turn recorded,
-  steer received, `ps` shows no `lf` on the store; server stopped: turn
-  completes, one gap line). Not run. `session_steers::` covers the same
-  sequence headless with a provider stand-in.
+- Demo with a real Claude turn in a Task Session. QA (`scratch/qa.html`) ran
+  the same sequence with the branch CLI, a launchd server and a stand-in
+  `claude` running the installed hooks: steer delivered and `emitted`, no hook
+  holding the store, frozen and stopped server each one gap line, duplicate
+  after a lost `.printed`. A real Claude login was not available.
 - Gate: the suites under Checks marked gate, plus `harness::` (named in the
   Task's check, not yet run on this tree).
 - `limit` / `record-limit` still open the store, on a usage limit only.

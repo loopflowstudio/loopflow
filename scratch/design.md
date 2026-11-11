@@ -1,10 +1,11 @@
 # LOO-825: conversation opening
 
-Status: publication is blocked by three reproduced parallel host-request timeouts
-at `a73c71151`. The affected Rust run passed 447 of 450 tests. Attachment-aware
-recovery is implemented; the remaining verification is recorded below. The earlier
-recovery counterexample remains the check against treating a retained surface as
-attachment.
+Status: the current gate passed all 450 affected Rust tests and all 804 headless
+Swift tests at `42b8c0f35`. Publication remains blocked by the unexplained
+parallel host-request timeouts recorded at `a73c71151`; neither the focused nor
+full traced run reproduced them. See `gate.md` for the current checks and limits.
+The recovery counterexample remains the check against treating a retained
+surface as attachment.
 
 The Task brief delegates the remaining product decisions:
 
@@ -151,13 +152,18 @@ and broader workspace acceptance remain outside this walkthrough.
 
 ## Remaining verification
 
-Gate: affected Rust suites (`open`, `desktop`, CLI discovery, Wave resolution,
-Work opening, transport and the CLI binary), documented commands, architecture,
-clippy, the broader Swift suite and the Xcode terminal-fallback build. Isolated Rex/Herdr acceptance remains,
-including direct opening, agent sibling and own-Session opening, same-Rex
-identity, focus present/absent, closed history, plain terminals, repository/Wave
-selection and failed attachment. The native arrangement fixtures alone do not
-establish all of those conversation behaviors.
+The current gate and isolated native fixtures are recorded in `gate.md`. The
+affected Rust suites, docs, architecture, clippy, headless Swift and Xcode fallback
+build all passed. Rex and Herdr native arrangements and Rex conversation
+attachment/reconnection passed after running Rex outside macOS's network sandbox.
+Its `/usr/bin/login` launcher cannot execute inside that sandbox. The Rex
+arrangement fixture now invokes `workspace` for its inside-host arrangement check.
+
+Before publication, the earlier intermittent 2-second host-request timeout still
+needs a cause. Traced parallel runs did not reproduce it. Native provider
+authentication and visible-window focus judgment remain outside headless gate;
+existing QA records direct/agent routing, own-Session opening, failure/retry and
+headless focus refusal. Transport tests cover delayed readiness and closed history.
 
 The earlier parallel Work-opening run had four 2s host-request timeouts; eight
 serial rechecks and three workspace checks passed without explaining them.

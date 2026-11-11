@@ -1,5 +1,8 @@
 # LOO-825 publication check, 2026-11-10
 
+The later `gate.md` records passing current checks and native-host acceptance.
+The unexplained two-second host-request failures below still block publication.
+
 `lf sync` checkpointed the QA edits as `a73c71151` and found no new base
 commits beyond `0766e9cbf`. The diff was reviewed against that base, including
 the QA repair. Publication remains blocked; `lf pr publish` has not run.

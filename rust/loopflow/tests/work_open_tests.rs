@@ -1907,7 +1907,11 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
             if settled {
                 break;
             }
-            assert!(Instant::now() < deadline, "{block}: {process}");
+            assert!(
+                Instant::now() < deadline,
+                "{block}: {process}\n{}",
+                server.screen(container, id)
+            );
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -1927,7 +1931,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let reply = root.path().join("caller.json");
     call(
         "session.new_window",
-        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 open --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
+        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 workspace --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
     );
     let deadline = Instant::now() + Duration::from_secs(15);
     let automatic = loop {
@@ -1945,7 +1949,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         }
         assert!(
             Instant::now() < deadline,
-            "Rex shell did not return its automatic-open receipt: {}",
+            "Rex shell did not return its workspace receipt: {}",
             std::fs::read_to_string(reply.with_extension("json.err")).unwrap_or_default(),
         );
         std::thread::sleep(Duration::from_millis(50));

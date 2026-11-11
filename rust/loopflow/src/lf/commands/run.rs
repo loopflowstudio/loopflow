@@ -181,6 +181,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
         managed,
         ..resolved
     };
+    (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
     print_context_header(&built, &turn);
     run_prompt(&built, &turn).map(|_| ())
 }
@@ -565,11 +566,7 @@ fn build_prompt_at(
         "prepared launch prompt"
     );
     crate::agent_input_timing::record("prompt_end", subject);
-    let agent = prepared
-        .config
-        .agent
-        .clone()
-        .expect("prepare_process_prompt always sets agent");
+    let agent = prepared.config.resolved_agent()?;
     let (harness, model) = parse_agent(&agent);
 
     let skill_name = discovered_skill

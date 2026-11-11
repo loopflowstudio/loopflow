@@ -404,3 +404,4 @@ Script: `/tmp/lfplan/bin/plan.py <db> <traced.json>` (not kept). Jack Heart:
 - `--lib -- server::boundary:: store::sqlite::session_events:: store::sqlite::steers` — 48 pass
 - `--lib -- session_record:: ops::human_session::` — 70 pass, 5 `capture_tests` fail together; all 25 `capture_tests` pass alone; gate (nextest isolates)
 - clippy — pass; `check_migrations.py` — only `unmerged: steer_delivery_lookups.sql`; `--lib store::migrations::` — 129 pass
+- Compress: the measured `sqlite_stat1` rows are one SQL `VALUES` list; `--lib -- server::boundary::` — 9 pass; clippy — pass

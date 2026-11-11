@@ -15,8 +15,7 @@ enum ServerClient {
                      deadline: Duration = readDeadline) async throws -> String {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
-        let value = try await link.request(.read(query), deadline: deadline)
-        return value.string ?? String(decoding: value.bytes, as: UTF8.self)
+        return try await link.request(.read(query), deadline: deadline).printed
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.

@@ -21,7 +21,7 @@ final class TaskFeed {
     private(set) var repositories: [RepositoryTasks] = []
     private(set) var loaded = false
     private(set) var error: String?
-    private(set) var waves: [MobileWave] = []
+    private(set) var waves: [Wave] = []
     var filter = TaskList.started
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
@@ -172,13 +172,13 @@ struct TaskListView: View {
     private var title: String {
         guard !shown.isEmpty else { return "All repositories" }
         guard let wave = waves.first(where: { $0.id == feed.wave }) else { return name(shown) }
-        return "\(name(shown)) · \(wave.name)"
+        return "\(name(shown)) · \(wave.displayName)"
     }
 
     /// The shown repository's Waves; a Wave is chosen within a repository, as on Desktop.
-    private var waves: [MobileWave] {
+    private var waves: [Wave] {
         guard let path = feed.repositories.first(where: { $0.repository == shown })?.path else { return [] }
-        return feed.waves.filter { $0.repo == path }.sorted { $0.name < $1.name }
+        return feed.waves.filter { $0.repo == path }.sorted { $0.displayName < $1.displayName }
     }
 
     var body: some View {
@@ -260,7 +260,7 @@ struct TaskListView: View {
                         if !waves.isEmpty {
                             Picker("Wave", selection: $feed.wave) {
                                 Text("Every Wave").tag(String?.none)
-                                ForEach(waves) { Text($0.name).tag(String?.some($0.id)) }
+                                ForEach(waves) { Text($0.displayName).tag(String?.some($0.id)) }
                             }
                         }
                     } label: {

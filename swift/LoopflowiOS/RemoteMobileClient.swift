@@ -28,27 +28,19 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
 
+    /// The Machine's typed reads and writes, as Desktop makes them.
+    var query: RegistryQuery {
+        RegistryQuery.served(deadline: Self.requestDeadline) { [self] in try await connection() }
+    }
+
     /// Every repository's Tasks matching `expression`, kept current.
     func observeTasks(expression: String) -> RemoteTaskObservation {
         RemoteTaskObservation(query: .viewSelect(expression: expression)) { [self] in try await connection() }
     }
 
-
     /// The Machine's Waves that are still in use.
-    func waves() async throws -> [MobileWave] {
-        try await decode([MobileWave].self, read(.waveList)).filter { $0.retiredAt == nil && $0.status != "abandoned" }
-    }
-
-    func file(task: String, path: String) async throws -> TaskFileSnapshot {
-        try await decode(TaskFileSnapshot.self, read(.taskFile(issue: task, path: path)))
-    }
-
-    func changes(task: String) async throws -> TaskChangesSnapshot {
-        try await decode(TaskChangesSnapshot.self, read(.taskChanges(issue: task, base: "parent", head: nil)))
-    }
-
-    func diff(task: String, path: String) async throws -> TaskDiffSnapshot {
-        try await decode(TaskDiffSnapshot.self, read(.taskDiff(issue: task, path: path, base: "parent", head: nil, draft: nil)))
+    func waves() async throws -> [Wave] {
+        try await query.allWaves().filter { $0.status != .abandoned }
     }
 
     private struct Ticket: Decodable { let ticket: String }
@@ -72,7 +64,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     }
 
     func creationContext() async throws -> MobileCreationContext {
-        let portfolio = try await decode(Portfolio.self, read(.desktopPortfolio))
+        let portfolio = try await query.portfolio()
         if let error = portfolio.error { throw RegistryQueryError(error) }
         let machineID = savedMachine.machineID
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
@@ -97,15 +89,14 @@ final class RemoteMobileClient: MobileTaskCreationClient {
                     receipt: receipt, message: previous.disposition == .inspect ? previous.explanation : nil)
             }
         }
-        let result = try await request(.command(.taskCreate(directory: submission.directory,
-            requestID: id, title: nil, request: submission.request, wave: nil, graph: nil, session: nil, run: true)))
-        let receipt = try decode(TaskCreateReceipt.self, result)
+        let receipt = try await query.createTask(request: submission.request, wave: nil, graph: nil,
+                                                 cwd: submission.directory, requestID: id)
         return MobileTaskOutcome(taskId: receipt.task.id, state: .started, receipt: receipt, message: nil)
     }
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
         try verifySubmission(submission)
-        let plan = try await decode(WorkViewPlan.self, read(.desktopViewGet(directory: submission.directory, expression: "task:\(taskID)")))
+        let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
         guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
@@ -158,21 +149,6 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     private func decode<T: Decodable>(_ type: T.Type, _ value: RawJSON) throws -> T {
         try value.decode(type)
-    }
-}
-
-/// A Wave as the nav offers it: a name within one repository.
-struct MobileWave: Decodable, Identifiable, Equatable {
-    let id: String
-    let name: String
-    let status: String
-    /// The repository's path on the Machine.
-    let repo: String
-    let retiredAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, status, repo
-        case retiredAt = "retired_at"
     }
 }
 

@@ -369,6 +369,20 @@ private final class Expiry: @unchecked Sendable {
     func fire() { lock.withLock { value = true } }
 }
 
+extension RegistryQuery {
+    /// Typed reads and writes over the server `link` returns; nothing runs `lf`.
+    /// A read or write unanswered within `deadline` is cancelled and reported.
+    public static func served(deadline: Duration?, link: @escaping @Sendable () async throws -> ServerLink) -> RegistryQuery {
+        RegistryQuery(serve: { read in
+            try await link().request(.read(read), deadline: deadline).printed
+        }, write: { change in
+            String(decoding: try await link().request(.command(change), deadline: deadline).bytes, as: UTF8.self)
+        }) { args, _ in
+            throw RegistryQueryError("`lf \(args.joined(separator: " "))` runs only on the Machine")
+        }
+    }
+}
+
 public enum ServerSubscriptionUpdate: Sendable {
     case reading(RawJSON)
     case event(SubscriptionEvent)

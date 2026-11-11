@@ -13,6 +13,9 @@ public struct RawJSON: Sendable, Equatable {
 
     public var isNull: Bool { bytes.elementsEqual("null".utf8) }
 
+    /// What `lf <read>` prints for this value: bare text for a string, JSON otherwise.
+    public var printed: String { string ?? String(decoding: bytes, as: UTF8.self) }
+
     /// The text of a JSON string; nil for any other value.
     public var string: String? {
         guard bytes.first == UInt8(ascii: "\""), bytes.last == UInt8(ascii: "\""), bytes.count >= 2 else { return nil }

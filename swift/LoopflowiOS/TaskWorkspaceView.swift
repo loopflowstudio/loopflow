@@ -99,7 +99,7 @@ struct TaskChangesView: View {
     }
 
     private func load() async {
-        do { changes = .value(try await client.changes(task: task.work.id)) } catch {
+        do { changes = .value(try await client.query.taskChanges(issue: task.work.id)) } catch {
             changes = .failed(machineConnectionMessage(error))
         }
     }
@@ -146,7 +146,7 @@ struct TaskFileView: View {
     }
 
     private func load() async {
-        do { file = .value(try await client.file(task: task.work.id, path: path)) } catch {
+        do { file = .value(try await client.query.taskFile(issue: task.work.id, path: path)) } catch {
             file = .failed(machineConnectionMessage(error))
         }
     }
@@ -201,7 +201,7 @@ struct TaskDiffView: View {
     }
 
     private func load() async {
-        do { diff = .value(try await client.diff(task: task.work.id, path: path)) } catch {
+        do { diff = .value(try await client.query.taskDiff(issue: task.work.id, path: path)) } catch {
             diff = .failed(machineConnectionMessage(error))
         }
     }

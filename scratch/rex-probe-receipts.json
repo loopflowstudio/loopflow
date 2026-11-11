@@ -1,0 +1,349 @@
+{
+  "version": "rex 0.0.1793377904-ge6592f\ncommit: e6592f74969959db77f1f84261901ef599a025cf\nbuilt: 2026-10-30T16:31:44Z\napi: revision 8 (supports 0 to 8)\n",
+  "sha256": "524cfc1eb9a271d9285975f392d9f943e7179142c5749741cb1dd03fed4cf282",
+  "observations": {
+    "method_names": [
+      "block.event"
+    ],
+    "process_schema": {
+      "code": 0,
+      "body": "Get the processes running in the terminal and how its program exited.\n\nMethod: com.superlogical.terminal.process\n\nInput schema:\n{\n  \"type\": \"object\",\n  \"additionalProperties\": false\n}\n\nOutput schema:\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"ancestors\": {\n      \"type\": [\n        \"null\",\n        \"array\"\n      ],\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"argv0\": {\n            \"type\": \"string\",\n            \"description\": \"The first argument as the process shows it now, such as -zsh for a login shell, cut to 256 bytes. Rex never returns the other arguments, because they can hold secrets.\"\n          },\n          \"cwd\": {\n            \"type\": \"string\",\n            \"description\": \"The process's working directory, as an absolute path. Left out if it can't be read, as for another user's process.\"\n          },\n          \"invoked_path\": {\n            \"type\": \"string\",\n            \"description\": \"The absolute path the executable was started through, before symlinks were resolved, such as a link in a bin directory. Present only when Rex can confirm it leads to the same file as path.\"\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"description\": \"The file name of the executable, such as zsh. When path is left out, the system's own name for the process, which Linux limits to 15 bytes. To label a process, use the first of script, argv0, and name that is present.\"\n          },\n          \"path\": {\n            \"type\": \"string\",\n            \"description\": \"The absolute path of the executable, with symlinks resolved. Left out if it can't be read, as for another user's process on Linux.\"\n          },\n          \"pid\": {\n            \"type\": \"integer\",\n            \"description\": \"The process ID.\"\n          },\n          \"script\": {\n            \"type\": \"string\",\n            \"description\": \"For an interpreter such as node or python, the absolute path of the script it is running, as the user named it. Left out for other programs.\"\n          },\n          \"user\": {\n            \"type\": \"string\",\n            \"description\": \"The name of the account the process runs as. Left out if it can't be looked up.\"\n          },\n          \"user_id\": {\n            \"type\": \"integer\",\n            \"description\": \"The user ID the process runs as on Unix, which shows when a command runs as another user, such as with sudo. Zero on Windows.\"\n          }\n        },\n        \"required\": [\n          \"pid\",\n          \"user_id\",\n          \"name\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"description\": \"The processes between foreground and child, nearest first: the parent of foreground, then its parent, and so on, ending with child. Left out when foreground is child, when there are more than 16, or when one of them has exited.\"\n    },\n    \"child\": {\n      \"type\": [\n        \"null\",\n        \"object\"\n      ],\n      \"properties\": {\n        \"argv0\": {\n          \"type\": \"string\",\n          \"description\": \"The first argument as the process shows it now, such as -zsh for a login shell, cut to 256 bytes. Rex never returns the other arguments, because they can hold secrets.\"\n        },\n        \"cwd\": {\n          \"type\": \"string\",\n          \"description\": \"The process's working directory, as an absolute path. Left out if it can't be read, as for another user's process.\"\n        },\n        \"invoked_path\": {\n          \"type\": \"string\",\n          \"description\": \"The absolute path the executable was started through, before symlinks were resolved, such as a link in a bin directory. Present only when Rex can confirm it leads to the same file as path.\"\n        },\n        \"name\": {\n          \"type\": \"string\",\n          \"description\": \"The file name of the executable, such as zsh. When path is left out, the system's own name for the process, which Linux limits to 15 bytes. To label a process, use the first of script, argv0, and name that is present.\"\n        },\n        \"path\": {\n          \"type\": \"string\",\n          \"description\": \"The absolute path of the executable, with symlinks resolved. Left out if it can't be read, as for another user's process on Linux.\"\n        },\n        \"pid\": {\n          \"type\": \"integer\",\n          \"description\": \"The process ID.\"\n        },\n        \"script\": {\n          \"type\": \"string\",\n          \"description\": \"For an interpreter such as node or python, the absolute path of the script it is running, as the user named it. Left out for other programs.\"\n        },\n        \"user\": {\n          \"type\": \"string\",\n          \"description\": \"The name of the account the process runs as. Left out if it can't be looked up.\"\n        },\n        \"user_id\": {\n          \"type\": \"integer\",\n          \"description\": \"The user ID the process runs as on Unix, which shows when a command runs as another user, such as with sudo. Zero on Windows.\"\n        }\n      },\n      \"description\": \"The process the terminal started, usually a shell. On macOS a login shell runs under login, and this describes login. Left out if there is no such process or it can't be read.\",\n      \"required\": [\n        \"pid\",\n        \"user_id\",\n        \"name\"\n      ],\n      \"additionalProperties\": false\n    },\n    \"foreground\": {\n      \"type\": [\n        \"null\",\n        \"object\"\n      ],\n      \"properties\": {\n        \"argv0\": {\n          \"type\": \"string\",\n          \"description\": \"The first argument as the process shows it now, such as -zsh for a login shell, cut to 256 bytes. Rex never returns the other arguments, because they can hold secrets.\"\n        },\n        \"cwd\": {\n          \"type\": \"string\",\n          \"description\": \"The process's working directory, as an absolute path. Left out if it can't be read, as for another user's process.\"\n        },\n        \"invoked_path\": {\n          \"type\": \"string\",\n          \"description\": \"The absolute path the executable was started through, before symlinks were resolved, such as a link in a bin directory. Present only when Rex can confirm it leads to the same file as path.\"\n        },\n        \"name\": {\n          \"type\": \"string\",\n          \"description\": \"The file name of the executable, such as zsh. When path is left out, the system's own name for the process, which Linux limits to 15 bytes. To label a process, use the first of script, argv0, and name that is present.\"\n        },\n        \"path\": {\n          \"type\": \"string\",\n          \"description\": \"The absolute path of the executable, with symlinks resolved. Left out if it can't be read, as for another user's process on Linux.\"\n        },\n        \"pid\": {\n          \"type\": \"integer\",\n          \"description\": \"The process ID.\"\n        },\n        \"script\": {\n          \"type\": \"string\",\n          \"description\": \"For an interpreter such as node or python, the absolute path of the script it is running, as the user named it. Left out for other programs.\"\n        },\n        \"user\": {\n          \"type\": \"string\",\n          \"description\": \"The name of the account the process runs as. Left out if it can't be looked up.\"\n        },\n        \"user_id\": {\n          \"type\": \"integer\",\n          \"description\": \"The user ID the process runs as on Unix, which shows when a command runs as another user, such as with sudo. Zero on Windows.\"\n        }\n      },\n      \"description\": \"The process in the foreground, such as the shell at its prompt or the command it is running. For a wrapper such as sudo, git, or cargo, it is the command the wrapper runs. Left out if it can't be found or read.\",\n      \"required\": [\n        \"pid\",\n        \"user_id\",\n        \"name\"\n      ],\n      \"additionalProperties\": false\n    },\n    \"home\": {\n      \"type\": \"string\",\n      \"description\": \"The home directory that the terminal's program inherited, for showing and expanding ~ in paths.\"\n    },\n    \"last_exit\": {\n      \"type\": [\n        \"null\",\n        \"object\"\n      ],\n      \"properties\": {\n        \"error\": {\n          \"type\": \"string\",\n          \"description\": \"Why the program failed, such as 'exit status 1'. Left out when it exited successfully.\"\n        },\n        \"exit_code\": {\n          \"type\": \"integer\",\n          \"description\": \"The program's exit code, or -1 if it has none, as when a signal ended it.\"\n        }\n      },\n      \"description\": \"How the terminal's program exited. Null while it is still running, and for a terminal that didn't start a program of its own.\",\n      \"required\": [\n        \"exit_code\"\n      ],\n      \"additionalProperties\": false\n    }\n  },\n  \"required\": [\n    \"last_exit\"\n  ],\n  \"additionalProperties\": false\n}\n\nValidation notes:\n- Call it as `com.superlogical.terminal.process` with `session_id`, `block_id`, and this method's own arguments under `args`.\n",
+      "stderr": ""
+    },
+    "normal_created": {
+      "code": 0,
+      "body": {
+        "session_id": "session:01a1c7ef-5a6f-7f03-9996-eee13b673737",
+        "initial_windows": [
+          {
+            "window_id": "window:01a1c7ef-5a72-7f36-ab8c-2f7d811ea249",
+            "block_ids": [
+              "block:01a1c7ef-5a70-7042-bf44-96f569730918"
+            ],
+            "revision": 1
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    "normal_process": {
+      "code": 0,
+      "body": {
+        "last_exit": null,
+        "child": {
+          "pid": 10940,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "foreground": {
+          "pid": 10940,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "normal_pwd": {
+      "code": 0,
+      "body": {
+        "pwd": "file://localhost/tmp/loo820-h8je1t9m",
+        "owner": {
+          "pid": 10940,
+          "name": "python3.14"
+        }
+      },
+      "stderr": ""
+    },
+    "normal_write": {
+      "code": 0,
+      "body": {
+        "bytes_written": 3
+      },
+      "stderr": ""
+    },
+    "normal_wait": {
+      "code": 42,
+      "body": {
+        "exit_code": 42,
+        "error": "exit status 42"
+      },
+      "stderr": "Error: exit status 42\n"
+    },
+    "normal_wait_again": {
+      "code": 42,
+      "body": {
+        "exit_code": 42,
+        "error": "exit status 42"
+      },
+      "stderr": "Error: exit status 42\n"
+    },
+    "normal_exited_process": {
+      "code": 0,
+      "body": {
+        "last_exit": {
+          "exit_code": 42,
+          "error": "exit status 42"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "crash_created": {
+      "code": 0,
+      "body": {
+        "session_id": "session:01a1c7ef-5c2a-78ae-ab98-3658316df5fe",
+        "initial_windows": [
+          {
+            "window_id": "window:01a1c7ef-5c2b-72ca-8c38-33cb211bb044",
+            "block_ids": [
+              "block:01a1c7ef-5c2a-7918-ad01-7b349d1d9930"
+            ],
+            "revision": 1
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    "crash_process": {
+      "code": 0,
+      "body": {
+        "last_exit": null,
+        "child": {
+          "pid": 11182,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "foreground": {
+          "pid": 11182,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "crash_pwd": {
+      "code": 0,
+      "body": {
+        "pwd": "file://localhost/tmp/loo820-h8je1t9m",
+        "owner": {
+          "pid": 11182,
+          "name": "python3.14"
+        }
+      },
+      "stderr": ""
+    },
+    "crash_write": {
+      "code": 0,
+      "body": {
+        "bytes_written": 6
+      },
+      "stderr": ""
+    },
+    "crash_wait": {
+      "code": 1,
+      "body": {
+        "exit_code": -1,
+        "error": "signal: killed"
+      },
+      "stderr": "Error: signal: killed\n"
+    },
+    "crash_wait_again": {
+      "code": 1,
+      "body": {
+        "exit_code": -1,
+        "error": "signal: killed"
+      },
+      "stderr": "Error: signal: killed\n"
+    },
+    "crash_exited_process": {
+      "code": 0,
+      "body": {
+        "last_exit": {
+          "exit_code": -1,
+          "error": "signal: killed"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "restart_created": {
+      "code": 0,
+      "body": {
+        "session_id": "session:01a1c7ef-5ddb-7167-9b60-b82262709c49",
+        "initial_windows": [
+          {
+            "window_id": "window:01a1c7ef-5ddb-7a50-88de-97a4d605cbca",
+            "block_ids": [
+              "block:01a1c7ef-5ddb-71d4-b411-f42fdc61ed2f"
+            ],
+            "revision": 1
+          }
+        ]
+      },
+      "stderr": ""
+    },
+    "restart_before": {
+      "code": 0,
+      "body": {
+        "last_exit": null,
+        "child": {
+          "pid": 11612,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "foreground": {
+          "pid": 11612,
+          "user_id": 501,
+          "user": "jack",
+          "name": "python3.14",
+          "path": "/Users/jack/.local/share/uv/python/cpython-3.14.2-macos-aarch64-none/bin/python3.14",
+          "invoked_path": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "argv0": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3",
+          "script": "/Users/jack/src/loopflow.loo-820-explore-direct-provider/scratch/probe_rex.py",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "restart_after": {
+      "code": 0,
+      "body": {
+        "last_exit": null,
+        "child": {
+          "pid": 13819,
+          "user_id": 501,
+          "user": "jack",
+          "name": "zsh",
+          "path": "/bin/zsh",
+          "invoked_path": "/bin/zsh",
+          "argv0": "/bin/zsh",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "foreground": {
+          "pid": 13819,
+          "user_id": 501,
+          "user": "jack",
+          "name": "zsh",
+          "path": "/bin/zsh",
+          "invoked_path": "/bin/zsh",
+          "argv0": "/bin/zsh",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "normal_process_after_restart": {
+      "code": 1,
+      "body": "",
+      "stderr": "Error: session.attach request timed out after 2s; increase --timeout: context deadline exceeded\n"
+    },
+    "crash_process_after_restart": {
+      "code": 0,
+      "body": {
+        "last_exit": null,
+        "child": {
+          "pid": 13818,
+          "user_id": 501,
+          "user": "jack",
+          "name": "zsh",
+          "path": "/bin/zsh",
+          "invoked_path": "/bin/zsh",
+          "argv0": "/bin/zsh",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "foreground": {
+          "pid": 13818,
+          "user_id": 501,
+          "user": "jack",
+          "name": "zsh",
+          "path": "/bin/zsh",
+          "invoked_path": "/bin/zsh",
+          "argv0": "/bin/zsh",
+          "cwd": "/private/tmp/loo820-h8je1t9m"
+        },
+        "home": "/tmp/loo820-h8je1t9m"
+      },
+      "stderr": ""
+    },
+    "normal_wait_after_restart": {
+      "code": 1,
+      "body": "",
+      "stderr": "Error: session.attach request timed out after 2s; increase --timeout: context deadline exceeded\n"
+    },
+    "restart_write": {
+      "code": 0,
+      "body": {
+        "bytes_written": 7
+      },
+      "stderr": ""
+    },
+    "restart_wait": {
+      "code": 0,
+      "body": {
+        "exit_code": 0
+      },
+      "stderr": ""
+    }
+  },
+  "launches": {
+    "normal": [
+      {
+        "pid": 10940,
+        "cwd": "/private/tmp/loo820-h8je1t9m",
+        "at_ns": 1794355714701358000,
+        "ps": "10940 10783 10940 Tue Nov 10 16:08:34 2026     /Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3"
+      }
+    ],
+    "restart": [
+      {
+        "pid": 11612,
+        "cwd": "/private/tmp/loo820-h8je1t9m",
+        "at_ns": 1794355715575280000,
+        "ps": "11612 10783 11612 Tue Nov 10 16:08:35 2026     /Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3"
+      }
+    ],
+    "crash": [
+      {
+        "pid": 11182,
+        "cwd": "/private/tmp/loo820-h8je1t9m",
+        "at_ns": 1794355715140860000,
+        "ps": "11182 10783 11182 Tue Nov 10 16:08:35 2026     /Users/jack/src/loopflow.loo-820-explore-direct-provider/.venv/bin/python3"
+      }
+    ]
+  },
+  "survivors": []
+}

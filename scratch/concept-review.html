@@ -30,19 +30,19 @@ a { color: var(--accent); }
 <header>
 <p class="meta">LOO-823 · concept review · 2026-11-11 · PR #1877</p>
 <h1>The Task closes its conversations</h1>
-<p class="lead"><strong>Iterate to implement.</strong> Conversation closure still depends on a checkout-retirement record. Finish separating the two: a done Task with no checkout must end its conversation after the same viewing grace. The stated lifetime rule settles this; no new product choice is needed.</p>
+<p class="lead"><strong>Review outcome: advance.</strong> No further design change or open product choice within this PR. Closure is implemented independently of checkout retirement: a done Task without a checkout and a conversation resumed after retirement follow the same viewing grace and live-work holds. Gate and demo still verify the final code.</p>
 <p class="meta">Built from <code>scratch/process-leaks.md</code>, <code>scratch/questions.md</code>, <code>docs/sessions.md</code>, <code>swift/README.md</code>, <code>rust/loopflow/src/transport/{input,lifetime}.rs</code>, <code>store/sqlite/sessions.rs</code>, <code>ops/task/retirement.rs</code> and <code>builtins/task/skill/demo.md</code> (the last three under <code>rust/loopflow/src/</code>).</p>
 </header>
 
-<h2>The remaining mismatch</h2>
-<p><strong>Before this branch:</strong> quiet conversations expired, while an edited draft could hold them indefinitely. <strong>Built:</strong> open conversations stay resident and the input ledger is gone. Completed-Task closure works through a pending checkout retirement, including a PR-less checkout.</p>
-<p><strong>Counterexample:</strong> <code>lf session bind &lt;session&gt; --task &lt;done-task&gt;</code> is supported even when that Task has no checkout. Leave its viewer: no retirement record is created, so no completed-Task ending is authorized. This is a code-path finding, not a new runtime reproduction.</p>
+<h2>The repaired mismatch</h2>
+<p><strong>Before this branch:</strong> quiet conversations expired, while an edited draft could hold them indefinitely. <strong>Built:</strong> open conversations stay resident and the input ledger is gone. Completed-Task closure reads Task completion and current Session membership independently of checkout deletion.</p>
+<p><strong>Counterexample found in review:</strong> <code>lf session bind &lt;session&gt; --task &lt;done-task&gt;</code> is supported even when that Task has no checkout. Previously no retirement record meant no completed-Task ending. The repair also covers resumption after a finished retirement. The original finding came from code inspection; both cases now have passing transport regressions.</p>
 <table>
 <thead><tr><th>Action</th><th>Concept</th><th>State-changing API</th></tr></thead>
 <tbody>
 <tr><td>Type, edit, send</td><td>Bytes waiting for the provider, then no lf input state</td><td><code>PendingInput::push / forward</code>; no store write</td></tr>
 <tr><td>Leave; return</td><td>Viewer leaves; provider stays</td><td><code>record_owner_viewer_hold</code>; <code>lf resume &lt;session&gt;</code></td></tr>
-<tr><td>Complete a Task; leave</td><td><strong>Proposed:</strong> closure follows Task completion, even without a checkout</td><td><code>owner_retiring</code> / <code>Ending::confirm</code>: judge Task state, membership, viewing and live work independently of deletion progress</td></tr>
+<tr><td>Complete a Task; leave</td><td>Closure follows Task completion, even without a checkout</td><td><code>owner_task_completed</code> / <code>Ending::confirm</code>: judge Task state, membership, viewing and live work independently of deletion progress</td></tr>
 <tr><td>Let cleanup remove the checkout</td><td>Merged delivery and settled execution permit a separate effect</td><td><code>retirement::run</code> → <code>prepare_deletion</code>; missing placement cannot prevent conversation closure</td></tr>
 <tr><td>Abandon a Task</td><td>Unviewed conversations end, even during a turn</td><td><code>owner_task_abandoned</code> → <code>Ending::confirm</code></td></tr>
 <tr><td>Quit or replace the provider</td><td>History survives; its unsent editor does not</td><td>Provider quit; <code>lf resume</code> takeover; <code>lf process rollover</code></td></tr>
@@ -51,17 +51,17 @@ a { color: var(--accent); }
 
 <h2>Use it, lose the connection, return</h2>
 <p>Leave a draft in an open Task and close its viewer. Return to the same provider. Complete the Task and leave again: after the fifteen-minute viewing grace, cleanup can end it once live work settles. A returning viewer cancels cleanup.</p>
-<p><strong>Proposed coverage:</strong> repeat with a done Task that never had a checkout, then with a conversation resumed after checkout retirement. Both follow the same closure rule. A finished deletion cannot exempt a new running conversation.</p>
+<p><strong>Covered by regressions; still to demonstrate:</strong> repeat with a done Task that never had a checkout, then with a conversation resumed after checkout retirement. Both follow the same closure rule. A finished deletion cannot exempt a new running conversation.</p>
 <p>A locked store cannot stall typing or authorize closure. The owner retries the judgment after recovery without replaying input, rechecking Task reopening and viewer return. Provider history and a saved screen remain; the unsent editor is lost.</p>
 <p><strong>Counterexample kept:</strong> a missed hook can hide an active turn. Output arriving after the cleanup judgment invalidates that judgment. The output check remains; the idle timer is gone.</p>
 
 <h2>Words people will meet</h2>
-<blockquote><p><strong>Proposed docs:</strong> A done Task's conversation ends after the viewing grace once live work settles, whether or not the Task has a checkout. Returning afterward continues from saved history; it does not reopen the Task. Checkout deletion is a separate cleanup effect.</p></blockquote>
+<p>A done Task's conversation ends after the viewing grace once live work settles, whether or not the Task has a checkout. Returning afterward continues from saved history; it does not reopen the Task. Checkout deletion is a separate cleanup effect. <code>docs/sessions.md</code> describes this behavior.</p>
 <p>The demo skill now waits for live work, quits each demo provider and joins its processes before removing the runtime root. Quitting the app alone is insufficient. History stays.</p>
 <p><strong>Built:</strong> Wave and repository conversations follow the open-Task rule. Bare owners also remain until quit during this transition. The ignored <code>end_detached_after</code> key and unused database column remain only for release compatibility and staged removal.</p>
 <p><strong>Proposed, unbuilt:</strong> bare-direct launch and resident-limit suspension. LOO-824 supplies the planned emulator; reading an empty editor from it has not been chosen. Nothing here adds a replacement ledger.</p>
 
-<p><small>Next: implement and demonstrate closure without a checkout and after retirement. Gate and the corrected process recount still follow. No code changed or tests ran in this review; earlier counts remain historical.</small></p>
+<p><small>Recorded after compression: 15 lifetime/retirement tests passed (33.90s), and both completed-Task transport regressions passed (14.86s). The earlier full transport run of 110 passed / 8 ignored predates this closure repair. This headless review compared the design, code and regressions; it changed documentation only and ran no tests. Gate, SSH cleanup verification, demonstration of both repaired cases and the corrected process recount remain.</small></p>
 
 <h2>Questions deferred beyond this PR</h2>
 <ol>

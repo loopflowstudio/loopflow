@@ -353,3 +353,15 @@ exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
 After `lf task complete`, the owner ends itself once fifteen minutes have passed
 without a viewer and live work has settled, even without a checkout or cleanup
 sweep.
+
+A new conversation's first launch exits the stand-in at once: its first turn
+arrives on a pipe, not the terminal. Read the thread ID from the transcript
+(`started <id>`), write any line to `$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl`
+beside the world's existing transcript, and `lf session resume` again; resumed,
+it reads the terminal. For a done Task without a checkout, prepare a repository
+conversation (`lf session resume --prepare --json` in the repository), complete
+a checkout-less Task, then `lf session bind <session> --task <task>`. Binding
+claims the Task, which reads `git config user.email` in the repository: with an
+isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
+text can match the repainted saved screen before the new provider reads input;
+wait for text only the new provider prints.

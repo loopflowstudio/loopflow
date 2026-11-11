@@ -6,6 +6,20 @@ or Dev-app processes. Existing processes are report-only: no signaling anything
 this work did not start, no name-pattern kills, no synthetic CPU load, and no
 step-tree reaper in lf.
 
+Current state: Task-based conversation closure is implemented, including a done
+Task without a checkout and a conversation resumed after retirement. The recorded
+post-compression checks passed 15 lifetime/retirement tests and both transport
+regressions. The 110-test transport run below predates this separation; it does
+not cover the final closure implementation. Remaining work is verification and
+demo, listed at the end; no implementation or product decision remains for this PR.
+
+Headless concept review, 2026-11-11: no further design change and no open choice
+within this PR; advance. Reviewed the ordinary draft/return path, closure without
+a checkout, resumption after retirement, store failure/recovery, and the
+returning-viewer and missed-hook counterexamples against the implementation and
+regressions. No code changed or tests ran in this review. Gate and demo still
+verify the final code; resident-limit suspension remains deferred.
+
 Report: `uv run python -I scratch/process_audit.py` writes `scratch/process-audit.html`
 (read-only; it opens `loopflow.db` with `mode=ro` for shell receipts).
 
@@ -138,22 +152,22 @@ Consequences of the rule, no change here:
 
 ## Concept review: closure belongs to the Task, not its checkout
 
-2026-11-11, headless review. Implementation direction, implied by Jack Heart's
+2026-11-11, headless review. The repair follows Jack Heart's
 "with task sessions, i think we can just hold them until the task is closed basically"
-and "4a" (done and abandoned): finish separating conversation closure from
+and "4a" (done and abandoned): conversation closure is separate from
 checkout deletion. No new product choice.
 
-Counterexample at review: bind an unfinished conversation to a done Task with no checkout,
+Counterexample before the repair: bind an unfinished conversation to a done Task with no checkout,
 then leave it. `docs/sessions.md` supports this interaction; binding neither
 adopts a checkout nor reopens the Task. `reconcile_task_retirement` requires
-`worktree IS NOT NULL`, and `owner_retiring_tasks` requires a `closing` retirement
-row. The conversation therefore has no completed-Task ending path. The PR-less
-checkout repair does not cover a missing checkout. A `retired` row also must
-not permanently exempt a subsequently resumed conversation from the same rule.
-These are code-path findings, not a fresh runtime reproduction.
+`worktree IS NOT NULL`, and the former `owner_retiring_tasks` required a `closing`
+retirement row. The conversation therefore had no completed-Task ending path.
+The PR-less checkout repair did not cover a missing checkout or a subsequently
+resumed conversation with a `retired` row. These were code-path findings;
+the regression results below now cover both repairs.
 
-Proposed experience and docs wording: "A done Task's conversation ends after
-the viewing grace once live work settles, whether or not the Task has a
+Implemented experience, also described in `docs/sessions.md`: "A done Task's
+conversation ends after the viewing grace once live work settles, whether or not the Task has a
 checkout. Returning before cleanup cancels that ending. Returning afterward
 continues from saved history; it does not reopen the Task. Checkout deletion
 is a separate cleanup effect." Leave the existing binding behavior intact.
@@ -181,7 +195,7 @@ Implementation contract:
 `scratch/concept-review.html` records the review direction. The resident-limit
 choices remain deferred, outside this PR.
 
-### Delete — do not maintain
+### Removed mechanisms
 
 - Removed: Session membership in `owner_retiring_tasks` and transport's consumption of a
   `closing` checkout row. The remaining `shell_retiring_tasks` / `shell_retiring`
@@ -232,6 +246,12 @@ PR-less or unresolved checkout stays. The real walkthrough with
 regression test `retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout`.
 Seen but outside this change: keystrokes typed while a return is still opening
 the provider are dropped; attaching waits on a held store write lock.
+
+QA second run, 2026-11-11 05:13–05:55, final closure code: no code change
+needed. Seen, not fixed (outside or cosmetic): input typed while a return is
+opening is dropped (#1882 path); after a return and re-closure the checkout row
+reads "Retained by an open Task Session viewer" until the next sweep;
+owner-ended providers keep open `processes` rows that nothing reads as running.
 
 ## Verified repairs
 
@@ -285,18 +305,21 @@ passes alone were insufficient. No startup repair remains from that finding.
 
 ## Remaining verification
 
-- Gate: affected transport, retirement, native-turn/steers, rollover, config,
-  CLI resolution/parser, server schema and `documented_commands::` suites;
+- Gate: affected transport, retirement (including store queries), native-turn/steers,
+  rollover, config, CLI resolution/parser, server schema and `documented_commands::` suites;
   Clippy. Reuse passing results only for identical content and command plans.
   The earlier late screen-directory finding still needs a fresh SSH-suite
   cleanup check.
 - Gate: `cargo package --locked --allow-dirty -p loopflow` for the embedded
   demo skill edit.
-- Demo: process diff and regenerated audit with the corrected executable
-  selector. The audit no longer calls an open conversation stale solely for
-  being old and unviewed; the saved counts include the selector error and
-  cannot serve as the final recount.
+- Demo: process diff after the affected suites. The audit regenerated at QA
+  05:20 counted 368, matching fresh `comm` recounts before and after (368, 368).
+- Demo: show the walked cases from `scratch/qa.html` (second run, 05:13–05:55):
+  open Task draft kept 40 min; done Task without a checkout ended at
+  completion + 15:00; checkout Task ended likewise, and its conversation
+  resumed after cleanup ended 15:00 after the viewer left again.
 
-Full build/test results before the lifetime revision do not cover its deletions.
+Full build/test results before the lifetime revision do not cover its deletions;
+the later 110-test runs cover those deletions but predate Task-based closure.
 No new product decision is needed for this PR; resident-limit suspension stays
 deferred with the choices in `questions.md`.

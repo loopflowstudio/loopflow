@@ -69,3 +69,10 @@ for the parent plan after its obsolete scratch plans were removed.
   calls with a DYLD interposer that records only successful child PIDs; do not
   put instrumentation in the five-pair wall-time cohort. Compare scope caching
   against the capacity commit if that commit clears the noise rule.
+
+- Final measurement, 2026-11-11: take one fresh read-only online backup of the
+  Machine store, then run every measured command against `/tmp/loo822-final-measure`.
+  Reuse the credential-free provider copies and unchanged timing functions;
+  freeze the clock and migrate/seal each side before timing. Compare baseline
+  `00851d9c6` with `b8fd92ab6b`; do not revert unrelated main or Task work for
+  an inconclusive final confirmation.

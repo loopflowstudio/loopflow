@@ -5183,6 +5183,8 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
         .unwrap();
     fixture.wait_file("ready");
     let owner = fixture.shell_owner("cleanup-shell");
+    // The launch attaches after the shell starts; take over only from it.
+    fixture.wait_controlled(&owner);
     let mut viewer = fixture.viewer(&owner, true);
     launch.wait().unwrap();
     viewer.input("sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
@@ -5264,6 +5266,7 @@ fn returning_task_viewer_resets_cleanup_without_another_sweep() {
         .unwrap();
     fixture.wait_file("ready");
     let shell = fixture.shell_owner("desktop-shell");
+    fixture.wait_controlled(&shell);
     let mut terminal = fixture.viewer(&shell, true);
     launch.wait().unwrap();
     terminal.input("export RETAINED=still-here; sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
@@ -5471,6 +5474,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "$(literal); spaced argument"
     );
     let owner = fixture.shell_owner("desktop-shell");
+    fixture.wait_controlled(&owner);
     let mut viewer = fixture.viewer(&owner, true);
     launch.wait().unwrap();
     viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
@@ -5607,6 +5611,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             .unwrap();
         fixture.wait_file("cycle-ready");
         let owner = fixture.shell_owner(&id);
+        fixture.wait_controlled(&owner);
         let mut viewer = fixture.viewer(&owner, true);
         launch.wait().unwrap();
         viewer

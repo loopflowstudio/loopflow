@@ -174,6 +174,8 @@ They do not cover direct signalling. With inherited `LF_*` unset and stdin close
 - Compress: `cargo test -p loopflow --lib --test transport_tests -- transport::lifetime::tests:: store::sqlite::task_retirement::tests:: completed_task_ returning_task_viewer_resets_cleanup_without_another_sweep silent_native_turns_survive_until_settlement native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return desktop_shell_reconnects_and_settles --test-threads=4`: 10 unit and 7 transport tests passed; `/tmp/loo823-compress-tests.log`. The lib-test link warned that `__eh_frame` exceeded compact-unwind's 16 MiB limit; build and tests succeeded. The last filter matched no test; explicit shell Close is checked separately below.
 - Compress: `cargo test -p loopflow --test transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs`: passed; `/tmp/loo823-compress-shell.log`. `cargo fmt --check` and `git diff --check` passed; `lf context` remains under both limits. Gate owns the broader suites and process census.
 - Realign: `git diff --check` passed; `lf context` fits both targets. Prose-only reconciliation reused the focused results above; no suites rerun.
+- Shell settlement race: interrupt hooks ran in registration order, so the owner's Process record (registered at startup) completed before its later shell-jobs hook wrote `jobs_settled`; `fixture.ends` could observe the exit first (`/tmp/loo823-bare-transport2.log`: 111 passed, 1 failed at `assert!(settled)`). `agent::exit_on_interrupt` now runs hooks in reverse, destructor order. Full `transport_tests` after the fix: 112 passed (`/tmp/loo823-hooks-transport1.log`). A second run hung in `desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets` cycle 12 at `launch.wait()`: the shell's argv wrote its ready file before the launch's own attach connected, the test's viewer took control first, then the launch's attach replaced it and never exited. The four Desktop-shell fixtures now `wait_controlled` before taking over. Two more full runs at load average ~175: 112 passed (`/tmp/loo823-hooks-transport3.log`), and 111 passed with `a_headless_run_survives_without_viewers` past its 30 s `launched` wait (`/tmp/loo823-hooks-transport2.log`, 227 s run). That test passed 5/5 alone in 14–19 s; it doesn't touch interrupt hooks. The cleanup and twenty-lifecycle tests passed in every full run after the fix.
+- Compress, with `wait_controlled` and the `closed_task_cleanup` migration rename: full `transport_tests` 112 passed, 0 failed (`/tmp/loo823-compress-transport1.log`); `closed_task_cleanup_upgrade_…` passed; `cargo fmt --check`, `git diff --check` clean. No further cuts: deletion targets are gone, surviving paths reviewed.
 
 The first live direct-signal world was interrupted at 09:58 when a rebuilt CLI
 met its older draft-migration checksum. Its own processes were stopped and a
@@ -328,3 +330,10 @@ Jack Heart: "lets push wahtever is left to 824 or 820 so we can land this and ge
 Moved by comment: bare-direct, resume-elsewhere, bare Graph targets, Desktop
 bare-pane owner → LOO-820; resident-limit suspension ("6a", "no opinion on 5")
 → LOO-824; bare Codex observer → LOO-826. LOO-823 takes no new scope.
+
+Jack Heart, next messages: "i am a little unsure on the bare direct though", then
+"if we already have it working we should just kee it here and hsip it here".
+Bare-direct launch stays in this PR. LOO-820 keeps the remainder: bare turn-hook
+and exit-record removal, resume-elsewhere, bare Graph targets, Desktop bare-pane owner.
+Jack Heart: "bare direct is great".
+Jack Heart: "826 was already shipping so i think you shouldnt ahve deferred anythign to it". Bare Codex observer → LOO-820; LOO-826 comment withdrawn.

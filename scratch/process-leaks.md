@@ -108,6 +108,42 @@ is the one sign of a turn the store never recorded. It no longer times anything.
 No new product choice. Still open, and not this PR's: the resident-limit
 default count and how suspension knows the editor is empty (`questions.md`).
 
+## Next implement: Swift README still describes the deleted rules
+
+Second headless review, 2026-11-11, against the diff at `261426a65`. Runtime,
+CLI help, `docs/` and the transport and test READMEs agree with the design.
+Two passages in `swift/README.md` do not:
+
+- Line 120: "Completed Tasks release on departure through the shared
+  two-minute/fifteen-minute lifecycle." There is one deadline now, the
+  fifteen-minute cleanup.
+- Lines 1255-1257: "Requested work, drafts and pending requests delay cleanup …;
+  eligible idle agents follow the two-minute policy." Drafts no longer delay
+  cleanup, and agents end with the checkout at that same deadline.
+
+Prose only; no build or test.
+
+Left alone on purpose: "an explicit end" in `transport/README.md` and the
+`transport_tests.rs` comment is the wording of the 2026-11-05 rule in Wave
+memory, minus the detached limit.
+
+Consequences of the rule, no change here:
+
+- `BACKGROUND_TASK_CONVERSATIONS` (16, `ops/human_session/primary.rs`) counts
+  every running Task conversation. While conversations ended after two quiet
+  minutes it bound only in bursts. Now, on a Machine with sixteen open Tasks
+  whose conversations run, every later `lf task run` skips its background start
+  and the conversation begins at `lf resume` or when Desktop opens it. It is a
+  second agent count beside the deferred per-Machine one ("6a"); see
+  `questions.md`.
+- `.lf/wave/infrastructure/MEMORY.md`, "Idle owners end", records the superseded
+  rule ("idle conversations to cost nothing", the two-minute limit, editable
+  drafts). This Task has no Wave and does not write there. Proposed replacement
+  for whoever maintains it: conversations stay running while their scope is
+  open; Task closure, quitting, `lf resume`, rollover or an explicit end are the
+  only endings; typed input holds nothing; an idle state under a resident limit
+  is deferred (quotes in `questions.md`).
+
 ## Remaining verification
 
 The sync at `475d5b369` includes #1882's conversation-opening readiness changes.

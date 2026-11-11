@@ -12,6 +12,12 @@ emulator is proposed, not chosen ("no opinion on 5"). No replacement input
 ledger belongs in this PR. Bare-direct launch remains in server-first; existing
 bare owners run until quit in this transition.
 
+Open with that limit, not this PR's: whether the sixteen-conversation cap on
+background Task starts (`BACKGROUND_TASK_CONVERSATIONS`) becomes the same number
+as the per-Machine agent count or stays separate. Nobody has said. It matters
+because the cap is now a steady ceiling: past sixteen running Task
+conversations a new Task's conversation waits for `lf resume` or Desktop.
+
 2026-11-11 coordination, comment `85810cc1-70e3-41da-a5ad-ee29c7867724`,
 Session `9af9d3006a494e3dba19fdd82e01b7a0` for Jack Heart:
 "From LOO-824's concept review: '823s rule is correct' (Jack Heart) also governs LOO-824's held terminals; LOO-824 drops its idle grace for them and will sync onto this PR once it lands. The deferred limit suspension that reads the input line off the server's emulator depends on LOO-824's emulator."

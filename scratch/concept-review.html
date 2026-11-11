@@ -47,58 +47,59 @@
 </style>
 </head><body>
 <main>
-<h1>Does a step that settles during a server restart still wake anyone?</h1>
-<p class="meta">LOO-826 · concept review 3, after realign · November 11, 2026<br>
+<h1>Bare conversations already hear Task progress at their next turn. Say so.</h1>
+<p class="meta">LOO-826 · concept review 4, after realign · November 11, 2026<br>
 Built from <code>scratch/loo-826.md</code>, <code>scratch/questions.md</code>,
-<code>docs/sessions.md</code>, <code>server/wake.rs</code>,
-<code>store/sqlite/steers.rs</code>, <code>harness/task_updates.rs</code>,
-<code>store/migrations/task_update_revision.sql</code></p>
+<code>docs/sessions.md</code>, <code>server/boundary.rs</code>, <code>server/wake.rs</code>,
+<code>harness/task_updates.rs</code>, <code>harness/context.rs</code>,
+<code>store/sqlite/task_work.rs</code></p>
 
-<p class="lead">Who to wake now survives a restart. What to tell them does not: the
-watcher's first reading is a baseline, so news recorded while no server ran waits for
-the person to type. The baseline guards against nothing. Claims already skip what a
-conversation heard. Deleting it is the change.</p>
+<p class="lead">The last open question asked whether bare conversations should get
+next-boundary updates. The code already gives them: an interactive bare launch keeps its
+turn hooks, the server answers its prompt boundary with an update, and the Task is found
+from its checkout. The docs and the notes said "nothing". The change is to the words and
+one test, not the behavior.</p>
+
+<blockquote>"Deliver at the next boundary only for bare or unreachable conversations."
+(Jack Heart, Task comment 164b4dd8)</blockquote>
 
 <h2>What people do, and what happens</h2>
 <div class="scroll"><table>
-<tr><th>Action</th><th>Built</th><th>Proposed</th></tr>
-<tr><td>Graph step settles; conversation idle</td><td>woken</td><td>woken</td></tr>
-<tr><td>Step settles during <code>lf install</code>'s restart</td><td class="no">not woken until the person types</td><td>woken when the server comes back</td></tr>
-<tr><td>Server down overnight, Desktop opens it</td><td class="no">next turn hears it</td><td>woken at start</td></tr>
-<tr><td>Any Graph writes a step; no news for this conversation</td><td class="no">its Claude inbox socket is opened and closed</td><td>untouched</td></tr>
-<tr><td>Plain <code>lf &lt;skill&gt;</code> in the Task checkout</td><td>no Task updates</td><td>open, question 1</td></tr>
+<tr><th>Conversation</th><th>Idle, a step settles</th><th>Next turn</th></tr>
+<tr><td><code>lf task run</code>, <code>--task</code>, Desktop (managed)</td><td>woken by the server</td><td>anything its turn missed</td></tr>
+<tr><td>Managed, server can't reach it</td><td>not woken; gap in <code>logs/lf.log</code></td><td>the update</td></tr>
+<tr><td>Plain <code>lf &lt;skill&gt;</code> in a Task checkout, interactive</td><td>not woken</td><td>the update <span class="tag">(built; docs say none)</span></td></tr>
+<tr><td>Plain <code>lf -b &lt;skill&gt;</code>, headless</td><td>not woken</td><td>nothing: no turn hooks, no server</td></tr>
 </table></div>
 
-<h2>The watcher</h2>
-<div class="built"><p><span class="tag">Built.</span></p>
-<pre><code>Ok(revision) if seen.is_none() =&gt; seen = Some(revision),   // baseline
-Ok(revision) if seen != Some(revision) =&gt; { seen = Some(revision); wake_idle(open, None); }</code></pre>
-<p><code>wake</code>: open Claude's inbox → claim steers → claim update → send if any text.</p></div>
-<div class="prop"><p><span class="tag">Proposed.</span> Every reading that differs from the last,
-the first included, wakes. <code>wake</code>: read steers and update → nothing, return → open inbox
-→ claim → send. The concepts don't change: an idle conversation is a managed Session on a live
-AgentProcess whose last turn yielded, reached by its recorded endpoint or inbox key.</p></div>
+<h2>Why the code does this</h2>
+<div class="built">
+<p><span class="tag">Built.</span> <code>native_args(…, managed=false)</code> keeps
+Claude's <code>Stop</code> and prompt hooks, without <code>crossSessionInbound</code>.
+<code>boundary.rs</code> answers every non-stop moment with
+<code>task_updates::claim</code>, which has no managed filter.
+<code>session_task_ids</code> joins on <code>session_membership</code>:
+<code>task_id</code> or the Session's <code>cwd</code> being the Task checkout.
+<code>idle_conversations</code> keeps only <code>WorkSource::is_managed</code>, so no wake.</p>
+</div>
 
-<h2>Why the baseline can go</h2>
-<p><code>task_updates::claim</code> compares the Task's state with the last update recorded
-for that Session and records <code>dispatched</code> before sending; pending steers stay pending
-until a batch is confirmed. A start-time wake therefore carries only undelivered news.
-Conversations launched before this build have no inbox key or endpoint recorded and aren't
-candidates until their next managed boundary, so an upgrade wakes nobody spuriously.</p>
-<blockquote>"Keep idle waking: a Task update that lands while a managed conversation is idle
-should still wake it, as today" (Jack Heart, Task comment 164b4dd8)</blockquote>
+<h2>Next implement</h2>
+<div class="prop">
+<p><span class="tag">Proposed.</span> <code>docs/sessions.md</code>:</p>
+<pre><code>A conversation you start with a bare `lf &lt;skill&gt;` in a terminal is never
+woken; it hears its Task's progress when you next type.</code></pre>
+<p>A <code>server::boundary</code> test pins it: interactive bare Session in a Task
+checkout, step settles, prompt boundary answer carries the update, <code>wake_idle</code>
+sends nothing.</p>
+</div>
 
-<h2>Also</h2>
-<p><code>--moment task-updates</code> stays a no-op for hooks in live conversations; its comment
-should name the Task that deletes it, filed at delivery.</p>
+<h2>What would break it</h2>
+<p>Interactive bare hooks leave with the owner (LOO-821: "dont really care about
+intermediate states as long as we remove the owner eventually"). When they do, bare
+conversations lose next-turn updates. That Task's design has to choose; this one doesn't.</p>
 
 <h2>Questions</h2>
-<ol class="q">
-<li>Bare conversations. The steer: "Deliver at the next boundary only for bare or
-unreachable conversations." LOO-821: bare hooks ask no server.
-<ol><li>Bare get nothing (built).</li>
-<li>A bare Session whose checkout names a Task asks the server best-effort at its prompt
-boundary, silent when none answers, and hears Task updates there.</li></ol></li>
-</ol>
+<p>None open. Steers waking (1) and bare conversations (2) are settled by the design
+and reversible; both are written in <code>scratch/questions.md</code>.</p>
 </main>
 </body></html>

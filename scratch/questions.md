@@ -72,14 +72,14 @@ Choices taken (reversible):
 - The `task_updates` revision triggers stay (shipped migration); the watcher
   reads them.
 
-Open: bare conversations. The steer says "Deliver at the next boundary only
-for bare or unreachable conversations." Under LOO-821's bare rule, bare hooks
-ask no server, so a bare conversation gets no Task updates at any boundary
-(`docs/sessions.md`: "not registered and gets no Task progress"), matching the
-Task brief's "Bare Sessions get none of this". Built as: unreachable managed
-conversations get the update at their next boundary; bare ones get nothing.
-Giving bare ones next-boundary updates would mean their hooks call the server
-again.
+Bare conversations, settled by the design in concept review 4 (reversible):
+the steer says "Deliver at the next boundary only for bare or unreachable
+conversations", and that is what the code does. An interactive bare launch
+keeps its turn hooks, its prompt boundary asks the server, and
+`session_membership` finds the Task its checkout names, so it hears updates at
+its next turn and is never woken. A headless bare run has no turn hooks and
+hears nothing (LOO-821 bare rule). The earlier note "bare ones get nothing"
+described the docs, not the code.
 
 Open, from the concept review (November 11):
 
@@ -89,16 +89,8 @@ Open, from the concept review (November 11):
    delivery per comment it arrives as a steer. Built: the wake carries the
    pending steer batch with the Task update. Alternatives were (b) steers wait
    for the next turn, (c) only Task comments wake.
-2. Bare conversations (above): get nothing, as built, or next-boundary
-   updates, as the steer's words say? The brief's "Bare Sessions get none of
-   this" can be read as no registration or push, which fits either answer.
-   The conflict is with LOO-821's rule that bare hooks ask no server, and
-   with "basically anything that doesnt touch the work model" working without
-   one. A middle option: a bare Session whose `work_source` names a Task asks
-   the server best-effort at its prompt boundary and logs nothing when none
-   answers. Why it matters: whether plain `lf <skill>` in a Task checkout
-   hears that Task's progress.
-   a. nothing (built). b. next-boundary updates, best-effort server ask.
+2. Bare conversations: settled in concept review 4 (above) as next-boundary
+   updates for interactive bare launches, nothing for headless bare runs.
 
 ## Inherited from LOO-821
 

@@ -668,6 +668,11 @@ async fn resume(
     let cwd = std::env::current_dir()?;
     drop(progress);
     if let Some(message) = message {
+        let managed = matches!(
+            target,
+            crate::ops::human_session::SessionTarget::Task(_)
+                | crate::ops::human_session::SessionTarget::Wave(_)
+        ) || crate::journal::task_run_step();
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
@@ -680,7 +685,9 @@ async fn resume(
         let session = crate::ops::human_session::admit_workspace(&store, session).await?;
         drop(launch);
         let id = session.id;
-        return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
+        return tokio::task::block_in_place(|| {
+            crate::lf::commands::run::resume(&id, message, cli, managed)
+        });
     }
     let session = reopen(
         &store,

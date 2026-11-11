@@ -394,12 +394,13 @@ part of what a phone or bot client is offered.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task or Wave command names its Work: `lf task run`
-and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation, a
-Session bound with `lf session bind`. Every other launch is bare, including
+A launch is managed when a Task or Wave command starts it: `lf task run`
+and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation,
+`lf resume --task` or `--wave`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. `WorkSource::is_managed`
-answers this for every launch path.
+checkout; that run still counts toward the Task. The command decides
+(`Cli::names_work`) and sets `AgentConfig::managed` on the launch; nothing
+reads it back from the Session row.
 
 For a managed launch, and for any conversation opened in a terminal, Claude
 and Codex hooks, the OpenCode plugin and the Pi extension run

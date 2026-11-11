@@ -460,6 +460,14 @@ impl Cli {
             .map(|task| format!("task:{task}"))
             .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
     }
+
+    /// Whether this is a Task or Wave command: it names its Work (`--task`,
+    /// `--wave`) or is a step of a Task's run. Its launch is managed; plain
+    /// `lf <skill>` in a Task's checkout only counts toward the Task. What
+    /// each gets is in `server/README.md` ("Turn and tool boundaries").
+    pub fn names_work(&self) -> bool {
+        self.work_subject_selector().is_some() || crate::journal::task_run_step()
+    }
 }
 
 #[derive(Subcommand, Debug)]

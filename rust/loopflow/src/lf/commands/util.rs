@@ -619,9 +619,12 @@ fn run_native_session(
                 let _native = native_return(&attachment);
                 drop(activation);
                 let error = match owned {
-                    Some(owner) => {
-                        crate::harness::agent_process::exec_native(process, owner, launch_lock)
-                    }
+                    Some(owner) => crate::harness::agent_process::exec_native(
+                        process,
+                        owner,
+                        command.managed(),
+                        launch_lock,
+                    ),
                     None => {
                         client_opened(std::process::id());
                         crate::harness::agent_process::exec_client(process, launch_lock)
@@ -641,7 +644,9 @@ fn run_native_session(
         }
     }
     let spawned = match owned {
-        Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
+        Some(owner) => {
+            crate::harness::agent_process::spawn_native(process, owner, command.managed())
+        }
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -1541,6 +1546,7 @@ mod tests {
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), original.clone()),
+                false,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(

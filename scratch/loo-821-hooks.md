@@ -5,15 +5,22 @@ Built: the `start`, `compact`, `tool` and `stop` moments of
 Described in `server/README.md` ("Turn and tool boundaries"),
 `harness/README.md`, `docs/troubleshooting.md` and `docs/dev/server-first.md`.
 
-Built: the managed rule, `session.rs::WorkSource::is_managed` (`declared` or
-`bound`). A managed launch gets every hook, a steer capability and the launch
-check (`harness/agent_process.rs::steer_environment`, `require_server`). A
+Built: managed is decided by the command, never read back from
+`agent_sessions.work_source` (Jack Heart: "the cli comamnd used should direct
+down different codepaths"). `Cli::names_work` is true for `--task`, `--wave`
+(Task and Wave conversations pass them) and a step of `lf task run`
+(`journal::task_run_step`); `lf -b resume --task|--wave` passes it into
+`run::resume`. The launch carries it as `AgentConfig::managed`; headless
+spawns take it as an argument (`agent_process::spawn(…, managed)`), native
+ones read `SessionCommand::managed`. A managed launch gets every hook, a steer
+capability and the launch check (`steer_environment`, `require_server`). A
 bare headless run gets two callbacks, start and compact, no capability and no
 check: Claude and Codex through `ContextDelivery::hook_settings(managed)`,
-OpenCode and Pi through `spec.managed` in their plugin source. The launch
-config carries it as `AgentConfig::managed`, set where the command names its
-Work (`lf/commands/run.rs::PromptBuild::name_work`) and from the Session row
-on resume (`agent/session.rs::resolve_session_config`).
+OpenCode and Pi through `spec.managed` in their plugin source. Deleted:
+`WorkSource::is_managed`, `PromptBuild::name_work`, the `work_source` reads in
+`steer_environment` and `resolve_session_config`, and the Task-run step's
+`declared` write in `ops/run.rs` (steps record `checkout` again, as on main).
+The column is still written as before.
 
 Not built, and why: a bare interactive launch (`lf -i`, `lf implement` at a
 terminal, an agent started from a Desktop shell) keeps every hook and its
@@ -27,11 +34,9 @@ Session move (`server/boundary.rs`). The whole `transport_tests` fixture is
 can go when "Bare launches go direct" removes the owner; `native_args` and
 `steer_environment` (the `interactive` column) are where.
 
-A step of `lf task run` is now recorded `declared`, not `checkout`: the Graph
-marks its Task-run steps (`LF_GRAPH_STEP=task`, read once by
-`journal::take_graph_step`), and `ops/run.rs::resolve_execution_binding`
-names the Task for them. Before this, this Task's own `implement` step was
-`checkout` in the store, the same as `lf implement` typed in the checkout.
+The Graph marks its Task-run steps (`LF_GRAPH_STEP=task`, read once by
+`journal::take_graph_step`); that mark, not the Session row, makes the step
+managed.
 
 Looked at and left alone:
 
@@ -111,12 +116,11 @@ What the bare rule costs, found while building it (see `questions.md`):
   session ID, creating it if missing", `pi --help`). Launching interactive
   Pi with `--session-id`, as Claude gets `--session-id`, would let lf know
   the session without the report. Not tried.
-- A headless Session started as a `lf task run` step before this change is
-  `checkout` in the store; a correction turn resumed on it is bare.
-  Jack Heart, November 11: "Thats fine".
+- A correction turn a Graph resumes on its step is managed: it runs as a
+  Task-run step, whatever the Session row says.
 
-LOO-824 (its concept review, Jack Heart: "managed should = held") will call
-`WorkSource::is_managed` and `require_server` instead of keeping its own
+LOO-824 (its concept review, Jack Heart: "managed should = held") will read
+`AgentConfig::managed` and call `require_server` instead of keeping its own
 rule; whichever branch lands second makes the switch.
 
 Seen in the plugins, not changed here:
@@ -143,6 +147,9 @@ Remaining:
   direct" (above).
 - Gate: the suites under Checks marked gate.
 - `limit` / `record-limit` still open the store, on a usage limit only.
+- An interactive resume of an existing conversation (`lf resume`, Desktop
+  reopening) runs no launch check: it gets every hook either way, and the
+  resume path carries no command flag down to the native launch.
 
 Choices taken (reversible):
 
@@ -200,6 +207,52 @@ Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
 
+Boundary queries (November 11; Jack Heart: "we should make sure this is
+going to scale to a lot of concurrent work"). Every statement a start,
+prompt, tool and turn-end boundary runs was traced and planned against a copy
+of the real store (10,269 batches, 40,119 deliveries, 3,019 steers, 1,094
+Tasks). Scans fixed:
+
+- `steer_batches` by Session (recover, confirm, waiting, reconcile's prepared
+  cancel): `steer_batches_session(session_id,evidence,created_at)`.
+- `steer_deliveries` by batch (cancel, excerpt): `steer_deliveries_batch`.
+- reconcile's applicable steers read every steer:
+  `steers_session`, `steers_repo` (Task and Wave already indexed).
+- reconcile's cancelled-delivery delete read every cancelled batch: scoped to
+  the Session.
+- reconcile's checkout membership read every Task, twice: `session_tasks`
+  now finds candidates by the cwd's ancestors through `idx_tasks_worktree`,
+  and `member_tasks` is materialized. Reconcile 1.7 → 0.23 ms.
+- Left: the history read at a conversation switch (`resume_reference`) plans
+  wave/task scans in branches its NULL filters never take; 8 ms on the
+  Session with the most events.
+
+No write lock when there is nothing to write: `recover_prepared_steers` with
+no prepared batch, `confirm_session_steers` with nothing printed and nothing
+past the deadline, `with_provider_context` on a turn in the selected,
+activated, already observed conversation, `emit_session_steers` with no
+undelivered applicable steer (its reconcile was rolled back in that case
+anyway). Test:
+`a_boundary_with_nothing_to_settle_does_not_wait_for_another_sessions_write`.
+
+50 concurrent Sessions, each on one of the store's 50 most recent Tasks and
+its Wave, each request opening its own store connection as the server does
+(`scratch/qa/fifty_sessions.rs`); debug build, SQLite at opt-level 2, load
+average 80–250 on 16 cores from other work:
+
+| | before | after |
+|---|---|---|
+| 1 Session, tool | 21 ms | 6 ms |
+| 50, tool ×20 each: p50 / p95 / p99 / max | 186 ms / 4.0 s / 7.8 s / 13.6 s | 641 ms / 1.05 s / 1.19 s / 1.4 s |
+| 50, prompt with a steer: p50 / p95 | 1.1 s / 4.3 s | 559 ms / 1.66 s |
+| 50, turn end: p50 / p95 | 1.0 s / 1.39 s | 625 ms / 800 ms |
+| mean store open in the tool burst | 26 ms | 550 ms |
+
+Before, boundaries queued on the write lock (p99 far past the hook's 2 s
+deadline: gap lines). After, they run side by side and the store open
+dominates: each open validates the whole migration history (5 ms alone).
+Added to `server-first.md` Open; not changed here.
+
 QA fixes (November 11; both were on main before this branch):
 
 - A new Session on a Task got every earlier Task steer again. `reconcile`
@@ -214,6 +267,15 @@ QA fixes (November 11; both were on main before this branch):
   on every harness.
 - `store::sqlite::steers::tests::a_new_task_session_skips_steers_an_earlier_session_read`,
   `context_block::tests::repeated_requests_over_unchanged_files_write_one_manifest` — pass
+
+Checks (November 11, managed by command and boundary queries):
+
+- `--lib -- server::boundary:: store::sqlite::steers store::sqlite::provider_transitions store::sqlite::task_work` — 36 pass, then the two new tests pass
+- `--test integration -- session_steers:: context_launch_tests:: settings_launch_tests::` — 35 pass
+- `--lib -- task_graph_launch_tests::a_task_run_takes harness::agent_process:: harness::context:: lf::tests::` — 66 pass
+- `--lib -- store::migrations::` — 129 pass; `scripts/check_migrations.py` — only `unmerged: steer_delivery_lookups.sql`
+- clippy — pass
+- gate: `transport_tests`, `binary(two_people)`, `world_recipes::`, `session_lifecycle_tests`, Swift `ServerProtocolTests`
 
 Checks (November 11, on the bare rule):
 

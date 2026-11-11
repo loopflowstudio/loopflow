@@ -556,4 +556,38 @@ mod tests {
         assert!(after.repo.ends_with("repo") && after.session.is_none());
         assert!(answer(&store, &stop(BoundaryMoment::Tool)).is_err());
     }
+
+    #[test]
+    fn a_boundary_with_nothing_to_settle_does_not_wait_for_another_sessions_write() {
+        let (home, store, adapter, delivery) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .busy_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        let writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t1"}),
+        );
+        let (answered, _) = answer(&store, &tool).unwrap();
+        assert_eq!(answered.steers, None);
+        assert!(!answered.waiting);
+        writer.execute_batch("ROLLBACK").unwrap();
+        // A steer to hand over needs the write lock again.
+        store
+            .save_session_steer("session", "Fixture author", "NEXT")
+            .unwrap();
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t2"}),
+        );
+        assert!(answer(&store, &tool).unwrap().0.steers.is_some());
+    }
 }

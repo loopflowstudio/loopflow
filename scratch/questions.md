@@ -47,8 +47,8 @@ Graph run with or without M's server and ask it nothing.
 
 Assumption taken (reversible), where a Task launch starts the server: the
 launch opens a connection to the server (hello, welcome) where it reserves its hook capability
-(`harness/agent_process.rs`), only for a managed Session
-(`WorkSource::is_managed` over `agent_sessions.work_source`). No answer: it runs
+(`harness/agent_process.rs`), only for a managed launch
+(`AgentConfig::managed`, set by the command). No answer: it runs
 `installation::server::readiness_command` (`lf install server` through the
 selected installation, as `client::bridge` does), never `ensure` in this
 build, then fails naming the server. Fixtures that launch Task or Wave agents
@@ -59,7 +59,7 @@ server runs another executable, which would refuse every launch from an
 upgraded or branch `lf` beside a working server
 (`resumed_session_completes_turns_after_build_replacement_and_viewer_return`
 showed it). A Session launched by plain `lf` in a Task's checkout carries
-that Task (`work_source` checkout) and is bare: not checked.
+that Task and is bare: not checked.
 
 - Pi's `pi-event` callback still opens the store each turn. Settled by the
   design: it is an observer and moves with the observer Task
@@ -67,9 +67,12 @@ that Task (`work_source` checkout) and is bare: not checked.
 
 Assumptions taken headless with the bare rule, November 11 (reversible):
 
-- Managed is read from how the Work was named, not from where the launch
-  came from. `--task` and `--wave` on any command count as a Task or Wave
-  command, so `lf --task X implement` is managed.
+- Managed is decided by the command (`Cli::names_work`): `--task` and
+  `--wave` on any command count as a Task or Wave command, so
+  `lf --task X implement` is managed. `lf -b resume <id>` with a Session ID or
+  Task identifier as the positional is bare; `--task`/`--wave` make it
+  managed. An interactive resume of an existing conversation runs no launch
+  check (it gets every hook either way).
 - Desktop: answered, no mark ("there is no such thing other than one you
   start through a shell", `loo-821-hooks.md`).
 - The bare list names launches "typed or run by an agent". Built for headless
@@ -81,8 +84,6 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
   Jack Heart, November 11: "dont really care about intermediate states as
   long as we remove the owner eventually and end up in cleanest place". Kept
   as built; interactive bare hooks go with the owner.
-- Sessions recorded `checkout` by an earlier `lf task run` reopen bare. No
-  migration rewrites them.
 
 - The load guidance in `AGENTS.md` ("**Load:** one Machine runs hundreds of
   concurrent agents…") and `builtins/task/skill/implement.md` ("Write for the

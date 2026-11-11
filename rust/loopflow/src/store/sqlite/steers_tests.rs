@@ -529,6 +529,44 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
 }
 
 #[test]
+fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
+    let (_home, store, _adapter) = fixture();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,worktree,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1','/work/task',1);
+            UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE is_local=1);",
+        )
+        .unwrap();
+    save_in(
+        &store.conn.lock().unwrap(),
+        ("task", "task"),
+        "task",
+        "1",
+        &Author::Named("Author".into()),
+        "Task direction",
+    )
+    .unwrap();
+    let pending = |cwd: &str| {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE agent_sessions SET cwd=?1 WHERE id='session'", [cwd])
+            .unwrap();
+        store.session_steers("session", 0, 32).unwrap().pending
+    };
+    assert_eq!(pending("/work/task/rust/src/"), 1);
+    assert_eq!(pending("/work/task"), 1);
+    assert_eq!(pending("/work/task-other"), 0);
+    assert_eq!(pending("/work"), 0);
+}
+
+#[test]
 fn a_new_task_session_skips_steers_an_earlier_session_read() {
     let (_home, store, adapter) = fixture();
     let save = |source: &str, text: &str| {

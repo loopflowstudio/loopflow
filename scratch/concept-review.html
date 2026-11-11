@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-821 concept review</title>
+<title>LOO-826 concept review</title>
 <style>
   :root {
     --bg: #fbfaf7; --ink: #1d1c1a; --soft: #5f5b54; --rule: #dedad2;
@@ -52,160 +52,55 @@
 </head>
 <body>
 <main>
+<h1>Does direction wake an idle agent, or only progress?</h1>
+<p class="meta">LOO-826 · concept review after implement · November 11, 2026<br>
+Built from <code>scratch/loo-826.md</code>, <code>scratch/questions.md</code>,
+<code>docs/sessions.md</code>, <code>server/wake.rs</code>, <code>server/boundary.rs</code>,
+<code>harness/task_updates.rs</code>, <code>harness/context.rs</code>,
+<code>store/sqlite/task_comments.rs</code></p>
 
-<h1>Which conversations depend on the Machine server?</h1>
-<p class="meta">LOO-821 · concept review at the demo step · November 11, 2026 · PR #1879<br>
-Built from <code>scratch/loo-821-hooks.md</code>, <code>scratch/questions.md</code>,
-<code>scratch/qa.html</code>, <code>docs/dev/server-first.md</code>,
-<code>server/README.md</code>, <code>server/boundary.rs</code>,
-<code>lf/commands/context.rs</code>, <code>harness/agent_process.rs</code></p>
+<p class="lead">The server now wakes idle managed conversations with Task updates and
+leaves steers for the next turn. A person's Task comment is both, so it arrives twice
+under two names. Question 1 decides which one wakes.</p>
 
-<p class="lead">The branch answers that question three different ways, and two of
-them contradict each other in the same PR. Question 1 picks one. Questions 2 and 3
-are smaller and follow from it.</p>
+<h2>What people do, and what happens</h2>
+<div class="scroll"><table>
+<tr><th>Action</th><th>Built on this branch</th><th>Proposed</th></tr>
+<tr><td>A Graph step settles on the Task</td><td>Idle conversation wakes: "Loopflow worker progress"</td><td>Same</td></tr>
+<tr><td>Jack comments "use the staging bucket" on the Task</td>
+<td class="no">Wakes now as worker progress ("New comment from jack: …"), then again as a steer at the next turn</td>
+<td>Delivered once, as a steer. Whether it wakes: question 1</td></tr>
+<tr><td><code>lf task steer LOO-826 '…'</code></td><td>Waits for the next turn ("A steer starts no turn")</td><td>Question 1</td></tr>
+<tr><td>Bare <code>claude</code> opened by <code>lf</code> in a terminal</td>
+<td class="no">Launched with <code>crossSessionInbound: accept</code>; never registered, never woken</td>
+<td>No <code>accept</code>: it follows registration</td></tr>
+</table></div>
 
-<h2>What people do, as built</h2>
-<div class="scroll">
-<table>
-<tr><th>You do</th><th>What you have to know</th><th>What changes state</th></tr>
-<tr><td><code>lf task steer LOO-1 "…"</code></td>
-  <td>It reaches the agent at its next prompt or tool. If the server is down it waits.</td>
-  <td><code>task.steer</code> saves it; a hook's <code>session.boundary</code> hands it over; the next one confirms it</td></tr>
-<tr><td><code>lf task run</code>, <code>lf resume --task</code>, Desktop</td>
-  <td>The agent starts only beside the server. A launch with none runs <code>lf install server</code>, and fails if that doesn't bring one up.</td>
-  <td>hello on <code>machine.sock</code>, then a launchd or systemd job</td></tr>
-<tr><td><code>lf implement</code> typed in a Task's checkout, or run there by the Task's agent</td>
-  <td>Same as the row above: the Session carries the Task.</td>
-  <td>same</td></tr>
-<tr><td><code>lf implement</code>, <code>lf --machine M implement</code>, no Task</td>
-  <td>Runs anywhere. With no server its turns aren't recorded and <code>logs/lf.log</code> gets one gap line.</td>
-  <td><code>session.boundary</code>, unanswered</td></tr>
-<tr><td><code>lf session steers</code>, <code>lf session history</code></td>
-  <td>A steer is <code>pending</code>, <code>uncertain</code>, then <code>emitted</code>. Missed turns are one <code>store-gap</code> entry.</td>
-  <td>reads</td></tr>
-</table>
-</div>
+<h2>Concepts</h2>
+<div class="built"><p><span class="tag">Built.</span> Steer = direction, delivered at a
+boundary. Task update = progress, delivered at a boundary or pushed by the server's
+wake. A direction comment is saved as a steer <em>and</em> read as a Task update.</p></div>
+<div class="prop"><p><span class="tag">Proposed.</span> Each thing a person or Graph does
+has one kind. Comments with a steer are direction only; Task updates are runs, steps and
+non-direction comments. The wake delivers whatever the conversation has pending.</p></div>
 
-<h2>The mismatch</h2>
-<p>Three rules decide how a conversation relates to the server. Each draws its line
-in a different place.</p>
-<div class="scroll">
-<table>
-<tr><th>Launch</th><th>Gets hooks</th><th>Server required (built)</th><th>Managed (<code>server-first.md</code>)</th></tr>
-<tr><td><code>lf task run</code> step, <code>resume --task</code>, Desktop</td><td>yes</td><td>yes</td><td>yes</td></tr>
-<tr><td><code>lf implement</code> typed in a Task checkout</td><td>yes</td><td>yes</td><td class="no">no: "stays bare"</td></tr>
-<tr><td>Subagent <code>lf research</code> started by a Task's agent</td><td>yes</td><td>yes</td><td class="no">no</td></tr>
-<tr><td><code>lf implement</code>, no Task</td><td>yes</td><td>no</td><td>no</td></tr>
-</table>
-</div>
-<p><code>docs/dev/server-first.md</code> on this branch now says both things. The
-managed rule, written in LOO-819:</p>
-<blockquote>A launch is managed when it comes through a Task or Wave command or from
-Desktop. A bare <code>lf</code> typed inside a Task's checkout stays bare and records the
-Task as its ancestry. One function answers this for every launch path.</blockquote>
-<p>And the line this Task added, a few paragraphs away:</p>
-<blockquote>A Task or Wave launch starts the server before its agent and fails when none
-comes up.</blockquote>
-<p>The code implements the second by asking the store whether the Session has a Task
-or Wave (<code>session_has_work</code>), which is true for the middle two rows. The
-plan's "one function" does not exist yet.</p>
-
-<h3>One interaction, with its failure</h3>
-<p>An agent is working LOO-900 on <code>mini</code>. The server there has stopped. The
-agent runs <code>lf -b research</code> to get a second opinion.</p>
-<div class="built">
-<p><span class="tag">Built.</span> The subagent's launch finds no server and runs
-<code>lf install server</code> on <code>mini</code>, registering a systemd unit, and waits
-for it. If it comes up, the subagent runs. If not, the tool call fails with
-"Loopflow server is not running, and Task and Wave work needs it". A research
-subagent that receives no steers and records nothing mid-run has been stopped by
-lf's own state.</p>
-</div>
-<div class="prop">
-<p><span class="tag">Proposed.</span> The subagent runs. It was not started by a Task
-command, so it is bare. Its hooks find no server, exit in a third of a second and
-leave one gap line. Its Session still carries LOO-900, so its cost counts there.
-<code>lf task run LOO-900</code> on <code>mini</code> is unchanged: it needs the server
-and starts it.</p>
-</div>
-<p>What survives either way: steers to the Task's own conversations, turn records
-for them, and "<code>lf --machine M &lt;skill&gt;</code> works with no server". What the
-proposal changes on purpose: a bare run in a Task checkout on a Machine with no
-server gets no launch error, so a steer aimed at it waits silently until a server
-answers. On a Machine whose server is running, the two behave the same.</p>
-
-<h3>What the proposal looks like in the docs</h3>
-<div class="prop">
-<p><span class="tag">Proposed</span>, replacing the added line in <code>server-first.md</code>
-and the troubleshooting entry's last paragraph:</p>
-<pre><code>lf task run LOO-900          # needs the Machine server; starts it
-lf resume --task LOO-900     # same
-lf implement                 # no server needed, in a Task's checkout or not</code></pre>
-<p>Agents started by a Task or Wave command, or from Desktop, start beside the
-Machine server. Anything you or an agent start with a plain <code>lf &lt;skill&gt;</code>
-runs without one, and still counts toward the Task whose checkout it ran in.</p>
-</div>
-
-<h2>Two smaller things</h2>
-
-<h3>A launch check that a stale server passes</h3>
-<p>The check asks "does a server say hello?". The thing it protects is "will
-<code>session.boundary</code> be answered?". QA ran branch hooks beside the installed
-0.15.2 server: the launch passed, then every boundary logged "this server has no
-operation <code>session.boundary</code>". So no server refuses the launch, and a
-server that can't take boundaries doesn't, though both leave the conversation in
-the same state. The check uses hello on purpose: <code>lf server status</code> reports
-"not ready" whenever the server runs another executable, which would refuse every
-launch from a branch build
-(<code>resumed_session_completes_turns_after_build_replacement_and_viewer_return</code>).</p>
-
-<h3>Steer confirmation's moving parts</h3>
-<p>"Arrive twice" is built as: an answered batch sits in <code>uncertain</code> until the
-conversation's next hook lists it in <code>printed</code>, read from a <code>.printed</code>
-file beside the delivery file; <code>waiting</code> in the answer covers two tools finishing
-together. Every steer now passes through <code>uncertain</code> for one tool interval, so
-<code>lf session steers</code> shows that word for a healthy delivery.</p>
-<p>The case this exists for is a server that answers after the hook gave up. There
-is a second way to close it: the hook sends its deadline, and a server that reaches
-the request too late hands over nothing, so the steer stays <code>pending</code> for the
-next boundary. That needs no <code>.printed</code> file, no <code>waiting</code> and no
-in-between state, and never duplicates. Its counterexample: a hook that reads the
-answer and dies before printing loses that steer until <code>--retry</code>, where
-confirmation delivers it again.</p>
+<h2>APIs that change</h2>
+<pre><code>// task_updates::read: skip comments whose id has a steer (comment:&lt;id&gt;)
+// harness/context.rs
+claude_args(context, hooks: Every|Context, work_managed: bool)
+//   crossSessionInbound: accept only when work_managed
+// wake::wake (only with 1a): claim steers beside the update, one message</code></pre>
 
 <h2>Questions</h2>
-<p class="meta">All three answered November 11: 1b, with the start and compact context hooks kept for bare launches; 2 unchanged (no design for older servers; negotiation reuses <code>hello</code>/<code>welcome</code> later); 3a kept as built. Words and details in <code>scratch/loo-821-hooks.md</code>.</p>
 <ol class="q">
-<li>Which launches need the Machine server?
-  <ol>
-  <li>Every Session that carries a Task or Wave, including a plain <code>lf &lt;skill&gt;</code>
-      in a Task checkout and subagents (built). <code>server-first.md</code>'s managed rule
-      then changes to match.</li>
-  <li>Launches through Task and Wave commands and Desktop, the managed rule as written.
-      A plain <code>lf &lt;skill&gt;</code> in a Task checkout runs without a server and still
-      counts toward the Task. The plan's one function gets written here and the launch
-      check calls it.</li>
-  </ol></li>
-<li>When a launch that needs the server can't get one that answers
-    <code>session.boundary</code>:
-  <ol>
-  <li>Refuse when none comes up; start without a word beside an older one (built).</li>
-  <li>Refuse in both cases, naming <code>lf install</code>. A branch <code>lf</code> beside
-      the installed server then can't launch Task work until the server is updated.</li>
-  <li>Start in both cases, after trying <code>lf install server</code>, and print one line
-      at launch: steers and turn records wait for the server, and the command that
-      fixes it. Nothing refuses.</li>
-  </ol></li>
-<li>Steer delivery:
-  <ol>
-  <li>Keep confirmation (built), and show the in-between state in
-      <code>lf session steers</code> as <code>sent</code> rather than <code>uncertain</code>.</li>
-  <li>Replace it with the deadline in the request: no duplicates, fewer parts, and a
-      steer is lost until <code>--retry</code> only when a hook dies between reading and
-      printing.</li>
-  </ol></li>
+<li>Do steers wake an idle managed conversation?
+<ol><li>Yes, through the same server path; a comment wakes as direction. <code>docs/sessions.md</code> drops "A steer starts no turn".</li>
+<li>No; a comment on an idle Task conversation waits for its next turn (less waking than before this branch).</li>
+<li>Task comments wake; <code>lf session steer</code> and <code>lf task steer</code> wait.</li></ol></li>
+<li>Bare conversations: the steer says "Deliver at the next boundary only for bare or unreachable conversations"; the brief says "Bare Sessions get none of this".
+<ol><li>Bare get nothing (built).</li>
+<li>Bare get next-boundary updates; their hooks ask the server again.</li></ol></li>
 </ol>
-
 </main>
 </body>
 </html>

@@ -69,6 +69,24 @@ conversations get the update at their next boundary; bare ones get nothing.
 Giving bare ones next-boundary updates would mean their hooks call the server
 again.
 
+Open, from the concept review (November 11):
+
+1. Do steers wake an idle managed conversation? Built and documented: "A
+   steer starts no turn"; Task updates do. Today a person's Task comment
+   reaches an idle conversation anyway, as a Task update, so waking already
+   happens for most direction, framed as worker progress. Once a comment is
+   delivered once (as a steer, `loo-826.md`):
+   a. steers wake through the same server path; `docs/sessions.md` drops "A
+      steer starts no turn". A comment wakes as direction.
+   b. steers keep waiting; a person's comment on an idle Task conversation
+      waits for its next turn, which is less waking than before this branch.
+   c. Task comments wake, `lf session steer`/`lf task steer` don't.
+   Why it matters: whether typing direction at a Task makes an idle agent act
+   on it now is the product, not plumbing. The wake path serves (a) at no
+   extra cost.
+2. Bare conversations (above): get nothing, as built and as the brief says, or
+   next-boundary updates, as the steer's words say?
+
 ## Inherited from LOO-821
 
 Decided in the Task conversation, November 10 (Jack Heart's words):

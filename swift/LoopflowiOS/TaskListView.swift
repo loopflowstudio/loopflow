@@ -212,8 +212,10 @@ struct TaskListView: View {
     }
 
     /// The saved choice, unless this Machine no longer has that repository.
+    /// The chosen repository, or all of them once a reading shows it is gone.
+    /// While a new reading loads the choice holds.
     private var shown: String {
-        feed.repositories.contains { $0.repository == repository } ? repository : ""
+        !feed.loaded || feed.repositories.contains { $0.repository == repository } ? repository : ""
     }
 
     private var title: String {
@@ -339,7 +341,7 @@ struct TaskListView: View {
         }
         .tint(theme.palette.accentInk)
         .environment(\.palette, theme.palette)
-        .onChange(of: shown) { feed.wave = nil }
+        .onChange(of: repository) { feed.wave = nil }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }

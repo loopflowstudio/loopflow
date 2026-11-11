@@ -967,6 +967,66 @@ async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
     assert!(error.to_string().contains("no stored login matches"));
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn task_detail_reads_capacity_once_for_all_sessions() {
+    let _lock = crate::journal::test_env_lock();
+    let logins = Logins::new().await;
+    let account = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
+    logins.sign_in("work");
+    let repo = loopflow_test_support::TestRepo::new();
+    let task = logins
+        .store
+        .sqlite
+        .create_task(&crate::work::task::NewTask {
+            repository_id: logins
+                .store
+                .sqlite
+                .ensure_repository(repo.path().to_str().unwrap())
+                .unwrap(),
+            id: crate::durable::TaskId::new(),
+            project_id: None,
+            title: "Many Sessions".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let mut status = crate::ops::task::registered_task_status(&logins.store, task)
+        .await
+        .unwrap();
+    let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
+    let mut expected = Vec::new();
+    for id in ["first", "second", "third"] {
+        let session = logins.codex_session(id, Some("gpt-5"), &account);
+        expected.push(crate::lf::commands::session::SessionFacts::of(
+            super::listed(&logins.store, id, &capacity)
+                .unwrap()
+                .unwrap(),
+        ));
+        status
+            .overview
+            .as_mut()
+            .unwrap()
+            .sessions
+            .push(crate::task_work::TaskSession {
+                id: session.id,
+                title: session.title,
+                interactive: session.interactive,
+                graph_lf_process_id: None,
+                completed_at: None,
+            });
+    }
+    crate::provider_account::CAPACITY_READS.set(0);
+    let detail = crate::lf::commands::waves::task_detail(&logins.store, status)
+        .await
+        .unwrap();
+    assert_eq!(crate::provider_account::CAPACITY_READS.get(), 1);
+    assert_eq!(
+        serde_json::to_value(detail.sessions).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
+
 #[test]
 fn no_raw_leaves_raw_conversations_out_of_the_list() {
     use clap::Parser;
@@ -1074,7 +1134,13 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
                 .any(|action| action.kind == super::SessionActionKind::Open));
             action
         };
-        let listed = super::listed(&store, &record.id).unwrap().unwrap();
+        let listed = super::listed(
+            &store,
+            &record.id,
+            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(retry(&listed).label, "Try again");
         assert!(retry(&listed).unavailable_reason.is_none());
         let refused = super::open_without_replacing(
@@ -1143,7 +1209,13 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .contains("No saved provider history"));
         for refreshed in [
             super::surface(&store, &before).await.unwrap(),
-            super::listed(&store, &record.id).unwrap().unwrap(),
+            super::listed(
+                &store,
+                &record.id,
+                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+            )
+            .unwrap()
+            .unwrap(),
             super::list(&store, &crate::session::SessionFilter::default())
                 .await
                 .unwrap()
@@ -1232,7 +1304,13 @@ fn recovery_refresh_follows_current_holder_and_history() {
             )
             .unwrap();
         // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
-        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        let refreshed = super::listed(
+            &store,
+            &record.id,
+            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         let takeover = refreshed
             .actions
             .iter()
@@ -1262,7 +1340,13 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .sqlite
             .record_agent_process_exit(&record.id, &holder, true)
             .unwrap();
-        let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+        let refreshed = super::listed(
+            &store,
+            &record.id,
+            &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         assert!(!refreshed
             .actions
             .iter()
@@ -1327,7 +1411,13 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             )
             .await
             .unwrap();
-            let refreshed = super::listed(&store, &record.id).unwrap().unwrap();
+            let refreshed = super::listed(
+                &store,
+                &record.id,
+                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed
@@ -1361,7 +1451,13 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             )
             .await
             .unwrap();
-            let refreshed = super::listed(&store, &next.id).unwrap().unwrap();
+            let refreshed = super::listed(
+                &store,
+                &next.id,
+                &crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap(),
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(prepared.actions, refreshed.actions);
             assert_eq!(
                 refreshed

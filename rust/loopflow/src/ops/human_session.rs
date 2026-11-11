@@ -634,13 +634,16 @@ fn graph_occurrence(
 
 /// One conversation as `list` reads it: the Session with this ID, else the
 /// open raw conversation whose provider ID it is. `None` once it is gone.
-pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+pub(crate) fn listed(
+    store: &SharedStore,
+    id: &str,
+    capacity: &LaunchCapacity,
+) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let capacity = LaunchCapacity::read(&store.sqlite)?;
     let Some(mut session) = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity))
+        .map(|session| summary_surface(&session, capacity))
     else {
         return Ok(turns::raw(&store.sqlite, None)?
             .into_iter()

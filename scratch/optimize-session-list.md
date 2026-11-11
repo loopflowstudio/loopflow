@@ -22,202 +22,13 @@ in history. No synthetic writer or load was introduced.
 The original 18–75 s Session-list stall remains unexplained. These measurements
 do not establish a fix for that stall.
 
-## Fresh comparisons (2026-11-11)
+## Iteration 1 receipts
 
-Claim tested: “On the frozen real Machine store, indexed reverse Task probes
-reduce default CLI median by at least 15% and warm served median by at least
-25%, without changing the answer.” The smaller fixes must earn their own gain.
-
-`before` = `00851d9c6`; `after1` = `d9e3c1f3b`; `after2` = `f8b742d8c`.
-Each table entry is **median [minimum–maximum], milliseconds; n=5 per side**.
-Pairs reverse order on every iteration. Each timed CLI follows an excluded
-warm-up; each server is warmed with an initial subscription before timing its
-checkpoint. SQL tracing is excluded from these times.
-
-| Comparison | Workload | Earlier | Candidate | Verdict |
-|---|---|---:|---:|---|
-| before → after1 | cli | 579.0 [561.7–586.6] | 436.3 [421.9–443.0] | Better |
-| before → after1 | served | 775.3 [747.3–885.5] | 210.7 [196.2–217.2] | Better |
-| after1 → after2 | cli | 439.7 [420.7–461.3] | 420.2 [410.5–429.5] | No measurable difference |
-| after1 → after2 | served | 204.4 [190.2–209.6] | 198.1 [179.5–234.9] | No measurable difference |
-| before → after2 | cli | 572.3 [565.4–584.6] | 428.0 [418.7–440.5] | Better |
-| before → after2 | served | 785.2 [758.4–970.9] | 201.1 [190.5–556.0] | Better |
-| after1 → after2 | board | 856.1 [825.0–1263.0] | 853.7 [771.9–1344.6] | No measurable difference |
-| after1 → after2 | selection | 458.5 [437.9–487.0] | 482.4 [461.3–905.9] | No measurable difference |
-| before → after2, network denied | task | 7687.8 [7033.9–8213.9] | 7301.6 [6953.0–7791.0] | No measurable difference |
-| before → after2, network denied | waves | 357.6 [351.9–394.0] | 385.5 [342.1–700.5] | No measurable difference |
-| before → after2, network denied | board | 1388.9 [959.3–1513.7] | 1391.9 [1150.4–2555.0] | No measurable difference |
-| before → after2, network denied | selection | 1627.5 [1235.4–2640.2] | 501.0 [467.5–650.6] | Better |
-
-The cumulative Work-selection improvement does not establish a benefit from
-`f8b742d8c`: the separate after1/after2 comparison overlaps. That reading also
-uses the Session summary query improved by `d9e3c1f3b`. Task status and Wave
-list show no measurable difference. Network-denied results are local-query
-measurements, not end-to-end planning-exchange latency.
-
-## Setup and validation
-
-- Fresh read-only SQLite online backup of the Machine store, then independent
-  copies for each migration. All application tables match the frozen backup;
-  only `schema_migrations` differs. Frozen counts: **14,731 Sessions, 236,270
-  Session events, 12,955 activity rows, 160,214 Processes, 1,099 Tasks and six
-  provider accounts**. The live source gained two events between backup and
-  the initial count query; the report uses the backup’s counts.
-- The original release baseline binary is retained unchanged. Both candidates
-  were release-built with `cargo build --release -p loopflow --bin lf`, using
-  the corresponding Rust source blobs in this checkout. Build provenance for
-  reconstructed after1 still names the checkout’s HEAD; source blobs, binary
-  hashes and commit mapping are recorded separately. Same Rust 1.98.1, Cargo
-  1.98.1, macOS 26.0.1 arm64, 16 logical CPUs and 128 GiB memory.
-- All commands run in this checkout with inherited `LF_*` removed and private
-  `LF_HOME`/`LF_BIN`. Binaries take turns at the same executable path; independent
-  store copies take turns at the same home path. `open_argv` therefore needs no
-  normalization. Clone/reset and validation happen outside timing.
-- Claude/Codex transcript directories, Claude owner records, Pi’s Session
-  directory and an online backup of OpenCode’s database are private copies.
-  No provider-home credential files were copied. A private clock interposer fixes wall time at
-  Unix **1794415563**, leaving monotonic clocks untouched. Timestamp fields and
-  deadline decisions remain in the full JSON digest.
-- OS processes, filesystem/Git facts and legacy absolute transcript paths
-  remain ambient. These are limits, not claimed frozen inputs. Full-answer
-  digests match within every retained cohort. Shared-Machine one-minute load ranged from 12.7 to 222.5;
-  no other person’s processes were stopped and no test load was generated.
-- **120 retained timed calls and 120 excluded warm-ups**, with zero command
-  or validation failures. CLI returns 100 unique Sessions and 11 turns;
-  served returns 371 unique Sessions and 52 turns. Task/Wave/board/selection
-  counts are 1/7/183/27. Session titles/cwd and Task titles are checked against
-  the private store; turn state and nonnegative usage are checked. This does
-  not validate every historical token count or raw-discovery completeness.
-- The calibration distinguishes a one-row list (498.7–539.7 ms) from the
-  default list (1,040.3–1,900.5 ms), two alternating pairs during setup. It
-  is an easier workload, not a performance improvement claim.
-
-## Excluded and incomplete work
-
-- One preflight board validator used the wrong key (`status`, not `state`).
-  Fixed before freezing the timing harness; its failed receipt is retained.
-- The first Task-status cohort was stopped after one completed baseline trial
-  (8,335.8 ms) when the trace showed planning exchange and private-store writes.
-  The next candidate trial was interrupted; its time and error count are
-  missing, not zero. The replacement planning cohort denies network access
-  on both sides. Command success does not mean the blocked exchange succeeded;
-  rejected network operations were not counted. Normal online Task-status
-  performance remains inconclusive.
-- Initial trace collection had 72 interleaved task-trace lines, and SQLite’s
-  own elapsed counter read the frozen wall clock. Those traces are excluded
-  from final attribution. The corrected collector serializes writes and uses
-  monotonic statement start/end times.
-
-## SQLite attribution
-
-Bundled SQLite **3.53.2**, release attribution builds, actual bound EXPLAIN
-plans on the traced connection. Statement timers use a monotonic clock;
-SQLite’s wall-clock PROFILE duration is unusable under the clock freeze.
-Times include row handling, nested reads and tracing overhead. Do not sum
-nested times or substitute them for the uninstrumented medians.
-
-Counters below are **fullscan steps / VM steps**. Q102 is per execution;
-Q111/Q112 are totals for five raw-candidate lookups in one bare CLI reading;
-Q114 is the six deadline reads in one served reading. Both served executions
-(initial subscription and warm checkpoint) have the same step counts.
-
-| Query / workload | before | after1 | after2 |
-|---|---:|---:|---:|
-| Q102, CLI 100 rows | 196,961 / 1,999,578 | 4,129 / 85,913 | 4,129 / 85,913 |
-| Q102, served 371 rows | 762,015 / 7,619,268 | 4,400 / 267,265 | 4,400 / 267,265 |
-| Q111, five thread lookups | 73,650 / 221,050 | 73,650 / 221,050 | 0 / 70 |
-| Q112, five by-ID summaries | 31,440 / 203,904 | 20,460 / 100,404 | 20,460 / 100,404 |
-| Q114, six availability deadlines | 77,724 / 311,274 | 77,724 / 311,274 | 0 / 108 |
-
-- Q102/Q112 use Task ID searches, `tasks_checkout_root` expression searches
-  and `tasks_primary_session` covering searches. Q102 loses **97.9% of CLI
-  scans / 95.7% of VM steps**, and **99.4% of served scans / 96.5% of VM steps**.
-  The recursive ancestor work has not merely hidden scans. It adds 100 small
-  sorts in the CLI and 371 in the served list; full answers remain identical.
-- After2 Q111 uses `session_provider_thread_created`, removing all five sorts
-  as well as the Session scan. Q114 uses the covering timestamp range search
-  `session_activity_observed (observed_at>?)`; it loses the traversal.
-- Real repository bindings use `idx_tasks_repository` for after2’s Task read.
-  Board Task-read scans/VM fall from **1,098 / 24,431** to **0 / 22,154**;
-  selection Task-read scans/VM from **1,098 / 79,548** to **0 / 73,304**.
-  The copy contains 730 Tasks in this repository out of 1,099 globally.
-  The global identifier inventory remains global.
-
-The hot path maps to `store/sqlite/sessions.rs::summary_query` and
-`store/sqlite/task_work.rs::session_tasks`. In the later warm attribution
-run, CLI Q102 falls **186.1 → 21.5 ms**; warm served Q102 **915.5 → 118.3 ms**.
-Those reductions explain the direction and scale of the kept change.
-Q102 occupies 26.6% of the 701.0 ms traced baseline CLI and 79.8% of the
-1,147.7 ms traced warm served path. Even deleting it entirely could reduce
-those paths by at most those shares (about 36% / 394% faster); the measured
-24.7% / 72.8% latency reductions do not exceed that upper bound. These are
-limits on the traced runs, not exact predictions for uninstrumented calls.
-
-After1’s bare Q111 totals **12.8 ms / 666.8 ms = 1.9%** of its traced CLI.
-Warm served Q111 plus Q114 total **30.5 ms / 310.0 ms = 9.8%**. The extra
-indexes make those statements cheaper, but their wall-time ranges overlap.
-Scoped Task reads take only **1.5 ms** in the after1 board trace and **3.6 ms**
-in the after1 selection trace, dropping to 1.5 and 2.6 ms. Micro gains at that
-share of the path do not justify claiming a planning speedup.
-
-After the Task probes, the main CLI summary is only **3.2%** of its traced
-path; the warm served summary remains **38.2%**. Its remaining scans include
-wave-address materialization. A separate visible planning limiter is the
-live-agent Process inventory: **160,213 fullscan / 673,783 VM steps**, 247.4 ms
-of a 475.8 ms Wave-list trace. Task status also spends 569.9 ms on a
-membership-based Process inventory (**175,186 scans / 7,635,331 VM steps**).
-These map to `store/sqlite/processes.rs::agent_processes` and `task_work`
-membership queries;
-Task status’s remaining multi-second non-SQL work was not isolated. Those
-are candidates for a fresh experiment, not changes made here.
-
-**Attribution limit:** by the time the corrected builds finished, two recorded
-CLI AgentProcesses and 15 served AgentProcesses had exited. Kernel probes
-confirmed those PIDs no longer existed. Profile answers therefore contain
-9/37 turns rather than the timed cohort’s 11/52, although all three profile
-builds match each other’s full JSON and still return 100/371 Sessions.
-The SQL comparisons use the same frozen store and matching trace workload;
-whole-path profile times are not an interchangeable repeat of the timing
-cohort. No fields were dropped to conceal this difference.
-
-[All selected SQL, bound plans, per-execution counters and top planning queries](session-list-measure/comparison-profiles.json)
-include the three attribution binary hashes. The JSON’s `non_readonly_statements`
-is SQLite’s classification, not a count of committed data changes.
-
-## Iteration 1 checks and decision
-
-- Full JSON matches on all three binaries for Task filtering, orphan filtering,
-  history, both pages of a three-row pagination check, by-ID cards, all-repository
-  board (272 Tasks), empty Wave status and active Wave status (seven Tasks):
-  [24 primary answers plus three continuation pages](session-list-measure/comparison-acceptance.json).
-- `uv run python scripts/check_migrations.py`: passed; the retained additive
-  migration contains only the checkout-root and primary-Session indexes.
-- All candidate Rust source files equal `d9e3c1f3b` byte-for-byte after rejection;
-  the frozen timing harness hashes are unchanged. Existing fixture coverage
-  includes lexical paths, cross-repository identifiers, deleted/closed Tasks,
-  scope exclusion and snapshot composition (historical implementation checks below).
-- `cargo fmt --check`: passed.
-- `cargo clippy --all-targets -- -D warnings`: passed.
-- `cargo test -p loopflow --lib store::sqlite::task_work::tests::`: **11 passed**,
-  LF variables removed and stdin closed. The test linker emitted an oversized
-  `__eh_frame` compact-unwind warning; no test or clippy failure.
-- `git diff --check`: passed. All private servers were terminated after each
-  read. The release binary is restored to the measured, uninstrumented after1
-  build. The original baseline binary is unchanged.
-
-Keep the measured Task probes. Leave the smaller fixes rejected until a real
-workload shows a non-overlapping incremental benefit. No new cache, resolver,
-lock policy or query rewrite was added during measurement.
-
-## Artifacts
-
-- [Every timing trial and decision](measure.html)
-- [Hashes, full samples, warm-ups, counts and excluded trials](session-list-measure/comparison-results.json)
-- `session-list-measure/compare.py`, `compare_series.py`, `compare_followup.py`
-  and `planning_compare.py`: frozen comparison harnesses; `build_traces.py`,
-  `trace_bound.rs`, `profile_compare.py`: separate attribution builds and runs.
-- Raw answers, databases, transcript copies and build logs remain in the
-  mode-0700 `/tmp/loo822-compare`; the original `/tmp/loo822-measure` is intact.
+Complete comparisons, frozen-input limits, excluded calls, SQL attribution and
+checks: `0f39f7be21:scratch/optimize-session-list.md`. Machine-readable artifacts
+remain in `session-list-measure/`, linked by the iteration 2 report below.
+The original 18–75 s stall was not reproduced; no normal read acquired a writer
+lock or retried one. Process inventory was the next measured limiter.
 
 ## Recorded direction
 
@@ -428,3 +239,22 @@ claimed. Source and tests were not modified during measurement.
   [validation and stack counts](session-list-measure/iteration2-checks.json).
   Raw JSON, stores, stack captures and logs remain in the mode-0700 private
   directory; `unsealed/` holds the invalid cohort unchanged.
+
+## Iteration 3 — Task-status repeated reads (2026-11-11)
+
+Read LaunchCapacity once per Task detail and reuse it for every Session row.
+Resolve planning scope once per distinct repository in a scope check, sharing
+answers between its Wave and Task loops. Keep all JSON fields, selection,
+ordering, freshness, and error handling. No credential values in diagnostics.
+
+Delete — do not maintain: per-row capacity acquisition in `human_session::listed`
+and repeated repository scope resolution in `linear_observe::check_scope`.
+Keep the existing renderers and scope resolver; no persistent cache or migration.
+
+Focused coverage: Task detail with multiple Sessions and one capacity read;
+planning scope checks with multiple Tasks/Waves, shared and foreign teams and
+unreadable configuration. Direct callers: Session card and Task screens.
+Gate owns wider Session/Task and planning suites; measure owns frozen full-JSON
+comparisons and attribution before retaining a performance claim.
+
+- Capacity: `cargo test -p loopflow --lib task_detail_reads_capacity_once_for_all_sessions` passed (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. LF variables unset, stdin closed; existing oversized unwind-table linker warning only. Initial test-counter compile failure used an unstable Cell API, replaced before this pass.

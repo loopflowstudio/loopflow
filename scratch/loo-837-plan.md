@@ -8,7 +8,7 @@ Diverged parent: when origin's parent branch has diverged from the local one, no
 
 `lf checkout --explain --stack-on P` lists what stacking would change outside the Task (push of P's branch, unpublished PR record for P, the diverged note) under `unavailable`, from refs already fetched.
 
-Concept review (2026-11-11): the model holds. The stack edge stays `parent_pr_id` → `task_prs` (retries keep the parent's PR identity); an unpublished row is phase `Working`, which `task_actions` treats like no row, so the parent's board and actions don't change.
+Concept review (2026-11-11): the model holds. The stack edge stays `parent_pr_id` → `task_prs` (retries keep the parent's PR identity); an unpublished row is phase `Working`, which `task_actions` treats like no row, so the parent's board and actions don't change. Second pass after the diverged work: basing on `origin/<branch>` is the only choice that neither forces nor ships the parent's unpublished commits inside the child's PR; the note says what was left out. Nothing to change.
 
 Remaining: gate; PR body states the placement finding above. Docs (`docs/ops.md`, `docs/dev/delivery.md`) describe the diverged case.
 

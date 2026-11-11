@@ -345,7 +345,12 @@ the private store.
 
 `cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
 writes a private Machine whose `bin/claude` stand-in echoes each line; its
-printed environment holds `LF_HOME`, the provider homes and `PATH`. Attach the
+printed environment holds `LF_HOME`, the provider homes and `PATH`. Under an
+isolated `HOME`, give that home a Git `user.email` first or the build fails at
+claiming. Copy `lf` and `lf-world` out of `target/` before a long walkthrough so
+a rebuild can't change the binary under its owners. `lf task checkout <task>`
+warms the Task's conversation detached; `lf session list --json` maps it to its
+Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without
 Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
 schedules checkout cleanup in a private home; call `lf task retire <task>` to

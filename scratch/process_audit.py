@@ -155,8 +155,12 @@ def binary_kind(path):
         return "Dev app"
     if "/demos/" in path or "Redemo" in path or "/tmp/loo-" in path:
         return "demo"
-    if re.search(r"^/(private/)?tmp/|/T/\.tmp|/var/folders/", path):
+    # transport_tests' Fixture names its homes lf-7501-*.
+    if re.search(r"^/(private/)?tmp/lf-7501-", path):
         return "test fixture"
+    # A private Machine, QA world or other test run that may still be in use.
+    if re.search(r"^/(private/)?tmp/|/T/\.tmp|/var/folders/", path):
+        return "temporary build"
     if "/target/" in path:
         return "checkout build"
     # An installed build kept under LF_HOME/bin for the processes still running it.
@@ -361,6 +365,7 @@ def advice(rows):
     hidden, _ = pids(lambda x: x["role"] == "desktop shell" and not x["viewed"])
     finished = [x for x in hidden if not x["healthy"]]
     demos, demo_pids = pids(lambda x: x["kind"] in ("demo", "Dev app") and x not in observers)
+    temporary, temporary_pids = pids(lambda x: x["kind"] == "temporary build")
     out = ["<h2>What to do</h2><table><tr><th>Group</th><th class=num>Count</th><th>Why it is still running</th><th>Recommendation</th></tr>"]
 
     def row(name, group, why, what):
@@ -413,6 +418,11 @@ def advice(rows):
         "A demo keeps its processes until its conversations are closed. Its leftover observers are "
         "counted in the row above.",
         f"Read the demo's note under its Task's <code>scratch/</code> first. PIDs: <code>{e(demo_pids)}</code>" if demos else "Nothing left.",
+    )
+    row(
+        "Other temporary binaries", temporary,
+        "A private Machine, QA world or test run started from a temporary directory. It may still be in use.",
+        f"Find what started it before stopping it. PIDs: <code>{e(temporary_pids)}</code>" if temporary else "Nothing left.",
     )
     out.append("</table>")
     return out

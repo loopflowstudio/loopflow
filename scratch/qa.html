@@ -9,6 +9,37 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e5e5ea;
 </style>
 <h1>LOO-823 QA: open conversations stay, done ones close</h1>
 
+<h2>Open scopes and a mid-grace return, 2026-11-11 10:59–11:29 PST</h2>
+<p>HEAD <code>89181c49ac</code>, branch <code>lf</code> and <code>lf-world</code> copied out of <code>target/</code> into
+<code>/tmp/lf-qa-823g</code>. <code>lf-world build one-task</code> world, isolated <code>HOME</code>/<code>LF_HOME</code>/provider homes,
+fake Claude, a Python PTY driver (<code>/tmp/lf-qa-823g/driver</code>). A bare <code>lf task retire</code> pass ran every thirty seconds.
+The earlier signalling pass did not re-check open scopes, and its S3 returned one second after leaving. This pass covers both.</p>
+<table><tr><th>Case</th><th>What happened</th><th>Observed</th></tr>
+<tr><td>O1, open Task with checkout (owner 60704)</td><td>Checkout warmed its conversation; attached, <code>hello o1</code> got its reply, typed <code>open task draft</code> without Enter, left 10:59:5x</td><td>Running through all 53 passes (27 min). Returning at 11:28 showed the draft; Enter got <code>reply …: open task draft</code> from the same owner.</td></tr>
+<tr><td>R1, repository conversation (owner 99651)</td><td><code>lf session resume</code> in the repository, <code>hello r1</code>, draft <code>repo draft</code>, left 11:00:12</td><td>Running throughout; draft returned and answered the same way.</td></tr>
+<tr><td>D1, done Task with PR-less checkout (owner 65111)</td><td>Attached, left 11:00:03; completed 11:00:22; returned 11:08:2x, <code>back d1</code> answered, left 11:08:30</td><td>Alive at 11:15:32, past completion +15. Ended on the 11:23:33 pass, +15:03 after the second departure. Checkout retained (“Retained PR-less checkout”).</td></tr>
+</table>
+<h3>Affected suites leave nothing</h3>
+<pre>ps -axww -o pid=,comm=   before 11:00:29, after 11:03:44
+cargo test -p loopflow --lib --test transport_tests -- conversation_cleanup_owns_grace_membership_and_work
+  cleanup_recognizes_current_session_launchers_without_process_parents transport::lifetime::tests::
+  store::sqlite::task_retirement::tests:: ops::task::retirement::tests:: completed_task_
+  returning_task_viewer_resets_cleanup_without_another_sweep silent_native_turns_survive_until_settlement
+  native_background_watches_survive_until_settlement a_locked_store_does_not_delay_input_or_replay_it_on_return
+  desktop_shell_reconnects_without_replay_and_close_settles_its_jobs --test-threads=4
+test result: ok. 20 passed … 85.17s
+test result: ok. 8 passed … 21.27s</pre>
+<p>41 new PIDs; none from this checkout's <code>target/</code>, a <code>/tmp/lf-7501-*</code> home, a Dev app or a test provider.
+The one provider match (<code>codex-code-mode-host</code>, 35846) is a child of a Codex app-server that the installed
+<code>~/.local/bin/lf -b -a codex … optimize-plan</code> started at 11:00:26, before the suites.</p>
+<h3>Audit against a fresh ps, and a fix</h3>
+<p>11:05: report 288, its own recount 287, a separate <code>ps … | grep -c</code> 287. Then the report put this walkthrough's three live
+owners (<code>/tmp/lf-qa-823g/lf</code>) under “Test fixture processes (<code>/tmp/lf-7501-*</code>)”, inside a
+“Safe to stop” <code>kill</code> list. Anyone copying that list would have ended live conversations. <code>binary_kind</code> classed every temporary path as a fixture.
+Fixed: “test fixture” now means only <code>lf-7501-*</code> homes. Other temporary binaries get their own row,
+“Find what started it before stopping it”, with PIDs and no kill command. Rerun at 11:06–11:07: fixtures 24, other temporary 3
+(60704 65111 99651); report 284 at read, 288 at its recount and 288 from a separate <code>ps</code> at 11:07:37.</p>
+<p>All this world's processes were stopped by PID at 11:29; none remain. Nothing else was signalled.</p>
 <h2>Direct signalling, 2026-11-11 10:03–10:41 PST</h2>
 <p>This pass supersedes the close-request mechanism and unresolved implementation findings below.
 Cleanup signals verified owners directly. Process close columns, the seven cancellation triggers,
@@ -142,28 +173,24 @@ turn and typed input went nowhere. The stand-in in <code>rust/loopflow/src/world
 <code>cargo test -p loopflow --test integration world_recipes</code>: 7 passed. The qa skill's workaround note is
 replaced.</p>
 
-<h2>What works now</h2>
+<h2>What works now (direct signalling, 89181c49ac)</h2>
 <ul>
-<li>Open Task and repository conversations run unviewed with a draft; returning shows it.</li>
-<li>A done Task's conversation ends on the first pass fifteen minutes after its viewer leaves, with or without a checkout. Returning first pushes the deadline out.</li>
-<li>Abandonment ends an unviewed conversation at once.</li>
-<li>A locked store delays no input. The leave is recorded once the store answers.</li>
-<li>Returning after closure restores history and the saved screen, but not the editor.</li>
-<li>The affected suites leave no processes. The audit's count matches <code>ps</code>.</li>
+<li>Open Task and repository conversations run unviewed with a draft for 27 minutes of cleanup passes; returning shows the draft and it submits.</li>
+<li>A done Task's conversation ends on the first pass fifteen minutes after its last viewer leaves: without a checkout (S2), with a PR-less checkout (S3, D1). A return eight minutes in moves the deadline to fifteen minutes after that return (D1).</li>
+<li>Abandonment ends an unviewed conversation at once; its checkout enters the retry queue.</li>
+<li>Startup input and a returned draft each produce exactly one provider reply. Resume after closure continues history.</li>
+<li>The affected focused suites leave no processes. The audit's count matches <code>ps</code>, and it no longer lists live temporary-binary owners as fixture leftovers to kill.</li>
 </ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>The 1b signalling path: not built yet.</li>
-<li>Mid-turn abandonment: the stand-in has no turns.</li>
-<li>A retired (merged) checkout: no merged PR exists in a world.</li>
-<li>Desktop windows, real providers, the launchd sweep, gate's full suites and Clippy.</li>
+<li>Mid-turn retention and mid-turn abandonment live: the stand-in has no turns. Focused tests cover them.</li>
+<li>A retired (merged) checkout: no merged PR exists in a world. A focused test covers it.</li>
+<li>Desktop windows and shells, real providers, the installed launchd sweep, gate's full suites, Clippy and Swift checks.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>Keys typed while a return is still opening the provider are echoed, then dropped. This is #1882's path, seen again on S2's return.</li>
-<li>An abandoned Task whose conversation was live during <code>lf task abandon</code> keeps its checkout forever: no later pass retries it. Provider rows the owner ended stay without <code>completed_at</code>, and the abandon message named them as live execution.</li>
-<li>S3's checkout row read <code>waiting / Retained by an open Task Session viewer</code> after its viewer left, until a later pass. Same as the earlier walkthrough.</li>
-<li>The whole-store revision guard didn't visibly delay a decision on this idle private Machine. The concept review measured it moving 8 times a second on the real one; 1b removes it.</li>
+<li>Not re-checked on this build: S3's checkout row read <code>waiting / Retained by an open Task Session viewer</code> after its viewer left, until a later pass (close-request pass).</li>
+<li>The audit still recommends killing 24 <code>/tmp/lf-7501-*</code> owners, 4–8 days old, and 103 orphaned observers on this Machine. A person decides; nothing was stopped.</li>
 </ol>

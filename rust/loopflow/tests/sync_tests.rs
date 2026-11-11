@@ -810,6 +810,65 @@ fn stacked_child_merges_main_after_parent_squash() {
 }
 
 #[test]
+fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent_path = repo.create_named_worktree("parent");
+    std::fs::write(parent_path.join("parent.txt"), "parent work\n").unwrap();
+    git(&parent_path, &["add", "parent.txt"]);
+    git(&parent_path, &["commit", "-m", "parent work"]);
+    let parent_tip = git(&parent_path, &["rev-parse", "HEAD"]);
+    let parent =
+        support::register_task_without_pr(home.path(), &parent_path, "parent", &repo.head_sha());
+    let child_path = repo.create_named_worktree("child");
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["checkout", "INF-124", "--stack-on", "INF-123"])
+        .current_dir(&child_path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        git(repo.bare_path(), &["rev-parse", "refs/heads/parent"]),
+        parent_tip
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let parent_pr = runtime
+        .block_on(parent.store.active_task_pr(&parent.task.id))
+        .unwrap()
+        .expect("stacking records the parent's PR");
+    assert!(parent_pr.publication.is_none());
+    let child = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(child.parent_pr_id, Some(parent_pr.id));
+    let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
+    assert_eq!(stacked.parent_branch.as_deref(), Some("parent"));
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "--plan"])
+        .current_dir(&child_path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
+}
+
+#[test]
 fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
     // A landed parent's removed checkout is ordinary state: the child plans
     // its sync onto the default branch without the parent's git dir.

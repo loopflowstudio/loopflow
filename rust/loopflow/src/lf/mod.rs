@@ -2196,7 +2196,7 @@ pub enum TaskCommand {
         issue: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
+        /// Fork this Task's worktree from another Task's branch, pushing it if needed
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]
@@ -2229,7 +2229,7 @@ until `lf ship`."
         from: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
+        /// Fork this Task's worktree from another Task's branch, pushing it if needed
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
         #[arg(long)]

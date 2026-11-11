@@ -68,9 +68,14 @@ lf checkout INF-124 --stack-on INF-123 --design scratch/child-design.md
 lf task run INF-124
 ```
 
-The parent must have a published PR; a draft suffices. The child can start and
-publish before that PR merges. It records its fork point and targets the parent's
-PR branch. Prepare a self-contained child-specific design and transfer it with
+The parent needs only a placed branch. When it has no Task PR record, stacking
+records an unpublished one for it, and pushes the branch to origin when origin
+lacks it or is behind; it never force-pushes and never opens a GitHub PR for the
+parent. The child can start and publish before the parent publishes or merges.
+It records its fork point and targets the parent's branch. Stacking fails when
+the parent is not a Task, has no placed branch, has already merged, or the push
+fails; the error names which, with git's message for a failed push. Prepare a
+self-contained child-specific design and transfer it with
 `--design`; its receipt retains source Task, commit and content hash. Identical
 retries do not reset the child; changed content at an occupied destination is a
 handoff conflict, with both versions retained.

@@ -156,7 +156,7 @@ async fn read_checkout(
         }
         report.unavailable.push("Checkout finalization may record CheckoutReady and clear inherited scratch for an untouched stacked PR; it has not run".into());
         if let Some(parent) = options.stack_on.as_deref() {
-            match super::select_existing_stack_parent(store, &task, parent).await {
+            match super::select_stack_parent(store, &task, parent).await {
                 Ok(_) => report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into()),
                 Err(error) => report.impediments.push(error.to_string()),
             }
@@ -177,10 +177,10 @@ async fn read_checkout(
             branch: plan.branch,
             stack_on: options.stack_on.clone(),
         });
-        if let Err(error) =
-            super::select_new_stack_parent(store, &task, options.stack_on.as_deref()).await
-        {
-            report.impediments.push(error.to_string());
+        if let Some(parent) = options.stack_on.as_deref() {
+            if let Err(error) = super::select_stack_parent(store, &task, parent).await {
+                report.impediments.push(error.to_string());
+            }
         }
         report.unavailable.push("Proposed path and branch use local Git facts only; fetched refs, base commit and provider PR evidence are unavailable. No checkout or PR was allocated".into());
     }

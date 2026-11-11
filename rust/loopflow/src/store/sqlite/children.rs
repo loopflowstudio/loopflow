@@ -744,9 +744,9 @@ impl SqliteStore {
             ));
         }
         let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;
-        if parent.is_settled() || parent.github().is_none() {
+        if parent.is_settled() {
             return Err(StoreError::InvalidAuthority(
-                "open the parent PR before stacking work on it".into(),
+                "stack parent PR has merged or closed; it has no live branch to stack on".into(),
             ));
         }
         let same_repo: bool = tx.query_row(

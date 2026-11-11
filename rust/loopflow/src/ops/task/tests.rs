@@ -1915,9 +1915,11 @@ async fn stacking_is_idempotent_and_preserves_history() {
     next.branch = next_task.branch.clone();
     next.slug = next_task.workspace_slug.clone();
     store.seed_task(&next_task, &next).await.unwrap();
-    let selected = super::select_existing_stack_parent(store, &current, "STACK-3")
+    let selected = super::select_stack_parent(store, &current, "STACK-3")
         .await
-        .unwrap();
+        .unwrap()
+        .pr
+        .expect("STACK-3 has a PR record");
     store
         .stack_task_placement(&current, &selected.id)
         .await
@@ -2137,7 +2139,7 @@ async fn task_preparation_refuses_an_unresolvable_base_before_allocating_placeme
 }
 
 #[tokio::test]
-async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
+async fn task_preparation_stacks_on_an_unpushed_parent_branch_without_a_pr() {
     let repo = loopflow_test_support::TestRepo::new();
     let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
     for selector in ["FIX-1", parent.task.id.as_str(), "FIX-1-issue"] {
@@ -2158,38 +2160,70 @@ async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
             "{error}"
         );
     }
+    // Placed through a Graph kickoff: a local branch, no Task PR row, nothing on origin.
+    repo.create_branch(&parent.task.branch);
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    let parent_tip = repo.head_sha();
+    repo.checkout("main");
+    let db = rusqlite::Connection::open(&parent.database_path).unwrap();
+    db.execute(
+        "DELETE FROM task_prs WHERE task_id=?1",
+        [parent.task.id.as_str()],
+    )
+    .unwrap();
     let child = Task {
         id: TaskId::new(),
         ..parent.task.clone()
     };
-    let result = super::prepare_task_placement(
-        &parent.store,
-        repo.path(),
-        &child,
-        None,
-        &super::TaskProcessOptions {
-            name: Some("child-task".into()),
-            stack_on: Some("FIX-1".into()),
-            ..Default::default()
-        },
+    let options = super::TaskProcessOptions {
+        name: Some("child-task".into()),
+        stack_on: Some("FIX-1".into()),
+        ..Default::default()
+    };
+
+    db.execute(
+        "UPDATE tasks SET worktree=NULL WHERE id=?1",
+        [parent.task.id.as_str()],
     )
-    .await;
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("open the parent PR"));
-    let retained = parent
+    .unwrap();
+    let error = super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("FIX-1 has no placed branch"),
+        "{error}"
+    );
+    db.execute(
+        "UPDATE tasks SET worktree=?2 WHERE id=?1",
+        [
+            parent.task.id.as_str(),
+            &parent.task.worktree.as_ref().unwrap().display().to_string(),
+        ],
+    )
+    .unwrap();
+
+    let prepared =
+        super::prepare_task_placement(&parent.store, repo.path(), &child, None, &options)
+            .await
+            .unwrap();
+    let remote = std::process::Command::new("git")
+        .current_dir(repo.bare_path())
+        .args(["rev-parse", &format!("refs/heads/{}", parent.task.branch)])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), parent_tip);
+    assert_eq!(prepared.plan.base_ref, parent_tip);
+    let recorded = parent
         .store
-        .get_task(&parent.task.id)
+        .active_task_pr(&parent.task.id)
         .await
         .unwrap()
-        .unwrap();
-    assert_eq!(retained.worktree, parent.task.worktree);
-    assert_eq!(parent.store.list_tasks(None).await.unwrap().len(), 1);
-    assert_eq!(
-        parent.store.task_prs(&parent.task.id).await.unwrap().len(),
-        1
-    );
+        .expect("stacking records the parent's PR");
+    assert_eq!(recorded.branch, parent.task.branch);
+    assert!(recorded.publication.is_none());
+    assert_eq!(prepared.pr(&child.id).parent_pr_id, Some(recorded.id));
 }
 
 #[test]

@@ -56,7 +56,10 @@ with `--notes`; refine a filed Task with `lf task update`. Return each Task as o
 link from `lf --task <issue> open --link --format markdown`
 (`[ID · title](loopflow://…)`), with its repository and Wave; keep the provider
 issue link separate. Run `lf open '<url>'` only when asked to open a Task now,
-and report what it printed; a printed link opens nothing.
+and report what it printed; a printed link opens nothing. Opening means the
+Task's conversation: agent calls use a sibling tab, and an already-open Session
+reports its location with `--focus` to reveal it. Never retry with `--here` inside
+a tool call or substitute workflow inspection for a requested conversation.
 
 If the repository is unreachable, the Wave unclear or its Project unavailable,
 leave the unfiled brief in the conversation and say why. Report provider

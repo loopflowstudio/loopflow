@@ -155,13 +155,17 @@ struct DTOFixtureTests {
         let links = try JSONDecoder().decode([WorkLink].self, from: data)
         #expect(links[0].conversation == .otherConversation)
         #expect(links[0].target.executionMachine != nil)
+        #expect(links[0].route.host == nil)
         #expect(links[1].target.kind == .wave)
-        #expect(links[1].route.hosts == [.terminal])
+        #expect(links[1].route.host == .terminal)
         #expect(try JSONDecoder().decode([WorkLink].self, from: JSONEncoder().encode(links)) == links)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         wire[0].removeValue(forKey: "fallback_argv")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode([WorkLink].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WorkLink.Route.self, from: Data(#"{"reason":"missing host"}"#.utf8))
         }
     }
 
@@ -230,7 +234,7 @@ struct DTOFixtureTests {
     @Test func desktopOpeningDoesNotConfuseLaunchWithUsability() throws {
         let data = try loadFixtureData("desktop_openings.json")
         let readings = try JSONDecoder().decode([DesktopOpening].self, from: data)
-        #expect(readings.map(\.status) == [.opening, .usable, .failed])
+        #expect(readings.map(\.status) == [.opening, .usable, .failed, .elsewhere])
         #expect(readings[0].reason == nil)
         #expect(readings[2].reason != nil)
         #expect(try JSONDecoder().decode([DesktopOpening].self, from: JSONEncoder().encode(readings)) == readings)
@@ -337,6 +341,7 @@ struct DTOFixtureTests {
         #expect(report.windows[1].viewParts.map(\.hidden) == [false, true, false])
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
         #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
+        #expect(window.workspaces.first?.layout.children.first?.attachment == .usable)
         #expect(window.workspaces.first?.layout.children.last?.surface == nil)
         #expect(window.list.first?.identifier == "LOO-519")
         #expect(window.actions.map(\.name) == ["back", "forward"])

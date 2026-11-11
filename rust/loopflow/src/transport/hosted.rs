@@ -439,6 +439,10 @@ impl Hosted {
         });
         owner_change |= self.ownership.settle(&self.viewers);
         self.release_lost_control();
+        let controller_ready = self.client.is_some()
+            && self.viewers.iter().any(|viewer| {
+                viewer.token.is_some() && viewer.token == self.control && viewer.ready
+            });
         {
             let Self {
                 viewers,
@@ -522,7 +526,13 @@ impl Hosted {
                                 viewer.input_hint = Some(hint);
                                 *hint_due = true;
                             }
-                            Request::Controlled => {
+                            Request::Controlled { ready } => {
+                                if let Some(ready) = ready {
+                                    viewer.ready = viewer.attached
+                                        && client
+                                            .as_ref()
+                                            .is_some_and(|client| client.detach == ready);
+                                }
                                 if viewer.attached {
                                     viewer.heartbeat_at = Instant::now();
                                 }
@@ -530,6 +540,7 @@ impl Hosted {
                                     answers,
                                     Reply::Controlled {
                                         held: control.is_some(),
+                                        ready: Some(controller_ready),
                                     },
                                 );
                             }
@@ -793,6 +804,7 @@ impl Hosted {
         }
         if let Some(event) = self.returning.take() {
             for viewer in self.viewers.iter_mut().filter(|viewer| viewer.attached) {
+                viewer.ready = false;
                 viewer.event(event.clone());
             }
         }

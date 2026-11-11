@@ -713,6 +713,7 @@ struct Viewer {
     /// The input claim, while this connection may type.
     token: Option<String>,
     attached: bool,
+    ready: bool,
     heartbeat_at: Instant,
     seq: u64,
     /// Events awaiting a sequence boundary in the stream.
@@ -750,6 +751,7 @@ impl Viewer {
             nonce: token()[..16].to_owned(),
             token: None,
             attached: false,
+            ready: false,
             heartbeat_at: Instant::now(),
             seq: 0,
             events: Vec::new(),
@@ -2137,7 +2139,7 @@ fn view(
         }
         if Instant::now() >= heartbeat {
             heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
-            if let Err(error) = send(&mut socket, Request::Controlled) {
+            if let Err(error) = send(&mut socket, Request::Controlled { ready: None }) {
                 if !can_reconnect {
                     return Err(error);
                 }
@@ -2387,7 +2389,20 @@ fn view(
                             return Ok(());
                         }
                         Event::Return { detach } => {
+                            // The owner may have exited with its final output and
+                            // status still buffered. A readiness write cannot discard them.
+                            let acknowledged = send(
+                                &mut socket,
+                                Request::Controlled {
+                                    ready: Some(detach.clone()),
+                                },
+                            )
+                            .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
+                            .is_ok();
                             returning = Some(detach);
+                            if controlled && acknowledged {
+                                acknowledge_open();
+                            }
                             if let Some(status) = &mut status {
                                 status.native_ready();
                             }
@@ -2654,6 +2669,22 @@ fn discard_reconnect_input() -> io::Result<()> {
     }
 }
 
+pub(crate) const OPEN_RECEIPT_ENV: &str = "LF_OPEN_RECEIPT";
+
+/// A tab launch succeeds only when this viewer holds input and its Session's
+/// native client is ready. Startup errors before Return leave no success receipt.
+fn acknowledge_open() {
+    let Some(path) = std::env::var_os(OPEN_RECEIPT_ENV) else {
+        return;
+    };
+    std::env::remove_var(OPEN_RECEIPT_ENV);
+    let path = Path::new(&path);
+    let temporary = path.with_extension("ready");
+    if std::fs::write(&temporary, "attached").is_ok() {
+        let _ = std::fs::rename(temporary, path);
+    }
+}
+
 /// A passive reveal records its terminal only after acquiring input control.
 fn record_relay_terminal(owner: &Host) -> Result<()> {
     let Some(session) = std::env::var_os("LF_RELAY_SESSION") else {
@@ -2742,12 +2773,17 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 /// Whether a viewer of this execution holds input control. A closed terminal
 /// leaves its execution running with none, ready for the next viewer.
 pub(crate) fn controlled(id: &Host) -> Result<bool> {
+    attachment(id).map(|(held, _)| held)
+}
+
+/// Input ownership and the controlling viewer's native readiness are separate.
+pub(crate) fn attachment(id: &Host) -> Result<(bool, bool)> {
     let mut socket = id.connect()?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    send(&mut socket, Request::Controlled)?;
+    send(&mut socket, Request::Controlled { ready: None })?;
     match receive_reply(&mut socket)? {
-        Reply::Controlled { held } => Ok(held),
+        Reply::Controlled { held, ready } => Ok((held, ready == Some(true))),
         other => bail!("unexpected transport reply {other:?}"),
     }
 }

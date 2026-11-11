@@ -6,6 +6,20 @@ its name, its Task and its provider's native history, whichever terminal or
 agent it ran in. This page covers finding them, steering them, what keeps
 running through an update, and what comes back after a crash.
 
+## Open without moving another view
+
+```bash
+lf open --task LOO-12              # the primary conversation in this terminal
+lf open --session <session> --tab  # an exact Session in a sibling tab
+lf open --task LOO-12 --focus       # reveal its existing view
+```
+
+`lf open` reports an already-open conversation and offers `--focus`; it does not
+take input from another view. Agent calls default to sibling tabs. To deliberately
+move an existing conversation's input here, use `lf resume`. Both continue an
+ended Session from history without replaying its prompt. Presentation modes and
+host support: [Open conversations and workspaces](workspaces.md).
+
 ## Come back to a conversation
 
 ```bash

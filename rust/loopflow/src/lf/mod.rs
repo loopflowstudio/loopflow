@@ -503,8 +503,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open Work in Desktop, this Rex/Herdr/cmux/tmux host or a terminal
+    /// Open one conversation here, in a sibling tab, or focus its existing view
     Open(commands::open::OpenArgs),
+    /// Open configured Task layouts or a repository/Wave overview
+    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -1178,6 +1180,7 @@ impl Commands {
             }
             Self::Ship { .. }
             | Self::Open(_)
+            | Self::Workspace(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -3544,6 +3547,22 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn conversation_modes_and_workspace_options_have_separate_commands() {
+        for flags in [
+            ["--here", "--tab"],
+            ["--here", "--focus"],
+            ["--tab", "--focus"],
+        ] {
+            assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
+        }
+        for option in ["--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
+            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        }
+        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
+    }
 
     #[test]
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {

@@ -2,14 +2,48 @@
 //! Task split layouts are handled only by Rex, Herdr and cmux.
 use std::process::Command;
 
-use super::{run_host, viewed_placement, OpenHost, Opened, Resolved, RouteError, TMUX_PANE};
+use anyhow::{Context, Result};
+
+use super::{run_host, viewed_placement, OpenHost, Resolved};
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct TmuxLocation {
+    socket: String,
+    pane: String,
+}
+
+impl TmuxLocation {
+    pub(super) fn current() -> Option<Self> {
+        let tmux = std::env::var("TMUX").ok()?;
+        Some(Self {
+            socket: tmux.rsplitn(3, ',').nth(2)?.into(),
+            pane: std::env::var("TMUX_PANE").ok()?,
+        })
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new("tmux");
+        command.args(["-S", &self.socket]);
+        command
+    }
+}
 
 /// A new window right after the caller's, named for the Work. Its pane is the
 /// destination: pane IDs are unique for the server's life, unlike indexes.
-pub(super) fn open(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.resume_shell(lf)?;
+pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<String> {
+    let shell = shlex::try_join(argv.iter().map(String::as_str))?;
+    let caller = match viewed_placement() {
+        Some((OpenHost::Tmux, value)) => Some(
+            serde_json::from_str::<TmuxLocation>(&value)
+                .context("Recorded tmux view is unreadable")?,
+        ),
+        _ => TmuxLocation::current(),
+    };
     let window = |after: Option<&str>| {
-        let mut command = Command::new("tmux");
+        let mut command = caller
+            .as_ref()
+            .map(TmuxLocation::command)
+            .unwrap_or_else(|| Command::new("tmux"));
         command.arg("new-window");
         if let Some(pane) = after {
             command.args(["-a", "-t", pane]);
@@ -30,37 +64,27 @@ pub(super) fn open(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, R
             .arg(&shell);
         run_host(command, "tmux")
     };
-    // A pane recorded at launch may be gone; the server's current session remains.
-    let caller = match viewed_placement() {
-        Some((OpenHost::Tmux, pane)) => Some(pane),
-        _ => std::env::var(TMUX_PANE)
-            .ok()
-            .filter(|pane| !pane.is_empty()),
-    };
-    let output = match caller.as_deref().map(|pane| window(Some(pane))) {
-        Some(Err(RouteError::Definite(_))) | None => window(None)?,
-        Some(result) => result?,
-    };
+    let output = window(caller.as_ref().map(|location| location.pane.as_str()))?;
     let pane = output.trim();
-    if pane.is_empty() {
-        return Err(RouteError::Unknown("tmux reply named no pane".into()));
-    }
-    Ok(Opened::opening(Some(pane.to_owned())))
+    anyhow::ensure!(!pane.is_empty(), "tmux reply named no pane");
+    Ok(pane.to_owned())
 }
 
-pub(super) fn focus(destination: &str) -> Result<(), RouteError> {
-    // Selecting proves the pane still exists; a client in another session
-    // follows it when one is attached.
-    let mut command = Command::new("tmux");
-    command.args(["select-window", "-t", destination, ";"]);
-    command.args(["select-pane", "-t", destination]);
-    let selected = run_host(command, OpenHost::Tmux.label()).map(drop);
-    if selected.is_ok() {
-        let mut switch = Command::new("tmux");
-        switch.args(["switch-client", "-t", destination]);
-        let _ = run_host(switch, OpenHost::Tmux.label());
-    }
-    selected.inspect_err(|error| {
-        tracing::debug!(reason = error.reason(), "cannot focus the destination");
-    })
+pub(super) fn focus(destination: &str) -> Result<()> {
+    let location: TmuxLocation =
+        serde_json::from_str(destination).context("Recorded tmux view is unreadable")?;
+    let mut command = location.command();
+    command.args([
+        "select-window",
+        "-t",
+        &location.pane,
+        ";",
+        "select-pane",
+        "-t",
+        &location.pane,
+    ]);
+    run_host(command, OpenHost::Tmux.label())?;
+    let mut switch = location.command();
+    switch.args(["switch-client", "-t", &location.pane]);
+    run_host(switch, OpenHost::Tmux.label()).map(drop)
 }

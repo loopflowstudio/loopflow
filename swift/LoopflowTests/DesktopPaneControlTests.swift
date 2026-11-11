@@ -804,7 +804,7 @@ struct DesktopPaneControlTests {
         _ = try router.perform(DesktopActionRequest("move", at: shellTarget, args: ["destination": sessionTarget.pane, "axis": "vertical"]))
         #expect(store.layout.allPanes.map(\.id) == [session.id, shell.id, filesPane.id])
         _ = try router.perform(DesktopActionRequest("resize", at: shellTarget, args: ["toward": sessionTarget.pane, "ratio": String(0.7)]))
-        let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil }, commands: { _ in nil })
+        let reading = DesktopLayoutInspection(store.layout, surface: { _ in nil }, commands: { _ in nil }, attachment: { _ in nil })
         let movedSplit = reading.children[0]
         #expect(movedSplit.axis == "vertical")
         #expect(abs(try #require(movedSplit.ratio) - 0.3) < 0.0001)

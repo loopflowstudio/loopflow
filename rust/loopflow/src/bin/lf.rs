@@ -1357,6 +1357,17 @@ fn print_thread(
 
 fn main() -> std::process::ExitCode {
     loopflow::transport::initialize();
+    // The holder outlives servers and installs. It records no Process itself
+    // and opens no store, so it runs before any of that is set up.
+    if std::env::args().skip(1).eq(["holder", "run"]) {
+        return match loopflow::holder::run() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("lf holder: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
         let result = run();
@@ -1457,6 +1468,16 @@ fn run() -> anyhow::Result<()> {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
+    }
+    // Clap has no `session attach`: a relay that names no valid host stops here.
+    if raw_args
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
+    {
+        anyhow::bail!(
+            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            &raw_args[3..]
+        );
     }
     if !raw_args
         .iter()
@@ -1697,6 +1718,7 @@ fn run() -> anyhow::Result<()> {
                 Commands::Config {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
+                    | Commands::Workspace(_)
             )
         )
     {
@@ -2035,6 +2057,9 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Open(args)) = &cli.command {
         return loopflow::lf::commands::open::explain(cli, args, json);
     }
+    if let Some(Commands::Workspace(args)) = &cli.command {
+        return loopflow::lf::commands::open::explain_workspace(cli, args, json);
+    }
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
@@ -2312,7 +2337,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    if execution && loopflow::transport::delegate_current(cli.batch)? {
+    let task_run = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        })
+    );
+    if execution && loopflow::transport::delegate_current(cli.batch, task_run)? {
         return Ok(());
     }
     // Only the operation a launcher started reports; an execution owner in
@@ -2397,6 +2428,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
+    }
+    if let Some(Commands::Workspace(workspace)) = &cli.command {
+        journal::observe_process(args);
+        return loopflow::lf::commands::open::run_workspace(&cli, workspace);
     }
     if let Some(Commands::Open(open)) = &cli.command {
         // Bounded observation records this Process and the calling
@@ -2752,7 +2787,7 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
+        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {
@@ -2859,6 +2894,7 @@ fn execute_command(
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::CodexObserve) => unreachable!("the observer dispatches before any store"),
+        Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {

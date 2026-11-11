@@ -1,7 +1,7 @@
 //! Passive terminal observation shares session_activity; no attachment claim.
 //! A conversation Loopflow never attached to has no AgentProcess; its absence
 //! is the witness, and a later launch replaces it like any other provider.
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::program_status::Records;
 use crate::store::{StoreError, StoreResult};
@@ -50,6 +50,65 @@ impl SqliteStore {
              AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.agent_process_id IS ?2 AND s.completed_at IS NULL)",
             params![session, agent_process, stream, sequence, json],
         )? == 1)
+    }
+
+    /// Record a held terminal's Program Status as the status of the Session
+    /// it hosts, under that Session's current AgentProcess. The server is its
+    /// only writer; a new provider or server starts a new stream. False when
+    /// the terminal hosts no open Session.
+    pub(crate) fn record_held_program_status(
+        &self,
+        terminal: &crate::id::TerminalId,
+        sequence: i64,
+        records: &Records,
+    ) -> StoreResult<bool> {
+        let hosted = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT id,agent_process_id FROM agent_sessions
+                 WHERE held_terminal_id=?1 AND completed_at IS NULL
+                 ORDER BY created_at DESC LIMIT 1",
+                [terminal.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<crate::id::AgentProcessId>>(1)?,
+                    ))
+                },
+            )
+            .optional()?
+        };
+        let Some((session, agent)) = hosted else {
+            return Ok(false);
+        };
+        let stream = format!("held:{terminal}");
+        if self.record_program_status(&session, agent.as_ref(), &stream, sequence, records)? {
+            return Ok(true);
+        }
+        Ok(
+            self.begin_program_status(&session, agent.as_ref(), &stream)?
+                && self.record_program_status(
+                    &session,
+                    agent.as_ref(),
+                    &stream,
+                    sequence,
+                    records,
+                )?,
+        )
+    }
+
+    /// Whether a held terminal hosts `session`: its server records the
+    /// Session's Program Status, and no view's reading replaces it.
+    pub(crate) fn session_is_held(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT held_terminal_id IS NOT NULL FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
     }
 }
 

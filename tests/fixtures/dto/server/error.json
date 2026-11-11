@@ -1,1 +1,0 @@
-{"type":"error","id":null,"code":"incompatible","message":"Server speaks protocol revisions 4–4; the client speaks 5–5; update the selected installation","data":{"server":{"revision":4,"min_revision":4},"update":"server"}}

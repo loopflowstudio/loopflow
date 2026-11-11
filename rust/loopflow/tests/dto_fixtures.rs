@@ -807,7 +807,8 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
         vec![
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
-            DesktopOpeningStatus::Failed
+            DesktopOpeningStatus::Failed,
+            DesktopOpeningStatus::Elsewhere
         ]
     );
     assert!(readings[0].reason.is_none());
@@ -855,6 +856,7 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
         ConversationRelation::OtherConversation
     );
     assert!(links[0].target.execution_machine.is_some());
+    assert!(links[0].route.host.is_none());
     assert_eq!(links[1].conversation, ConversationRelation::Unknown);
     assert!(links[1].url.contains("?repository="));
     assert_eq!(
@@ -863,6 +865,9 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
     missing[0].as_object_mut().unwrap().remove("fallback_argv");
+    assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0]["route"].as_object_mut().unwrap().remove("host");
     assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
 }
 
@@ -1169,6 +1174,10 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     assert_eq!(window.history.back, 1);
     assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
     assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
+    assert_eq!(
+        window.workspaces[0].layout.children[0].attachment,
+        Some(loopflow::lf::commands::desktop::DesktopOpeningStatus::Usable)
+    );
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
     assert!(window.view_parts.is_empty());
     let parts = &reading.windows[1].view_parts;
@@ -1342,6 +1351,30 @@ fn creation_recovery_dispositions_round_trip() {
     let json = include_str!("../../../tests/fixtures/dto/creation_lookup.json");
     let receipts: Vec<loopflow::store::sqlite::creation::CreationReceipt> =
         serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn opening_receipts_distinguish_focus_from_attachment() {
+    use loopflow::lf::commands::open::{OpenReceipt, OpenStatus};
+    let json = include_str!("../../../tests/fixtures/dto/open_receipts.json");
+    let receipts: Vec<OpenReceipt> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        receipts
+            .iter()
+            .map(|receipt| receipt.status)
+            .collect::<Vec<_>>(),
+        [
+            OpenStatus::Opening,
+            OpenStatus::Usable,
+            OpenStatus::Focused,
+            OpenStatus::Elsewhere,
+            OpenStatus::Failed
+        ]
+    );
     assert_eq!(
         serde_json::to_value(receipts).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

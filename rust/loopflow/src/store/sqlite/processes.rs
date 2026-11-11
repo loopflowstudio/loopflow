@@ -346,7 +346,7 @@ pub(super) fn attach_in(
         // A best-effort start receipt can lose to a held write lock; the
         // attaching lf's row lands here instead, never a self-rooted agent.
         if let Some(start) = crate::journal::current_start_record(process) {
-            super::record_process_in(tx, &start)?;
+            super::record_process_in(tx, &start, crate::transport::held_terminal())?;
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
@@ -527,6 +527,20 @@ impl SqliteStore {
                 read_lf_process,
             )
             .optional()?)
+    }
+
+    /// The lf processes that started inside held terminal `terminal`.
+    pub(crate) fn held_terminal_processes(
+        &self,
+        terminal: &crate::id::TerminalId,
+    ) -> StoreResult<Vec<LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare("SELECT id FROM processes WHERE kind='lf' AND held_terminal_id=?1")?;
+        let ids = query
+            .query_map([terminal], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
     }
 
     /// Read one provider OS process by its own identity.
@@ -1095,7 +1109,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
-            super::record_process_in(&tx, &start)?;
+            super::record_process_in(&tx, &start, crate::transport::held_terminal())?;
         }
         let released = tx.execute(
             &format!(

@@ -286,3 +286,54 @@ but its terminal stops at sign-in. Label these provider API checks; they do not
 establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
 Use different names for a headless Graph and its skill so Graph resolution does
 not treat the step as a recursive Graph call.
+
+## Native conversation opening
+
+Use the private homes above for native servers too. Start Rex with
+`rex server run --listen unix://<root>/rex.sock --state-dir <root>/rex-state
+--config <root>/empty.lua`; create an empty Lua file first. Every Rex client
+command takes `--autostart=false -S unix://<root>/rex.sock`. Never launch a second
+Rex app: its preferences share the installed app's cached route. A headless Rex
+server can attach and capture real terminals; focus correctly fails without a
+capable display client.
+
+Open with `lf open --tab --host rex --server unix://<root>/rex.sock --json`.
+Use `rex api call session.list_blocks '{"session_id":"…"}'`, then
+`rex block capture -s <session> -b <block>` to read the terminal. To check the
+direct default inside Rex, create a `session.new_window` whose terminal command
+is `["<branch-lf>","open","--task","<task>"]`; it must stay in that block.
+
+For Herdr, isolate `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, start
+`herdr --session qa server`, and set `HERDR_SOCKET_PATH` to
+`<config>/herdr/sessions/qa/herdr.sock` in clients. `herdr pane list` and
+`herdr pane read <pane> --source visible --format text` show the real destination.
+Two simultaneous opens of one prepared Session should create one attachment.
+
+To exercise failed-start recovery with real Codex, exit its private sign-in
+screen with Ctrl+C, temporarily put invalid TOML in the private Codex config,
+and reopen that Session. Capture the retained error tab, restore the config,
+then repeat the exact opening command. Check the Session and provider-thread
+identity, and capture again after startup settles. Attachment at the sign-in
+screen does not establish authenticated conversation behavior. Stop native
+servers and their terminal descendants, including detached owners recorded in
+the private store.
+
+## Held terminals
+
+Unset `REX_*` along with `LF_*`: an inherited Rex block makes every view
+report "open in Rex". A stand-in `claude` on the private `PATH` (answering
+`--version`) drives held Task Sessions with `lf resume --task <id>` on a PTY.
+Its stdin is lf's first-turn prompt file: drain it with `cat > /dev/null` and
+read answers from `/dev/tty`, or the agent answers its own question with the
+prompt. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
+`lf session list --json --all` reads (`availability`) with no view open.
+
+To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
+a relay replaced across a `held.sock` revision execs `LF_BIN`. A copy with a
+few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
+(its own holder). A managed launch with the server stopped readies
+`com.loopflow.server.<hash>` under launchd for the private home; `launchctl
+kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
+that label out afterwards. Kill stand-in agents by their holder parent PID;
+holders exit about a minute after their last child. Read the private store
+through a copy once the server stops: a read-only open finds no `-shm`.

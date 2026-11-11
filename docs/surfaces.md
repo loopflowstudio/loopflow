@@ -3,33 +3,36 @@
 Your Tasks and conversations live in `lf`, not in a window. Open them wherever
 you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
 
-For Task layouts, Wave defaults, automatic arrivals and native splits, read
-[Open Task workspaces](workspaces.md).
+For presentation modes, layouts and recovery, read
+[Open conversations and workspaces](workspaces.md).
 
 ## Open Work where you are
 
 ```bash
-lf open loopflow://loopflow/task/LOO-12        # LOO-12's conversation, in the host you're in
-lf open loopflow://loopflow/wave/product       # the product Wave
-lf open --available                            # every conversation available for you, at once
-lf open loopflow://loopflow/task/LOO-12 --diff # conversation plus its Changes (Desktop)
+lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation here
+lf open --task LOO-12 --tab                  # attach in a sibling tab
+lf open --task LOO-12 --focus                # reveal its existing view
+lf open --wave product                      # the product Wave's conversation
+lf workspace --wave product                 # the Wave's Task overview
+lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
 ```
 
-From Rex, Herdr or cmux, `lf open` launches a fresh Task tab with its splits in
-the host you are in: inside a Rex session or Herdr workspace, a Task joins it; a
-repository or Wave gets its own session, workspace or cmux group. Each open is a
-new launch; return to earlier tabs through the host. From tmux it opens a new
-window right after this one. Otherwise it opens in Desktop on macOS, then a plain
-terminal. Host context comes from viewer placement, the host's environment or Rex
-process ancestry; opening never scans running apps, and failure in your host never
-falls through to another. `--host desktop|rex|cmux|herdr|tmux|terminal` picks one
-explicitly.
+Direct CLI opening attaches in the current terminal, including inside Rex.
+An agent call defaults to a sibling tab in its conversation's host. It never
+attaches inside its own tool call. Desktop navigation focuses its existing view.
 
-For a selected Task, Rex, Herdr and cmux run `lf resume` in its Conversation pane,
-which moves the conversation's input here. A repository or Wave opening starts no
-agents: it reconnects running conversations no terminal is showing and shows
-workflow information for the rest, as automatic Task arrivals do. tmux and terminal
-routes focus an existing conversation or report it as `elsewhere`.
+Ordinary terminal opening reports an already-open conversation's location and
+offers `--focus`; it does not move input or create a duplicate. `--focus` reports
+**Not open** if there is no live view. A plain terminal without sibling-tab
+support reports that limitation and gives a command to run in a terminal you
+open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
+failure never falls through to another.
+
+`lf open` resolves one conversation, independently of workspace layouts.
+`lf workspace` opens configured arrangements and repository or Wave overviews;
+`lf task view` inspects workflow. Opening a conversation does not advance a Graph
+or replay its prompt. Success means the conversation attached; attachment
+failure reaches the opening command and can be retried.
 
 A Work address names the repository by folder, then the Task or Wave. It never
 carries a path or a host, so the same link works on any machine with the repository.
@@ -79,8 +82,8 @@ It never launches a terminal editor, browser or host as a fallback.
 lf --task LOO-12 open --link --format markdown   # a Markdown link to LOO-12's conversation
 ```
 
-`--link` opens nothing. Paste it in a PR, a chat or a note; clicking it runs
-`lf open` and lands in Desktop, or a terminal when Desktop isn't installed.
+`--link` opens nothing. Paste it in a PR, a chat or a note; clicking it uses
+your registered `loopflow:` handler. From a terminal, pass it to `lf open`.
 Installing `lf` registers a `loopflow:` handler, leaving one you chose in place.
 With Herdr installed, Control-click opens the Work beside the clicked pane.
 

@@ -1,11 +1,11 @@
 //! The completion and landing callers share this durable retirement operation.
+use crate::transport::Host;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use super::{block_on_task, task_error, task_store};
 use crate::durable::{TaskId, WorkStatus};
-use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::{NullProgress, OpsError, OpsResult};
 use crate::store::{
@@ -49,8 +49,9 @@ fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option
             ViewerHold::Viewed(at) => {
                 if !owner.ended
                     && now < at + VIEWER_OBSERVATION_GRACE
-                    && crate::journal::lf_evidence(store, &owner.owner)
-                        != ProcessIdentityEvidence::Dead
+                    && owner.owner.as_ref().is_none_or(|owner| {
+                        crate::journal::lf_evidence(store, owner) != ProcessIdentityEvidence::Dead
+                    })
                 {
                     return Ok(Some(ViewerHold::Viewed(at)));
                 }
@@ -73,7 +74,10 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
 
 /// Owners consume automatic closes between sweeps. The queued phase alone
 /// cannot authorize ending execution after Session viewing has returned.
-pub(crate) fn owner_retiring(store: &SqliteStore, owner: &LfProcessId) -> OpsResult<bool> {
+pub(crate) fn owner_retiring<'a>(
+    store: &SqliteStore,
+    owner: impl Into<crate::store::sqlite::Transport<'a>>,
+) -> OpsResult<bool> {
     let now = now();
     for task in store.owner_retiring_tasks(owner).map_err(task_error)? {
         match viewer_hold(store, &task, now)? {
@@ -266,17 +270,19 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
         if session.completed_at.is_some() {
             continue;
         }
-        if let Some(owner) = store
+        if let Some(host) = store
             .sqlite
             .session_transport(session.id.as_str())
             .map_err(task_error)?
         {
-            if crate::journal::lf_evidence(&store.sqlite, &owner) == ProcessIdentityEvidence::Dead {
+            if host.owner().is_some_and(|owner| {
+                crate::journal::lf_evidence(&store.sqlite, owner) == ProcessIdentityEvidence::Dead
+            }) {
                 continue;
             }
             if store
                 .sqlite
-                .owner_retention(&owner)
+                .owner_retention(host.transport())
                 .map_err(task_error)?
                 .is_some()
             {
@@ -284,7 +290,19 @@ fn require_settled_work(store: &SharedStore, task: &Task) -> OpsResult<()> {
                     "Requested work, a draft or a pending request still holds this Task",
                 ));
             }
-            allowed.insert(owner);
+            // A held terminal is no process: the lf processes that started
+            // inside it stand where an owner would.
+            match host {
+                Host::Owner(owner) => {
+                    allowed.insert(owner);
+                }
+                Host::Terminal(terminal) => allowed.extend(
+                    store
+                        .sqlite
+                        .held_terminal_processes(&terminal)
+                        .map_err(task_error)?,
+                ),
+            }
         }
     }
     let processes = store

@@ -19,8 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Session owners retain their existing lifetime policy; this
-service creates no PTYs, retention records or Graphs. Logout/reboot do not
+stop the service. Managed Sessions run in a holder the service starts with
+`setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
+stopping or replacing the service leaves holders and their agents running.
+Session owners retain their existing lifetime policy. This service holds no
+PTY itself and starts no Graphs. Logout/reboot do not
 preserve live processes. Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
@@ -31,7 +34,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 4
+## Local protocol, revision 5
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Messages are
@@ -42,7 +45,7 @@ socket and its directory are private; remote proxies must never forward this
 endpoint. Remote admission is outside this revision.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
-mirrors them. Executable fixtures live in `tests/fixtures/dto/server/`.
+mirrors them. Executable fixtures live in `rust/loopflow/tests/fixtures/dto/server/`.
 `nc -U machine.sock` is a debugging tool: type `{"type":"status"}`.
 
 `lf server describe --json` prints the protocol as one JSON Schema, generated
@@ -79,8 +82,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":4,"server_revision":4,"min_revision":4,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -103,7 +106,7 @@ executable SHA-256, the Machine reading (`null` while the registry is
 unavailable or uninitialized) and limits. What the server can do is its
 revision and `lf server describe`, not a list in the welcome. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 4 only; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 5 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -125,7 +128,7 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
 operation's value: what its CLI spelling prints with `--json`, a ticket
-`{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
+`{ticket, owner_lf_process_id, terminal_id, expires_in_ms}` for `session.attach`, and null
 once a subscription is confirmed.
 A completed request's ID can be reused immediately after its response or error. A
 subscription keeps its ID after acknowledgement and readings, until `ended`,
@@ -214,12 +217,14 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
+| `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
+| `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` and CLI attachment to an owner reaches its socket directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
 | `wave.create` | `lf wave create` | write |
@@ -356,11 +361,33 @@ part of what a phone or bot client is offered.
   response means outcome unknown; inspect state before retrying. Transport IDs
   correlate diagnostics and are **not** durable deduplication receipts. Only
   `task.create` and `session.new` have the creation retry contract below.
+- `session.start {session, request, argv, cwd, env, rows, cols}` starts the
+  Session's agent in this build's holder and answers `{terminal_id}`. `env` is
+  the caller's complete environment; the server's own is not used. `request`
+  identifies the start: repeating it answers the same terminal and starts
+  nothing, and a start whose holder reply was lost is reconciled against the
+  holder's inventory first; a start that could not be reconciled answers
+  `outcome_unknown`, and repeating the same `request` settles it. It creates
+  a process and is the only operation here that does; attaching never does.
+- `session.attach {session}` prefers the Session's held terminal to an owner,
+  and `{session, terminal_id}` attaches only to that terminal. Either answers
+  a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
+  and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
+  The bridged connection speaks the viewer protocol with the server's
+  terminal registry. A terminal that has ended answers `not_found` with
+  `terminal_id` and `current_terminal_id` (null when the Session has none).
+  A terminal whose holder has not answered this server since it started
+  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+  agent keeps running, and the same request attaches once the holder answers.
+  A ticket presented after its terminal ended, or while its holder is not
+  answering, gets the same two errors with a null `id` in place of `bridged`.
+  The owner form below serves owners only, with `terminal_id` null in its
+  ticket and its `bridged`; an owner ID is never a terminal ID.
 - `session.attach {session, owner_lf_process_id}` answers a ticket
-  `{ticket, owner_lf_process_id, expires_in_ms}` on an ordinary client
+  `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}` on an ordinary client
   connection, which stays a client. The bridge is a new connection whose first
   and only message is `{"type":"attach","ticket"}`; the server answers
-  `bridged {owner_lf_process_id}`, and the connection then speaks the unchanged
+  `bridged {owner_lf_process_id, terminal_id: null}`, and the connection then speaks the unchanged
   binary owner protocol in `transport/README.md` and `transport/wire.rs`. A
   ticket is 16 random bytes as 22 base64url characters, opens one bridge, lasts
   60 seconds and works only for the user who requested it; an unknown, spent,
@@ -519,7 +546,7 @@ selecting fields out of any typed response can make it undecodable. Request
 the screen read when a typed client needs a smaller payload. Desktop's
 outline continues to use `plan.list` for its richer runtime data.
 
-Handle failures through the [protocol error codes](#local-protocol-revision-4).
+Handle failures through the [protocol error codes](#local-protocol-revision-5).
 Check the named Task or Session when it cannot be found. If the host cannot
 answer, retain any previous display as stale and retry the read after recovery;
 an unavailable Session card does not establish that the Session ended.
@@ -763,8 +790,11 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 
 ### Terminal and provider recovery
 
-Terminal continuation addresses the exact owner, separately from Work reads.
-Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+Terminal continuation addresses the exact owner or held terminal, separately
+from Work reads. A view of a held terminal resumes from its PTY byte position,
+served from the holder's 2 MiB ring; a server restart does not invalidate the
+position, and one older than the ring falls back to a fresh screen. For
+owners, byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
 reconnect grace; expired continuation falls back to a fresh screen from that
 owner. Terminal-mode viewers request a fresh screen. Uncertain input is
 never replayed. Recovery takes only free claims or those held by the viewer's

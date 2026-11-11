@@ -1,6 +1,7 @@
 //! Session-viewer holds and one cleanup intent pinned to a Task's completion.
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::transport::Transport;
 use super::SqliteStore;
 use crate::durable::TaskId;
 use crate::id::LfProcessId;
@@ -33,10 +34,12 @@ impl ViewerHold {
     }
 }
 
-/// One Session owner's dated viewing evidence, retained after owner exit.
+/// One Session host's dated viewing evidence, retained after it ends.
 #[derive(Debug)]
 pub(crate) struct OwnerHold {
-    pub owner: LfProcessId,
+    /// The owner process; a held terminal has none, and the server that
+    /// records its viewing refreshes the evidence while it runs.
+    pub owner: Option<LfProcessId>,
     pub hold: ViewerHold,
     pub ended: bool,
 }
@@ -55,16 +58,20 @@ pub(crate) struct TaskRetirement {
 impl SqliteStore {
     /// Record one observation for both Session activity and checkout retention.
     /// Renewed viewing revokes automatic closure in this same transaction.
-    pub(crate) fn record_owner_viewer_hold(
+    pub(crate) fn record_owner_viewer_hold<'a>(
         &self,
-        owner: &LfProcessId,
+        owner: impl Into<Transport<'a>>,
         hold: Option<ViewerHold>,
     ) -> StoreResult<()> {
+        let owner = owner.into();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE processes SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4
+            &format!(
+                "UPDATE {} SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4
              WHERE id=?1 AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4)",
+                owner.table()
+            ),
             params![
                 owner.as_str(),
                 hold.map(ViewerHold::as_str),
@@ -88,13 +95,17 @@ impl SqliteStore {
         let mut query = conn.prepare(&format!(
             "SELECT p.id,p.viewer_hold,p.completed_at IS NOT NULL,p.viewer_hold_at FROM processes p
              WHERE p.viewer_hold IS NOT NULL
-               AND p.id IN (SELECT s.transport_lf_process_id FROM agent_sessions s WHERE s.id IN ({}))
-             ORDER BY p.id",
-            super::task_work::session_ids("?1")
+               AND p.id IN (SELECT s.transport_lf_process_id FROM agent_sessions s WHERE s.id IN ({sessions}))
+             UNION ALL
+             SELECT NULL,t.viewer_hold,t.ended_at IS NOT NULL,t.viewer_hold_at FROM held_terminals t
+             WHERE t.viewer_hold IS NOT NULL
+               AND t.id IN (SELECT s.held_terminal_id FROM agent_sessions s WHERE s.id IN ({sessions}))
+             ORDER BY 1",
+            sessions = super::task_work::session_ids("?1")
         ))?;
         let rows = query.query_map([task.as_str()], |r| {
             Ok((
-                r.get::<_, LfProcessId>(0)?,
+                r.get::<_, Option<LfProcessId>>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, bool>(2)?,
                 r.get::<_, i64>(3)?,
@@ -209,14 +220,20 @@ impl SqliteStore {
             params![intent.task_id.as_str(),intent.completion,intent.checkout,intent.branch,phase,reason])? == 1)
     }
 
-    pub(crate) fn owner_retiring_tasks(&self, owner: &LfProcessId) -> StoreResult<Vec<TaskId>> {
+    pub(crate) fn owner_retiring_tasks<'a>(
+        &self,
+        owner: impl Into<Transport<'a>>,
+    ) -> StoreResult<Vec<TaskId>> {
+        let owner = owner.into();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!("SELECT h.task_id FROM task_retirements h
             WHERE h.phase='closing' AND (
-                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.transport_lf_process_id=?1)
-                OR EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id")))?;
+                EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id IN ({}) AND s.{}=?1)
+                OR EXISTS(SELECT 1 FROM desktop_shells s WHERE s.task_id=h.task_id AND s.owner=?1))", super::task_work::session_ids("h.task_id"), owner.session_column()))?;
         let tasks = query
-            .query_map([owner], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
+            .query_map([owner.as_str()], |r| {
+                Ok(TaskId::from_raw(r.get::<_, String>(0)?))
+            })?
             .collect::<rusqlite::Result<_>>()?;
         Ok(tasks)
     }
@@ -226,22 +243,24 @@ impl SqliteStore {
 /// The caller records viewing and revokes cleanup in the same transaction.
 fn hold_viewer_retirements(
     conn: &Connection,
-    owner: &LfProcessId,
+    owner: Transport<'_>,
     absent_since: Option<i64>,
 ) -> StoreResult<()> {
     let mut query = conn.prepare(&format!(
         "WITH owned AS MATERIALIZED (
-             SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE transport_lf_process_id=?1
+             SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE {}=?1
          )
          SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
          AND (?2 IS NULL OR h.due_at < ?2+?3)
          AND h.task_id IN (SELECT tw.id FROM owned s JOIN tasks tw ON ({}))",
+        owner.session_column(),
         super::task_work::session_membership("s")
     ))?;
     let tasks = query
-        .query_map(params![owner, absent_since, WORKSPACE_GRACE], |r| {
-            Ok(TaskId::from_raw(r.get::<_, String>(0)?))
-        })?
+        .query_map(
+            params![owner.as_str(), absent_since, WORKSPACE_GRACE],
+            |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for task in tasks {
         hold_retirement(conn, &task, absent_since.is_none().then_some(VIEWED))?;

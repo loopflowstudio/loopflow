@@ -392,7 +392,7 @@ fn session_command_status_with_env(
                 crate::process::resume_session_agent_process(&store, &session.id, &process)?;
             store.make_session_interactive(&session.id, &attachment)?;
             if let Some(owner) = crate::transport::current() {
-                store.bind_session_transport(&session.id, &attachment, owner)?;
+                store.bind_session_transport(&session.id, &attachment, owner.transport())?;
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),

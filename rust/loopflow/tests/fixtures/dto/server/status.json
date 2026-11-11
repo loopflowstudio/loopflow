@@ -1,7 +1,7 @@
 {
   "type": "status",
-  "revision": 4,
-  "min_revision": 4,
+  "revision": 5,
+  "min_revision": 5,
   "instance": "server-1",
   "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "clients": [

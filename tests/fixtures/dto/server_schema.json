@@ -2430,7 +2430,7 @@
       "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
     },
     "DesktopTaskPane": {
-      "description": "`lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,\nwhich keeps the pane current after the Task leaves the plan.",
+      "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
         "comments": {
           "anyOf": [
@@ -5713,20 +5713,24 @@
       "type": "string"
     },
     "OpenRoute": {
-      "description": "Destinations this invocation would try, in order, from its own context.",
+      "description": "The selected host, or no host when focusing a recorded view.",
       "properties": {
-        "hosts": {
-          "items": {
-            "$ref": "#/$defs/OpenHost"
-          },
-          "type": "array"
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenHost"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reason": {
           "type": "string"
         }
       },
       "required": [
-        "hosts",
+        "host",
         "reason"
       ],
       "type": "object"
@@ -9889,10 +9893,27 @@
         },
         {
           "additionalProperties": false,
-          "description": "The answer to `attach`: the connection now speaks the owner protocol\nwith this LfProcess, and nothing more arrives from the server.",
+          "description": "The answer to `attach`: the connection now speaks the viewer protocol\nwith this owner LfProcess or this held terminal, whichever is not null,\nand nothing more arrives from the server.",
           "properties": {
             "owner_lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfProcessId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "terminal_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": {
               "const": "bridged",
@@ -9901,7 +9922,8 @@
           },
           "required": [
             "type",
-            "owner_lf_process_id"
+            "owner_lf_process_id",
+            "terminal_id"
           ],
           "type": "object"
         },
@@ -10018,12 +10040,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's terminal: the server resolves the Session's\ncurrent owner LfProcess and answers `{ticket, owner_lf_process_id,\nexpires_in_ms}`. A new connection presents the ticket as its first\nmessage (`attach`) and becomes the bridge; this connection stays a\nclient. When the owner ends, the bridge closes; attaching again by the\nsame Session reaches its next owner. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
+          "description": "A ticket for the Session's terminal: the server resolves the Session's\nheld terminal, else its current owner LfProcess, and answers `{ticket,\nowner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A\nnew connection presents the ticket as its first message (`attach`) and\nbecomes the bridge; this connection stays a client. When the terminal\nor owner ends, the bridge closes; attaching again by the same Session\nreaches its next one. With `owner_lf_process_id`, the\nSession must still be owned by exactly that LfProcess, for a client that\nreconnects only to the owner it had.",
           "examples": [
             {
               "kind": "session.attach",
               "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-              "session": "session_5e55105e000040008000000000000001"
+              "session": "session_5e55105e000040008000000000000001",
+              "terminal_id": null
             }
           ],
           "properties": {
@@ -10043,12 +10066,24 @@
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "terminal_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TerminalId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Attach only to this held terminal. Without either ID, a Session's\nheld terminal is preferred to an owner."
             }
           },
           "required": [
             "kind",
             "session",
-            "owner_lf_process_id"
+            "owner_lf_process_id",
+            "terminal_id"
           ],
           "type": "object",
           "x-result": {
@@ -10057,7 +10092,120 @@
           "x-result-example": {
             "expires_in_ms": 60000,
             "owner_lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
+            "terminal_id": null,
             "ticket": "Qk9nM3hLcjJwVnc5YVptRQ"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Start the Session's agent in this build's holder and answer\n`{terminal_id}`. `env` is the caller's whole environment; the server's\nis not used. Repeating `request` answers the terminal it started.\nThis is the only operation here that creates a process.",
+          "examples": [
+            {
+              "argv": [
+                "/usr/local/bin/lf",
+                "session",
+                "resume",
+                "session_5e55105e000040008000000000000001"
+              ],
+              "cols": 80,
+              "cwd": "/Users/me/src/app",
+              "env": [
+                [
+                  "PATH",
+                  "/usr/bin:/bin"
+                ],
+                [
+                  "HOME",
+                  "/Users/me"
+                ]
+              ],
+              "kind": "session.start",
+              "placement": "desktop-shell",
+              "request": "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+              "rows": 24,
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
+          "properties": {
+            "argv": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "env": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "session.start",
+              "type": "string"
+            },
+            "placement": {
+              "description": "The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was\nvalidated as; the held child continues it on its PTY. Null outside\na pane.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LfSessionId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "session",
+            "request",
+            "argv",
+            "cwd",
+            "env",
+            "rows",
+            "cols",
+            "placement"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          },
+          "x-result-example": {
+            "terminal_id": "3f2a1b0c-5d4e-4f6a-8b7c-9d0e1f2a3b4c"
           }
         }
       ]
@@ -10107,7 +10255,26 @@
           "type": "integer"
         },
         "owner_lf_process_id": {
-          "$ref": "#/$defs/LfProcessId"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfProcessId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The owner the bridge reaches; null for a held terminal."
+        },
+        "terminal_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The held terminal the bridge reaches; null for an owner."
         },
         "ticket": {
           "description": "16 random bytes as 22 base64url characters; single use.",
@@ -10117,6 +10284,7 @@
       "required": [
         "ticket",
         "owner_lf_process_id",
+        "terminal_id",
         "expires_in_ms"
       ],
       "type": "object"
@@ -10737,6 +10905,19 @@
       ],
       "type": "object"
     },
+    "SessionStarted": {
+      "additionalProperties": false,
+      "description": "What `session.start` answers.",
+      "properties": {
+        "terminal_id": {
+          "$ref": "#/$defs/TerminalId"
+        }
+      },
+      "required": [
+        "terminal_id"
+      ],
+      "type": "object"
+    },
     "SessionState": {
       "oneOf": [
         {
@@ -11327,6 +11508,23 @@
         "fail"
       ],
       "type": "string"
+    },
+    "StatusRecorded": {
+      "description": "The snapshot a Session's Program Status now holds.",
+      "properties": {
+        "sequence": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "sequence"
+      ],
+      "type": "object"
     },
     "Steer": {
       "properties": {
@@ -14436,6 +14634,9 @@
       ],
       "type": "object"
     },
+    "TerminalId": {
+      "type": "string"
+    },
     "Threshold": {
       "oneOf": [
         {
@@ -16406,6 +16607,80 @@
               "unavailable": null,
               "worktree": "/src/loopflow.task"
             }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf session observe-status --json <id> --terminal <terminal> --stream\n<stream> --sequence <n> [--agent-process <id>]`, `records` on stdin: one\nProgram Status reading from the terminal showing the Session.",
+          "examples": [
+            {
+              "agent_process": "5e55105e-0000-4000-8000-000000000007",
+              "directory": "/",
+              "id": "session_5e55105e000040008000000000000001",
+              "kind": "session.status",
+              "records": {
+                "records": [
+                  {
+                    "app": null,
+                    "id": null,
+                    "kind": "question",
+                    "msg": "Proceed?",
+                    "progress": null,
+                    "state": "blocked",
+                    "title": null
+                  }
+                ],
+                "seen": true
+              },
+              "sequence": 1,
+              "stream": "5e55105e-0000-4000-8000-000000000008",
+              "terminal": "pane-1"
+            }
+          ],
+          "properties": {
+            "agent_process": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "session.status",
+              "type": "string"
+            },
+            "records": {
+              "$ref": "#/$defs/Records"
+            },
+            "sequence": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "terminal": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "id",
+            "terminal",
+            "agent_process",
+            "stream",
+            "sequence",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/StatusRecorded"
           }
         },
         {
@@ -18485,6 +18760,6 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 4,
-  "x-revision": 4
+  "x-min-revision": 5,
+  "x-revision": 5
 }

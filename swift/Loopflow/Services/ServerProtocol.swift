@@ -1,11 +1,11 @@
 import Foundation
 
-/// Revision 3 of the server protocol: one connection per client, a negotiated
+/// Revision 5 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 4
-    public static let minRevision = 4
+    public static let revision = 5
+    public static let minRevision = 5
     public static let maxMessage = 32 * 1024 * 1024
 }
 
@@ -132,8 +132,14 @@ public enum ServerOperation: Encodable, Sendable {
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
+    /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
+    /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
+    /// pane (`LF_TERMINAL_ID`) the child continues.
+    case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
 
-    private enum Keys: String, CodingKey { case kind, session, ownerLfProcessID = "owner_lf_process_id" }
+    private enum Keys: String, CodingKey {
+        case kind, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
+    }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
@@ -145,6 +151,19 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(owner, forKey: .ownerLfProcessID)
+            // Desktop attaches to owners; a held terminal is named by `terminal_id`.
+            try box.encodeNil(forKey: .terminalID)
+        case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols, let placement):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.start", forKey: .kind)
+            try box.encode(session, forKey: .session)
+            try box.encode(request, forKey: .request)
+            try box.encode(argv, forKey: .argv)
+            try box.encode(cwd, forKey: .cwd)
+            try box.encode(env.map { [$0.0, $0.1] }, forKey: .env)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
+            try box.encode(placement, forKey: .placement)
         }
     }
 }
@@ -234,8 +253,9 @@ public enum ServerMessage: Decodable, Sendable {
     /// What the request returned: a read's or write's value, or the ticket for
     /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: JSONValue)
-    /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
-    case bridged(ownerLfProcessID: String)
+    /// The answer to `attach`: the connection now speaks the viewer protocol
+    /// with this owner LfProcess or held terminal.
+    case bridged(ServerBridge)
     case reading(id: String, checkpoint: String, frame: JSONValue)
     case event(id: String, seq: UInt64, event: SubscriptionEvent)
     /// The subscription's last reading was its answer (`task.wait` reached
@@ -248,7 +268,7 @@ public enum ServerMessage: Decodable, Sendable {
     case error(id: String?, code: String, message: String, data: JSONValue)
 
     private enum Keys: String, CodingKey {
-        case type, id, result, frame, checkpoint, code, message, data, seq, event, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id"
+        case type, id, result, frame, checkpoint, code, message, data, seq, event, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
     }
     public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -258,7 +278,13 @@ public enum ServerMessage: Decodable, Sendable {
         case "response":
             self = .response(id: try box.decode(String.self, forKey: .id), traceID: try box.decode(String.self, forKey: .traceID),
                              result: try box.decode(JSONValue.self, forKey: .result))
-        case "bridged": self = .bridged(ownerLfProcessID: try box.decode(String.self, forKey: .ownerLfProcessID))
+        case "bridged":
+            // Both keys are required; exactly one is not null.
+            switch (try box.decode(String?.self, forKey: .ownerLfProcessID), try box.decode(String?.self, forKey: .terminalID)) {
+            case (let owner?, nil): self = .bridged(.owner(lfProcessID: owner))
+            case (nil, let terminal?): self = .bridged(.terminal(id: terminal))
+            default: throw DecodingError.dataCorruptedError(forKey: .ownerLfProcessID, in: box, debugDescription: "A bridge names one owner or one terminal")
+            }
         case "reading":
             self = .reading(id: try box.decode(String.self, forKey: .id), checkpoint: try box.decode(String.self, forKey: .checkpoint), frame: try box.decode(JSONValue.self, forKey: .frame))
         case "event":
@@ -271,6 +297,12 @@ public enum ServerMessage: Decodable, Sendable {
         default: throw DecodingError.dataCorruptedError(forKey: .type, in: box, debugDescription: "Unsupported server message; update the client")
         }
     }
+}
+
+/// What a bridge reached: a Session owner LfProcess, or a terminal held beside the server.
+public enum ServerBridge: Equatable, Sendable {
+    case owner(lfProcessID: String)
+    case terminal(id: String)
 }
 
 public struct ServerWelcome: Decodable, Sendable {

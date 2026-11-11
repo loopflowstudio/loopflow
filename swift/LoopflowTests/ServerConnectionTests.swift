@@ -18,15 +18,19 @@ struct ServerConnectionTests {
         try await wait { connection.reading.state == .connected }
         #expect(!connection.reading.acceptsInput)
         #expect(connection.reading.title == ServerConnectionReading.openingTitle)
+        #expect(connection.reading.attachment == .opening)
         try relay.publish(generation: 1, state: "connected", input: true)
         try await wait { connection.reading.acceptsInput }
         #expect(connection.reading.title == nil)
+        #expect(connection.reading.attachment == .usable)
         try relay.publish(generation: 2, state: "reconnecting", input: false)
         try await wait { connection.reading.state == .reconnecting }
+        #expect(connection.reading.title == "Reconnecting… Input paused; last screen may be stale.")
         #expect(!connection.reading.acceptsInput)
         try relay.publish(generation: 2, state: "connected", input: false)
         try await wait { connection.reading.canMoveHere }
         #expect(connection.reading.title == "Read-only. Move here to type.")
+        #expect(connection.reading.attachment == .elsewhere)
     }
 
     @Test func providerTransitionSurvivesTheStatusStreamAndWaitsForNativeReadiness() async throws {

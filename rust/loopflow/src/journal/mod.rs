@@ -78,6 +78,12 @@ impl TestLedgerGuard {
     }
 }
 
+/// The store this test thread is pinned to, for a worker it starts.
+#[cfg(test)]
+pub(crate) fn test_ledger_path() -> Option<PathBuf> {
+    TEST_LEDGER_DB_PATH.with(|path| path.borrow().clone())
+}
+
 /// Pin a blocking fixture worker to its owning test's store; the caller holds
 /// the environment lock. Production processes already share one admitted ledger.
 #[cfg(test)]
@@ -749,7 +755,7 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
             let wait = context
                 .receipt_wait
                 .saturating_sub(already_waited + started.elapsed());
-            match store.record_process_within(&record, wait) {
+            match store.record_process_within(&record, crate::transport::held_terminal(), wait) {
                 Ok(()) => true,
                 Err(err) => {
                     let waited = (already_waited + started.elapsed()).as_secs_f64();

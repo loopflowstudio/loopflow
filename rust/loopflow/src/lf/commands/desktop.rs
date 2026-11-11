@@ -248,6 +248,9 @@ pub struct DesktopLayoutInspection {
     pub pane: Option<String>,
     pub incarnation: Option<String>,
     pub surface: Option<String>,
+    /// The Session owner's attachment reading, independent of surface existence.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub attachment: Option<DesktopOpeningStatus>,
     pub content: Option<String>,
     pub subject: Option<String>,
     pub axis: Option<String>,
@@ -504,6 +507,8 @@ pub fn require_supported() -> Result<()> {
 /// LaunchServices acceptance is opening, never proof of a usable native target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopOpening {
+    /// Identity of this transient receipt, renewed when its owner publishes a result.
+    pub revision: String,
     pub url: String,
     pub status: DesktopOpeningStatus,
     pub reason: Option<String>,
@@ -514,6 +519,7 @@ pub struct DesktopOpening {
 pub enum DesktopOpeningStatus {
     Opening,
     Usable,
+    Elsewhere,
     Failed,
 }
 
@@ -548,6 +554,7 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
         bail!("cannot open Work in Loopflow.app: macOS open exited with {status}");
     }
     let opening = DesktopOpening {
+        revision: uuid::Uuid::new_v4().to_string(),
         url: url.into(),
         status: DesktopOpeningStatus::Opening,
         reason: None,
@@ -755,6 +762,33 @@ fn view_plan(
     passive: bool,
     json: bool,
 ) -> Result<()> {
+    if !passive && expression.is_none() {
+        require_supported()?;
+        // Default Work displays its arrangement, like `lf workspace`.
+        return super::open::run_workspace(
+            cli,
+            &super::open::WorkspaceArgs {
+                selection: super::open::OpenSelection {
+                    url: None,
+                    host: super::open::OpenHost::Desktop,
+                    session: None,
+                    diff: false,
+                    link: false,
+                    format: None,
+                    json,
+                    server: None,
+                },
+                available: false,
+                no_focus: false,
+                follow: None,
+                seen: Vec::new(),
+                local_workspace: false,
+                arrive_task: Vec::new(),
+                into: None,
+                remote: Vec::new(),
+            },
+        );
+    }
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
         use crate::work::selection::{Selection, SelectionExpression, SelectionId};
@@ -800,33 +834,8 @@ fn view_plan(
     if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
         return Err(crate::process::CommandExit(3).into());
     }
-    if !passive {
+    if let Some(expression) = expression.filter(|_| !passive) {
         require_supported()?;
-        let Some(expression) = expression else {
-            // Default Work opens through its public address, like `lf open`.
-            return super::open::run(
-                cli,
-                &super::open::OpenArgs {
-                    server: None,
-                    no_focus: false,
-                    follow: None,
-                    seen: Vec::new(),
-                    local_workspace: false,
-                    arrive_task: Vec::new(),
-                    into: None,
-                    remote: Vec::new(),
-                    files: Vec::new(),
-                    url: None,
-                    host: super::open::OpenHost::Desktop,
-                    available: false,
-                    session: None,
-                    diff: false,
-                    link: false,
-                    format: None,
-                    json,
-                },
-            );
-        };
         let resolution = super::open::selected_context(cli, None)?;
         let repo = bound(&resolution.repository_path, "repository path")?;
         let mut url = reqwest::Url::parse("loopflow://open")?;
@@ -1058,6 +1067,127 @@ pub(crate) fn save_layout(
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     dispatch(cli, command).map_err(exit_status)
+}
+
+fn inspect_running() -> Result<Option<DesktopInspection>> {
+    if !socket_path().exists() {
+        return Ok(None);
+    }
+    let result = DesktopConnection::open()
+        .and_then(|mut connection| connection.call("inspect", serde_json::json!({})));
+    match result {
+        Ok(reading) => Ok(Some(reading)),
+        Err(error)
+            if error
+                .downcast_ref::<DesktopError>()
+                .is_some_and(|error| matches!(error, DesktopError::Unreachable(_))) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Known native Session views, by identity, without launching Desktop.
+pub(super) fn conversation_view(
+    session: &str,
+) -> Result<Option<(Option<DesktopPaneTarget>, DesktopOpeningStatus)>> {
+    let Some(reading) = inspect_running()? else {
+        return Ok(None);
+    };
+    find_conversation(reading, session)
+}
+
+fn find_conversation(
+    reading: DesktopInspection,
+    session: &str,
+) -> Result<Option<(Option<DesktopPaneTarget>, DesktopOpeningStatus)>> {
+    fn find<'a>(
+        layout: &'a DesktopLayoutInspection,
+        session: &str,
+    ) -> Option<&'a DesktopLayoutInspection> {
+        if layout.content.as_deref() == Some("session")
+            && layout.subject.as_deref() == Some(session)
+        {
+            Some(layout)
+        } else {
+            layout
+                .children
+                .iter()
+                .find_map(|child| find(child, session))
+        }
+    }
+    for window in &reading.windows {
+        for workspace in window
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.is_open)
+        {
+            if let Some(pane) = find(&workspace.layout, session) {
+                return Ok(Some((
+                    Some(DesktopPaneTarget {
+                        repository: window.repository.clone(),
+                        window: window.window.clone(),
+                        work: workspace.work.clone(),
+                        pane: pane
+                            .pane
+                            .clone()
+                            .context("Session view omitted pane identity")?,
+                        incarnation: pane
+                            .incarnation
+                            .clone()
+                            .context("Session view omitted incarnation")?,
+                        tab: None,
+                    }),
+                    pane.attachment
+                        .context("Session view omitted attachment reading")?,
+                )));
+            }
+        }
+    }
+    // Resolution can outlive the caller's wait before any pane exists. Its
+    // existing opening owner still owns that attempt; no second launch is due.
+    let pending = reading
+        .windows
+        .into_iter()
+        .filter_map(|window| window.opening)
+        .chain(reading.openings)
+        .any(|opening| {
+            opening.status == DesktopOpeningStatus::Opening
+                && crate::work::link::WorkUrl::parse(&opening.url)
+                    .is_ok_and(|url| url.session.as_deref() == Some(session))
+        });
+    Ok(pending.then_some((None, DesktopOpeningStatus::Opening)))
+}
+
+pub(super) fn focus_conversation(destination: &str) -> Result<()> {
+    let target: DesktopPaneTarget = serde_json::from_str(destination)?;
+    let _: DesktopActionReceipt = DesktopConnection::open()?.call(
+        "perform",
+        DesktopActionRequest {
+            repository: target.repository.clone(),
+            window: target.window.clone(),
+            pane: Some(target),
+            action: "focus".into(),
+            args: Default::default(),
+        },
+    )?;
+    Ok(())
+}
+
+pub(super) fn conversation_opening(url: &str) -> Result<Option<DesktopOpening>> {
+    let Some(reading) = inspect_running()? else {
+        return Ok(None);
+    };
+    Ok(reading
+        .windows
+        .into_iter()
+        .filter_map(|window| window.opening)
+        .chain(reading.openings.into_iter().filter(|opening| {
+            // Repository readiness does not establish conversation attachment.
+            opening.status != DesktopOpeningStatus::Usable
+        }))
+        .find(|opening| opening.url == url))
 }
 
 /// Reuse the Files surface without launching Desktop or changing conversation ownership.
@@ -2842,7 +2972,7 @@ impl DesktopConnection {
         let bundle = super::open::desktop_bundle();
         let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|error| {
             DesktopError::Unreachable(format!(
-                "Loopflow Desktop ({bundle}) is not running or not serving {} ({error}). Open it with lf open, or inspect Work with lf task status <task>.",
+                "Loopflow Desktop ({bundle}) is not running or not serving {} ({error}). Open it with lf open --host desktop, or inspect Work with lf task status <task>.",
                 path.display()
             ))
         })?;
@@ -3303,6 +3433,52 @@ mod tests {
     use crate::ops::context::{ContextExplanation, ContextFact};
 
     const ACTIONS: &str = include_str!("../../../../../tests/fixtures/dto/desktop_action.json");
+
+    #[test]
+    fn conversation_attachment_is_independent_of_retained_surface() {
+        use super::{find_conversation, DesktopOpeningStatus};
+        for status in [
+            DesktopOpeningStatus::Opening,
+            DesktopOpeningStatus::Usable,
+            DesktopOpeningStatus::Failed,
+            DesktopOpeningStatus::Elsewhere,
+        ] {
+            let mut reading: DesktopInspection = serde_json::from_str(include_str!(
+                "../../../../../tests/fixtures/dto/desktop_inspection.json"
+            ))
+            .unwrap();
+            let pane = &mut reading.windows[0].workspaces[0].layout.children[0];
+            pane.attachment = Some(status);
+            // Failed/pending panes remain focusable even without a native surface.
+            pane.surface = None;
+            let (view, attachment) = find_conversation(reading.clone(), "session-one")
+                .unwrap()
+                .unwrap();
+            assert_eq!(attachment, status);
+            assert_eq!(view.unwrap().pane, "session-pane");
+            assert!(find_conversation(reading, "absent").unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn conversation_attachment_remains_pending_before_a_pane_exists() {
+        let mut reading: DesktopInspection = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/desktop_inspection.json"
+        ))
+        .unwrap();
+        reading.windows.clear();
+        reading.openings[0].url = "loopflow://repo?session=session-one".into();
+        reading.openings[0].status = super::DesktopOpeningStatus::Opening;
+        let (view, attachment) = super::find_conversation(reading.clone(), "session-one")
+            .unwrap()
+            .unwrap();
+        assert!(view.is_none());
+        assert_eq!(attachment, super::DesktopOpeningStatus::Opening);
+        reading.openings[0].status = super::DesktopOpeningStatus::Failed;
+        assert!(super::find_conversation(reading, "session-one")
+            .unwrap()
+            .is_none());
+    }
 
     /// One window listing two Tasks; the second has the designated
     /// session/shell/browser workspace from the action fixture.

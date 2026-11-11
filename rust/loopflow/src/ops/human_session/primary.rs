@@ -97,38 +97,6 @@ pub(crate) async fn ensure_task(
     Ok((prepare(store, &session.id).await?, started))
 }
 
-/// What `lf resume --task` finds for a Task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskResume {
-    /// No conversation yet: resume starts the first, which needs a harness.
-    First,
-    Existing,
-    /// The command is running inside one of them. The ranking could pick it, and
-    /// a conversation cannot resume itself.
-    Caller,
-}
-
-pub(crate) fn task_resume(
-    store: &crate::store::sqlite::SqliteStore,
-    task: &crate::durable::TaskId,
-) -> crate::store::StoreResult<TaskResume> {
-    let conversations = store.task_conversations(task)?;
-    let caller = crate::journal::agent_caller();
-    Ok(
-        if caller.is_some_and(|caller| {
-            conversations
-                .iter()
-                .any(|(session, _)| session.id == caller.session_id)
-        }) {
-            TaskResume::Caller
-        } else if conversations.is_empty() {
-            TaskResume::First
-        } else {
-            TaskResume::Existing
-        },
-    )
-}
-
 /// Background Task conversations stop starting at this many running ones;
 /// Desktop keeps the same number of Tasks warm.
 pub(crate) const BACKGROUND_TASK_CONVERSATIONS: usize = 16;
@@ -196,8 +164,9 @@ async fn start_in_background(
         "resume".into(),
         id.clone(),
     ];
-    tokio::task::spawn_blocking(move || {
-        crate::transport::start(&argv, true, &worktree, &|command| {
+    let held = session.id.clone();
+    let started = tokio::task::spawn_blocking(move || {
+        crate::transport::start_held(&argv, &worktree, Some(&held), &|command| {
             let key = crate::work::wave::context::WAVE_ID_ENV;
             match &wave {
                 Some(wave) => command.env(key, wave.id().as_str()),
@@ -205,8 +174,16 @@ async fn start_in_background(
             };
         })
     })
-    .await??;
-    Ok(Some(id))
+    .await?;
+    match started {
+        Ok(_) => Ok(Some(id)),
+        // The Graph runs without the conversation, as past the conversation limit.
+        Err(error) if error.is::<crate::transport::ServerMissing>() => {
+            tracing::info!(session = %id, "background Task conversation not started: no Machine server");
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub(super) async fn task_conversation(

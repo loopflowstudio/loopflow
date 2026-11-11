@@ -213,6 +213,15 @@ pub enum WorkSource {
     Bound,
 }
 
+impl WorkSource {
+    /// The managed rule: a launch is managed when a Task or Wave command named
+    /// its Work (a selector, a Task's run, a Task or Wave conversation, a
+    /// binding). A bare `lf` in a Task's checkout only counts toward the Task.
+    pub(crate) fn is_managed(self) -> bool {
+        matches!(self, Self::Declared | Self::Bound)
+    }
+}
+
 /// SQL selection for conversation inventory; mode and completion are independent.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {

@@ -277,11 +277,11 @@ impl TerminalTitle {
         title.host.is_some().then_some(title)
     }
 
-    fn viewing(owner: &crate::id::LfProcessId) -> Option<Self> {
+    fn viewing(owner: &crate::transport::Host) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
             let store =
                 SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
-            let Some(id) = store.transport_session(owner)? else {
+            let Some(id) = store.transport_session(owner.transport())? else {
                 return Ok(None);
             };
             let Some(session) = store.session(&id)? else {
@@ -389,50 +389,74 @@ impl Drop for TerminalTitle {
 /// link its Session after the viewer attaches, so the viewer keeps looking.
 #[derive(Debug)]
 pub(crate) struct ViewerTitle {
-    owner: crate::id::LfProcessId,
+    owner: crate::transport::Host,
     title: Option<TerminalTitle>,
     /// Until when to look; executions without a Session never get one.
     looking: Option<Instant>,
     checked: Option<Instant>,
 }
 
+/// One worker reading Session names for every owner a host serves; store reads
+/// must never hold up provider output or terminal input. It ends once its
+/// handle and every `OutputTitle` made from it are gone.
+#[derive(Debug, Clone)]
+pub(crate) struct TitleReader {
+    requests: mpsc::SyncSender<TitleRequest>,
+}
+
+#[derive(Debug)]
+struct TitleRequest {
+    owner: crate::transport::Host,
+    answer: mpsc::SyncSender<String>,
+}
+
+/// Requests waiting for the worker; a full queue skips a check until the next tick.
+const TITLE_QUEUE: usize = 64;
+
+impl TitleReader {
+    pub(crate) fn spawn() -> Self {
+        let path = crate::store::database_path_from_env();
+        let (requests, requested) = mpsc::sync_channel::<TitleRequest>(TITLE_QUEUE);
+        std::thread::spawn(move || {
+            let Ok(path) = path else { return };
+            let mut store = None;
+            while let Ok(request) = requested.recv() {
+                let mut read = || -> anyhow::Result<Option<String>> {
+                    if store.is_none() {
+                        store = Some(SqliteStore::open_processes_read_only(&path)?);
+                    }
+                    output_title(store.as_ref().expect("opened above"), &request.owner)
+                };
+                if let Ok(Some(name)) = read()
+                    .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
+                {
+                    let _ = request.answer.try_send(name);
+                }
+            }
+        });
+        Self { requests }
+    }
+}
+
 /// The serving owner's Session name, sent through its serialized terminal stream.
 /// Host-specific names remain with each viewer, including remote viewers.
 #[derive(Debug)]
 pub(crate) struct OutputTitle {
-    requests: mpsc::SyncSender<()>,
+    owner: crate::transport::Host,
+    reader: TitleReader,
+    answer: mpsc::SyncSender<String>,
     names: mpsc::Receiver<String>,
     checked: Option<Instant>,
 }
 
 impl OutputTitle {
-    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
-        let owner = owner.clone();
-        let path = crate::store::database_path_from_env();
-        let (requests, requested) = mpsc::sync_channel(1);
-        let (names, received) = mpsc::sync_channel(1);
-        // Store reads must never hold up provider output or terminal input.
-        // Dropping the owner disconnects both channels and ends this worker.
-        std::thread::spawn(move || {
-            let Ok(path) = path else { return };
-            let mut store = None;
-            while requested.recv().is_ok() {
-                let mut read = || -> anyhow::Result<Option<String>> {
-                    if store.is_none() {
-                        store = Some(SqliteStore::open_processes_read_only(&path)?);
-                    }
-                    output_title(store.as_ref().expect("opened above"), &owner)
-                };
-                if let Ok(Some(name)) = read()
-                    .inspect_err(|error| tracing::debug!(%error, "cannot read output Session name"))
-                {
-                    let _ = names.try_send(name);
-                }
-            }
-        });
+    pub(crate) fn new(owner: &crate::transport::Host, reader: &TitleReader) -> Self {
+        let (answer, names) = mpsc::sync_channel(1);
         Self {
-            requests,
-            names: received,
+            owner: owner.clone(),
+            reader: reader.clone(),
+            answer,
+            names,
             checked: None,
         }
     }
@@ -443,7 +467,10 @@ impl OutputTitle {
             .is_none_or(|checked| checked.elapsed() >= Duration::from_millis(500))
         {
             self.checked = Some(Instant::now());
-            let _ = self.requests.try_send(());
+            let _ = self.reader.requests.try_send(TitleRequest {
+                owner: self.owner.clone(),
+                answer: self.answer.clone(),
+            });
         }
         self.names.try_recv().ok()
     }
@@ -455,9 +482,9 @@ impl OutputTitle {
 
 fn output_title(
     store: &SqliteStore,
-    owner: &crate::id::LfProcessId,
+    owner: &crate::transport::Host,
 ) -> anyhow::Result<Option<String>> {
-    let Some(id) = store.transport_session(owner)? else {
+    let Some(id) = store.transport_session(owner.transport())? else {
         return Ok(None);
     };
     let Some(session) = store.session(&id)? else {
@@ -474,7 +501,7 @@ fn output_title(
 }
 
 impl ViewerTitle {
-    pub(crate) fn new(owner: &crate::id::LfProcessId) -> Self {
+    pub(crate) fn new(owner: &crate::transport::Host) -> Self {
         Self {
             owner: owner.clone(),
             title: None,
@@ -634,7 +661,11 @@ mod tests {
             Some("Release notes".to_string())
         );
         assert_eq!(
-            super::output_title(&title.store, &process).unwrap(),
+            super::output_title(
+                &title.store,
+                &crate::transport::Host::Owner(process.clone())
+            )
+            .unwrap(),
             Some("Release notes".into())
         );
         title

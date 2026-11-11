@@ -177,7 +177,7 @@ final class WorkLinkRouter {
         try Task.checkCancellation()
         let id = UUID()
         repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
-            receipt: DesktopOpening(url: receipt, status: .opening, reason: nil))
+            receipt: DesktopOpening(revision: UUID().uuidString, url: receipt, status: .opening, reason: nil))
         let observed = workspaces
         let retained = openingScenes[path].flatMap { retainedWorkspace($0) }
         // A retained window comes forward now; resolution does not raise it again.
@@ -311,7 +311,7 @@ final class WorkLinkRouter {
     private func finishRepositoryOpening(_ path: String, id: UUID, status: DesktopOpening.Status, reason: String? = nil) {
         guard let request = repositoryOpenings[path], request.id == id,
               request.receipt.status == .opening else { return }
-        repositoryOpenings[path]?.receipt = DesktopOpening(url: request.receipt.url, status: status, reason: reason)
+        repositoryOpenings[path]?.receipt = DesktopOpening(revision: UUID().uuidString, url: request.receipt.url, status: status, reason: reason)
     }
 
     /// No focus change, reads, surface allocation, or provider launch.

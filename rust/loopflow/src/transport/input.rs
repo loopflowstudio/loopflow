@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use crate::id::LfProcessId;
+use super::Host;
 use crate::store::sqlite::HOOK_BUSY_TIMEOUT;
 use crate::store::RecordingGap;
 
@@ -68,7 +68,7 @@ impl PendingInput {
         !self.is_empty() && self.retry_at.is_none()
     }
 
-    pub fn forward(&mut self, input: &mut impl Write, owner: &LfProcessId, terminal: bool) {
+    pub fn forward(&mut self, input: &mut impl Write, owner: &Host, terminal: bool) {
         let now = Instant::now();
         if self.is_empty() {
             if terminal && self.replay_at.is_some_and(|at| at <= now) {
@@ -101,11 +101,11 @@ impl PendingInput {
     /// Offer the store every byte it has not recorded: the delivered ones, then
     /// the queued ones past `recorded`. A failed offer moves the queued bytes to
     /// the delivered side; they go to the provider now and to the store later.
-    fn retain(&mut self, owner: &LfProcessId) -> Retained {
+    fn retain(&mut self, owner: &Host) -> Retained {
         let fresh = &self.bytes.make_contiguous()[self.recorded..];
         let offered = [self.unrecorded.as_slice(), fresh].concat();
         let retained = match crate::journal::process_ledger()
-            .and_then(|store| store.try_record_owner_input(owner, &offered))
+            .and_then(|store| store.try_record_owner_input(owner.transport(), &offered))
         {
             Ok(true) => {
                 self.busy_since = None;
@@ -146,9 +146,9 @@ impl PendingInput {
         retained
     }
 
-    pub fn native_ended(&mut self, owner: &LfProcessId) {
-        if let Err(error) =
-            crate::journal::process_ledger().and_then(|store| store.clear_owner_input(owner))
+    pub fn native_ended(&mut self, owner: &Host) {
+        if let Err(error) = crate::journal::process_ledger()
+            .and_then(|store| store.clear_owner_input(owner.transport()))
         {
             tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
         }

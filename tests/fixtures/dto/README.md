@@ -81,8 +81,8 @@ Swift decodes it for the Task's Session history.
 
 `work_links.json` pins `lf open --link --json`: a readable label, the public Work
 address, its executable fallback, the resolved target (including a remote execution
-owner), the caller's conversation relation and the proposed route. Rust and Swift
-round-trip it; Desktop resolves incoming addresses through it. A link is not an
+owner), the caller's conversation relation and one route host (`null` for focus).
+Rust and Swift round-trip it; Desktop resolves incoming addresses through it. A link is not an
 opening receipt.
 
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;

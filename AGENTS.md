@@ -298,6 +298,8 @@ them.
 - Public APIs get `# Panics` / `# Errors` / `# Safety` sections where they aren't obvious.
 
 **Rust tests:**
+- Unix-socket fixtures use short `/tmp` directories: canonicalizing macOS
+  `/var/folders` paths can exceed the socket address limit.
 - External terminal-host tests use an isolated socket, configuration, state directory
   and process group. Check native identity and command replay separately: stable
   pane IDs do not prove that the same processes survived a host restart.

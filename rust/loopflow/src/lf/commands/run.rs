@@ -99,7 +99,7 @@ pub(crate) fn preview_prompt(
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
-    if crate::transport::delegate_current(true)? {
+    if crate::transport::delegate_current(true, false)? {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;

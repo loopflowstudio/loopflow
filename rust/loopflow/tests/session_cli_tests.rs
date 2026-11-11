@@ -1845,8 +1845,10 @@ fn program_status_cli_observes_available_without_completing_work() {
             last = Some(frame);
         }
     };
-    let mut observer = Child(
-        command(
+    // Each snapshot is its own command, as Desktop sends each one to the server.
+    let agent_process = attachment.agent_process_id.to_string();
+    let observe = |stream: &str, sequence: i64, records: &serde_json::Value| {
+        let mut observer = command(
             home.path(),
             &[
                 "session",
@@ -1855,16 +1857,23 @@ fn program_status_cli_observes_available_without_completing_work() {
                 "--terminal",
                 "fixture-pane",
                 "--agent-process",
-                attachment.agent_process_id.as_str(),
+                &agent_process,
+                "--stream",
+                stream,
+                "--sequence",
+                &sequence.to_string(),
             ],
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .unwrap(),
-    );
-    let mut input = observer.0.stdin.take().unwrap();
+        .unwrap();
+        let mut input = observer.stdin.take().unwrap();
+        input.write_all(records.to_string().as_bytes()).unwrap();
+        drop(input);
+        observer.wait_with_output().unwrap()
+    };
     let records = |state: &str| {
         serde_json::json!({"seen":true,"records":[{
         "state":state,"id":"worker","kind":if state=="blocked" { Some("question") } else { None },
@@ -1882,10 +1891,8 @@ fn program_status_cli_observes_available_without_completing_work() {
             .unwrap()
             .clone()
     };
-    // The pipe also fragments a JSON frame across reads.
-    let blocked = records("blocked").to_string() + "\n";
-    input.write_all(&blocked.as_bytes()[..17]).unwrap();
-    input.write_all(&blocked.as_bytes()[17..]).unwrap();
+    let first = observe("pane-1", 1, &records("blocked"));
+    assert!(first.status.success(), "{first:?}");
     let item = watch_for(Some("blocked"));
     assert_eq!(item["availability"], "available");
     assert_eq!(
@@ -1907,19 +1914,28 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     let page: serde_json::Value = serde_json::from_slice(&page.stdout).unwrap();
     assert_eq!(page["entries"][0]["id"], id);
+    let mut sequence = 1;
     for state in ["working", "idle", "done", "blocked", "working"] {
-        writeln!(input, "{}", records(state)).unwrap();
+        sequence += 1;
+        assert!(observe("pane-1", sequence, &records(state))
+            .status
+            .success());
         let item = watch_for(Some(state));
         if matches!(state, "working" | "done") {
             assert!(item["availability"].is_null());
         }
     }
-    writeln!(input, "{}", serde_json::json!({"seen":true,"records":[]})).unwrap();
+    sequence += 1;
+    let empty = serde_json::json!({"seen":true,"records":[]});
+    assert!(observe("pane-1", sequence, &empty).status.success());
     assert_eq!(
         watch_for(None)["program_status"]["records"],
         serde_json::json!([])
     );
-    writeln!(input, "{}", records("done")).unwrap();
+    sequence += 1;
+    assert!(observe("pane-1", sequence, &records("done"))
+        .status
+        .success());
     watch_for(Some("done"));
     drop(subscription.0.stdin.take());
     assert!(subscription.0.wait().unwrap().success());
@@ -1933,12 +1949,23 @@ fn program_status_cli_observes_available_without_completing_work() {
         .is_none());
     let mut invalid = records("blocked");
     invalid["records"][0]["msg"] = serde_json::json!("bad\ncontrol");
-    writeln!(input, "{invalid}").unwrap();
-    drop(input);
-    assert!(!observer.0.wait().unwrap().success());
+    assert!(!observe("pane-1", sequence + 1, &invalid).status.success());
+    // A snapshot that arrives late never replaces a newer one.
+    let late = observe("pane-1", sequence - 1, &records("working"));
+    assert!(!late.status.success());
+    assert!(String::from_utf8_lossy(&late.stderr).contains("Program Status stream replaced"));
     assert_eq!(
         read_session()["program_status"]["records"][0]["state"],
         "done"
+    );
+    // A second observer of the same provider replaces the first.
+    assert!(observe("pane-2", 1, &records("idle")).status.success());
+    assert!(!observe("pane-1", sequence + 2, &records("working"))
+        .status
+        .success());
+    assert_eq!(
+        read_session()["program_status"]["records"][0]["state"],
+        "idle"
     );
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
@@ -1950,16 +1977,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     store
         .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
-    let stale = run(
-        home.path(),
-        &[
-            "session",
-            "observe-status",
-            &id,
-            "--terminal",
-            "fixture-pane",
-        ],
-    );
+    let stale = observe("pane-3", 1, &records("idle"));
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
     let item = read_session();

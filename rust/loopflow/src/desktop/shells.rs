@@ -101,7 +101,7 @@ pub fn run(args: &ShellArgs) -> Result<()> {
             "Shell ended. Create a new shell explicitly; its commands will not be replayed"
         );
     }
-    crate::transport::attach(&owner, None, None, None)
+    crate::transport::attach(&crate::transport::Host::Owner(owner), None, None, None)
 }
 
 /// Desktop-supplied startup code and its relative UTF-8 resources. Carried as JSON

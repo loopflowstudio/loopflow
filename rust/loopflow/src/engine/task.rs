@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn results_match_the_shared_fixtures_without_defaults() {
         let running: TaskRun = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_running.json"
+            "../../tests/fixtures/dto/server/task_running.json"
         ));
         let text = running.render().unwrap();
         assert!(text.contains("running as Graph process"));
@@ -400,11 +400,11 @@ mod tests {
             .unwrap()
             .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
         let shipping: TaskShip = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_shipping.json"
+            "../../tests/fixtures/dto/server/task_shipping.json"
         ));
         assert!(shipping.render().unwrap().starts_with("LOO-1 shipping"));
         let held: Hold = result(include_str!(
-            "../../../../tests/fixtures/dto/server/task_held.json"
+            "../../tests/fixtures/dto/server/task_held.json"
         ));
         assert_eq!(held.render(), "LOO-1 stopped shipping");
         // A missing field is an error, never a default.

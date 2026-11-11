@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>LOO-824 · What moves the three goals</title>
+<style>
+:root{--bg:#f7f5ef;--ink:#1f2a2e;--muted:#5b6a6c;--line:#cfd4cc;--paper:#fffef9;--accent:#1f625c;--soft:#e9efe9;--warm:#a1452a;--code:#edf0e9}
+@media(prefers-color-scheme:dark){:root{--bg:#141d20;--ink:#e6ebe5;--muted:#a3b3b3;--line:#3d4e51;--paper:#1a272b;--accent:#a6d4bb;--soft:#22352f;--warm:#f0ae8f;--code:#222f33}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:800px;margin:auto;padding:56px 24px 96px}
+a{color:var(--accent);text-underline-offset:3px}
+h1{font:500 clamp(34px,6vw,54px)/1.1 Georgia,serif;letter-spacing:-.03em;margin:18px 0 22px}
+h2{font:500 30px/1.2 Georgia,serif;letter-spacing:-.015em;margin:0 0 14px}
+h3{font-size:17px;margin:26px 0 6px}
+p{margin:0 0 16px}
+code{font:.88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:3px}
+.meta{font-size:14px;color:var(--muted)}
+.lead{font-size:21px;line-height:1.5}
+section{padding:44px 0 8px;border-top:1px solid var(--line);margin-top:40px}
+.note{font-size:14px;color:var(--muted)}
+.wrap{overflow-x:auto;margin:14px 0 20px}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:520px}
+th,td{text-align:left;padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:14px;color:var(--muted)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.this td{font-weight:600}
+.goal{margin:0 0 14px;padding-left:16px;border-left:3px solid var(--line)}
+.goal b{display:block;font-size:14px;color:var(--accent)}
+.goal.against{border-color:var(--warm)}.goal.against b{color:var(--warm)}
+.opts{margin:6px 0 18px;padding:0;list-style:none}
+.opts li{margin:0 0 8px;padding-left:44px;text-indent:-44px}
+.opts strong{display:inline-block;width:44px;text-indent:0;color:var(--accent)}
+.demo{background:var(--paper);border:1px solid var(--line);border-radius:8px;margin:22px 0;padding:20px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+.row span{font-size:14px;color:var(--muted);min-width:92px}
+button{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:4px;padding:7px 11px;background:var(--paper);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+button:focus-visible,a:focus-visible{outline:3px solid var(--warm);outline-offset:3px}
+.out{margin-top:16px;border-top:1px solid var(--line);padding-top:16px;min-height:230px}
+.out h3{margin:0 0 4px;font-size:14px;color:var(--muted);font-weight:600}
+.out p{margin:0 0 14px}
+.questions{background:var(--soft);border-radius:8px;padding:28px 24px 12px;margin-top:48px;border:0}
+.questions h3{margin-top:22px}
+footer{margin-top:36px;font-size:14px;color:var(--muted)}
+@media(max-width:560px){body{font-size:16px}main{padding:36px 16px 72px}.lead{font-size:19px}}
+</style>
+</head>
+<body><main>
+
+<header>
+<p class="meta">LOO-824 · explore · November 10, 2026 · nothing here is built or chosen</p>
+<h1>Three goals, and the four choices that move them</h1>
+<p class="lead">Any holder removes the per-Session owner process. After that, four choices are left. Two of them help all three goals at once. One, where the terminal emulator lives, sets "least duplicative with Rex" against "best Desktop experience", and a short probe measures how far apart they really are.</p>
+<p class="meta">Built from <a href="holder.md">scratch/holder.md</a>, <a href="../docs/dev/server-first.md">docs/dev/server-first.md</a>, <code>rust/loopflow/src/transport/README.md</code>, <code>transport.rs</code>, <code>transport/terminal.rs</code>, <a href="../docs/dev/research/server-protocols.md">research/server-protocols.md</a> and a <code>ps</code> sample of this Machine at 18:29.</p>
+</header>
+
+<section>
+<h2>What this Task is worth before any choice</h2>
+<p>This Machine, a few minutes ago. The row in bold is what LOO-824 removes; the others belong to other server-first pieces.</p>
+<div class="wrap"><table>
+<tr><th>lf command</th><th class="n">processes</th><th class="n">memory</th><th class="n">CPU</th><th>removed by</th></tr>
+<tr class="this"><td><code>session serve</code></td><td class="n">126</td><td class="n">4.4 GB</td><td class="n">70%</td><td>this Task</td></tr>
+<tr><td><code>__context-block</code></td><td class="n">62</td><td class="n">8.3 GB</td><td class="n">29%</td><td>observers become server registrations</td></tr>
+<tr><td><code>session observe-status</code></td><td class="n">113</td><td class="n">2.4 GB</td><td class="n">0%</td><td>Desktop sends pane status itself</td></tr>
+<tr><td><code>__codex-observe</code></td><td class="n">42</td><td class="n">2.4 GB</td><td class="n">115%</td><td>observers become server registrations</td></tr>
+<tr><td>everything else lf</td><td class="n">36</td><td class="n">1.9 GB</td><td class="n">103%</td><td></td></tr>
+</table></div>
+<p>An owner is a whole <code>lf</code> process: 36 MB at the median, 76 MB at most. Thirty of the 126 were using 1% of a core or more while their conversations sat idle. All of that goes with any cut below, replaced by one holder per build and some state inside the server that already runs.</p>
+<p>So on the first goal, the holder is worth about a quarter of today's memory, and it is not the largest piece. The choices below decide how the remaining cost grows with the number of Sessions, and what the result is like to use.</p>
+</section>
+
+<section>
+<h2>1. Give the held terminal its own model</h2>
+<ul class="opts">
+<li><strong>1a</strong> Move today's owner loop into the server: one thread and one private socket per terminal.</li>
+<li><strong>1b</strong> A terminal registry in the server, one event loop, views dispatched straight to terminal state.</li>
+</ul>
+<div class="goal"><b>Load</b>With 1a every byte takes view → server bridge → Session socket → loop → holder, and each terminal keeps a thread. With 1b it takes view → server → holder and nothing runs until a file descriptor is ready. Why idle owners burn CPU today has not been traced; if the loop's own timers are the cause, 1a carries them into the server 126 times over.</div>
+<div class="goal"><b>Responsibilities</b>1b says what is true: a Session has a terminal, the terminal sits in a holder, and only real processes appear in the process list. 1a needs adapters that pretend a server thread is an owner process, and the next Task (every view types) deletes them.</div>
+<div class="goal"><b>Desktop</b>Nothing looks different in this Task. 1b is what lets Desktop and <code>lf ps</code> answer "how many Sessions is this Machine holding" from one place.</div>
+<p>All three goals point the same way. The cost is more transport extraction now and a changed attach route for managed Sessions.</p>
+</section>
+
+<section>
+<h2>2. Where the emulator lives</h2>
+<p>The emulator is the headless Ghostty terminal that paints a view opening late and answers the agent's terminal queries while nobody is watching. Something has to hold one per Session. It is also most of what Rex is.</p>
+<ul class="opts">
+<li><strong>3a</strong> In the server. The holder keeps PTYs and 2 MiB of raw bytes each. Said in LOO-819: "Yea the second".</li>
+<li><strong>3b</strong> In the holder, beside the PTY. Rex and Paseo do this.</li>
+</ul>
+<div class="goal against"><b>Responsibilities: favors 3a</b>A 3a holder does five things: start, write, resize, read from a byte position, report exit. Rex's block API appears to offer the same five, so a Rex block could stand in for the holder later and the Session would open natively in Rex. A 3b holder is a PTY owner with an emulator, scrollback and a snapshot protocol that must stay readable across builds: a second, smaller Rex that Loopflow maintains.</div>
+<div class="goal against"><b>Desktop: favors 3b, by an amount not yet measured</b>With 3b a server restart loses nothing: every pane, including one opened for the first time afterward, is painted from an emulator that never stopped. With 3a the emulator is rebuilt from the ring. Rows are mostly safe: a joining view is painted at most 2,000 rows or 768 KiB today, and the ring holds 2 MiB. What may be wrong is state set before the ring begins: bracketed paste, focus reporting, the Kitty keyboard stack, program colors. The kickoff probe showed Claude and Codex redraw rows and cursor after a size nudge. It could not see modes.</div>
+<div class="goal"><b>Desktop: also favors 3a</b>The holder is the one process whose death ends every agent on its build. 3b puts a terminal parser fed by agent output inside it. In the server, the same parser failing costs a reconnect.</div>
+<div class="goal"><b>Load: roughly even</b>The same parsing and the same scrollback (up to 8 MiB per Session, as today) happen in one process or the other. 3b saves the holder → server copy for Sessions nobody is viewing. 3a lets old-build holders stay tiny.</div>
+
+<div class="demo">
+<div class="row" role="group" aria-label="Emulator"><span>Emulator</span><button data-k="e" data-v="server" aria-pressed="true">3a · in the server</button><button data-k="e" data-v="holder" aria-pressed="false">3b · in the holder</button></div>
+<div class="row" role="group" aria-label="Open views resume"><span>Open views</span><button data-k="r" data-v="pos" aria-pressed="true">4a · resume by PTY position</button><button data-k="r" data-v="refresh" aria-pressed="false">4b · refresh</button></div>
+<div class="row" role="group" aria-label="Moment"><span>Moment</span><button data-k="m" data-v="install" aria-pressed="true">lf install, pane open</button><button data-k="m" data-v="cold" aria-pressed="false">Open a pane after the install</button><button data-k="m" data-v="crash" aria-pressed="false">Something crashes</button><button data-k="m" data-v="many" aria-pressed="false">100 Sessions, 3 on screen</button></div>
+<div class="out" aria-live="polite"><h3>In the Desktop pane</h3><p id="see"></p><h3>Underneath</h3><p id="cost"></p></div>
+<p class="note">Proposed behavior, reasoned from the design and the code. Not measured.</p>
+</div>
+</section>
+
+<section>
+<h2>3. Let open panes continue from a PTY position</h2>
+<ul class="opts">
+<li><strong>4a</strong> A view's place in the stream is a count of PTY bytes, answered from the holder's ring.</li>
+<li><strong>4b</strong> As the kickoff plan has it: after a server restart every view refreshes from the rebuilt emulator.</li>
+</ul>
+<p>Today a view's resume position counts its own stream and lives in a 1 MiB spool inside the owner. Move the owner into the server and that spool dies with every install, so every open pane repaints. The holder already numbers its bytes. If views use the same numbers, a pane that was open through the restart asks for "everything after byte N" and carries on: no redraw, its own scrollback untouched, whichever emulator choice is made.</p>
+<div class="goal"><b>Desktop</b>The common case, an install while panes are open, becomes a pause and nothing else. The emulator question shrinks to panes opened cold after a restart.</div>
+<div class="goal"><b>Load</b>No per-view spool in the server; a slow view rereads from the ring.</div>
+<div class="goal"><b>Responsibilities</b>One numbering for output, owned by the holder.</div>
+<p>Cost: the snapshot a view starts from has to be tied to a PTY position, which changes the viewer stream. More than 2 MiB of output during the gap falls back to a refresh.</p>
+</section>
+
+<section>
+<h2>4. Leave the disk journal out</h2>
+<p><strong>1c</strong> writes emulator checkpoints and output to disk so a crashed server can restore the exact screen. It adds continuous writes for every Session, terminal output at rest, retention rules and a format to migrate. It helps only the case 4a does not already cover: a pane opened cold after a server crash. And 3b would cover that case without a disk. None of the three goals moves enough to pay for it.</p>
+</section>
+
+<section>
+<h2>5. Which launches the holder takes</h2>
+<ul class="opts">
+<li><strong>2a</strong> Plain <code>lf resume SESSION</code> of an ended Task or Wave Session starts it managed.</li>
+<li><strong>2b</strong> It follows where it was typed: bare in a plain terminal, managed from a Task or Wave command or from Desktop.</li>
+</ul>
+<div class="goal"><b>Responsibilities</b>2b keeps the line where server-first drew it. In Rex the agent is the foreground program and Rex keeps it alive; Loopflow adds nothing Rex already does.</div>
+<div class="goal"><b>Desktop</b>With 2a, a Task conversation resumed from any terminal is the same live process Desktop shows. With 2b, Desktop shows that Session as running elsewhere, and opening it there starts a new process from its history.</div>
+<div class="goal"><b>Load</b>No difference worth counting.</div>
+</section>
+
+<section>
+<h2>Rex behind the same five messages</h2>
+<p>A sketch, read from <code>rex</code> help text on this Machine. Nothing here has been run against Rex.</p>
+<div class="wrap"><table>
+<tr><th>Holder message</th><th>Rex, as documented</th></tr>
+<tr><td><code>start</code></td><td><code>session.new_block</code> creates a block in no window</td></tr>
+<tr><td><code>read</code> from a position</td><td><code>data.connect</code> issues a ticket for the block's <code>rex.data.terminal.v1</code> stream</td></tr>
+<tr><td><code>exit</code></td><td><code>rex wait</code> "returns the child process's exit status"</td></tr>
+<tr><td><code>write</code>, <code>resize</code></td><td>not checked</td></tr>
+</table></div>
+<p>With 3a the server never asks a holder for a screen, only for bytes, so a holder is replaceable by anything that keeps a PTY. On a Machine with Rex, managed Sessions could live in Rex blocks and Loopflow's own holder would be what runs where Rex does not. With 3b that door is narrower: the server would depend on a snapshot format only Loopflow's holder speaks. Earlier, on the same idea: "could we make it so that we actually make rex an dependency of loopflow and have rex own the terminal?" and "potentially weird thing there would just be if you then open rex you see all of your loopflow stuff".</p>
+</section>
+
+<section>
+<h2>Side by side</h2>
+<div class="wrap"><table>
+<tr><th>Choice</th><th>Load</th><th>Separation from Rex</th><th>Desktop</th></tr>
+<tr><td>Any holder</td><td>large</td><td>some</td><td>large: installs stop ending turns</td></tr>
+<tr><td>1b terminal model</td><td>medium, grows with Session count</td><td>large</td><td>small now, needed next</td></tr>
+<tr><td>4a PTY positions</td><td>small</td><td>small</td><td>large</td></tr>
+<tr><td>3a emulator in server</td><td>even</td><td>large</td><td>unknown loss on cold opens; safer holder</td></tr>
+<tr><td>3b emulator in holder</td><td>even</td><td>against</td><td>exact cold opens; riskier holder</td></tr>
+<tr><td>1c disk journal</td><td>against</td><td>against</td><td>small</td></tr>
+<tr><td>2b entry point decides</td><td>none</td><td>medium</td><td>mixed</td></tr>
+</table></div>
+<h3>One reading</h3>
+<p>1b and 4a, no journal: they cost work and nothing else. For the emulator, the open fact is whether Claude and Codex set their modes again after a resize. Repeating the kickoff probe through the production Ghostty emulator answers it in an afternoon. If they do, 3a gives up almost nothing a Desktop user would see and keeps the holder something Rex can replace. If they do not, the choice between 3a with a known flaw on cold opens and 3b is a real one, and it is yours.</p>
+</section>
+
+<section class="questions">
+<h2>Questions</h2>
+<h3>1. How does the server model a held terminal?</h3>
+<ul class="opts"><li><strong>1a</strong> Move the loops.</li><li><strong>1b</strong> Terminal registry and one event loop.</li><li><strong>1c</strong> 1b plus the disk journal.</li></ul>
+<h3>2. Plain <code>lf resume SESSION</code> for an ended Task or Wave Session</h3>
+<ul class="opts"><li><strong>2a</strong> Managed, because of the Session's Task or Wave.</li><li><strong>2b</strong> Follows where it was typed.</li></ul>
+<h3>3. Where does the emulator live?</h3>
+<ul class="opts"><li><strong>3a</strong> Server, as said in LOO-819.</li><li><strong>3b</strong> Holder, as Rex and Paseo do.</li><li><strong>3c</strong> Run the mode probe first, then choose.</li></ul>
+<h3>4. Open views across a server restart</h3>
+<ul class="opts"><li><strong>4a</strong> Continue from a PTY position.</li><li><strong>4b</strong> Refresh from the rebuilt emulator.</li></ul>
+<p class="note">Combinations, a different weighting of the three goals, or another round are all answers.</p>
+</section>
+
+<footer>The design and what was said are in <a href="holder.md">holder.md</a>; the open choices in <a href="questions.md">questions.md</a>. The controls change only this page.</footer>
+<noscript><p class="note">The scenario picker needs JavaScript; the sections above it carry the same reasoning.</p></noscript>
+</main>
+<script>
+const T={
+ install:{
+  "server.pos":["Reconnecting…, input paused for the moment the server is down, then the turn carries on from the exact byte. Nothing is redrawn. The pane's own scrollback is untouched.","The view asks the new server for everything after its PTY position; the holder's ring supplies it. The server rebuilds its emulator in the background for later joiners. More than 2 MiB during the gap falls back to a refresh."],
+  "server.refresh":["Reconnecting…, then the screen is painted again. If the new build carries the same Ghostty revision it is exact, from a snapshot written at shutdown. Otherwise the screen comes from ring replay and a size nudge: rows and cursor right, modes not verified.","The per-view spool died with the old server, so every open pane repaints at once from emulators the new server has just rebuilt."],
+  "holder.pos":["Reconnecting…, input paused, then the turn carries on from the exact byte. Nothing is redrawn.","Same as 3a with 4a. The emulator in the holder was never interrupted, but an open pane does not need it."],
+  "holder.refresh":["Reconnecting…, then the screen is painted again, exactly: modes, colors and history as they were.","The holder's emulator kept running through the install and repaints every pane. The old holder keeps its old Ghostty revision until its Sessions end."]},
+ cold:{
+  "server.pos":["The visible screen is right. History above it is there, up to the usual 2,000 rows, as long as it fits in the last 2 MiB of output. Whether paste and special keys behave depends on whether the agent set its modes again after the nudge. Not known yet.","The server's emulator for this Session was rebuilt from the holder's ring after the install. State set before the ring begins is gone unless the agent re-sends it. Same Ghostty revision on both builds: exact, from the shutdown snapshot."],
+  "server.refresh":["Same as with 4a: a cold open has no position to continue from. Screen right, history mostly there, modes not verified.","Rebuilt emulator: ring replay plus one size nudge, or the shutdown snapshot when the Ghostty revision matches."],
+  "holder.pos":["Exactly the screen the agent has: modes, colors, alternate screen, full retained history.","Painted from an emulator that has run since the Session started. The server restart never touched it."],
+  "holder.refresh":["Exactly the screen the agent has: modes, colors, alternate screen, full retained history.","Painted from an emulator that has run since the Session started."]},
+ crash:{
+  "server.pos":["Server crash: open panes pause and continue from their byte; a pane opened afterward gets ring replay and a nudge, with no snapshot to help. Emulator bug on strange agent output: one more server crash, same recovery.","Agents never notice. The holder contains no parser, so the process that keeps agents alive does not read what they print."],
+  "server.refresh":["Server crash: every pane repaints from ring replay and a nudge; there is no shutdown snapshot after a crash. Emulator bug: the same.","Agents never notice. The holder contains no parser."],
+  "holder.pos":["Server crash: nothing visible beyond a pause. Emulator bug on strange agent output: the holder dies and every agent on that build ends mid-turn. Panes show the Sessions ended; each has to be resumed from provider history.","The parser shares a process with every PTY of its build. Catching panics covers Rust; a fault inside the Ghostty library does not unwind."],
+  "holder.refresh":["Server crash: panes repaint exactly. Emulator bug on strange agent output: the holder dies and every agent on that build ends mid-turn.","The parser shares a process with every PTY of its build."]},
+ many:{
+  "server.pos":["Three live panes. The other 97 show their status and open in one paint.","Holder: 100 PTYs, at most 200 MB of ring, no parsing. Server: 100 emulators, each with up to 8 MiB of scrollback as today, parsing whatever its agent prints. Every byte crosses holder → server once. Against 126 processes at a median 36 MB today."],
+  "server.refresh":["Three live panes. The other 97 show their status and open in one paint.","As with 4a, plus a 1 MiB spool in the server for each open view."],
+  "holder.pos":["Three live panes. The other 97 show their status and open in one paint.","Holder: 100 PTYs and 100 emulators, the same parsing and scrollback. Server: bytes for the 3 Sessions on screen only. An older build's holder stays this size until its last Session ends."],
+  "holder.refresh":["Three live panes. The other 97 show their status and open in one paint.","Holder: 100 PTYs and 100 emulators. Server: streams and spools for the 3 open views."]}
+};
+const s={e:"server",r:"pos",m:"install"};
+function draw(){const [a,b]=T[s.m][s.e+"."+s.r];document.getElementById("see").textContent=a;document.getElementById("cost").textContent=b;
+ document.querySelectorAll("button[data-k]").forEach(x=>x.setAttribute("aria-pressed",String(s[x.dataset.k]===x.dataset.v)));}
+document.querySelectorAll("button[data-k]").forEach(x=>x.addEventListener("click",()=>{s[x.dataset.k]=x.dataset.v;draw()}));
+draw();
+</script>
+</body>
+</html>

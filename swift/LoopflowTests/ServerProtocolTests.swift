@@ -7,7 +7,7 @@ struct ServerProtocolTests {
         .deletingLastPathComponent().deletingLastPathComponent()
 
     private func fixture(_ name: String) throws -> Data {
-        try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/server/\(name).json"))
+        try Data(contentsOf: root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server/\(name).json"))
     }
 
     /// What `lf server describe --json` prints; a Rust test holds it to the wire types.
@@ -122,7 +122,15 @@ struct ServerProtocolTests {
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
         guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
-        #expect(owner == trace)
+        #expect(owner == .owner(lfProcessID: trace))
+        // A held terminal outlives server restarts and is named by its terminal.
+        guard case .bridged(let held) = try message("bridged_terminal") else { Issue.record("Missing held bridge"); return }
+        #expect(held == .terminal(id: "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"))
+        let start = ServerClientMessage.request(id: "start-1", operation: .sessionStart(
+            session: "session_5e55105e000040008000000000000001", request: "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+            argv: ["/usr/local/bin/lf", "session", "resume", "session_5e55105e000040008000000000000001"], cwd: "/Users/me/src/app",
+            env: [("PATH", "/usr/bin:/bin"), ("HOME", "/Users/me")], rows: 24, cols: 80, placement: "desktop-shell"), select: nil)
+        #expect(try encoded(start) == value("session_start"))
     }
 
     @Test func primarySessionSelectionUsesTheSharedViewPlanRead() throws {
@@ -173,6 +181,12 @@ struct ServerProtocolTests {
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),
+            ("session_status", "status-1", .sessionStatus(
+                directory: "/", id: "session_5e55105e000040008000000000000001", terminal: "pane-1",
+                agentProcess: "5e55105e-0000-4000-8000-000000000007", stream: "5e55105e-0000-4000-8000-000000000008",
+                sequence: 1, records: ProgramStatusRecords(seen: true, records: [
+                    ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil, app: nil,
+                                        title: nil, msg: "Proceed?")]))),
             ("wave_plan_bind", "bind-1", .wavePlanBind(directory: "/repo", wave: "product",
                                                                project: "5e55105e-0000-4000-8000-000000000042")),
             ("wave_plan_connect", "connect-1", .wavePlanConnect(directory: "/repo", wave: "product", all: false,
@@ -382,7 +396,7 @@ struct ServerProtocolTests {
     @Test func everyFixtureIsMirrored() throws {
         let client = try arms("ClientMessage", tag: "type", of: schema())
         let tests = try source("swift/LoopflowTests/ServerProtocolTests.swift")
-        let directory = root.appendingPathComponent("tests/fixtures/dto/server")
+        let directory = root.appendingPathComponent("rust/loopflow/tests/fixtures/dto/server")
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
             let name = url.deletingPathExtension().lastPathComponent
             let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
@@ -400,10 +414,13 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"bridged","owner_lf_process_id":"x"}"#.utf8))
         }
     }
 }

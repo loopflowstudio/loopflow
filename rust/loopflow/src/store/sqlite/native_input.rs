@@ -8,8 +8,8 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
+use super::transport::Transport;
 use super::SqliteStore;
-use crate::id::LfProcessId;
 use crate::steer::{NativeBoundary, SteerAdapter};
 use crate::store::{StoreError, StoreResult};
 
@@ -131,15 +131,15 @@ fn terminal_reply(bytes: &[u8]) -> bool {
         })
 }
 
-pub(super) fn pending(conn: &Connection, owner: &LfProcessId) -> StoreResult<bool> {
+pub(super) fn pending(conn: &Connection, owner: Transport<'_>) -> StoreResult<bool> {
     Ok(read(conn, owner)?.pending())
 }
 
-fn read(conn: &Connection, owner: &LfProcessId) -> StoreResult<NativeInput> {
+fn read(conn: &Connection, owner: Transport<'_>) -> StoreResult<NativeInput> {
     let saved: Option<String> = conn
         .query_row(
-            "SELECT native_input FROM processes WHERE id=?1",
-            [owner],
+            &format!("SELECT native_input FROM {} WHERE id=?1", owner.table()),
+            [owner.as_str()],
             |row| row.get(0),
         )
         .optional()?
@@ -152,7 +152,7 @@ fn read(conn: &Connection, owner: &LfProcessId) -> StoreResult<NativeInput> {
 
 fn update(
     conn: &mut Connection,
-    owner: &LfProcessId,
+    owner: Transport<'_>,
     change: impl FnOnce(&mut NativeInput),
 ) -> StoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -160,8 +160,11 @@ fn update(
     change(&mut input);
     let saved = serde_json::to_string(&input)?;
     tx.execute(
-        "UPDATE processes SET native_input=?2 WHERE id=?1 AND native_input IS NOT ?2",
-        params![owner, saved],
+        &format!(
+            "UPDATE {} SET native_input=?2 WHERE id=?1 AND native_input IS NOT ?2",
+            owner.table()
+        ),
+        params![owner.as_str(), saved],
     )?;
     tx.commit()?;
     Ok(())
@@ -170,11 +173,12 @@ fn update(
 impl SqliteStore {
     /// Record before forwarding, without blocking the terminal's descriptor loop.
     /// False leaves the bytes with the owner to retry after store contention.
-    pub(crate) fn try_record_owner_input(
+    pub(crate) fn try_record_owner_input<'a>(
         &self,
-        owner: &LfProcessId,
+        owner: impl Into<Transport<'a>>,
         bytes: &[u8],
     ) -> StoreResult<bool> {
+        let owner = owner.into();
         let mut conn = match self.conn.try_lock() {
             Ok(conn) => conn,
             Err(TryLockError::WouldBlock) => return Ok(false),
@@ -198,10 +202,14 @@ impl SqliteStore {
         }
     }
 
-    pub(crate) fn clear_owner_input(&self, owner: &LfProcessId) -> StoreResult<()> {
+    pub(crate) fn clear_owner_input<'a>(&self, owner: impl Into<Transport<'a>>) -> StoreResult<()> {
+        let owner = owner.into();
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE processes SET native_input=NULL WHERE id=?1 AND native_input IS NOT NULL",
-            [owner],
+            &format!(
+                "UPDATE {} SET native_input=NULL WHERE id=?1 AND native_input IS NOT NULL",
+                owner.table()
+            ),
+            [owner.as_str()],
         )?;
         Ok(())
     }
@@ -215,18 +223,25 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let owner: Option<LfProcessId> = conn
+            let host: Option<(
+                Option<crate::id::LfProcessId>,
+                Option<crate::id::TerminalId>,
+            )> = conn
                 .query_row(
-                    "SELECT s.transport_lf_process_id FROM agent_sessions s
+                    "SELECT s.transport_lf_process_id,s.held_terminal_id FROM agent_sessions s
                  JOIN processes p ON p.id=s.agent_process_id
                  WHERE s.id=?1 AND p.agent_interactive=1",
                     [&adapter.session],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .optional()?
-                .flatten();
-            if let Some(owner) = owner {
-                update(&mut conn, &owner, |input| match prompt {
+                .optional()?;
+            let host = match &host {
+                Some((_, Some(terminal))) => Some(Transport::Terminal(terminal)),
+                Some((Some(owner), None)) => Some(Transport::Owner(owner)),
+                _ => None,
+            };
+            if let Some(owner) = host {
+                update(&mut conn, owner, |input| match prompt {
                     Some(text) => input.start(prompt_id, text),
                     None => input.stop(prompt_id),
                 })?;

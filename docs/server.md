@@ -23,7 +23,8 @@ Machine commands manage execution destinations, their connections and capacity.
 The server lets clients reach Work and existing Sessions on a host. Installation
 owns its registration and updates. Desktop's window automation stays with the app.
 Desktop uses this connection for all shared Work reads, changes and live updates.
-Ordinary CLI commands can run without the client server.
+Ordinary CLI commands can run without the client server; opening a Task or Wave
+conversation is the exception, because the server starts its agent.
 
 Keep a Task open in Desktop while editing its checkout or waiting for CI. Its
 live reading updates when Loopflow observes a relevant change, including changes
@@ -42,9 +43,11 @@ and retries. Task and Session creations recover through their saved request and
 server receipt. Other changes submitted before the connection dropped are never
 repeated automatically; check the current Work before submitting them again.
 
-Desktop reconnects automatically to the same Session owner when the server is
-replaced or its connection drops. Its native status row shows **Reconnecting…**;
-the screen stays visible and input pauses until the connection is acknowledged.
+Desktop reconnects automatically to the same running conversation when the
+server is replaced or its connection drops. Its native status row shows
+**Reconnecting…**; the screen stays visible and input pauses until the
+connection is acknowledged. The pane then continues from where it stopped,
+including output printed while the server was away, without redrawing.
 Selection, copy, Find and scrolling remain available.
 
 If another viewer has control, recovery leaves that viewer in control. The
@@ -53,7 +56,10 @@ repairs the connection after automatic retries are exhausted. It does not take
 control, restart the provider or repeat a command. Uncertain keystrokes and
 unacknowledged commands are never replayed automatically.
 
-An unavailable connection does not mean the Session has ended. Closing Desktop
+An unavailable connection does not mean the Session has ended. Agents run in a
+holder beside the server, not in it, so a stopped or crashed server leaves
+every turn running; [Keep working through an update](sessions.md#keep-working-through-an-update)
+says what each kind of interruption costs. Closing Desktop
 leaves the server and existing execution owners independent of the window.
 Session lifetime rules still apply: drafts, pending requests, active turns and
 running Graphs retain their owners; settled, unviewed Sessions can end after
@@ -97,9 +103,12 @@ the affected Work to see what happened before making another change.
 
 ## Updates and disabled background access
 
-Use `lf install` to update the selected build. Installation reconciles the server
-registration; Desktop reconnects through the update. `lf server run` is the
-foreground entry used by the OS supervisor, not a routine setup step.
+Use `lf install` to update the selected build, at any time: it restarts the
+server and ends no conversation. Running agents stay on the build they started
+with until they end; conversations opened afterward use the new one.
+Installation reconciles the server registration; Desktop and terminal views
+reconnect through the update. `lf server run` is the foreground entry used by
+the OS supervisor, not a routine setup step.
 
 If macOS has disabled Loopflow's background item, enable it in System Settings.
 On Linux, disabled or masked user services likewise require explicit enablement.

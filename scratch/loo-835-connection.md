@@ -147,3 +147,44 @@ direct run above still covers the product code. Rust, website and Swift go to CI
 Gate, November 11 10:05 (at f5f141f35, load 20 but `syspolicyd` 241-270%):
 the runner stopped at `rust-cli` a third time; architecture and rustfmt pass.
 Rust, website and Swift: CI.
+
+## Gate, November 11 11:15 (at fc2d51e51)
+
+Comparison: recorded stack base `42143df1a`, not `origin/main` (which also
+includes LOO-821). Product code is unchanged since the direct passing run at
+`5967faced`; this pass corrects the server README's process count: Pi renders
+at each turn's first model request as well as after compaction.
+
+Check plan from the 36-path stack diff:
+
+- Plugin sources, their generator and Pi guard: `harness::context::tests::`,
+  `harness::pi::`, `os_process::lifeline`, Pi `session_launch_contract` cases,
+  and both Node context probes named in `tests/README.md`.
+- Event handling and wire: `server::boundary::`, `server::schema::tests::`,
+  `session_steers::`; the Swift protocol consumer through `--swift`.
+- Removed internal CLI callbacks: `lf::tests::`, `binary(lf)`,
+  `cli_discovery::`, `session_cli_tests::` and
+  `transport_tests::retained_hooks_survive_upgrade`.
+- Docs and embedded source: architecture, `documented_commands::`, website,
+  and `cargo package --locked --allow-dirty -p loopflow`; rustfmt and clippy.
+
+The prior notes above cover the unchanged Rust checks they name. Additional
+Rust consumers, archive compilation and Swift remain for CI. No fourth build
+attempt: `ps` at 11:15 showed `syspolicyd` at 227.6% CPU, with two other
+checkouts' test binaries at 931.8% and 47.5%; the previous three runner stops
+all occurred during `rust-cli`, not a failed product assertion.
+
+- `node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` — pass
+  (compaction refresh, native additions, sibling isolation).
+- `node scripts/benchmarks/skill-invocation/test_pi_context.mjs` — pass
+  (automatic/manual compaction, native tools/messages, Task update delivery,
+  unbound child).
+- `uv run --no-sync python scripts/check_architecture.py` — pass, zero
+  unexplained owners, mirrors, shims or stale vocabulary.
+- `cd website && uv run --no-sync python dev.py test` — 73 pass; this run's
+  PATH selected the installed CLI for the generated command reference.
+- `cd website && PATH="$PWD/../target/debug:$PATH" uv run --no-sync python dev.py test -k 'test_docs or test_doc_md_endpoint'`
+  — 13 pass with the branch CLI; only command-reference consumers rerun.
+- `uv run --no-sync python scripts/test_network.py target/debug/deps/integration-2ae664a62b50a13a documented_commands::`
+  — 4 pass against the edited docs, using the already-built unchanged test code.
+- `git diff --check` — pass.

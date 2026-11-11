@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Loopflow
 import Observation
@@ -32,6 +31,14 @@ final class ProgramStatusSurface {
     private var publication: Task<Void, Never>?
     private var active = true
     private var hasAssociatedSession = false
+    private let send: Send
+
+    /// Delivers one reading; throws when the server did not record it.
+    typealias Send = @Sendable (ServedWrite) async throws -> Void
+
+    init(send: @escaping Send = { _ = try await ServerClient.write($0) }) {
+        self.send = send
+    }
 
     func associate(sessionId: String?, terminalId: String?, provider: SessionProviderReading?) {
         guard self.sessionId != sessionId || self.terminalId != terminalId || self.provider != provider else { return }
@@ -75,7 +82,7 @@ final class ProgramStatusSurface {
         if writer == nil {
             association = UUID()
             let association = self.association
-            writer = ProgramStatusWriter(sessionId: sessionId, terminalId: terminalId, provider: provider) { [weak self] error in
+            writer = ProgramStatusWriter(sessionId: sessionId, terminalId: terminalId, provider: provider, send: send) { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.active, self.association == association else { return }
                     self.observationError = error
@@ -100,139 +107,78 @@ final class ProgramStatusSurface {
     }
 }
 
-/// Queue-confined pipe owner. Nonblocking writes cannot stall terminal I/O, and
-/// at most one replacement snapshot waits behind a partially written frame.
+/// Sends each changed snapshot to the Machine server as one `session.status`
+/// write. One request is in flight at a time and at most one newer snapshot
+/// waits behind it, so a slow server never stalls terminal I/O.
 private final class ProgramStatusWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.loopflow.program-status")
     private let sessionId: String
     private let terminalId: String
     private let provider: SessionProviderReading
+    private let send: ProgramStatusSurface.Send
     private let observation: @Sendable (String?) -> Void
-    private var process: Process?
-    private var input: FileHandle?
-    private var pending: Data?
-    private var frame = Data()
-    private var offset = 0
-    private var writable: DispatchSourceWrite?
+    /// A failed writer is replaced, and the server fences the stream it leaves.
+    private let stream = UUID().uuidString.lowercased()
+    private var sequence = 0
+    private var pending: ProgramStatusRecords?
+    private var sending = false
     private var stopped = false
-    private var drainDeadline: Date?
     private var last: ProgramStatusRecords?
 
-    init(sessionId: String, terminalId: String, provider: SessionProviderReading, observation: @escaping @Sendable (String?) -> Void) {
+    init(sessionId: String, terminalId: String, provider: SessionProviderReading,
+         send: @escaping ProgramStatusSurface.Send, observation: @escaping @Sendable (String?) -> Void) {
         self.sessionId = sessionId
         self.terminalId = terminalId
         self.provider = provider
+        self.send = send
         self.observation = observation
     }
 
     func submit(_ snapshot: ProgramStatusRecords) {
         queue.async { [self] in
             guard !stopped, snapshot != last else { return }
-            do {
-                if process == nil { try start() }
-                pending = try JSONEncoder().encode(snapshot) + Data([10])
-                last = snapshot
-                flush()
-            } catch {
-                fail(error.localizedDescription)
-            }
+            last = snapshot
+            pending = snapshot
+            flush()
         }
-    }
-
-    private func start() throws {
-        let helper = try LocalWaveAgentLauncher.controlLfPath()
-        let process = LocalWaveAgentLauncher.queryProcess(
-            [helper, "session", "observe-status", sessionId, "--terminal", terminalId]
-                + (provider.agentProcessId.map { ["--agent-process", $0.rawValue] } ?? [])
-        )
-        let pipe = Pipe.uninherited()
-        process.standardInput = pipe
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] process in
-            guard let self else { return }
-            self.queue.async {
-                if !self.stopped { self.fail("Status observation ended (\(process.terminationStatus))") }
-            }
-        }
-        try process.run()
-        pipe.fileHandleForReading.closeFile()
-        input = pipe.fileHandleForWriting
-        let fd = pipe.fileHandleForWriting.fileDescriptor
-        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-        _ = fcntl(fd, F_SETNOSIGPIPE, 1)
-        self.process = process
-    }
-
-    private func observeWritable() {
-        guard !stopped, !frame.isEmpty || pending != nil else {
-            writable?.cancel()
-            writable = nil
-            return
-        }
-        guard writable == nil, let input else { return }
-        let writable = DispatchSource.makeWriteSource(fileDescriptor: input.fileDescriptor, queue: queue)
-        writable.setEventHandler { [self] in flush() }
-        self.writable = writable
-        writable.resume()
     }
 
     private func flush() {
-        defer {
-            if let deadline = drainDeadline, (frame.isEmpty && pending == nil) || Date() >= deadline {
-                finish()
-            } else {
-                observeWritable()
+        guard !sending, let snapshot = pending else { return }
+        pending = nil
+        sending = true
+        sequence += 1
+        let write = ServedWrite.sessionStatus(
+            directory: "/", id: sessionId, terminal: terminalId, agentProcess: provider.agentProcessId?.rawValue,
+            stream: stream, sequence: sequence, records: snapshot)
+        Task { [self] in
+            let failure: String?
+            do {
+                try await send(write)
+                failure = nil
+            } catch {
+                failure = error.localizedDescription
             }
-        }
-        guard !stopped, let input else { return }
-        if frame.isEmpty, let pending {
-            frame = pending
-            self.pending = nil
-            offset = 0
-        }
-        guard !frame.isEmpty else { return }
-        let written = frame.withUnsafeBytes { bytes in
-            Darwin.write(input.fileDescriptor, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
-        }
-        if written > 0 {
-            offset += written
-            if offset == frame.count {
-                frame = Data()
-                offset = 0
-                observation(nil)
+            queue.async { [self] in
+                sending = false
+                if let failure {
+                    let report = !stopped
+                    stopped = true
+                    pending = nil
+                    if report { observation(failure) }
+                } else {
+                    if !stopped { observation(nil) }
+                    flush()
+                }
             }
-        } else if written < 0, errno != EAGAIN, errno != EINTR {
-            fail("Status observation unavailable")
         }
     }
 
-    private func fail(_ message: String) {
-        guard !stopped else { return }
-        finish()
-        observation(message)
-    }
-
+    /// Draining lets the snapshot already submitted reach the server.
     func stop(drain: Bool = false) {
         queue.async { [self] in
-            if drain, !stopped {
-                drainDeadline = Date().addingTimeInterval(2)
-                flush()
-                queue.asyncAfter(deadline: .now() + .seconds(2)) { [self] in finish() }
-            } else {
-                finish()
-            }
+            stopped = true
+            if !drain { pending = nil }
         }
-    }
-
-    private func finish() {
-        stopped = true
-        writable?.cancel()
-        writable = nil
-        try? input?.close()
-        input = nil
-        pending = nil
-        frame = Data()
-        process = nil
     }
 }

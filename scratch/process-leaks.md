@@ -57,61 +57,65 @@ Direction (Jack Heart, word for word, in the demo-step review):
 - Where: "3a - here" (this Task, PR #1877). "Closed" means both done and abandoned ("4a").
 - Suspension under a resident limit: "6a" (agent count per Machine, in config); "no opinion on 5".
 
-Build in this PR:
-1. Delete idle ending: the quiet/viewer grace in `transport/lifetime.rs`,
-   `idle_retention`, `DetachedLimit` and `session.end_detached_after`. Keep
-   abandonment ending, Desktop shell Close, and completed-Task retirement ending.
-   `.lf/config.yaml` is read by the released lf too and `SessionConfig` is
-   `deny_unknown_fields`: keep `end_detached_after` parseable and ignored,
-   marked with the Task that removes it, and file that Task (AGENTS.md rule).
-2. Delete the native-input ledger: `store/sqlite/native_input.rs`,
-   recording before forwarding in `transport/input.rs` (and its retry path),
-   `acknowledge_native_input`, `OwnerRetention::NativeInput`. Stop reading and
-   writing `processes.native_input`; dropping the column is a later staged
-   contract migration, not this PR.
-3. A closed Task ends its conversation at cleanup whatever its input:
-   `retirement::require_settled_work` no longer waits on input. A running
-   Graph or live turn still holds cleanup as today.
-4. Rollover and takeover (`lf process rollover`, `human_session.rs`) lose
-   input as a reason. Rollover is a person's or operator's explicit act; it
-   now moves an owner with a draft the way quitting would. Say so in its
-   help and docs.
-5. Docs: `docs/sessions.md` (lifetime = scope; no two-minute rule),
-   `docs/config.md`, the troubleshooting section this PR added (its "send or
-   clear" sentence goes), transport README, `lifetime.rs` module doc,
-   `docs/dev/server-first.md` (CLI cleanup row no longer lists
-   `end_detached_after`).
-6. Tests pinning the ledger or idle ending go; add one that a done Task's
-   conversation with typed input ends at cleanup.
+Implemented; gate and demo remain:
+
+1. Conversations no longer expire from quiet output or absent viewers.
+   Abandonment ending, Desktop shell Close, and completed-Task retirement remain.
+   The shared `end_detached_after` config key is parseable but ignored until
+   LOO-829 removes it after release.
+2. Input flows through the bounded byte queue without a store write, retention
+   ledger or retry recording. The released `processes.native_input` column has
+   no runtime consumers; its removal needs a later staged contract migration.
+3. Completed-Task cleanup ends conversations with unsent input after viewing
+   grace and live work settle. A running Graph or pending request still holds
+   cleanup; abandonment retains its existing rule of ending unviewed terminal
+   owners even during a turn.
+4. Explicit rollover and takeover may replace an idle provider with a draft,
+   discarding its editor. Help and docs describe that loss. Regression coverage
+   includes retirement with typed input and forwarding during store locks.
 
 Not in this PR: suspension under a limit (6a). It needs to know the editor is
 empty, and the ledger is being deleted; proposed (nobody picked it) to build
 it with the server-first holder and read the input line off the server's
-emulator (5a). Bare launches with no owner stay the server-first piece; until
-then the 14 unscoped owners run until someone quits them, accepted as
-transition cost.
+emulator (5a). Bare launches with no owner stay the server-first piece; the
+14 unscoped owners in the audit run until someone quits them during this
+transition.
 
 ## Delete — do not maintain
 
-Runtime cuts below are complete. Only the ignored shared-config key and the
-released SQLite column remain for their post-release removal.
+The 2026-11-11 headless review's four documentation corrections are applied:
 
-- `transport/lifetime.rs`: `Grace`, `limit`, quiet/viewer idle expiry and its tests.
-  Keep viewer observations, stale-candidate rejection, abandonment and retirement.
-- `config.rs`: `DetachedLimit`; keep only the ignored parser until
-  `task_c118380f31f14d07ba28669499efa395` removes shared-config compatibility.
-- `store/sqlite/native_input.rs`, `OwnerRetention::NativeInput`,
-  `acknowledge_native_input`, `try_record_owner_input`, `clear_owner_input`.
-  Keep current-turn recording and the released column without runtime consumers.
-- `transport/input.rs`: retention recording, budget and replay; delete
-  `transport/input_retry_tests.rs` and its serve-loop hook. Keep the bounded
-  byte queue and partial-write forwarding. Input must flow during store locks.
-- `desktop::shells::holds_input`, `SqliteStore::idle_retention`, ledger-only
-  steers/rollover fixtures and transport tests requiring idle expiry.
-  Keep live-turn/request/Graph, shell Close and takeover coverage. The Task-Graph
-  check belongs in `owner_retiring_tasks`; it does not hold explicit rollover.
+- `rust/loopflow/src/builtins/task/skill/demo.md`: remove draft-settlement and
+  permanent input-hold rules. Wait for live turns and pending requests, resume
+  each demo Session and quit its provider; signal only a verified demo PID that
+  will not exit. Keep history roots and the ban on signaling by process name.
+- `docs/server.md`: remove draft retention and idle expiry. Open scopes keep
+  their conversations; completed-Task cleanup waits for live work and viewing grace.
+- `docs/dev/execution.md`: remove draft retention during replacement; document
+  loss of unsent editor input.
+- `docs/sessions.md`: replace the nonexistent conversation-close action with
+  quitting the agent. "nothing ends it" (Jack Heart) remains the lifetime rule.
+
+The related test guide now describes direct input during store locks and live-turn
+retention, with no references to the deleted retry suite. Config, transport and
+troubleshooting docs name quitting the agent; quitting a demo app alone leaves
+its owners running. Teardown uses the demo's saved Machine environment.
+
+Kept on purpose: `Ending::may_end` still vetoes completed-Task retirement when
+output arrived after the judgment. Hooks are best-effort, so streaming output
+is the one sign of a turn the store never recorded. It no longer times anything.
+
+No new product choice. Still open, and not this PR's: the resident-limit
+default count and how suspension knows the editor is empty (`questions.md`).
 
 ## Remaining verification
+
+The sync at `475d5b369` includes #1882's conversation-opening readiness changes.
+Its three new tests brought back four references to the removed `StopOwner`;
+those references are removed, with cleanup still owned by `Fixture::drop`.
+LOO-824 will adopt this lifetime rule after this PR lands (exact coordination
+quote in `questions.md`); resident-limit suspension still awaits its emulator
+and a decision on how to detect an empty editor.
 
 The upgrade fixture uses native turn hooks for both responsive and unresponsive
 owners, then one replacement/reconnect path; no synthetic live-turn SQL or
@@ -128,7 +132,12 @@ The audit no longer calls an open conversation stale solely for being old and un
 - `swift build --build-tests --package-path swift`, then `scripts/test_desktop.sh --skip-build --filter UninheritedPipeTests`: built and 1 passed in 0.001s. The first run spent 30s in SIGTERM teardown; SIGKILL removes the inherited-mask wait. The rebuilt test bundle initially failed signature validation; local `codesign --force --sign - --timestamp=none` on that bundle restored the headless check.
 - `ps -axo pid=,command=` before/after focused Rust tests: 42 prior matching processes remained, no new fixture/build process (excluding the reading commands). Nothing pre-existing was signalled.
 - `cargo fmt --check`, `git diff --check`: passed; audit script syntax parses.
+- `uv run cargo test -p loopflow --test transport_tests -- conversation_open_` (inherited `LF_*` unset, stdin closed): 3 passed after the sync repair; 11.74s.
+- `uv run cargo test -p loopflow --test integration documented_commands::` (inherited `LF_*` unset, stdin closed): 4 passed after replacing the retired status phrase in `docs/troubleshooting.md` found on the first run.
+- Compress follow-through: `git diff --check` passed; obsolete symbol/doc search found no remaining runtime references. Only prose and a test comment changed; no build or test rerun. `lf context`: within both targets.
 
 Gate: affected transport, retirement, native-turn/steers, rollover, config,
-CLI resolution/parser, documented-command and server schema suites; Clippy. Demo: process diff and regenerated audit. Full build/test results before
+CLI resolution/parser and server schema suites; Clippy.
+`cargo package --locked --allow-dirty -p loopflow` remains with gate for the
+embedded demo skill edit. Demo: process diff and regenerated audit. Full build/test results before
 this lifetime revision do not cover these deletions.

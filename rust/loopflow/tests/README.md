@@ -100,14 +100,12 @@ prepared-viewer case exercises the returned production launch command, healthy
 idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
 its process inventory rejects an additional remote PTY.
 
-`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
-holds a SQLite writer while typing and returning to the viewer. Control stays
-responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
-without replay. `transport::input_retry_tests` bounds polling through a failed
-store and verifies recovery through the real descriptor loop.
+`transport_tests::a_locked_store_does_not_delay_input_or_replay_it_on_return`
+holds a SQLite writer while typing and returning to the viewer. Input and control
+keep flowing while the store is locked; returning does not replay input.
 
 `transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
-owners while resuming their Sessions. Drafts, pending requests, turns, Graph
+owners while resuming their Sessions. Pending requests, turns, Graph
 ancestry/steps and Runs retain the same provider, attachment and capture; no new
 provider launches. A completed Session is unknown, not work: its unanswering owner
 ends and resume continues on one new provider, while an answering one is attached.
@@ -116,8 +114,9 @@ movement after protected work settles.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
-must retain drafts, requests, history and Session/Task/capture identity through
-build replacement and viewer return; only provider replacement changes its fence.
+must retain live turns, pending requests, history and Session/Task/capture identity
+through build replacement and viewer return. Once work settles, explicit resume
+may replace an idle provider, discarding unsent input and changing its fence.
 An unanswering protected owner survives failed attachment and completes continued
 turns after transport returns.
 `process::runtime::tests::resume_*dead_owners*` covers cross-process recovery:

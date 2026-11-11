@@ -310,7 +310,7 @@ and `lf process rollover --dry-run` name a `session serve` owner by its PID.
 | `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
 | `lf session serve --terminal -- /bin/sh -c …` | A Desktop shell tab, shown or hidden | The shell's jobs and environment; its saved screen stays |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
-| `lf session observe-status <ID>` | Records one "working" or "waiting on you" reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
+| `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
 | `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
 | `lf server run` | The Machine server | Desktop's connection until the server is started again |
@@ -328,9 +328,9 @@ it or quitting Desktop leaves it running.
 A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from
 development. Tests end every process they start before they exit; one that
-remains is a bug worth filing with its command line. A demo or Dev app keeps
-its processes until you quit it; quit the app, or `lf resume` the demo's
-conversations and close them, before stopping anything by PID.
+remains is a bug worth filing with its command line. Quitting a demo app leaves
+its conversation owners running. Use the demo's saved Machine environment to
+`lf resume` each conversation and quit its agent before stopping anything by PID.
 
 Stop processes one at a time by PID, after reading what each serves. Never stop
 them by name or pattern (`pkill lf`, `killall lf`): that ends live

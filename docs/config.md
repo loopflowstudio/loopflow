@@ -422,7 +422,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
 
 `session.end_detached_after` is accepted for older configurations but ignored.
-Conversations remain running until closed or their Task is cleaned up.
+Conversations remain running until you quit their agent or their Task is cleaned up.
 
 ## Scratch lifecycle
 

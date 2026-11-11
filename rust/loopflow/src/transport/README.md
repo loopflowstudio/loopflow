@@ -72,7 +72,8 @@ the command's output.
 
 Conversations stay running while their scope is open. Completed Tasks end their
 conversations through retirement; abandonment ends unviewed Task conversations,
-even during a turn. Wave, repository and bare conversations run until closed.
+even during a turn. Wave, repository and bare conversations run until their
+agent quits.
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
 launch it. Background starts require a configured, installed agent and stop at
@@ -88,9 +89,8 @@ to its terminal; no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when an explicit rollover or takeover
 replaces its provider, just as on quit.
 
-A quit returns the provider's own exit within a
-second; exit records still waiting on a locked or refused store finish in the
-background or are lost, logged.
+A quit returns the provider's own exit within a second; exit records still
+waiting on a locked or refused store finish in the background or are lost, logged.
 
 Nothing else ends an owner on its own. Removing, rebuilding or superseding its
 lf executable leaves it serving on the build it started with; the only endings
@@ -98,8 +98,8 @@ are the person quitting, `lf resume` taking the conversation over, `lf process
 rollover`, Task closure, or an explicit end. Failed store judgments retry at the
 next two-second poll. Repeated unchanged policy errors and retention reasons
 produce one warning until the condition changes; activity launches no helper.
-Policy exit saves the screen, stops the agent and records its
-exit. `lf resume` reopens provider history without starting a turn. Other ended
+Policy exit saves the screen, stops the agent and records its exit.
+`lf resume` reopens provider history without starting a turn. Other ended
 Sessions stay stopped.
 
 `lf resume` replaces an idle owner that is superseded or unanswering, continuing

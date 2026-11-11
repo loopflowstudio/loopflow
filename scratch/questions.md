@@ -16,7 +16,7 @@ bare owners run until quit in this transition.
 Session `9af9d3006a494e3dba19fdd82e01b7a0` for Jack Heart:
 "From LOO-824's concept review: '823s rule is correct' (Jack Heart) also governs LOO-824's held terminals; LOO-824 drops its idle grace for them and will sync onto this PR once it lands. The deferred limit suspension that reads the input line off the server's emulator depends on LOO-824's emulator."
 
-`task_c118380f31f14d07ba28669499efa395` removes the ignored
-`session.end_detached_after` parser after LOO-823 ships. Created locally on
-2026-11-11; Linear sync is pending. The `processes.native_input` column remains
+LOO-829 (`task_c118380f31f14d07ba28669499efa395`) removes the ignored
+`session.end_detached_after` parser after LOO-823 ships; Linear sync was confirmed
+2026-11-11. The `processes.native_input` column remains
 until a staged contract migration can remove it; runtime no longer uses it.

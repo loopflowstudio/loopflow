@@ -512,7 +512,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(left.due_at, Some(110 + WORKSPACE_GRACE));
-        // The two-minute agent policy does not add two minutes to this deadline.
+        // Another cleanup pass does not restart the absence grace.
         assert_eq!(
             store
                 .reconcile_task_retirement(&task, 230, None)

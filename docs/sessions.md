@@ -50,9 +50,8 @@ scope's operating instructions.
 
 A conversation stays running while its scope is open. Task conversations end
 when the Task closes (done or abandoned); completed-Task cleanup waits for live
-work and the checkout's viewing grace. Wave and repository conversations stay
-running until you close them. Leaving a viewer does not end its provider.
-Bare conversations also remain running until you quit them.
+work and the checkout's viewing grace. Wave, repository and bare conversations
+stay running until you quit their agent. Leaving a viewer does not end its provider.
 
 `lf process rollover` moves idle owners to the selected lf. It discards unsent
 input when it replaces the provider. Saved history and screens cannot restore

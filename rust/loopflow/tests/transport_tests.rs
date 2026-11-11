@@ -751,7 +751,6 @@ printf '%s' "$answer" > "$HOME/answer"
     );
     let owner =
         fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
-    let _stop = StopOwner(&fixture, owner.clone());
     fixture.launches(1);
     let session = fixture.session_of_owner(&owner);
     let mut command = fixture.command(&["open", "--session", &session]);
@@ -797,7 +796,6 @@ fn conversation_open_pending_retry_waits_for_the_controlling_viewers_readiness()
     let path = fixture.waiting_provider();
     let owner =
         fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
-    let _stop = StopOwner(&fixture, owner.clone());
     fixture.launches(1);
     let session = fixture.session_of_owner(&owner);
     let mut viewer = fixture.viewer(&owner, true);
@@ -860,7 +858,6 @@ read -r answer < /dev/tty
         &path,
         "original-request",
     ));
-    let _stop = StopOwner(&fixture, first.clone());
     fixture.launches(1);
     let session = fixture.session_of_owner(&first);
     let mut source = fixture.viewer(&first, true);
@@ -915,7 +912,6 @@ read -r answer < /dev/tty
         .env("PATH", &path)
         .env("LF_SETTINGS", "agent: codex");
     let owner = fixture.owner(command);
-    let _stop_reopened = StopOwner(&fixture, owner.clone());
     let mut viewer = fixture.viewer(&owner, true);
     viewer.until_event("return");
     let launches = fixture.launches(2);

@@ -97,7 +97,8 @@ Deleted: the hook's store opens (`hook_store`, `acquire_planning`,
 Turn-end planning refresh now has no Linear-fixture test;
 `server::boundary::after_stop` calls `sync_repository` directly.
 
-Checks (November 10, on the launch check):
+Checks (November 10, on the launch check, before the v0.15.3 merge, which
+changed only release files):
 
 - `cargo test -p loopflow --lib -- server::boundary server::client lf::commands::context` — 18 pass
 - `session_steers::` — 5 pass (new `a_task_launch_with_no_machine_server_fails_naming_it`); `public_context_capability…` failed once at 10 s in a 17-test run and passed alone and in the last run: load

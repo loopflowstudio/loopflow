@@ -35,10 +35,10 @@ Clarified: "i guess what i mean is remote work with tasks should require reote
 servers". Bare `lf --machine M` stays bare: no server required, its gap
 closes when "Bare launches drop their hooks" lands. Task work on M (`lf
 --machine M task run`, `resume --task`) needs M's server, and today nothing on
-those paths starts it either: views use the server only when `LF_SERVER` is
-set (`transport.rs` → `client::bridge`), and Graph runs never ask. So a Task
-launch ensures its Machine's server (`installation::server::ensure`) before
-the agent starts, and fails naming the server if it can't come up.
+those paths started it either: views used the server only when `LF_SERVER`
+was set (`transport.rs` → `client::bridge`), and Graph runs never asked. So a
+Task launch needs its Machine's server before the agent starts, and fails
+naming the server if it can't come up (how: the assumption below).
 
 Then: "but it seems like lf --machine X should still be able to work for a
 simple skil or graph and basically anything that doesnt touch the work model".

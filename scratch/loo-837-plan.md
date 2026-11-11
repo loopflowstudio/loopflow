@@ -10,7 +10,7 @@ Diverged parent: when origin's parent branch has diverged from the local one, no
 
 Concept review (2026-11-11): the model holds. The stack edge stays `parent_pr_id` → `task_prs` (retries keep the parent's PR identity); an unpublished row is phase `Working`, which `task_actions` treats like no row, so the parent's board and actions don't change.
 
-Remaining: gate; PR body states the placement finding above.
+Remaining: gate; PR body states the placement finding above. Docs (`docs/ops.md`, `docs/dev/delivery.md`) describe the diverged case.
 
 Checks:
 - `cargo test -p loopflow --lib stack`: pass (new `task_preparation_stacks_on_origin_when_the_parent_branch_diverged`)

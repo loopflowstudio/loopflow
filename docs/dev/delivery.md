@@ -71,7 +71,9 @@ lf task run INF-124
 The parent needs only a placed branch. When it has no Task PR record, stacking
 records an unpublished one for it, and pushes the branch to origin when origin
 lacks it or is behind; it never force-pushes and never opens a GitHub PR for the
-parent. The child can start and publish before the parent publishes or merges.
+parent. When origin's branch has diverged, nothing is pushed: the child bases on
+`origin/<branch>` and the stack line names the local commits it leaves out. The
+child can start and publish before the parent publishes or merges.
 It records its fork point and targets the parent's branch. Stacking fails when
 the parent is not a Task, has no placed branch, has already merged, or the push
 fails; the error names which, with git's message for a failed push. Prepare a

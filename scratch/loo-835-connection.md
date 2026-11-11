@@ -119,3 +119,20 @@ test `a_native_pi_turn_against_a_frozen_server_waits_only_where_a_steer_can_land
 The inbox (2a) and the wake rule (1c) go to LOO-826 (PR #1890), which already
 moves Task updates into the `session.boundary` answer and wakes idle
 conversations from the server.
+
+## Gate, November 11 (at 5967faced)
+
+`scripts/test.py` would not start: uv-cache inventory deadline, then
+`syspolicyd` above 100% CPU for 25 min (load 269-282, other checkouts
+building). Ran the same plan directly, nice +10:
+
+- `cargo test --lib` `harness::context::tests::` `server::boundary::`
+  `harness::pi::` `lf::tests::` `os_process::lifeline` `server::schema::tests::`: 82 pass
+- integration `session_steers::` `documented_commands::`: 9 pass from an empty
+  cwd with temp `HOME` and `LF_HOME`; with the real `~/.lf` five fail on its
+  config (rewritten 06:14 by a newer lf, "unknown or ineligible setting claude")
+- `session_launch_contract pi_`: 4 pass; `cargo fmt --check`, clippy `-D warnings`: pass
+- website `dev.py test`: 73 pass
+- Swift: CI (the diff is one doc comment in `ServerProtocol.swift`)
+
+Not synced: parent #1879 has moved past this branch's copy of it (`dde32ca97`).

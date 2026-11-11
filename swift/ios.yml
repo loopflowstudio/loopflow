@@ -3,10 +3,10 @@ include:
 name: LoopflowMobile
 options:
   postGenCommand: ""
-packages:
-  SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm.git
-    revision: 5d14406844143538cd8f8851d2d8a67c1fe443e5
+settings:
+  base:
+    # GhosttyKit's Simulator slice is arm64 only.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 targets:
   LoopflowiOS:
     type: application
@@ -14,13 +14,20 @@ targets:
     sources:
       - path: LoopflowiOS
         excludes: [README.md]
-      - path: ../third_party/notices/swiftterm.txt
+      - path: LoopflowMac/ThirdPartyNotices/NOTICES.txt
         buildPhase: resources
       - path: ../third_party/notices/app-fonts.txt
         buildPhase: resources
     dependencies:
       - target: Loopflow
-      - package: SwiftTerm
+      # `uv run python scripts/loopflow-dev.py ghostty-build` writes it.
+      - framework: .build/local/GhosttyKit.xcframework
+        embed: false
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreText.framework
+      - sdk: IOSurface.framework
+      - sdk: libc++.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.ios.dev

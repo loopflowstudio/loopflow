@@ -301,6 +301,11 @@ def _package_source(source: Path, destination: Path, specification: dict) -> Non
         raise ValueError("Packaged source differs from its audited fixture omissions")
 
 
+def _relinked(relative: Path) -> bool:
+    """Whether a framework file belongs in the relink copy: Desktop links the macOS slice."""
+    return not relative.parts[0].startswith(("ThirdParty", "ios-"))
+
+
 def _package_sources(root: Path, output: Path, inventory: dict, framework: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     cache = root / ".lf/tmp/third-party"
@@ -312,13 +317,13 @@ def _package_sources(root: Path, output: Path, inventory: dict, framework: Path)
     with zipfile.ZipFile(output / "GhosttyKit.zip", "w", zipfile.ZIP_DEFLATED) as original:
         for path in sorted(framework.rglob("*")):
             relative = path.relative_to(framework)
-            if path.is_file() and not relative.parts[0].startswith("ThirdParty"):
+            if path.is_file() and _relinked(relative):
                 original.write(path, str(Path("GhosttyKit.xcframework") / relative))
     _source_snapshot(root, output / "loopflow.tar.gz")
     shutil.copyfile(root / "third_party/REBUILD.md", output / "REBUILD.md")
     shutil.copyfile(root / "scripts/rebuild_third_party.py", output / "rebuild.py")
     shutil.copyfile(root / "scripts/app_bundle.py", output / "app_bundle.py")
-    libraries = sorted(framework.glob("*/libghostty.a"))
+    libraries = sorted(framework.glob("macos*/libghostty.a"))
     if len(libraries) != 1:
         raise ValueError("Expected one universal macOS GhosttyKit library")
     architectures = _run(["lipo", "-archs", str(libraries[0])]).split()
@@ -404,7 +409,7 @@ def verify_archive(archive: Path) -> None:
         with zipfile.ZipFile(frameworks[0] / "ThirdPartySources/GhosttyKit.zip") as relink:
             for path in frameworks[0].rglob("*"):
                 relative = path.relative_to(frameworks[0])
-                if path.is_file() and not relative.parts[0].startswith("ThirdParty"):
+                if path.is_file() and _relinked(relative):
                     name = str(Path(frameworks[0].name) / relative)
                     if hashlib.sha256(relink.read(name)).hexdigest() != _sha(path):
                         raise ValueError(f"Relink framework differs from shipped framework: {name}")

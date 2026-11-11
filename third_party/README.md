@@ -41,8 +41,8 @@ For a dependency/artifact update:
    signing/compression. Downloads are content-addressed and always checksum-checked.
 
 Packaging includes pinned dependency source archives, an exact copy of the
-framework for relinking, the current Loopflow source/build inputs, and standalone
-libintl archives extracted from both framework slices. These are carried inside
+framework's macOS slice for relinking, the current Loopflow source/build inputs,
+and standalone libintl archives extracted from both macOS architectures. These are carried inside
 the app/archive, without relying on an upstream source URL or a future written
 offer. [REBUILD.md](REBUILD.md) gives the recipient's modification/relink procedure.
 A failed download, stale inventory, changed object layout or missing source aborts
@@ -60,7 +60,8 @@ The historical public lf3/lf7 archives are immutable and are not republished by
 this change. Current app packaging supplies the material they lack; future
 GhosttyKit archives include it before publication.
 
-The iOS development target pins SwiftTerm separately in `swift/ios.yml` and
-bundles `notices/swiftterm.txt` plus the existing font notices directly. It does
-not link Desktop's Rust/GhosttyKit closure. Shared theme licenses remain in the
-Loopflow framework's resources.
+The iOS development target links GhosttyKit's `ios-arm64` and
+`ios-arm64-simulator` slices and bundles the generated `NOTICES.txt` plus the
+font notices. It carries no relink material: the iOS slices combine libintl the
+same way, and nothing packages their uncombined library or sources yet. Shared
+theme licenses remain in the Loopflow framework's resources.

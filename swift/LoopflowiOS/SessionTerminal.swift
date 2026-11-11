@@ -1,5 +1,4 @@
 import Loopflow
-import SwiftTerm
 import SwiftUI
 import UIKit
 
@@ -31,15 +30,16 @@ enum TerminalKey: CaseIterable {
         }
     }
 
-    func bytes(applicationCursor: Bool) -> [UInt8] {
+    /// The key's USB keyboard usage, which is how the terminal names keys.
+    var usage: UInt32 {
         switch self {
-        case .escape: EscapeSequences.cmdEsc
-        case .tab: EscapeSequences.cmdTab
-        case .up: applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal
-        case .down: applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal
-        case .left: applicationCursor ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal
-        case .right: applicationCursor ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal
-        case .enter: [13]
+        case .escape: 0x29
+        case .tab: 0x2B
+        case .up: 0x52
+        case .down: 0x51
+        case .left: 0x50
+        case .right: 0x4F
+        case .enter: 0x28
         }
     }
 }
@@ -60,8 +60,8 @@ struct SessionTerminal: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> SessionTerminalController {
         let controller = SessionTerminalController(link: link)
         actions.controller = controller
-        controller.loadViewIfNeeded()
         controller.apply(theme)
+        controller.loadViewIfNeeded()
         return controller
     }
 
@@ -71,36 +71,22 @@ struct SessionTerminal: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {
         controller.link.render = nil
+        controller.terminal.close()
     }
 }
 
-/// The software keyboard never types into the terminal: replies go through the
-/// reply field, so a stray touch sends nothing. A hardware keyboard types directly.
-private final class DirectTerminalView: TerminalView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        inputView = UIView(frame: .zero)
-        inputAccessoryView = nil
-    }
-
-    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
-
-    /// SwiftTerm's own scroll position can trail a finger's; realign before output arrives.
-    func holdReadingRow() -> Int? {
-        guard canScroll, contentOffset.y + bounds.height < contentSize.height - 1 else { return nil }
-        let cellHeight = getOptimalFrameSize().height / CGFloat(getTerminal().rows)
-        let row = Int(max(0, contentOffset.y) / cellHeight)
-        if row != getTerminal().buffer.yDisp { scrollTo(row: row, notifyAccessibility: false) }
-        return getTerminal().buffer.yDisp
-    }
-}
-
-final class SessionTerminalController: UIViewController, @preconcurrency TerminalViewDelegate, UIScrollViewDelegate {
+/// The Session's terminal, drawn by Ghostty. The software keyboard never types
+/// into it: replies go through the reply field, so a stray touch sends nothing.
+/// A hardware keyboard types directly once the terminal is tapped.
+final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
     let link: SessionLink
-    private let terminal = DirectTerminalView(frame: .zero)
+    let terminal = GhosttySurfaceView(frame: .zero)
+    /// Carries the finger: native scrolling over the terminal's rows, which Ghostty draws.
+    private let scroller = UIScrollView()
     private let latest = UIButton(type: .system)
-    private var appliedTheme: String?
-    private var reading = false
+    private var theme: ThemeDefinition?
+    private var scroll = GhosttySurfaceView.Scroll()
+    private var placing = false
 
     init(link: SessionLink) {
         self.link = link
@@ -111,21 +97,22 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        terminal.terminalDelegate = self
-        terminal.delegate = self
-        terminal.allowMouseReporting = false
+        terminal.isAccessibilityElement = true
         terminal.accessibilityLabel = "Session terminal"
         terminal.accessibilityIdentifier = "session-terminal"
-        updateFont()
+        terminal.onWrite = { [weak link] in link?.send($0) }
+        terminal.onGrid = { [weak link] in link?.fit(columns: $0, rows: $1) }
+        terminal.onScroll = { [weak self] in self?.place($0) }
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (controller: SessionTerminalController, _: UITraitCollection) in
-            controller.updateFont()
-        }
-        // The owner reads program status reports; the renderer in control answers the capability query.
-        terminal.getTerminal().parser.oscHandlers[7501] = { [weak link] bytes in
-            guard bytes.elementsEqual([UInt8(ascii: "?")]) else { return }
-            link?.send(Data("\u{1b}]7501;?\u{7}".utf8))
+            controller.applyAppearance()
         }
         link.render = { [weak self] bytes, reset in self?.render(bytes, reset: reset) }
+
+        scroller.delegate = self
+        scroller.contentInsetAdjustmentBehavior = .never
+        scroller.scrollsToTop = false
+        scroller.showsHorizontalScrollIndicator = false
+        scroller.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(focusTerminal)))
 
         var style = UIButton.Configuration.filled()
         style.title = "Latest"
@@ -137,7 +124,7 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
         latest.isHidden = true
         latest.addAction(UIAction { [weak self] _ in self?.showLatest() }, for: .touchUpInside)
 
-        for subview in [terminal, latest] {
+        for subview in [terminal, scroller, latest] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -146,97 +133,91 @@ final class SessionTerminalController: UIViewController, @preconcurrency Termina
             terminal.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
             terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            scroller.topAnchor.constraint(equalTo: terminal.topAnchor),
+            scroller.bottomAnchor.constraint(equalTo: terminal.bottomAnchor),
+            scroller.leadingAnchor.constraint(equalTo: terminal.leadingAnchor),
+            scroller.trailingAnchor.constraint(equalTo: terminal.trailingAnchor),
             latest.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             latest.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
             latest.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let grid = terminal.getTerminal()
-        link.fit(columns: grid.cols, rows: grid.rows)
+        applyAppearance()
     }
 
     func apply(_ theme: ThemeDefinition) {
-        guard appliedTheme != theme.id else { return }
-        appliedTheme = theme.id
-        terminal.nativeBackgroundColor = UIColor(theme.terminal.background.color)
-        terminal.nativeForegroundColor = UIColor(theme.terminal.foreground.color)
-        terminal.selectedTextBackgroundColor = UIColor(theme.terminal.selectionBackground.color)
-        terminal.selectedTextForegroundColor = UIColor(theme.terminal.selectionForeground.color)
-        terminal.installColors(theme.terminal.indexed.prefix(16).map {
-            SwiftTerm.Color(red: UInt16(($0.hex >> 16) & 255) * 257,
-                            green: UInt16(($0.hex >> 8) & 255) * 257,
-                            blue: UInt16($0.hex & 255) * 257)
-        })
+        guard self.theme?.id != theme.id else { return }
+        self.theme = theme
+        applyAppearance()
+    }
+
+    /// Theme colours, and JetBrains Mono 12 scaled by Dynamic Type.
+    private func applyAppearance() {
+        guard let theme else { return }
+        let size = UIFontMetrics(forTextStyle: .body).scaledValue(for: 12, compatibleWith: traitCollection)
+        GhosttyRuntime.shared.apply(theme, fontSize: Double(size))
+        guard isViewLoaded else { return }
         view.backgroundColor = UIColor(theme.terminal.background.color)
+        scroller.indicatorStyle = theme.isDark ? .white : .black
         latest.configuration?.baseBackgroundColor = UIColor(theme.palette.surface)
         latest.configuration?.baseForegroundColor = UIColor(theme.palette.accentInk)
     }
 
-    /// Sends a reply as one paste, then Return, so a multi-line reply arrives whole.
-    func reply(_ text: String) {
+    /// A reply as the Session should receive it: one paste, then Return, so a
+    /// multi-line reply arrives whole. Nil when nothing printable is left.
+    static func replyBytes(_ text: String, bracketed: Bool) -> Data? {
         let clean = String(text.unicodeScalars.filter {
             !CharacterSet.controlCharacters.contains($0) || $0 == "\n" || $0 == "\t"
         })
-        guard !clean.isEmpty else { return }
-        let bracketed = terminal.getTerminal().bracketedPasteMode
+        guard !clean.isEmpty else { return nil }
         let body = bracketed ? "\u{1b}[200~\(clean)\u{1b}[201~" : clean.replacingOccurrences(of: "\n", with: " ")
-        link.send(Data(body.utf8))
+        return Data(body.utf8)
+    }
+
+    func reply(_ text: String) {
+        guard let paste = Self.replyBytes(text, bracketed: terminal.bracketedPaste) else { return }
+        link.send(paste)
         link.send(Data([13]))
         showLatest()
     }
 
-    func press(_ key: TerminalKey) {
-        link.send(Data(key.bytes(applicationCursor: terminal.getTerminal().applicationCursor)))
-    }
+    func press(_ key: TerminalKey) { terminal.press(usage: key.usage) }
 
-    private func updateFont() {
-        let base = UIFont(name: "JetBrainsMono-Regular", size: 12) ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
-        terminal.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traitCollection)
-    }
+    @objc private func focusTerminal() { terminal.becomeFirstResponder() }
 
     private func render(_ bytes: Data, reset: Bool) {
-        if reset {
-            reading = false
-            terminal.feed(text: "\u{1b}c")
-        }
-        // Output that arrives while reading earlier lines leaves them in place.
-        let row = reading ? terminal.holdReadingRow() : nil
-        reading = row != nil
-        terminal.feed(byteArray: Array(bytes)[...])
-        if let row, terminal.getTerminal().buffer.yDisp != row {
-            terminal.scrollTo(row: row, notifyAccessibility: false)
-        }
-        updateLatest()
+        if reset { terminal.feed(Data("\u{1b}c".utf8)) }
+        terminal.feed(bytes)
     }
 
-    private var isReadingEarlier: Bool {
-        terminal.contentOffset.y + terminal.bounds.height < terminal.contentSize.height - 1
-    }
+    // MARK: Scrolling
 
-    private func updateLatest() { latest.isHidden = !isReadingEarlier }
+    private var fingerScrolling: Bool { scroller.isTracking || scroller.isDragging || scroller.isDecelerating }
 
-    private func showLatest() {
-        reading = false
-        terminal.scroll(toPosition: 1)
-        terminal.scrollTo(row: terminal.getTerminal().buffer.yDisp)
-        updateLatest()
+    /// Ghostty reported its rows. Earlier lines stay put while output arrives
+    /// because Ghostty holds the row it shows; only the length grows under the finger.
+    private func place(_ next: GhosttySurfaceView.Scroll) {
+        scroll = next
+        let row = terminal.rowHeight
+        placing = true
+        scroller.contentSize = CGSize(width: scroller.bounds.width,
+                                      height: CGFloat(next.lastOffset) * row + scroller.bounds.height)
+        if !fingerScrolling { scroller.contentOffset.y = CGFloat(next.offset) * row }
+        placing = false
+        latest.isHidden = !next.readingEarlier
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
-            reading = isReadingEarlier
-        }
-        updateLatest()
+        let height = terminal.rowHeight
+        guard !placing, fingerScrolling, height > 0 else { return }
+        let row = min(max(0, Int((scrollView.contentOffset.y / height).rounded())), scroll.lastOffset)
+        guard row != scroll.offset else { return }
+        scroll.offset = row
+        terminal.scroll(toRow: row)
+        latest.isHidden = !scroll.readingEarlier
     }
 
-    func send(source: TerminalView, data: ArraySlice<UInt8>) { link.send(Data(data)) }
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) { link.fit(columns: newCols, rows: newRows) }
-    func scrolled(source: TerminalView, position: Double) { updateLatest() }
-    func setTerminalTitle(source: TerminalView, title: String) {}
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
-    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    private func showLatest() {
+        scroller.setContentOffset(scroller.contentOffset, animated: false)
+        terminal.scrollToLatest()
+    }
 }

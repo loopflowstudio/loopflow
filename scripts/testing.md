@@ -18,6 +18,10 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
+Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
+code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
+to regenerate and review snapshots for intended prompt changes before gate.
+
 After syncing, rerun affected tests when main changed APIs they call, even if
 Git merged cleanly. A passing check from before the sync does not cover that
 combination; renamed enum variants can leave new branch tests uncompilable.

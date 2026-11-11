@@ -23,6 +23,9 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
+    /// A Task or Wave command's launch (`AgentConfig::managed`): it starts
+    /// only beside the Machine server.
+    pub(crate) managed: bool,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -50,8 +53,10 @@ pub(crate) fn native_connection_command(
         "--".into(),
         session_id.to_string(),
     ];
+    // The app-server it joins passed the managed launch's server check.
     SessionCommand {
         launch: None,
+        managed: false,
         input,
         program: "codex".into(),
         args,
@@ -158,6 +163,7 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
+        managed: config.managed,
         input,
         program: harness,
         args,
@@ -172,6 +178,7 @@ pub(crate) fn build_session_command(
 pub(crate) fn session_environment(
     config: &AgentConfig,
     context_file: Option<&Path>,
+    native: bool,
 ) -> Result<BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     if crate::config::parse_agent(config.agent()?).0 == "opencode" {
@@ -216,6 +223,7 @@ pub(crate) fn session_environment(
                 &mut settings,
                 context,
                 &super::system_prompt_with_structured_replies(config),
+                native || config.managed,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
@@ -468,7 +476,7 @@ mod tests {
                     .iter()
                     .any(|arg| arg.contains("failIfUnavailable")));
             } else {
-                let environment = session_environment(&config, None).unwrap();
+                let environment = session_environment(&config, None, true).unwrap();
                 let settings: serde_json::Value =
                     serde_json::from_str(&environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
                 assert_eq!(
@@ -561,7 +569,7 @@ mod tests {
             let launch = format!(
                 "{:?} {:?} {:?}",
                 command.args,
-                session_environment(&config, None).unwrap(),
+                session_environment(&config, None, true).unwrap(),
                 build_codex_thread_start_params(&config, false)
             );
             assert!(

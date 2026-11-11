@@ -482,7 +482,10 @@ A server that has not yet reached this build answers `invalid {kind}` for
 ### OpenCode and Pi ask from inside the provider
 
 A managed OpenCode or Pi turn with a dozen tool calls starts no `lf` process
-after launch. The plugin runs inside the provider's own long-lived process, so
+at its boundaries. Two remain after launch: one `lf __context-block` after
+each compaction, and on Pi one long-lived `lf __context-block --moment
+task-updates` watcher per conversation, as Claude and Codex start from their
+session hooks. The plugin runs inside the provider's own long-lived process, so
 at each boundary it does what a hook does without the process: it opens
 `machine.sock`, sends the `hello` a hook sends, makes one request and closes
 the connection when the answer arrives:
@@ -518,8 +521,7 @@ server; it reuses that block for every model request until the next one.
   puts any steer text ahead of the block. Turn end is `stop`.
 
 Pi's bash guard is a `/bin/sh` script in the extension, not an `lf` process
-(see `harness/context.rs`); it asks no server. Pi's Task-update watcher stays
-one `lf` child for the conversation.
+(see `harness/context.rs`); it asks no server.
 
 A connection that drops, or a request with no answer within two seconds,
 is a gap like a hook's: the boundary goes on without lf, the plugin writes

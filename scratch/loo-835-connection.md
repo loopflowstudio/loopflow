@@ -53,3 +53,29 @@ Out of scope, seen here: native Pi keeps one long-lived
 `lf __context-block --moment task-updates` child per conversation, the
 same kind of process the Task counted (62 holding 8.3 GB). A server
 subscription could replace it, but it would hold a slot for the conversation.
+
+Compress, November 11: no cut found past 33b7cb702. `git grep` finds no
+`tool-group`, `--provider-pid`, `watch_tool_lifeline`, `PiEvent`,
+`open_for_hook` or kept-socket code outside release notes; `lf context`:
+scratch 7346/12000 tokens.
+
+## Concept review, November 11 (headless, after compress)
+
+`ps` on this Machine at the review: 96 live `__context-block` processes, all
+`--moment task-updates`, 5.4 GB RSS. 60 under `codex` (4,556 MB, about 76 MB
+each), 34 under `claude` (796 MB), 2 under `lf`. None under Pi or OpenCode,
+and no per-step `tool`/`pi-event` process. The Claude and Codex ones come from
+the async `task-updates` command in SessionStart and Stop
+(`context_block.rs:296,301`); Pi's is `watchUpdates` in `context_pi.mjs`. So
+the Task's measured problem (62 processes, 8.3 GB) matches the Task-update
+watcher, not the per-step plugin processes this branch removes.
+
+Done after the review: `server/README.md` "OpenCode and Pi ask from inside
+the provider" now opens by naming the two `lf` processes left after launch
+(one `__context-block` per compaction, Pi's task-updates watcher).
+`harness/README.md` and `docs/dev/server-first.md` already agree.
+
+PR body: does not claim the 62 / 8.3 GB figure as this Task's problem. Say
+what the branch removes (per-boundary and per-second `lf` processes on Pi and
+OpenCode) and that the measurement counted Task-update watchers, which LOO-826
+deletes. Open questions: `questions.md` (LOO-835).

@@ -110,3 +110,18 @@ Assumptions taken headless with the bare rule, November 11 (reversible):
 - A native Pi launch with no context delivery file (`LF_CONTEXT_DELIVERY`
   unset) opens no connection and records no events; `pi-event` used to record
   them without a delivery. No production launch path found that does this.
+- Open, needs a person: scope. (a) Ship this branch as is; the Task-update
+  watcher (`lf __context-block --moment task-updates`, one per Claude, Codex
+  and native Pi conversation; 96 live holding 5.4 GB at the November 11
+  concept review) gets its own linked Task. (b) This Task also takes on the
+  watcher, which is what the Task's 62 / 8.3 GB figure counted. Taken for
+  now: (a), reversible. The linked Task already exists: LOO-826 ("Observers
+  become server registrations"), which deletes the watcher. Its brief names
+  Claude's watcher, not Pi's `watchUpdates` in `context_pi.mjs`; not steered
+  in because LOO-826 had a live compress run on November 11.
+- Open, needs a person: should a Task update wake an idle conversation?
+  (a) Yes, as today: something per conversation waits; cheapest is a
+  `/bin/sh` blocking on a file the server writes, not a 20-76 MB `lf`.
+  (b) No: updates ride the next `session.boundary` answer like steers, no
+  process waits, and an idle agent hears of a Task change on its next turn.
+  Left for the watcher's Task.

@@ -221,12 +221,16 @@ impl SqliteStore {
         let merged = export_in(&tx, repo, destination, true)?
             .merge(&unseen)
             .map_err(invalid)?;
-        let unseen_edits: Vec<_> = unseen
+        let records: BTreeSet<_> = unseen
             .changes
             .values()
-            .map(|change| change.edit.clone())
+            .map(|change| {
+                (
+                    planning_write::table(&change.edit.change),
+                    change.edit.target.as_str(),
+                )
+            })
             .collect();
-        let records: BTreeSet<_> = planning_write::grouped(&unseen_edits).into_keys().collect();
         for (id, change) in &unseen.changes {
             planning_write::retain(&tx, id, change)?;
             tx.execute(
@@ -546,6 +550,7 @@ fn route_repository(conn: &Connection, repo: &str, destination: &str) -> StoreRe
     )?;
     Ok(())
 }
+
 /// The incoming history of every field with a change not yet routed from
 /// this destination. A change's predecessors edit the same field, so the
 /// result is closed under causality and merges like the whole document would

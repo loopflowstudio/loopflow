@@ -85,4 +85,5 @@ writer.
 - Touched modules (durable, sessions, selections, task_ownership, planning_peers, planning_write, repositories, children, task_work, provider_account, machine): 222 pass; steers, session_events, query_plans pass.
 - `steers::tests::only_abandoned_prewrite_reservations_return_to_pending` failed once (steers_tests.rs:388) in a 5-module parallel run; passed 3/3 alone and in the steers module run. Gate reruns it.
 - `cargo clippy --all-targets -- -D warnings` clean.
+- Compress (shared `task_repo_in`, `seed_task` without `expect`, direct peer-import record set): task_ownership, planning_peers, children, query_plans 27 pass; clippy clean.
 - Gate: `binary(two_people)`, `binary(transport_tests)` (store-wide schema), migration upgrade fixtures.

@@ -306,14 +306,7 @@ impl RepoFacts {
 
     /// You in the Task's repository.
     pub(crate) fn of_task_in(conn: &Connection, task: &TaskId) -> StoreResult<Self> {
-        let repo: Option<String> = conn
-            .query_row(
-                "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Self::in_repo(&repo.ok_or(StoreError::NotFound)?)
+        Self::in_repo(&task_repo_in(conn, task)?)
     }
 
     /// You in a repository by its planning identity.
@@ -336,12 +329,19 @@ impl RepoFacts {
 /// (reassertion, handing back an ended Machine's Tasks): loads configuration
 /// under the lock.
 fn planning_connected_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    let repo: String = conn.query_row(
+    Ok(crate::ops::planning_client::connected(&task_repo_in(
+        conn, task,
+    )?))
+}
+
+fn task_repo_in(conn: &Connection, task: &TaskId) -> StoreResult<String> {
+    conn.query_row(
         "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
         [task.as_str()],
         |row| row.get(0),
-    )?;
-    Ok(crate::ops::planning_client::connected(&repo))
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
 }
 
 /// The one Machine of yours that writes the Task's next entry: the owner's,

@@ -2551,9 +2551,8 @@ impl SqliteStore {
             )?;
         }
         insert_task_pr(&tx, pr)?;
-        if task.worktree.is_some() {
-            // A seeded checkout is placed work, which claims the Task like `place_task`.
-            let me = me.as_ref().expect("resolved for a seeded checkout");
+        // A seeded checkout is placed work, which claims the Task like `place_task`.
+        if let Some(me) = &me {
             super::task_ownership::claim_in(&tx, &task.id, me)?;
         }
         seed_task_linear_observation(&tx, task)?;

@@ -48,7 +48,7 @@ Recommendation: launch bare interactive Pi with `--session-id`.
 # LOO-824
 
 Its choices and reversible assumptions are in the parent branch,
-`e1c5b37d9:scratch/questions.md` and `e1c5b37d9:scratch/holder.md`.
+`62c5e537e:scratch/questions.md` and `62c5e537e:scratch/holder.md`.
 
 ## Assumptions, LOO-820, reversible
 
@@ -77,6 +77,6 @@ repository's Sessions"); `lf task steer` cannot reach them.
 Use LOO-823's foreground launch and signal handling from the parent;
 keep LOO-820's resume beside a running bare agent and lock reacquisition
 when delegation does not start a transport. Parent design and reduction
-notes remain at `e1c5b37d9:scratch/holder.md` and
-`e1c5b37d9:scratch/simplification-opportunities.md`; this checkout keeps
+notes remain at `62c5e537e:scratch/holder.md` and
+`62c5e537e:scratch/simplification-opportunities.md`; this checkout keeps
 LOO-820's design and launch reduction plan.

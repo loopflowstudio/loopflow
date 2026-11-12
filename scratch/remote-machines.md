@@ -253,6 +253,9 @@ lf task interrupt X && lf task abandon X     # clean up
   ops::task_ownership:: store::sqlite::rentals rental::` 36; clippy clean. Earlier: `documented_commands::` 4,
   `--lib server::schema::tests:: lf::tests:: ops::task_ownership::` 52,
   `git::worktrees::` 22 passed.
+- 2026-11-12, `lf task move` after_help now describes the continued Graph and
+  printed `lf resume --task <ID>`: `documented_commands::` 4, `lf::tests::` 43
+  passed; clippy clean; no launchd job or `lf` process from this checkout left.
 - 2026-11-12, after these runs: no launchd job or `lf` process from this checkout left.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)`
   plus `lf::tests::` for the CLI, and clippy.

@@ -2492,7 +2492,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
-        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Workflow position and Session; `lf task run` there runs its route again. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
     )]
     Move {
         issue: String,

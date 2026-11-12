@@ -188,3 +188,4 @@ compaction), which loses nothing.
 - compress 5: the bare exit code reuses `transport::provider_exit_code`; `Foreground` clears the leader on drop (the `Leading` guard is gone); Pi `resume_args` reads one `conversation_file`. `--lib lf::commands::util:: pi_` 44 passed; `session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed; clippy, fmt clean.
 - realign 6: no tests; QA's three items are in `2d972e033d`/`79b456f453` (grep: the "another client" hint only on the held arm of `util.rs`, `end_leader`, both new tests). The parent's merge (holder moved under `server/`) changes nothing here.
 - concept review 4: no tests; design-only (one bare exit status, above). The steer question and pre-LOO-824 primaries stay as written in Open.
+- compress 6: production code already had one decider (`bare_exit_code`); the two PTY tests share `spawn_in_terminal` and `bare_claude` (79+/126−). `--test integration session_cli_tests::a_` 2 passed; clippy, fmt clean.

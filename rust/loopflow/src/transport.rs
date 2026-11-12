@@ -324,7 +324,6 @@ pub(crate) fn start(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(log);
-    inherit(&mut command);
     // Validate placement on the viewer's PTY before handing it to the owner,
     // whose stdin is deliberately detached.
     command.env_remove(TERMINAL_ENV);
@@ -344,6 +343,8 @@ pub(crate) fn start(
             Ok(())
         });
     }
+    // After the sweep, so descriptors the caller hands on stay open.
+    inherit(&mut command);
     let mut child = command.spawn()?;
     let output = child.stdout.take().expect("startup pipe configured");
     std::thread::spawn(move || {
@@ -360,15 +361,21 @@ pub(crate) fn start(
 /// Descriptors above stderr, such as a terminal host's pipes to its other
 /// children that this process inherited. A detached owner outlives that host, so
 /// it must not hold them: a reader waiting for the host's end to close would
-/// wait for as long as the owner runs. Marking an already close-on-exec or
-/// closed number (the listing's own) again is harmless.
+/// wait for as long as the owner runs. Release locks and worktree leases this
+/// process inherited stay: a release's surviving child keeps its target and
+/// checkout exclusive after the release controller dies. Marking an already
+/// close-on-exec or closed number (the listing's own) again is harmless.
 fn open_descriptors() -> Vec<RawFd> {
     let Ok(entries) = std::fs::read_dir("/dev/fd") else {
         return Vec::new();
     };
+    let held: Vec<RawFd> = ["LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok()?.parse().ok())
+        .collect();
     entries
         .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
-        .filter(|fd| *fd > libc::STDERR_FILENO)
+        .filter(|fd| *fd > libc::STDERR_FILENO && !held.contains(fd))
         .collect()
 }
 

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-857 concept review 2</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mut:#6b6b70;--line:#ddd;--new:#1f7a3a;--old:#a33}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e8ea;--bg:#16161a;--mut:#9a9aa2;--line:#333;--new:#6fd08c;--old:#f08a8a}}
+body{font:16px/1.55 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:44rem;margin:2rem auto;padding:0 1rem}
+code,pre{font:13.5px ui-monospace,Menlo,monospace}pre{overflow-x:auto;border-left:3px solid var(--line);padding:.4rem .8rem}
+.old{color:var(--old)}.new{color:var(--new)}small{color:var(--mut)}h2{margin-top:2rem}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:.35rem;text-align:left;vertical-align:top}
+</style></head><body>
+<small>LOO-857 · concept-review (second pass) · 2026-11-12 · built from <code>scratch/plan.md</code>, <code>rust/loopflow/src/linear/acceptance.rs</code>, <code>rust/loopflow/src/lf/commands/waves.rs</code></small>
+<h1>One more wedge like the first, in Project membership</h1>
+<p><b>Decision:</b> Team membership follows the later-read rule. Initiative moves stay refused, and their error names a fix. Next step: implement.</p>
+
+<h2>The mismatch</h2>
+<p>The branch makes a Linear read at the same <code>updatedAt</code> win, for issues and Projects. <code>validate_project_membership</code> still refuses any Team or Initiative change it didn't write itself:</p>
+<pre class="old">Project 3f… membership changed without relationship ordering evidence</pre>
+<p>It also hides the Project from its Wave (<code>membership_unresolved=1</code>). It runs before every issue read too, so <code>lf task sync LOO-403</code>, the command the new messages point to, fails for every Task in that Project. Only <code>lf wave plan reteam</code> clears it.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<tr><th></th><th>Built on this branch</th><th>Proposed</th></tr>
+<tr><td>Someone changes a Project's Team in Linear</td><td class="old">every sync fails; Project leaves the Wave</td><td class="new">next read replaces <code>team_ids</code>; Project stays</td></tr>
+<tr><td>Someone moves a Project to another Initiative</td><td class="old">same refusal, prose message</td><td class="new">still refused: "moved to another Initiative in Linear; move it back, then run <code>lf wave sync</code>"</td></tr>
+<tr><td>Launch refused on Invalid planning</td><td class="old">"refresh its planning"</td><td class="new">"run <code>lf task sync &lt;issue&gt;</code>"</td></tr>
+<tr><td><code>StoreError::ProjectMembershipConflict</code></td><td>unused</td><td class="new">deleted</td></tr>
+</table>
+
+<h2>Questions</h2>
+<ol>
+<li>When a Project leaves its Wave's Initiative in Linear (removed, or moved to another one): (a) keep refusing with a named fix, (b) follow Linear and move or drop the Project from the Wave plan. Recorded in <code>scratch/questions.md</code>; this Task does (a).</li>
+</ol>
+</body></html>

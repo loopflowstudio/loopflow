@@ -31,3 +31,26 @@ Built:
 Checks:
 - `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests::` — pass (implement, compress).
 - `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::` — pass (implement). Gate runs affected suites.
+
+## Next implement (concept review 2, 2026-11-12)
+
+`validate_project_membership` (`linear/acceptance.rs`) is the same kind of
+wedge: any Team or Initiative difference from the stored row, at any revision
+that isn't older, sets `membership_unresolved=1`, drops the Project from the
+Wave and errors "membership changed without relationship ordering evidence".
+The only thing that clears it is `lf wave plan reteam`'s own write. It runs
+before `accept_linear_issue_in` too, so `lf task sync <issue>`, the remedy the
+new messages name, fails for every Task in that Project.
+
+- Team ids follow the later-read rule: a read that isn't older replaces
+  `team_ids` and clears `membership_unresolved`. Teams are Linear's to change;
+  this is what "one concept, a Linear observation" already says. A stale
+  in-flight read loses on `observed_at`, the same way as items.
+- An Initiative difference stays refused (Wave ownership, the same family as
+  the open question in `questions.md`). Its message names a remedy: "Project X
+  moved to another Initiative in Linear; move it back, then run `lf wave sync`".
+- Delete the unused `StoreError::ProjectMembershipConflict`.
+- `lf/commands/waves.rs` launch refusal "refresh its planning" → "run
+  `lf task sync <issue>`".
+- Test: a Team change at the stored revision is accepted, and
+  `lf task sync`-path acceptance (`accept_linear_issue_in`) succeeds afterwards.

@@ -18,8 +18,8 @@ here. A change that should end in a PR becomes a Task: `lf task create
 
 `lf help <command-or-skill>` is the current reference.
 
-Name the Session for its work in two or three words: read `session_id` from
-`LF_AGENT_CALLER` and run `lf session rename <id> '<name>' --suggest`. A name a
+Name the Session for its work in two or three words: take its ID from the lf
+context block and run `lf session rename <id> '<name>' --suggest`. A name a
 person gave is kept. Don't rename branches or worktrees.
 
 Answer in this conversation. Never `lf resume` your own Session. Docs, PRs, Task

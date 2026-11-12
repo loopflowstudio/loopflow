@@ -89,8 +89,8 @@ lf session bind SESSION --task LOO-12           # select this Task’s conversat
 Promotion preserves the branch, dirty and untracked files, and the Session's
 provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
-Pass `--session` explicitly to keep a conversation. An agent uses its own
-`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Pass `--session` explicitly to keep a conversation. An agent reads its own
+Session ID from its lf context block.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries

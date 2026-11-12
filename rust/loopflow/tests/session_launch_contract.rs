@@ -1324,23 +1324,81 @@ fn provider_switch_imports_session_history_with_current_policy() {
 
 #[test]
 fn opencode_headless_start_selects_the_model_and_permissions() {
-    let fixture = Fixture::new("opencode:opencode/first-model");
-    fixture.create_wave();
-    let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
+    for managed in [false, true] {
+        let fixture = Fixture::new("opencode:opencode/first-model");
+        if managed {
+            fixture.create_wave();
+        }
+        let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
         "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
         "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
     );
-    fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
-    fixture.settings("opencode:opencode/first-model", true, false);
-    let first = fixture.run(&["-b", "--wave", "fixture", ":", "first turn"]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(
-            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
+        fixture.settings("opencode:opencode/first-model", true, false);
+        let first = fixture.run(if managed {
+            &["-b", "--wave", "fixture", ":", "first turn"]
+        } else {
+            &["-b", ":", "first turn"]
+        });
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+            )
+            .unwrap()["id"],
+            "first-model"
+        );
+        assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
+        let plugin = first["config"]["plugins"][0]
+            .as_str()
+            .unwrap()
+            .strip_prefix("file://")
+            .unwrap();
+        let source = fs::read_to_string(Path::new(plugin).join("index.js")).unwrap();
+        let mut lines = source.lines();
+        let spec: Value = serde_json::from_str(
+            lines
+                .next()
+                .unwrap()
+                .strip_prefix("const spec = ")
+                .unwrap()
+                .trim_end_matches(';'),
         )
-        .unwrap()["id"],
-        "first-model"
-    );
-    assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
+        .unwrap();
+        let delivery: String = serde_json::from_str(
+            lines
+                .next()
+                .unwrap()
+                .strip_prefix("const delivery = ")
+                .unwrap()
+                .trim_end_matches(';'),
+        )
+        .unwrap();
+        let session = fixture.session();
+        assert!(!spec["instructions"].as_str().unwrap().contains(&session));
+        for moment in ["start", "compact"] {
+            let output = fixture
+                .command()
+                .args([
+                    "__context-block",
+                    "--delivery",
+                    &delivery,
+                    "--moment",
+                    moment,
+                ])
+                .output()
+                .unwrap();
+            success(&output);
+            let context: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let text = context["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap();
+            assert!(
+                text.starts_with(&format!("This Session: {session}\n")),
+                "{text}"
+            );
+            assert!(!text.contains("This Session's Task:"));
+        }
+    }
 }
 
 #[test]
@@ -1737,54 +1795,70 @@ fn pi_fixture() -> Fixture {
 
 #[test]
 fn pi_public_headless_skill_delivers_context() {
-    let fixture = pi_fixture();
-    fixture.create_wave();
-    fixture.repo.create_file(
-        ".lf/skills/pi-proof.md",
-        &format!(
-            "Preserve this Pi skill and its exact arguments. LARGE_START{}LARGE_END",
-            "雪<&>".repeat(20_000)
-        ),
-    );
-    fixture
-        .repo
-        .create_file("scratch/pi-context.md", "Pi context sentinel.");
-    let output = fixture
-        .command()
-        .env(
-            "PI_FIXTURE_RECORD",
-            fixture.home.path().join("received.json"),
-        )
-        .args([
-            "-b",
-            "--wave",
-            "fixture",
-            "skill",
-            "pi-proof",
-            "Unicode 雪 stays intact",
-        ])
-        .output()
-        .unwrap();
-    success(&output);
-    let received = fixture.received();
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains("Preserve this Pi skill"));
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains("Unicode 雪 stays intact"));
-    assert!(received["input"]
-        .as_str()
-        .unwrap()
-        .contains(&format!("LARGE_START{}LARGE_END", "雪<&>".repeat(20_000))));
-    assert!(received["context"]
-        .as_str()
-        .unwrap()
-        .contains("Pi context sentinel"));
-    assert_eq!(received["caller"]["session_id"], fixture.session());
-    assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
+    for managed in [false, true] {
+        let fixture = pi_fixture();
+        if managed {
+            fixture.create_wave();
+        }
+        fixture.repo.create_file(
+            ".lf/skills/pi-proof.md",
+            &format!(
+                "Preserve this Pi skill and its exact arguments. LARGE_START{}LARGE_END",
+                "雪<&>".repeat(20_000)
+            ),
+        );
+        fixture
+            .repo
+            .create_file("scratch/pi-context.md", "Pi context sentinel.");
+        let output = fixture
+            .command()
+            .env(
+                "PI_FIXTURE_RECORD",
+                fixture.home.path().join("received.json"),
+            )
+            .args(if managed {
+                vec![
+                    "-b",
+                    "--wave",
+                    "fixture",
+                    "skill",
+                    "pi-proof",
+                    "Unicode 雪 stays intact",
+                ]
+            } else {
+                vec!["-b", "skill", "pi-proof", "Unicode 雪 stays intact"]
+            })
+            .output()
+            .unwrap();
+        success(&output);
+        let received = fixture.received();
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains("Preserve this Pi skill"));
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains("Unicode 雪 stays intact"));
+        assert!(received["input"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("LARGE_START{}LARGE_END", "雪<&>".repeat(20_000))));
+        assert!(received["context"]
+            .as_str()
+            .unwrap()
+            .contains("Pi context sentinel"));
+        assert!(received["context"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("This Session: {}\n", fixture.session())));
+        assert!(!received["system"]
+            .as_str()
+            .unwrap()
+            .contains("This Session:"));
+        assert_eq!(received["caller"]["session_id"], fixture.session());
+        assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
+    }
 }
 
 #[test]

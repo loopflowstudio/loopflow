@@ -22,11 +22,86 @@ skill:
 ```
 
 Use `agent` for a choice you want applied. Use `default_agent` for a fallback
-that lets another applicable `agent` choose differently. A `default_agent` list
-(`claude,codex`) launches its first entry and lets a headless Graph step fall
-through to the next when every account for the first is held back by a usage
-limit; an explicit `agent` never changes provider. The examples below are
-separate setups; combine the pieces that fit your work.
+that lets another applicable `agent` choose differently. Use `agents` for the
+providers Loopflow may use and the order it tries them in. The examples below
+are separate setups; combine the pieces that fit your work.
+
+## Keep going when a provider runs out
+
+```bash
+lf set --global agents '[claude, codex]'
+lf set --global skill.compress.default_agent codex
+```
+
+```yaml
+# ~/.lf/config.yaml
+agents: [claude, codex]
+skill:
+  compress:
+    default_agent: codex
+```
+
+`agents` is one ordered list: the providers Loopflow may use, and the order it
+tries them in. Work starts on Claude. `default_agent` names one entry and moves
+it to the top where it applies, so compress tries Codex first and keeps Claude
+behind it.
+
+Entries are `harness[:model]`, so the same list orders models:
+
+```yaml
+agents: [claude:opus, codex, claude:fable]   # Opus, then Codex, then Fable
+```
+
+A bare entry (`codex`) runs that provider's configured model and is a different
+entry from `codex:o3`. Each entry is tried as written; nothing the list lacks
+is tried.
+
+When a usage limit refuses a headless step, the step moves on instead of
+failing: to your next login for that provider, then to the next entry in
+`agents`.
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: codex_error: You've hit your usage limit
+```
+
+| Setting | Compress tries | Everything else tries |
+| --- | --- | --- |
+| `agents: [claude, codex]` | Claude, then Codex | Claude, then Codex |
+| plus `skill.compress.default_agent: codex` | Codex, then Claude | Claude, then Codex |
+| plus `skill.compress.agent: codex` | Codex only | Claude, then Codex |
+| `lf -a codex graph code` | Codex only | Codex only |
+
+An `agent` choice or `-a` pins one provider: the step changes login, never
+provider, and waits for a reset when no login has room. Neither is checked
+against `agents`, so `-a pi` runs Pi for that command whatever the list says.
+The list covers what Loopflow picks by itself.
+
+A narrower `agents` replaces the wider one whole, so a repository, Wave or
+skill can shorten or reorder it:
+
+```bash
+lf set agents '[codex, claude]'                      # this repository: Codex first
+lf --wave frontend set agents '[claude]'             # this Wave: Claude only
+lf set --global skill.review.agents '[codex]'        # review: Codex only, everywhere
+```
+
+A `default_agent` the list lacks is added in front, for the scope it applies
+to and nowhere else:
+
+| `agents` | `default_agent` | Order |
+| --- | --- | --- |
+| `[claude:opus, codex, claude:fable]` | `claude:fable` | Fable, Opus, Codex |
+| `[claude, codex]` | `codex:o3` | Codex o3, Claude, Codex |
+| `[claude, codex]` | `pi` | Pi, Claude, Codex |
+
+With no `agents` at all, `default_agent: claude` runs Claude alone, with nothing
+behind it.
+
+The older comma list, `default_agent: claude,codex`, still reads as
+`agents: [claude, codex]` with `default_agent: claude`, and warns with the
+file and the replacement. [When an account runs out](subscriptions.md#when-an-account-runs-out)
+has each move a step makes.
 
 ## Let a repository choose its exceptions
 
@@ -138,8 +213,8 @@ A repository Graph can make a choice for one occurrence:
 - step: {name: implement, id: fix-review, agent: claude}
 ```
 
-That shared choice beats every fallback. A personal `agent` choice still wins.
-For Graph authoring, see [Orchestration](orchestration.md).
+That shared choice beats every fallback and pins the step to Claude. A personal
+`agent` choice still wins. For Graph authoring, see [Orchestration](orchestration.md).
 
 ## Override one launch
 
@@ -253,8 +328,9 @@ Agents and context appear first, followed by Machines, Accounts, Desktop,
 Planning, Release and Loopflow. Empty sections are hidden. These feature groups
 also organize catalogue browsing; each row keeps its actual configuration path.
 Use `--explain` for each candidate, its authored key, file and winning reason.
-`default_agent` appears within the explanation for `agent`, never as a separate
-table row, including with `--all`.
+`default_agent` and `agents` appear within the explanation for `agent`, never as
+separate table rows, including with `--all`. The agent row shows the whole
+order a step would try, such as `codex, then claude`.
 `--json` always includes every setting and candidate, unchanged by display filtering.
 
 Inspection shows the effective value, authored key, source, scope, target and file
@@ -326,7 +402,9 @@ settings. A more specific target does not outrank a higher source.
 
 Agent selection first separates **choices** from **fallbacks**: every applicable
 `agent` beats every `default_agent`. Apply source, scope and target ordering within
-each class. A command-line `default_agent` is still a fallback.
+each class. A command-line `default_agent` is still a fallback. `agents` then
+supplies what a fallback may move to: the applicable list, with the winning
+`default_agent` first.
 
 | Declarations | Selected agent |
 | --- | --- |
@@ -334,11 +412,14 @@ each class. A command-line `default_agent` is still a fallback.
 | Personal implement `agent: codex`; repository occurrence `agent: claude` | Codex |
 | Personal implement `default_agent: codex`; repository general `agent: claude` | Claude |
 | Explicit `-a codex`; repository occurrence `agent: claude` | Codex |
+| Personal `agents: [claude, codex]`; nothing else | Claude, then Codex |
+| Personal `agents: [claude, codex]`; repository implement `default_agent: codex` | Codex, then Claude |
+| Personal `agents: [claude, codex]`; repository `agents: [codex]` | Claude, then Codex |
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
 `context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. Account lists preserve
-order and replace as a unit. `planning` replaces its complete tagged provider
+clears earlier contributions. Keyed maps merge by key. Account lists and `agents`
+preserve order and replace as a unit. `planning` replaces its complete tagged provider
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target
@@ -673,13 +754,14 @@ or filter its searches or Git commands.
 
 ### Agent
 
-Choose a harness, with an optional model. Use `default_agent` for a fallback.
+Choose a harness, with an optional model. Use `default_agent` for a fallback and
+`agents` for the ordered list a fallback may move through.
 
 | | |
 |---|---|
 | **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (uses applicable authored fallbacks, then the sole installed harness) |
+| **Default** | unset (uses applicable authored fallbacks, then the first of `agents`, then the sole installed harness) |
 
 ```yaml
 agent: codex          # harness default
@@ -689,12 +771,28 @@ skill:
     agent: claude:opus
 ```
 
+```yaml
+agents: [claude, codex]   # allowed providers, in the order to try them
+default_agent: codex      # tried first here; the rest of agents stays behind it
+```
+
+| Key | What it does | When a usage limit refuses a headless step |
+| --- | --- | --- |
+| `agent`, `-a` | Pins one harness | Changes login; never changes provider |
+| `default_agent` | Names one entry, tried first when no `agent` applies | Moves through the rest of `agents` |
+| `agents` | Ordered `harness[:model]` entries Loopflow may pick | Moves through the list in order |
+
+An entry may carry a model (`agents: [claude:opus, codex, claude:fable]`), and
+a step moves through the entries as written. `agents` works everywhere `agent`
+does and [replaces as a unit](#keep-going-when-a-provider-runs-out).
+
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
-Built-in skills recommend no harness. With no authored choice or fallback,
-Loopflow selects automatically only when exactly one supported harness is installed.
-With multiple harnesses, save your choice with `lf set --global default_agent claude`
-or select one command with `-a claude`. Start setup with `lf -a claude init` to
+Built-in skills recommend no harness. With no authored choice, fallback or
+`agents` list, Loopflow selects automatically only when exactly one supported
+harness is installed. With multiple harnesses, save your choice with
+`lf set --global default_agent claude`, or your order with
+`lf set --global agents '[claude, codex]'`, or select one command with `-a claude`. Start setup with `lf -a claude init` to
 choose and save a personal default. Installation order and remaining usage do not
 choose a harness.
 Inspection still works without a choice; a new launch explains how to select one.
@@ -702,7 +800,7 @@ Existing Sessions retain their recorded provider when resumed.
 A personal `skill.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.
-Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
+All three keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
 Bare `claude` uses the [saved Claude model](#claude-model) when set; otherwise,

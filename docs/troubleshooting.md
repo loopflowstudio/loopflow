@@ -241,13 +241,20 @@ failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
 An exhausted subscription takes a different path: lf marks that login
-unavailable until its reported reset and moves to your next login with room.
+unavailable until its reported reset and moves to your next login with room,
+then to the next provider in `agents`. A limit that refuses the launch itself
+moves on the same way.
 
 ```bash
-lf account                           # every login, its capacity and when it resets
-lf gate -a codex                     # run this one on another harness
-lf --only-account claude=work@ gate  # stay inside the logins you name
+lf account                               # every login, its capacity and when it resets
+lf set --global agents '[claude, codex]' # let headless steps move to Codex when Claude is out
+lf gate -a codex                         # run this one on another harness
+lf --only-account claude=work@ gate      # stay inside the logins you name
 ```
+
+A step that keeps failing on one provider's limit is pinned there by an `agent`
+choice or `-a`, or has no `agents` list to move through;
+`lf config settings --skill <name> --explain` shows which.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.

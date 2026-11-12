@@ -181,14 +181,27 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        // A fallback may list the agents a step falls through to; a choice
-        // names one.
+        // The retired `default_agent: claude,codex` spelling still reads
+        // until Task a4b75c removes it.
         if path[0] == "default_agent" {
             for entry in super::agent_list(agent) {
                 validate_agent_policy(entry)?;
             }
         } else {
             validate_agent_policy(agent)?;
+        }
+    }
+    if path[0] == "agents" {
+        let entries = value
+            .as_sequence()
+            .ok_or_else(|| invalid("agents needs a list, such as [claude, codex]"))?;
+        for entry in entries {
+            validate_agent_policy(
+                entry
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| invalid("agents entries need harness[:model]"))?,
+            )?;
         }
     }
     let mut check = super::catalog::defaults();
@@ -580,6 +593,40 @@ fn _filter_file_settings(
     });
 }
 
+/// Read the retired `default_agent: claude,codex` as `agents: [claude, codex]`
+/// with `default_agent: claude`, and say where to write the replacement.
+/// Task a4b75c deletes this once `agents` has shipped.
+fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
+    let Some(list) = values
+        .get("default_agent")
+        .and_then(Value::as_str)
+        .filter(|list| list.contains(','))
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let entries: Vec<&str> = super::agent_list(&list).collect();
+    let Some(first) = entries.first() else {
+        values.remove("default_agent");
+        return;
+    };
+    super::reader::warn(
+        std::path::Path::new(locator),
+        None,
+        &format!(
+            "default_agent: {list} is the old spelling; write agents: [{}] and default_agent: {first}",
+            entries.join(", ")
+        ),
+    );
+    values.insert("default_agent".into(), (*first).into());
+    if !values.contains_key("agents") {
+        values.insert(
+            "agents".into(),
+            Value::Sequence(entries.iter().map(|entry| (*entry).into()).collect()),
+        );
+    }
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
@@ -733,6 +780,7 @@ pub fn resolve_layers(
                         && super::catalog::definition(key).is_some()
                 })
             });
+            _split_agent_list(map, &candidate.locator);
         }
         let mut flat = Vec::new();
         leaves(&values, &mut Vec::new(), &mut flat);
@@ -823,18 +871,39 @@ pub fn resolve_layers(
             }
         }
     }
-    // Config keeps the two authored keys distinct. Inspection's effective agent
-    // includes both classes, with every fallback below every explicit choice.
-    let mut agent = explanations
+    // The sole installed harness stands in only when nothing was authored.
+    let authored_default = explanations
         .get("default_agent")
-        .cloned()
-        .unwrap_or(EffectiveSetting {
-            value: Value::Null,
-            candidates: Vec::new(),
-        });
-    if let Some(choices) = explanations.remove("agent") {
-        agent.value = choices.value;
-        agent.candidates.extend(choices.candidates);
+        .and_then(|setting| setting.candidates.last())
+        .is_some_and(|candidate| candidate.source != ConfigSource::Builtin);
+    if !authored_default && !config.agents.is_empty() {
+        config.default_agent = None;
+    }
+    // Config keeps the three authored keys distinct. Inspection's effective
+    // agent includes them all: the list lowest, then every fallback, then
+    // every explicit choice.
+    let mut agent = EffectiveSetting {
+        value: config
+            .agent_order()
+            .first()
+            .map_or(Value::Null, |agent| agent.as_str().into()),
+        candidates: Vec::new(),
+    };
+    for key in ["agents", "default_agent", "agent"] {
+        let declared = if key == "agent" {
+            explanations.remove(key)
+        } else {
+            explanations.get(key).cloned()
+        };
+        agent.candidates.extend(
+            declared
+                .into_iter()
+                .flat_map(|setting| setting.candidates)
+                .filter(|candidate| {
+                    candidate.source != ConfigSource::Builtin
+                        || (key == "default_agent" && config.default_agent.is_some())
+                }),
+        );
     }
     explanations.insert("agent".into(), agent);
     for (key, setting) in &mut explanations {
@@ -846,6 +915,11 @@ pub fn resolve_layers(
             .iter()
             .rposition(|candidate| candidate.value.as_sequence().is_some_and(Vec::is_empty));
         let last = setting.candidates.len().saturating_sub(1);
+        let list = setting
+            .candidates
+            .iter()
+            .rposition(|candidate| candidate.key == "agents")
+            .filter(|_| !config.agents.is_empty());
         for (index, candidate) in setting.candidates.iter_mut().enumerate() {
             candidate.reason = if super::catalog::definition(key).is_some_and(|definition| {
                 definition.lifecycle == super::catalog::Lifecycle::Inactive
@@ -854,6 +928,15 @@ pub fn resolve_layers(
             } else if append && reset.is_none_or(|reset| index >= reset) {
                 if candidate.value.as_sequence().is_some_and(Vec::is_empty) {
                     "clears earlier contributions"
+                } else {
+                    "contributes"
+                }
+            } else if key == "agent" && Some(index) == list {
+                // The list in force; the last candidate of all when it alone selects.
+                if config.agent.is_some() {
+                    "unused: an agent choice pins one provider"
+                } else if index == last {
+                    "selected"
                 } else {
                     "contributes"
                 }
@@ -1037,6 +1120,79 @@ mod tests {
             value: serde_yaml_ng::from_str(text).unwrap(),
         }
     }
+    #[test]
+    fn agents_orders_what_a_fallback_moves_through() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let order = |layers: &[ConfigDeclarations], skill: Option<&Skill>| {
+            resolve_layers(layers, skill).unwrap().config.agent_order()
+        };
+        let personal = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: [codex, claude]\nskills: {implement: {default_agent: claude}}",
+        );
+        // The list outranks the sole installed harness.
+        assert_eq!(
+            order(std::slice::from_ref(&personal), None),
+            ["codex", "claude"]
+        );
+        let implement = Skill::named("implement");
+        assert_eq!(
+            order(std::slice::from_ref(&personal), Some(&implement)),
+            ["claude", "codex"]
+        );
+        // A narrower list replaces the wider one whole; precedence is unchanged.
+        let repo = layer(
+            ConfigSource::Repository,
+            SettingScope::Repository,
+            "agents: [pi]",
+        );
+        assert_eq!(order(&[personal.clone(), repo], None), ["codex", "claude"]);
+        let wave = layer(
+            ConfigSource::Personal,
+            SettingScope::Wave,
+            "agents: [claude]",
+        );
+        assert_eq!(order(&[personal.clone(), wave], None), ["claude"]);
+        let pinned = layer(
+            ConfigSource::Repository,
+            SettingScope::Repository,
+            "agent: pi",
+        );
+        let resolved = resolve_layers(&[personal, pinned], None).unwrap();
+        assert_eq!(resolved.config.agent_order(), ["pi"]);
+        let reasons: Vec<_> = resolved.settings["agent"]
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.key.as_str(), candidate.reason.as_str()))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                ("agents", "unused: an agent choice pins one provider"),
+                ("agent", "selected")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_comma_spelling_of_default_agent_reads_as_agents() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let old = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "default_agent: 'codex, claude:opus'",
+        );
+        let resolved = resolve_layers(&[old], None).unwrap();
+        assert_eq!(resolved.config.default_agent.as_deref(), Some("codex"));
+        assert_eq!(resolved.config.agents, ["codex", "claude:opus"]);
+        assert_eq!(resolved.settings["agent"].value.as_str(), Some("codex"));
+        assert_eq!(
+            resolved.settings["agent"].selected().unwrap().key,
+            "default_agent"
+        );
+    }
+
     fn occurrence() -> Skill {
         let mut skill = Skill::named("implement");
         skill.occurrence = Some(Box::new(OccurrenceSettings {

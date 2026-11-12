@@ -341,22 +341,28 @@ A Graph step keeps going by itself:
 ```bash
 lf task status LOO-1
 #   implement went on under another claude account after: provider_rate_limited: rejected: five_hour
+#   compress went on under claude after: codex_error: You've hit your usage limit
 #   implement is waiting for claude capacity until Nov 5 14:00: ... It goes on by itself.
 ```
 
 | What happens | What the step does |
 |---|---|
 | Its account hits a limit, another is eligible | Continues the same conversation under that account |
-| Every eligible account is held back and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
-| Those are held back too and `default_agent` lists another provider (`claude,codex`) | Continues on the next provider, seeded with the conversation so far, as `lf session new -a` does |
+| Every eligible account is held back and `agents` has a next entry (`agents: [claude:fable, claude:opus, codex]`) | Continues on that entry: the same conversation on another model of its provider; on another provider, seeded with the conversation so far, as `lf session new -a` does |
+| Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
+| The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. The refusal does not count as a failed run |
 | Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
 | No account will free up | Fails with the limit, like any other failure |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
 Only accounts in the resolved route take a step on. An explicit `harness:model`
-stays on its model and changes only accounts; a bare harness may change model;
-only a preference list (`lf set default_agent claude,codex`, no explicit
-`agent`) lets a step change provider. Nothing is written to your preferences.
+stays on its model and changes only accounts; a bare harness with no order
+behind it may change model; only [`agents`](config.md#keep-going-when-a-provider-runs-out)
+(`lf set --global agents '[claude, codex]'`, no explicit `agent` or `-a`) lets a
+step change provider, and it tries each entry as written. A step that started
+on its `default_agent` moves through the rest of the list in order. A launch
+refused on a login Loopflow does not route fails with its limit once the last
+entry refuses too. Nothing is written to your preferences.
 Commit messages and PR text fail at once, because someone is waiting for them.
 
 A [saved Claude model](config.md#claude-model) supplies bare `claude`'s starting

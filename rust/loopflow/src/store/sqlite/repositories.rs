@@ -258,6 +258,7 @@ impl SqliteStore {
 
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = super::task_ownership::RepoFacts::of_task_in(&conn, task)?;
         let tx = conn.savepoint()?;
         let (repo, checkout): (String, Option<String>) = tx.query_row(
             "SELECT w.repo,t.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
@@ -268,7 +269,7 @@ impl SqliteStore {
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let (machine_id, source) = super::task_ownership::writer_in(&tx, task)?;
+        let (machine_id, source) = super::task_ownership::writer_in(&tx, task, &me)?;
         Ok(TaskExecutionRoute {
             task_id: task.clone(),
             checkout,

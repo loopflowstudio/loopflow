@@ -946,12 +946,27 @@ impl SqliteStore {
         )? {
             return Ok(canonical);
         }
-        let mut query = conn.prepare("SELECT id FROM (
-            SELECT receipt_key AS id FROM session_events WHERE kind='captured' UNION SELECT json_extract(payload,'$.caller_key') FROM session_events WHERE kind='captured')
-            WHERE substr(id,1,length(?1))=?1 OR (substr(id,1,4)='run_' AND substr(id,5,length(?1))=?1)
-            ORDER BY id LIMIT 2")?;
+        // A prefix is the range [prefix, prefix+U+10FFFF) in BINARY order, so
+        // each candidate is searched in `session_capture_key` or
+        // `session_capture_caller` rather than read from every capture.
+        let caller = "CASE WHEN json_valid(payload) THEN json_extract(payload,'$.caller_key') END";
+        let mut query = conn.prepare(&format!("
+            SELECT receipt_key AS id FROM session_events WHERE kind='captured' AND receipt_key>=?1 AND receipt_key<?2
+            UNION SELECT receipt_key FROM session_events WHERE kind='captured' AND receipt_key>=?3 AND receipt_key<?4
+            UNION SELECT {caller} FROM session_events WHERE kind='captured' AND {caller}>=?1 AND {caller}<?2
+            UNION SELECT {caller} FROM session_events WHERE kind='captured' AND {caller}>=?3 AND {caller}<?4
+            ORDER BY id LIMIT 2"))?;
+        let run = format!("run_{selector}");
         let ids = query
-            .query_map([selector], |row| row.get::<_, String>(0))?
+            .query_map(
+                params![
+                    selector,
+                    format!("{selector}\u{10FFFF}"),
+                    run,
+                    format!("{run}\u{10FFFF}")
+                ],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         match ids.as_slice() {
             [id] => Ok(id.clone()),
@@ -966,13 +981,14 @@ impl SqliteStore {
         thread: &AgentSessionId,
     ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Only `provider-session:` observations carry the id; matching their
-        // receipt first spares parsing millions of other payloads.
+        // Only `provider-session:` observations carry the id. The expression
+        // matches `session_events_provider_session` exactly so it is searched.
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
              UNION SELECT session_id FROM session_events WHERE kind='observed'
                 AND instr(receipt_key,':provider-session:')>0
-                AND json_extract(payload,'$.evidence.provider_session_id')=?1
+                AND CASE WHEN json_valid(payload)
+                    THEN json_extract(payload,'$.evidence.provider_session_id') END=?1
              ORDER BY 1",
         )?;
         let ids = query
@@ -1128,7 +1144,10 @@ impl SqliteStore {
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
                     AND terminal.receipt_key=i.receipt_key||':terminal.json'
-                WHERE i.kind='captured' AND (?7 IS NULL OR i.receipt_key=?7) AND
+                WHERE i.kind='captured' AND (?7 IS NULL OR i.receipt_key=?7)
+                    -- `eligible` keeps only these when finished inputs are excluded;
+                    -- filtering here spares the per-input subqueries on older ones.
+                    AND (?6 OR COALESCE(m.observed_at,i.observed_at)>=?5) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL
                     OR (i.receipt_key=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)
                     OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.session_id=i.session_id
@@ -1141,7 +1160,8 @@ impl SqliteStore {
                         MAX(observed_at) AS latest
                     FROM session_events WHERE ?7 IS NULL AND kind IN ('started','usage','completed','output')
                         AND captured_event IS NULL
-                    GROUP BY session_id,provider_thread,provider_turn) e
+                    GROUP BY session_id,provider_thread,provider_turn
+                    HAVING ?6 OR MIN(observed_at)>=?5) e
                 LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'

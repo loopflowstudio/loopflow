@@ -88,23 +88,18 @@ impl SqliteStore {
                 "machine target and label must be nonempty; local is reserved".into(),
             ));
         }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if map_local_machine(&tx)?.id == *machine_id {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if map_local_machine(&conn)?.id == *machine_id {
             return Err(StoreError::InvalidData(
                 "cannot add the local machine as remote".into(),
             ));
         }
-        let now = now_unix();
-        tx.execute(
-            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
-            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
-            params![machine_id.as_str(), now],
-        )?;
+        // The declaration file is written first, outside any write transaction.
+        // A declared Machine needs no row until it is contacted.
         let declaration = crate::config::placement::MachineDeclaration {
             id: machine_id.clone(),
         };
-        let path = crate::config::placement::home(&tx)
+        let path = crate::config::placement::home(&conn)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
             .join("config.yaml");
         crate::config::files::update(&path, |document| {
@@ -129,7 +124,11 @@ impl SqliteStore {
             Ok(())
         })
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
+        conn.execute(
+            "INSERT INTO machines(id,is_local,created_at,observed_at) VALUES(?1,0,?2,?2)
+            ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at",
+            params![machine_id.as_str(), now_unix()],
+        )?;
         map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
     }
 

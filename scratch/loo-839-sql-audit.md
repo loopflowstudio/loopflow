@@ -52,31 +52,37 @@ processes_attachment_exit. Server: `server::statistics` (start + ~24 h,
 SystemTime). Guard: `store::query_plans` (boundary test now uses it; widening
 its tables to `processes` found the FK scan above).
 
-## Remaining (in the brief's scope, not yet fixed)
+## Fixed in the second pass (before → after, raw.db copy)
 
-- `task_ownership` `claim_task`/`handoff_task`/`unassign_task`: `git config`
-  spawned under the write lock via `my_key_in`/`person()`; resolve identity
-  before BEGIN and pass it through the `_in` helpers.
-- `reorder_task`, `save_dashboard`: whole-repository Work read plus 3 queries
-  per Task inside the write transaction (13 s hold observed).
-- `import_peer_planning` on a moved revision still re-imports the whole history
-  and runs `ensure_repository_in` (file IO, sometimes git) per Wave under lock.
-- `place_task`/`create_task`: config file reads (`planning_client::connected`,
-  `global_settings`) under lock.
-- `durable::add_machine`, `upsert_provider_account`: YAML writes under lock.
-- `session_steers`/`session_steer_source` still reconcile under the write lock
-  (CLI reads); `record_session_event` duplicate check inside IMMEDIATE.
-- Reads: `pending_inputs` (Session history) 241 ms; `unrecorded_agent_ancestry`
-  192 ms (doctor/prune); `sessions_for_agent_session` 59 ms (json_extract scan);
-  `task_graph_pairs` 40 ms per Work projection; `resolve_history_input` 28 ms.
-- FK children without an index whose parents are rarely deleted:
-  `session_events.task_id/wave_id`, `session_steers.steer_id`,
-  `planning_peer_routes.mutation_id`.
+| what | before | after |
+|---|---|---|
+| claim/handoff/unassign/place: Git email + name + `planning_client::connected` under the lock (`RepoFacts` read before BEGIN) | ~43 ms warm, 190 ms cold | ~1.5 ms (placement + declarations remain) |
+| `reorder_task`, `save_dashboard`: Work read in the write transaction | `work_in` 180–220 ms warm (13 s hold observed) | revision/order check + write; Work read in a snapshot |
+| `import_peer_planning` moved revision: merge/write only fields with unrouted changes; repository registration before BEGIN; `ensure_record` no longer runs Git locator IO for a registered repository | whole history re-applied | 124 ms whole import with nothing unseen, 327 ms with 200, 429 ms with 2,000 |
+| `add_machine`, `upsert_provider_account`: YAML written before the row, no transaction | YAML under lock | none |
+| `session_steers` / `session_steer_source`: read-only check, write lock only when reconcile changes something; `record_session_event` duplicate check before IMMEDIATE | IMMEDIATE every read | snapshot read |
+| `unrecorded_agent_ancestry` + `processes_unrecorded_ancestry` | 190 ms | <0.1 ms |
+| `sessions_for_agent_session` + `agent_sessions_provider_thread`, `session_events_provider_session` | 58 ms | <0.1 ms |
+| `resolve_history_input`: prefix ranges + `session_capture_caller` | 28 ms | <0.1 ms |
+| `pending_inputs`: window pushed into both branches (1-day window) | 270 ms | 240 ms |
+
+FK-child indexes: session_events_task, session_events_wave, session_steers_steer,
+planning_peer_routes_mutation. `store::query_plans` covers Session lookups and
+steer reads, plus a test that an unchanged steer read does not wait on another
+writer.
+
+## Filed as linked Tasks
+
+- LOO-865 `task_graph_pairs` walks every Graph: 40–65 ms per projection, 37–53 ms for one Task. Task-driven SQL: 0.1 ms one Task, 7.7 s all Tasks.
+- LOO-866 `pending_inputs` still walks every capture (240 ms).
+- LOO-867 placement reads under the ownership lock (~1.5 ms); `connected` (~10 ms) in `reassert_in`/`hand_back_in`.
+- LOO-868 `export_in` over the whole planning history under the lock on a moved revision.
+- LOO-869 `work_in` runs 3 queries per Task (180–220 ms for 750 Tasks) on every selection read.
+- LOO-870 `query_plans` exempts partial-index walks and cannot see FK checks.
 
 ## Checks
 
-- `cargo test -p loopflow --lib store::query_plans:: server::boundary:: server::statistics::` — pass (implement).
-- Touched modules (task_retirement, steers, wake, planning_peers, linear_team_checks, sessions, ci_incidents, repositories, children, task_work, durable, graph_inventory, task_ownership, ops::task::retirement, ops::planning_sync): 118 pass.
-- Compress (`linear_team_checks` helper, stale doc comments): `cargo test -p loopflow --lib -- store::query_plans:: server::boundary:: linear_team_checks sqlite::sessions::` — 26 pass.
-- `cargo clippy --all-targets -- -D warnings` clean; `documented_commands::` pass.
+- Touched modules (durable, sessions, selections, task_ownership, planning_peers, planning_write, repositories, children, task_work, provider_account, machine): 222 pass; steers, session_events, query_plans pass.
+- `steers::tests::only_abandoned_prewrite_reservations_return_to_pending` failed once (steers_tests.rs:388) in a 5-module parallel run; passed 3/3 alone and in the steers module run. Gate reruns it.
+- `cargo clippy --all-targets -- -D warnings` clean.
 - Gate: `binary(two_people)`, `binary(transport_tests)` (store-wide schema), migration upgrade fixtures.

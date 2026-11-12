@@ -11,9 +11,10 @@ use std::cell::RefCell;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 11] = [
+const GROWING: [&str; 12] = [
     "agent_sessions",
     "planning_peer_changes",
+    "planning_peer_routes",
     "processes",
     "session_events",
     "session_steers",
@@ -32,11 +33,12 @@ const GROWING: [&str; 11] = [
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
-         'planning_peer_changes','repository_plans');
+         'planning_peer_changes','planning_peer_routes','repository_plans');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','16454 1'),
          ('agent_sessions','agent_sessions_held_terminal','66 2'),
          ('agent_sessions','agent_sessions_primary_repository','9 1'),
+         ('agent_sessions','agent_sessions_provider_thread','15649 1'),
          ('agent_sessions','agent_sessions_primary_wave','15 1'),
          ('agent_sessions','agent_sessions_transport','11054 4'),
          ('agent_sessions','conversation_task_inventory','16489 32 3 1'),
@@ -48,6 +50,8 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('planning_peer_changes','planning_peer_changes_clock','36055 1'),
          ('planning_peer_changes','planning_peer_changes_object','36055 7 2'),
          ('planning_peer_changes','sqlite_autoindex_planning_peer_changes_1','36055 1'),
+         ('planning_peer_routes','planning_peer_routes_mutation','4220 1'),
+         ('planning_peer_routes','sqlite_autoindex_planning_peer_routes_1','4220 844 704 1'),
          ('processes','agent_process_attachment','17262 113'),
          ('processes','agent_process_session','17262 1'),
          ('processes','agent_process_unfinished','68 1'),
@@ -57,6 +61,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('processes','processes_receipt_locator','166864 1'),
          ('processes','processes_recent','166864 2 1'),
          ('processes','processes_trace','166864 35 2 1'),
+         ('processes','processes_unrecorded_ancestry','0 0'),
          ('processes','processes_unfinished','741 2 1'),
          ('processes','sqlite_autoindex_processes_1','166864 1'),
          ('projects','idx_projects_wave','63 3 1'),
@@ -65,17 +70,22 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('projects','sqlite_autoindex_projects_2','63 2'),
          ('repository_plans','repository_selected_plan','53 1'),
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
+         ('session_events','session_capture_caller','16643 15'),
          ('session_events','session_capture_key','16643 1'),
          ('session_events','session_event_input','20248 2 2'),
          ('session_events','session_event_receipt','266075 17 9 8 3 1'),
          ('session_events','session_events_captured_event','188608 12'),
          ('session_events','session_events_history','266075 17 1'),
          ('session_events','session_events_process','61597 4 4'),
+         ('session_events','session_events_provider_session','19846 2'),
+         ('session_events','session_events_task','152437 289'),
          ('session_events','session_events_turn','266075 17 9 8 1'),
          ('session_events','session_input_membership','16623 1 1 1'),
          ('session_events','session_observation_receipt','168288 11 1'),
          ('session_events','session_process_membership','61597 4 4'),
          ('session_events','session_turn_events','81144 6 6 4 1 1'),
+         ('session_events','session_events_wave','112013 5092'),
+         ('session_steers','session_steers_steer','43213 24'),
          ('session_steers','sqlite_autoindex_session_steers_1','43213 6 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_1','13328 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_2','13328 1'),
@@ -302,6 +312,79 @@ mod tests {
         assert_eq!(
             due, None,
             "viewing reset the deadline and absence keeps it reset"
+        );
+    }
+
+    #[test]
+    fn session_lookups_and_steer_reads_plan_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        // A Machine's worth of steers for other Sessions.
+        for other in 0..20 {
+            store.test_session(
+                &format!("other-{other}"),
+                &crate::session_record::new_artifact_key(),
+            );
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO steers(id,session_id,source,revision,author,text,created_at)
+                 WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<2999)
+                 SELECT lower(hex(randomblob(16))),'other-'||(i%20),'fixture:'||i,'1',
+                     '{\"kind\":\"named\",\"id\":\"Fixture author\"}','OTHER',unixepoch() FROM n",
+            )
+            .unwrap();
+        let steer = store
+            .save_session_steer("viewed", "person", "Look here")
+            .unwrap();
+        let traced = statements(&store, || {
+            store
+                .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
+                .unwrap();
+            assert!(store.resolve_history_input("abc").is_err());
+            store.unrecorded_agent_ancestry().unwrap();
+            store.session_steers("viewed", 0, 10).unwrap();
+            store.session_steer_source("viewed", &steer.id).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn an_unchanged_steer_read_does_not_wait_for_another_write() {
+        let (home, store, _task, _viewer) = fixture();
+        let steer = store
+            .save_session_steer("viewed", "person", "Look here")
+            .unwrap();
+        // The first read files the steer's receipt.
+        store.session_steers("viewed", 0, 10).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .busy_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        let writer = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let page = store.session_steers("viewed", 0, 10).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(
+            store.session_steer_source("viewed", &steer.id).unwrap().id,
+            steer.id
+        );
+        // A new steer needs a receipt, which needs the write lock.
+        writer.execute_batch("ROLLBACK").unwrap();
+        store
+            .save_session_steer("viewed", "person", "And here")
+            .unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        assert!(store.session_steers("viewed", 0, 10).is_err());
+        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            store.session_steers("viewed", 0, 10).unwrap().items.len(),
+            2
         );
     }
 

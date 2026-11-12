@@ -128,14 +128,18 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
 /// Git planning carries the Task's branch, so whoever runs it next checks out
 /// the same branch and finds the same PR. Remote providers supply their branch
 /// through planning acquisition. An already-recorded branch writes nothing.
-fn record_task_branch_in(tx: &Connection, task: &TaskId, branch: &str) -> StoreResult<()> {
-    let (repo, recorded): (String, Option<String>) = tx.query_row(
-        "SELECT w.repo,t.planning_branch_name FROM tasks t
-         JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+fn record_task_branch_in(
+    tx: &Connection,
+    task: &TaskId,
+    branch: &str,
+    planning_connected: bool,
+) -> StoreResult<()> {
+    let recorded: Option<String> = tx.query_row(
+        "SELECT planning_branch_name FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    if recorded.as_deref() == Some(branch) || crate::ops::planning_client::connected(&repo) {
+    if recorded.as_deref() == Some(branch) || planning_connected {
         return Ok(());
     }
     super::planning_write::local(
@@ -156,6 +160,7 @@ fn place_task_in(
     worktree: &Path,
     workspace_slug: &str,
     pr: &TaskPr,
+    me: &super::task_ownership::RepoFacts,
 ) -> StoreResult<()> {
     let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
     if task.worktree.is_some() {
@@ -172,8 +177,8 @@ fn place_task_in(
     require_task_planning(conn, &task)?;
     // Allocating a checkout is the actual work reservation: it claims an
     // unowned Task, and refuses one owned on another Machine.
-    super::task_ownership::claim_in(conn, task_id)?;
-    record_task_branch_in(conn, task_id, &pr.branch)?;
+    super::task_ownership::claim_in(conn, task_id, me)?;
+    record_task_branch_in(conn, task_id, &pr.branch, me.planning_connected())?;
     let local = super::durable::map_local_machine(conn)?.id;
     task.worktree = Some(worktree.to_path_buf());
     task.workspace_slug = workspace_slug.to_string();
@@ -227,8 +232,9 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = super::task_ownership::RepoFacts::of_task_in(&conn, task_id)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        place_task_in(&tx, task_id, worktree, workspace_slug, pr)?;
+        place_task_in(&tx, task_id, worktree, workspace_slug, pr, &me)?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
@@ -246,6 +252,12 @@ impl SqliteStore {
         receipt: Option<&super::creation::CreationIdentity>,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = match creation {
+            Some(input) => {
+                super::task_ownership::RepoFacts::of_repository_in(&conn, &input.repository_id)?
+            }
+            None => super::task_ownership::RepoFacts::of_task_in(&conn, task_id)?,
+        };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(input) = creation {
             if let Some(project) = &input.project_id {
@@ -268,7 +280,7 @@ impl SqliteStore {
             // Completion may have arrived after source preparation. Binding still
             // selects the conversation, without allocating or reopening work.
             if !super::durable::task_state_in(&tx, task_id)?.is_terminal() {
-                place_task_in(&tx, task_id, path, &pr.slug, pr)?;
+                place_task_in(&tx, task_id, path, &pr.slug, pr, &me)?;
                 insert_task_event_in(
                     &tx,
                     task_id,
@@ -280,7 +292,7 @@ impl SqliteStore {
             }
         }
         if let Some(session) = session {
-            super::task_ownership::claim_in(&tx, task_id)?;
+            super::task_ownership::claim_in(&tx, task_id, &me)?;
             // Transfer only the selected conversation out of its shared primary
             // scope. The checkout and historical captures retain their owners.
             tx.execute(
@@ -2516,6 +2528,11 @@ impl SqliteStore {
 
     pub(crate) fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = task
+            .worktree
+            .is_some()
+            .then(|| super::task_ownership::RepoFacts::of_repository_in(&conn, &task.repository_id))
+            .transpose()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task(task)?;
         validate_task_project(&tx, task)?;
@@ -2536,7 +2553,8 @@ impl SqliteStore {
         insert_task_pr(&tx, pr)?;
         if task.worktree.is_some() {
             // A seeded checkout is placed work, which claims the Task like `place_task`.
-            super::task_ownership::claim_in(&tx, &task.id)?;
+            let me = me.as_ref().expect("resolved for a seeded checkout");
+            super::task_ownership::claim_in(&tx, &task.id, me)?;
         }
         seed_task_linear_observation(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;

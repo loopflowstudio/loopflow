@@ -3078,11 +3078,11 @@ mod tests {
     }
 
     #[test]
-    fn closed_task_cleanup_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
+    fn task_workspace_teardown_upgrade_keeps_explicit_closes_and_rejudges_automatic_closes() {
         let conn = open();
-        apply_before_migration(&conn, "closed_task_cleanup");
+        apply_before_migration(&conn, "task_workspace_teardown");
         conn.execute_batch(include_str!(
-            "../../tests/fixtures/migrations/closed_task_cleanup_released.sql"
+            "../../tests/fixtures/migrations/task_workspace_teardown_released.sql"
         ))
         .unwrap();
         apply_pending_migrations(&conn);

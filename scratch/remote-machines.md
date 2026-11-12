@@ -213,6 +213,19 @@ live Task. The reply to "Should I install it on both and run a move with a
 throwaway Task?" was "ok, sounds good. i think 0-3 could be this task, and 4
 and 5 could be follow up tasks?", which doesn't say.
 
+## Next implement direction (concept review, 2026-11-12)
+
+The move, stage lines, restart-at-step and the laptop's views match "What a
+move should feel like" items 1, 2, 6, 7 and 9; items 3 and 4 stay as decided
+against above. No open product choice. One fix the design implies:
+
+- `SqliteStore::tasks_owned_by` reads each Task's ownership twice
+  (`rentals::tasks_held_in`, then `ownership_in` again) and fills a missing
+  `since` with `0`. A held Task always has an entry naming that Machine (the
+  query selects on it), so the `0` can only print "since 1970" on the wire
+  (`HeldTask.since` in `lf machine list --json`). Have `tasks_held_in` keep the
+  ownership it read and take `since` from it, with no fallback.
+
 ## Live check (for a person, both Machines on this build)
 
 ```sh

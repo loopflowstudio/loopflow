@@ -11,27 +11,31 @@ They define the attachment and recovery contract for implementation.
 
 ## Transport dependency — November 11, 2026 UTC
 
-At 22:47 UTC, `gh pr view 1812 --json state,mergedAt,headRefOid,url,autoMergeRequest`
-reported `OPEN`, `mergedAt: null`, `autoMergeRequest: null`, and head
-`4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetched main remained at
-`1570bef610a0a0cee0402ecc37d3a31461b213a8`, still without
-`server/mobile.rs` or `server/ticket.rs`. Landing PR #1812 is outside this Task;
-reinspect its shared store and endpoints after it lands.
+At November 12 00:04 UTC, `gh pr view 1812` still reported `OPEN`,
+`mergedAt: null`, `autoMergeRequest: null`, and the same head below. Fetching
+`origin/main` returned the same commit, still without `server/mobile.rs` or
+`server/ticket.rs`. The dependency is unchanged; implementation cannot proceed
+within the supplied scope.
 
-At 23:24 UTC, GitHub's PR metadata still reported #1812 `open`,
-`merged: false`, `merged_at: null`, with the same head. A fresh
-`git fetch origin main` returned the same main commit; neither shared
-transport file is present there. Implementation remains dependent on LOO-718
-landing; another pass against this unchanged base cannot complete it.
+At 23:27 UTC, GitHub's PR metadata reported
+[#1812](https://github.com/loopflowstudio/loopflow/pull/1812) `open`,
+`merged: false`, `merged_at: null`, at unchanged head
+`4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. A fresh `git fetch origin main`
+returned `1570bef610a0a0cee0402ecc37d3a31461b213a8`, still without
+`server/mobile.rs` or `server/ticket.rs`. Implementation and authenticated
+acceptance remain dependent on LOO-718 landing. Landing that PR is outside this
+Task; reinspect its shared store and endpoints after it lands. Earlier status
+observations, including the 22:47 UTC `autoMergeRequest: null`, are in
+`7e498be5ca473fb1fc5d6d562648d05eeb925ece:scratch/design.md`.
 
 At that head, the ticket, remote and mobile modules are unchanged from the 22:09 UTC
 inspection of `2a23883cb399fc5d7de180a024cc8fac4e49fdbe` (then also open,
 without auto-merge). That inspection confirms `remote.rs::connection` refuses
 unadmitted peers before either WebSocket upgrade. `mobile.rs::permits_peer`
 binds admission to node/user identity; `mobile-same-device` permits the host's
-own node without changing that identity. In `ticket.rs::Tickets::redeem`, a
-foreign terminal attempt still leaves the ticket redeemable, and expiry uses
-`Instant`. Direct store tests cover only bulk purposes, including retaining a
+own node without changing that identity. Reinspection at 23:27 UTC confirms
+`ticket.rs::Tickets::redeem` still leaves a ticket redeemable after a foreign
+terminal attempt, and expiry uses `Instant`. Direct store tests cover only bulk purposes, including retaining a
 ticket after a foreign attempt and releasing abandoned reservations in the
 background. Terminal consumption must change without changing that bulk behavior.
 

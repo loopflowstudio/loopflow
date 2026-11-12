@@ -565,6 +565,125 @@ fn task_run_open_while_running(fail_open: bool) {
 }
 
 #[test]
+fn task_run_open_waits_for_foreground_runs() {
+    for mode in ["-b", "-i"] {
+        let task = GraphTask::new();
+        let lf = task.open_fixture();
+        let hold = hold_script(task.home.path(), true);
+        task.repo.create_file(
+            ".lf/graphs/foreground.yaml",
+            &format!(
+                "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
+                hold.display(),
+            ),
+        );
+        let out = task.home.path().join("foreground.out");
+        let log = fs::File::create(&out).unwrap();
+        let mut held = HeldGraph {
+            child: command(
+                task.repo.path(),
+                task.home.path(),
+                &[mode, "task", "run", "INF-123", "foreground", "--open"],
+            )
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap(),
+            release: task.home.path().join("release"),
+            caller: task.home.path().join("unused-caller"),
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !task.home.path().join("ready").exists() {
+            assert!(
+                held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(held.child.try_wait().unwrap().is_none());
+        assert!(!task.home.path().join("opened").exists());
+        fs::write(&held.release, "").unwrap();
+        let status = loop {
+            if let Some(status) = held.child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(status.success(), "{mode}: {text}");
+        assert!(text.contains(": Attached"), "{mode}: {text}");
+        assert_eq!(
+            fs::read_to_string(task.home.path().join("opened"))
+                .unwrap()
+                .trim(),
+            "opening-primary"
+        );
+        let outcomes: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(task.home.path().join("opened-graphs.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(outcomes, serde_json::json!(["succeeded"]), "{mode}");
+    }
+}
+
+#[test]
+fn task_run_open_successful_quote_launches_and_opens_nothing() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    task.ok(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+    ]);
+    let before = task.graph();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &[
+            "task", "run", "INF-123", "--rent", "quote", "--quote", "--open",
+        ],
+    )
+    .env("LF_BIN", &lf)
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("would rent") && text.contains("runs nothing"),
+        "{text}"
+    );
+    assert!(!task.home.path().join("opened").exists());
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+    assert_eq!(task.graph(), before);
+    assert!(task
+        .registered
+        .store
+        .sqlite
+        .rentals(None)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn task_run_open_leaves_failed_launches_and_reads_alone() {
     let task = GraphTask::new();
     let lf = task.open_fixture();
@@ -986,15 +1105,21 @@ impl GraphTask {
         fs::write(
             &lf,
             format!(
-                r#"#!/bin/sh
-if [ "$1 $2 $3" = 'session resume --start-if-free' ]; then
-  printf '%s\n' "$4" >> "$LF_HOME/opened"
-  [ ! -e "$LF_HOME/open-fails" ] || exit 9
-  exit 0
-fi
-exec '{}' "$@"
+                r#"#!/usr/bin/env python3
+import json, os, sqlite3, sys
+from pathlib import Path
+if sys.argv[1:4] == ['session', 'resume', '--start-if-free']:
+    home = Path(os.environ['LF_HOME'])
+    # Capture completion at attachment, not after the caller exits.
+    with sqlite3.connect(home / 'loopflow.db') as db:
+        outcomes = [row[0] for row in db.execute('SELECT p.outcome FROM processes p JOIN graph_processes g ON g.lf_process_id=p.id')]
+    (home / 'opened-graphs.json').write_text(json.dumps(outcomes))
+    with (home / 'opened').open('a') as opened:
+        opened.write(sys.argv[4] + '\n')
+    sys.exit(9 if (home / 'open-fails').exists() else 0)
+os.execv({binary}, [{binary}, *sys.argv[1:]])
 "#,
-                loopflow_test_support::lf_binary()
+                binary = serde_json::to_string(&loopflow_test_support::lf_binary()).unwrap(),
             ),
         )
         .unwrap();

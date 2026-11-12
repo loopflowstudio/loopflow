@@ -517,7 +517,6 @@ mod tests {
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
         MAX_MESSAGE, MIN_REVISION, REVISION,
     };
-    use crate::transport::Host;
     use futures_util::{SinkExt, StreamExt};
     use std::sync::Arc;
     use std::time::Duration;
@@ -802,33 +801,37 @@ mod tests {
                     node: "phone".into(),
                     user: 1,
                 };
-                let owner = crate::id::LfProcessId::new();
+                let held = crate::id::TerminalId::new();
                 let listener =
-                    tokio::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
+                    tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
                         .unwrap();
+                let entrance = tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    while stream.read_u8().await.unwrap() != b'\n' {}
+                    let answer = format!(
+                        "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
+                        crate::transport::registry::REVISION
+                    );
+                    stream.write_all(answer.as_bytes()).await.unwrap();
+                    stream
+                });
                 let attach = |ticket: String| text(&ClientMessage::Attach { ticket });
-                let ticket =
-                    tickets.issue(phone.clone(), Purpose::Terminal(Host::Owner(owner.clone())));
+                let ticket = tickets.issue(phone.clone(), Purpose::Terminal(held.clone()));
                 let mut terminal = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
                 terminal.send(attach(ticket.clone())).await.unwrap();
                 assert!(matches!(
                     receive(&mut terminal).await.unwrap(),
-                    ServerMessage::Bridged { owner_lf_process_id: Some(of), .. } if of == owner
+                    ServerMessage::Bridged { terminal_id } if terminal_id == held
                 ));
-                let _owned = listener.accept().await.unwrap();
+                let _held = entrance.await.unwrap();
                 // Replay, another node and a local ticket are refused and spent.
                 let laptop = Admission::Remote {
                     node: "laptop".into(),
                     user: 1,
                 };
-                let foreign = tickets.issue(
-                    laptop.clone(),
-                    Purpose::Terminal(Host::Owner(owner.clone())),
-                );
-                let local = tickets.issue(
-                    Admission::Local,
-                    Purpose::Terminal(Host::Owner(owner.clone())),
-                );
+                let foreign = tickets.issue(laptop.clone(), Purpose::Terminal(held.clone()));
+                let local = tickets.issue(Admission::Local, Purpose::Terminal(held.clone()));
                 for presented in [ticket, foreign.clone(), local.clone()] {
                     let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
                     refused.send(attach(presented)).await.unwrap();

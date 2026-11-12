@@ -240,10 +240,33 @@ fn spawn() -> Result<()> {
 
 const HOLDER_COMMAND: &str = r#"["lf","holder","run"]"#;
 
-/// The LfProcess a holder is recorded as. Its id comes from the holder's pid
-/// and OS start time, so every server that meets the same holder names the
-/// same row, however many terminals it holds.
+/// The LfProcess a holder is recorded as: its open row when one names the
+/// same pid and a start within the kernel's reading (Linux derives a start
+/// from `ps` elapsed time, which moves by a second between reads), else a new
+/// one. Every server that meets the same holder names the same row, however
+/// many terminals it holds.
 fn holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
+    let open = crate::journal::process_ledger()
+        .and_then(|store| store.unfinished_processes())
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|row| match row {
+            crate::process::ProcessEntry::Lf(process)
+                if process.command.as_deref() == Some(HOLDER_COMMAND)
+                    && process.pid == Some(pid)
+                    && process
+                        .os_started_at
+                        .is_some_and(|started| started.abs_diff(os_started_at) <= 3) =>
+            {
+                Some(process)
+            }
+            _ => None,
+        });
+    open.unwrap_or_else(|| new_holder_process(pid, os_started_at))
+}
+
+/// A first row for the holder `pid`, named by its pid and OS start time.
+fn new_holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
     let name = format!("holder:{pid}:{os_started_at}");
     let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, name.as_bytes());
     crate::process::LfProcess {

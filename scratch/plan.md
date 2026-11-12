@@ -69,3 +69,4 @@ dominating after the lock fix, one repository refresh per tick is the next cut.
 - planning revision triggers: `cargo test -p loopflow --lib store::sqlite::revisions::` — 9 passed; `-- store::sqlite:: linear::acceptance:: store::tests::` — 308 passed; clippy clean
 - compress (after triggers): no edits; frame `observed_at` stripping stays because rebuilds from other domains still carry restamped values; no rerun
 - gate: `documented_commands::`, `lf::tests::`, `wave_resolution_matrix::`, `local_planning::`, `binary(two_people)`, `binary(transport_tests)` (store trigger/schema)
+- qa (2026-11-12): CLI + private server walkthrough, real-store copy (migration, triggers, transition lookup, manabot routing) — all pass, no fixes; report `scratch/qa.html`. Installed log today: 118 no-initiative wave.sync at 16.6 s mean (fixed here); 101 connected-Wave failures (conflicting facts, missing Project, 5 s deadline) unchanged.

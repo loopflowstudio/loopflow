@@ -7,10 +7,10 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 03:23 UTC, GitHub's PR metadata reported #1812 open and
+At November 12 03:56 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`.
-The fetch left `origin/main` at
-`4dc15b730205b121d5e0bf482676c8a6610b2c15`, already merged into this checkout.
+`origin/main` was at `649f11db4b460fd33662d44da24ba656ea048b64`, not yet
+merged into this checkout.
 Neither contains
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.

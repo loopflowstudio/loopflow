@@ -57,6 +57,37 @@ outranks repository. `docs/config.md` precedence table says so. A person with
 only a personal list and no `default_agent` no longer follows a repository's
 fallback; nobody has said which is wanted.
 
+## Next implement direction (concept review 3, 2026-11-12)
+
+The rule is rank (source, then scope, then target), and the words say
+"specific". Run in a throwaway home with personal global `agents: [claude,
+codex]` and a repository `.lf/config.yaml` holding
+`skill.implement.default_agent: codex`:
+`lf config settings --skill implement --explain` showed `agent  claude, then
+codex` and, under `default_agent = codex · Shared project · skill implement`,
+`unused: a more specific agents list is the whole order`. The list there is
+global and the fallback is per skill; the reason sends a reader looking for a
+skill-level list that does not exist.
+
+1. The reason reads `unused: a higher agents list is the whole order`, the
+   word the neighbouring `overridden by a higher declaration` uses.
+2. `docs/config.md` says the same in both places: in "Keep going when a
+   provider runs out" ("A wider `default_agent` does not lead a narrower
+   list … at least as specifically") and in the precedence paragraph
+   ("declared more specifically"). State it by rank, and give the repository
+   case one sentence beside the skill one: a repository `default_agent` does
+   not lead a personal list.
+3. Comments and the test in `config/settings.rs` follow the wording.
+
+Done looks like: that repro prints the new reason; the focused config tests
+pass. No behaviour changes.
+
+Also run, unchanged and as designed: the incident's config (global
+`default_agent: claude`, `skill.compress.default_agent: codex`, no `agents`)
+still shows compress as `codex` alone; after `lf set --global agents
+claude,codex` it shows `codex, then claude`, and everything else `claude,
+then codex`.
+
 ## Settled without a new answer
 
 - `-a` is not checked against `agents`: the Task says "An explicit one-off

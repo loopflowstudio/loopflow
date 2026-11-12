@@ -214,12 +214,7 @@ def cmd_test() -> int:
 
 
 def _normalize_ghostty_library(framework: Path) -> None:
-    """Give SwiftPM the static-library basename it requires, without debug info.
-
-    Ghostty strips its own Zig code in ReleaseFast; its C++ dependencies (glslang,
-    SPIRV-Cross) keep DWARF, about 80% of each slice. Apps never ship it: the linker
-    leaves DWARF out of the executable.
-    """
+    """Give SwiftPM the static-library basename it requires."""
     manifest = framework / "Info.plist"
     info = plistlib.loads(manifest.read_bytes())
     for library in info["AvailableLibraries"]:
@@ -228,10 +223,19 @@ def _normalize_ghostty_library(framework: Path) -> None:
         name = "libghostty.a"
         if original != name:
             (directory / original).rename(directory / name)
-        subprocess.run(["xcrun", "strip", "-S", str(directory / name)], check=True)
         library["LibraryPath"] = name
         library["BinaryPath"] = name
     manifest.write_bytes(plistlib.dumps(info))
+
+
+def _strip_ghostty_debug_info(framework: Path) -> None:
+    """Ghostty strips its own Zig code in ReleaseFast; its C++ dependencies (glslang,
+    SPIRV-Cross) keep DWARF, about 80% of each slice. Apps never ship it: the linker
+    leaves DWARF out of the executable.
+    """
+    for library in plistlib.loads((framework / "Info.plist").read_bytes())["AvailableLibraries"]:
+        path = framework / library["LibraryIdentifier"] / library["LibraryPath"]
+        subprocess.run(["xcrun", "strip", "-S", str(path)], check=True)
 
 
 def cmd_ghostty_build() -> int:
@@ -295,6 +299,7 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     _normalize_ghostty_library(local_framework)
+    _strip_ghostty_debug_info(local_framework)
     run(
         [
             sys.executable,

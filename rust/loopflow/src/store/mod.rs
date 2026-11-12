@@ -100,8 +100,6 @@ pub enum StoreError {
     Stale(String),
     #[error("invalid data: {0}")]
     InvalidData(String),
-    #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
-    ProviderObservationConflict { entity: &'static str, id: String },
     #[error("competing planning {effect} receipts")]
     PlanningReceiptConflict { effect: &'static str },
     #[error("Project {project_id} membership changed without relationship ordering evidence")]

@@ -180,7 +180,7 @@ pub(crate) async fn refresh_task_input(
         return Err(crate::ops::OpsError::Message(
             read.refresh_error.unwrap_or_else(|| {
                 format!(
-                    "Task {selector:?} planning is {:?}; refresh planning",
+                    "Task {selector:?} planning is {:?}; run `lf task sync {selector}`",
                     read.observation.state
                 )
             }),

@@ -654,13 +654,30 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                     .title,
                 confirmed.item.name
             );
-            let mut conflicting = confirmed.clone();
-            conflicting.item.name = "Contradiction at the same revision".into();
-            assert!(fixture
+            // Linear can change a field without moving `updatedAt`: at one
+            // revision an older read is ignored and a later read wins.
+            let mut stale = confirmed.clone();
+            stale.item.name = "Older read at the same revision".into();
+            stale.observed_at -= 1;
+            fixture
                 .store
-                .seed_issue(&scope, "linear", conflicting, None, None)
+                .seed_issue(&scope, "linear", stale, None, None)
                 .await
-                .is_err());
+                .unwrap();
+            assert_eq!(
+                refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
+                    .await
+                    .unwrap(),
+                confirmed
+            );
+            confirmed.item.name = "Edited without a new revision".into();
+            confirmed.item.description = "Description Linear rewrote".into();
+            confirmed.observed_at += 1;
+            fixture
+                .store
+                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .await
+                .unwrap();
             assert_eq!(
                 refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
                     .await
@@ -996,7 +1013,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("omitted"));
+                .contains("missing from its Initiative"));
             assert_eq!(
                 fixture
                     .store

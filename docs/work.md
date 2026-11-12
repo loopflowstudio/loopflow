@@ -446,6 +446,16 @@ it with its saved ID when absent; between syncs, every `lf` command looks for an
 uncertain creation once per window. `--retry-updates` retries saved field
 changes after reading the tracker again. `lf wave sync` refreshes from Linear first.
 
+```bash
+lf task sync LOO-403 --retry-updates
+```
+
+Linear can change an issue without moving its `updatedAt` (it re-renders
+branch names, for one). When its copy disagrees with lf's saved copy at the same
+`updatedAt`, the sync keeps what it just read and carries on; your saved local
+edits stay queued. When an error has a fix, it names the command:
+`lf task sync <issue>` for a Task, `lf wave sync` for a Project.
+
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 
 Next: [Sessions](sessions.md), every conversation those Tasks ran.

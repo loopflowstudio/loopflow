@@ -10,10 +10,10 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
-use crate::holder::client::Client;
-use crate::holder::wire::{self, Decoder, Exit, Frame, Request};
-use crate::holder::Place;
 use crate::id::TerminalId;
+use crate::server::holder::client::Client;
+use crate::server::holder::wire::{self, Decoder, Exit, Frame, Request};
+use crate::server::holder::Place;
 
 use super::hosted::Chunk;
 use super::input::PendingInput;
@@ -249,7 +249,7 @@ impl Source {
 
     fn settle_without_holder(&mut self) {
         self.ended = Some(
-            match crate::holder::recorded_exit(&self.place, self.terminal.as_str()) {
+            match crate::server::holder::recorded_exit(&self.place, self.terminal.as_str()) {
                 Ok(Some(exit)) => Ended::Exited(exit),
                 Ok(None) => Ended::Unknown,
                 Err(error) => {

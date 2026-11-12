@@ -1360,7 +1360,7 @@ fn main() -> std::process::ExitCode {
     // The holder outlives servers and installs. It records no Process itself
     // and opens no store, so it runs before any of that is set up.
     if std::env::args().skip(1).eq(["holder", "run"]) {
-        return match loopflow::holder::run() {
+        return match loopflow::server::holder::run() {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("lf holder: {error:#}");

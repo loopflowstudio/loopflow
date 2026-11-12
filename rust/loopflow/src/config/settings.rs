@@ -1,5 +1,5 @@
 //! Typed preferences, preserving source authority until an invocation is selected.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -631,7 +631,15 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     let Some(warning) = old_default_agent_warning(&list) else {
         return;
     };
-    super::reader::warn(std::path::Path::new(locator), None, &warning);
+    // One read resolves a file several times; say it once per file.
+    static WARNED: std::sync::Mutex<BTreeSet<String>> = std::sync::Mutex::new(BTreeSet::new());
+    if WARNED
+        .lock()
+        .expect("warned files lock")
+        .insert(locator.to_owned())
+    {
+        super::reader::warn(std::path::Path::new(locator), None, &warning);
+    }
     let entries: Vec<Value> = super::agent_list(&list).map(Value::from).collect();
     values.insert("default_agent".into(), entries[0].clone());
     if !values.contains_key("agents") {
@@ -886,12 +894,15 @@ pub fn resolve_layers(
             }
         }
     }
-    // The sole installed harness stands in only when nothing was authored.
-    let authored_default = explanations
-        .get("default_agent")
-        .and_then(|setting| setting.candidates.last())
-        .is_some_and(|candidate| candidate.source != ConfigSource::Builtin);
-    if !authored_default && !config.agents.is_empty() {
+    // `default_agent` leads only a list declared no more specifically than
+    // it: a narrower `agents` is the whole order. The sole installed harness
+    // ranks below every authored list.
+    let rank = |key: &str| {
+        let winner = explanations.get(key)?.candidates.last()?;
+        Some((winner.source, winner.scope, winner.target.clone()))
+    };
+    let outranked = !config.agents.is_empty() && rank("default_agent") < rank("agents");
+    if outranked {
         config.default_agent = None;
     }
     // Config keeps the three authored keys distinct. Inspection's effective
@@ -947,14 +958,16 @@ pub fn resolve_layers(
                     "contributes"
                 }
             } else if key == "agent" && Some(index) == list {
-                // The list in force; the last candidate of all when it alone selects.
+                // The list in force; it selects when no default_agent leads it.
                 if config.agent.is_some() {
                     "unused: an agent choice pins one provider"
-                } else if index == last {
+                } else if config.default_agent.is_none() {
                     "selected"
                 } else {
                     "contributes"
                 }
+            } else if key == "agent" && candidate.key == "default_agent" && outranked {
+                "unused: a more specific agents list is the whole order"
             } else if index == last && !setting.value.is_null() {
                 "selected"
             } else if key == "agent" && candidate.key == "default_agent" && config.agent.is_some() {
@@ -1168,7 +1181,60 @@ mod tests {
             SettingScope::Wave,
             "agents: [claude]",
         );
-        assert_eq!(order(&[personal.clone(), wave], None), ["claude"]);
+        assert_eq!(order(&[personal.clone(), wave.clone()], None), ["claude"]);
+        // A default_agent leads only a list no more specific than it.
+        let fallback = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: [claude, codex]\ndefault_agent: claude\nskills: {review: {agents: [codex]}, compress: {default_agent: codex}}",
+        );
+        assert_eq!(
+            order(std::slice::from_ref(&fallback), None),
+            ["claude", "codex"]
+        );
+        assert_eq!(
+            order(
+                std::slice::from_ref(&fallback),
+                Some(&Skill::named("compress"))
+            ),
+            ["codex", "claude"]
+        );
+        let review = Skill::named("review");
+        let narrowed = resolve_layers(std::slice::from_ref(&fallback), Some(&review)).unwrap();
+        assert_eq!(narrowed.config.agent_order(), ["codex"]);
+        assert_eq!(narrowed.settings["agent"].value.as_str(), Some("codex"));
+        let reasons = |resolved: &super::ResolvedSettings| -> Vec<(String, String)> {
+            resolved.settings["agent"]
+                .candidates
+                .iter()
+                .map(|candidate| (candidate.key.clone(), candidate.reason.clone()))
+                .collect()
+        };
+        assert!(reasons(&narrowed).contains(&(
+            "default_agent".into(),
+            "unused: a more specific agents list is the whole order".into()
+        )));
+        assert!(reasons(&narrowed).contains(&("agents".into(), "selected".into())));
+        assert_eq!(
+            order(
+                &[
+                    layer(
+                        ConfigSource::Personal,
+                        SettingScope::Global,
+                        "default_agent: claude"
+                    ),
+                    wave
+                ],
+                None
+            ),
+            ["claude"]
+        );
+        let codex_wave = layer(
+            ConfigSource::Personal,
+            SettingScope::Wave,
+            "agents: [codex]",
+        );
+        assert_eq!(order(&[fallback, codex_wave], None), ["codex"]);
         let pinned = layer(
             ConfigSource::Repository,
             SettingScope::Repository,

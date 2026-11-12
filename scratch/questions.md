@@ -34,37 +34,28 @@ then claude` with no warning; `lf set --global default_agent claude,codex`
 printed `warning: …/config.yaml: default_agent: claude,codex is the old
 spelling; write agents: [claude, codex] and default_agent: claude`.
 
-## Next implement direction (concept review 2, 2026-11-12)
+## Built: a narrower list is the whole order (2026-11-12)
 
-A narrower `agents` does not narrow when a wider `default_agent` exists. Run in
-a throwaway home with `default_agent: claude` (global) and
-`lf set --global skill.implement.agents codex`:
+Concept review 2 ran global `default_agent: claude` with
+`lf set --global skill.implement.agents codex` and saw `agent  claude, then
+codex`. Now `default_agent` leads only when its winning declaration ranks at
+least as high as the winning `agents` by (source, scope, target); otherwise
+the list is the whole order and `--explain` marks the `default_agent`
+"unused: a more specific agents list is the whole order". The same comparison
+drops the sole installed harness under any authored list.
 
-    agent    claude, then codex  Personal global · skill implement + Personal global
+Run in a throwaway home with that config:
+`lf config settings --skill implement --explain` showed `agent  codex
+Personal global · skill implement`, the unused line for `default_agent =
+claude`, and `selected` for `agents = ["codex"]`; plain `lf config settings`
+showed `agent  claude`. `default_agent: claude,codex` warned once (it printed
+twice before; the warning is now once per file per process).
 
-Implement starts on Claude. `docs/config.md` says of the same shape
-(`lf set --global skill.review.agents codex`) "review: Codex only, everywhere",
-and of `lf --wave frontend set agents claude` "this Wave: Claude only". Both
-are false for the config in the Task's incident, which has a global
-`default_agent: claude`. The Task asks for a list "set globally and narrowed or
-reordered per repository, Wave or skill".
-
-Build (default for open choice 4):
-
-- `default_agent` leads the order only when it is declared at least as
-  specifically as the `agents` in force, by the source, scope and target
-  ordering both keys already use. A more specific `agents` is the whole order.
-  Same level keeps "d,a,b,c"; `skill.compress.default_agent: codex` over a
-  global list keeps "Codex, then Claude".
-- `--explain` marks the outranked `default_agent` candidate with why, as it
-  does for a list under an `agent` choice.
-- `docs/config.md`: one row in the "Keep going" table and one in the
-  precedence table for global `default_agent: claude` plus
-  `skill.review.agents: [codex]` → Codex only.
-- Test in `agents_orders_what_a_fallback_moves_through`: that shape, and the
-  Wave-scoped list under a global `default_agent`.
-- The old-spelling warning printed twice for one `lf config settings` read of
-  `default_agent: claude,codex`; print it once per file.
+Consequence of ranking by source first: a repository `default_agent` (general
+or per skill) no longer leads a personal `agents` list, since personal
+outranks repository. `docs/config.md` precedence table says so. A person with
+only a personal list and no `default_agent` no longer follows a repository's
+fallback; nobody has said which is wanted.
 
 ## Settled without a new answer
 
@@ -103,17 +94,14 @@ Each has a default built; none stops the work.
 4. Does a wider `default_agent` lead a narrower `agents`? Said so far: "Only
    for the scope at which the default_agent works" and "agents: [a,b,c] /
    default_agent: d / then the real order is d,a,b,c", both about one level.
-   Nobody has said what a global `default_agent: claude` does to
-   `skill.review.agents: [codex]`. Default to build: the narrower list is the
-   whole order, because the Task says "narrowed". The alternative keeps
-   today's run (Claude, then Codex) and makes `agent` the only way to get
-   "Codex only"; then the docs' two "only" comments go. It matters because it
-   decides whether `agents` can take a provider away from a skill or Wave, or
-   only add ones behind the default.
+   Built: the narrower list is the whole order, because the Task says
+   "narrowed". The alternative keeps Claude, then Codex and makes `agent` the
+   only way to get "Codex only". Undecided inside the built rule: whether a
+   repository `default_agent` should lead a personal list (built: it does not).
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass (after compress).
+- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass (after the narrowing rule).
 - Compress: `_split_agent_list` now keys off `old_default_agent_warning`; a
   `default_agent: ','` with no entries is left as written instead of dropped.
 - `cargo test -p loopflow --test integration documented_commands::`: pass.

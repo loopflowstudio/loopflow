@@ -73,6 +73,7 @@ lf task status MTG-328
 | `agents: [claude, codex]` | Claude, then Codex | Claude, then Codex |
 | plus `skill.compress.default_agent: codex` | Codex, then Claude | Claude, then Codex |
 | plus `skill.compress.agent: codex` | Codex only | Claude, then Codex |
+| `default_agent: claude` plus `skill.compress.agents: [codex]` | Codex only | Claude only |
 | `lf -a codex graph code` | Codex only | Codex only |
 
 An `agent` choice or `-a` pins one provider: the step changes login, never
@@ -88,6 +89,11 @@ lf set agents codex,claude                   # this repository: Codex first
 lf --wave frontend set agents claude         # this Wave: Claude only
 lf set --global skill.review.agents codex    # review: Codex only, everywhere
 ```
+
+A wider `default_agent` does not lead a narrower list: with a global
+`default_agent: claude`, review above still runs Codex only. `default_agent`
+leads when it is declared at least as specifically as the list, as
+`skill.compress.default_agent` is over a global `agents`.
 
 A `default_agent` the list lacks is added in front, for the scope it applies
 to and nowhere else:
@@ -407,7 +413,9 @@ Agent selection first separates **choices** from **fallbacks**: every applicable
 `agent` beats every `default_agent`. Apply source, scope and target ordering within
 each class. A command-line `default_agent` is still a fallback. `agents` then
 supplies what a fallback may move to: the applicable list, with the winning
-`default_agent` first.
+`default_agent` first. A list declared more specifically than that
+`default_agent`, by the same source, scope and target ordering, is the whole
+order, and `--explain` marks the `default_agent` unused.
 
 | Declarations | Selected agent |
 | --- | --- |
@@ -416,7 +424,9 @@ supplies what a fallback may move to: the applicable list, with the winning
 | Personal implement `default_agent: codex`; repository general `agent: claude` | Claude |
 | Explicit `-a codex`; repository occurrence `agent: claude` | Codex |
 | Personal `agents: [claude, codex]`; nothing else | Claude, then Codex |
-| Personal `agents: [claude, codex]`; repository implement `default_agent: codex` | Codex, then Claude |
+| Personal `agents: [claude, codex]`; personal implement `default_agent: codex` | Codex, then Claude |
+| Personal `agents: [claude, codex]`; repository implement `default_agent: codex` | Claude, then Codex |
+| Personal global `default_agent: claude`; personal review `agents: [codex]` | Codex |
 | Personal `agents: [claude, codex]`; repository `agents: [codex]` | Claude, then Codex |
 
 Lists and compound settings follow their declared merge rules. `context.docs`,

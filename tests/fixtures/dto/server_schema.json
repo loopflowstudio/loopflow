@@ -1113,7 +1113,7 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/$defs/Status"
+          "$ref": "#/$defs/Status2"
         }
       },
       "required": [
@@ -2074,6 +2074,26 @@
         "command_line"
       ],
       "type": "string"
+    },
+    "Configuration": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/TailscaleIdentity",
+          "description": "The Machine owner's identity: their other devices are admitted."
+        }
+      },
+      "required": [
+        "enabled",
+        "endpoint",
+        "owner"
+      ],
+      "type": "object"
     },
     "ConnectedClient": {
       "additionalProperties": false,
@@ -7488,7 +7508,44 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf desktop view list --all [--expression <expression>]`: one selection\nacross the portfolio repositories, as the phone lists open Tasks.",
+          "properties": {
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "view.select",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "$ref": "#/$defs/ViewPlan"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf --cwd <directory> session list`, with `--headless`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
+          "examples": [
+            {
+              "after": null,
+              "directory": "/repo",
+              "headless": false,
+              "kind": "session.list",
+              "limit": 100,
+              "task": "task_00000000000000000000000000000001"
+            }
+          ],
           "properties": {
             "after": {
               "type": [
@@ -7513,6 +7570,13 @@
                 "integer",
                 "null"
               ]
+            },
+            "task": {
+              "description": "Only the Sessions of this Task, as `--task <task>` filters them.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -7520,7 +7584,8 @@
             "directory",
             "headless",
             "after",
-            "limit"
+            "limit",
+            "task"
           ],
           "type": "object",
           "x-result": {
@@ -9994,6 +10059,48 @@
         },
         {
           "additionalProperties": false,
+          "description": "The answer for `id` is `bytes` long, more than `limits.max_message`:\na ticketed connection delivers it as one message.",
+          "properties": {
+            "bytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ticket": {
+              "type": "string"
+            },
+            "type": {
+              "const": "bulk",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ticket",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticketed connection's answer; what follows is what the ticket names.",
+          "properties": {
+            "type": {
+              "const": "admitted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Connection-local ordering; never a replay or reading checkpoint.",
           "properties": {
             "event": {
@@ -10248,6 +10355,196 @@
         },
         {
           "additionalProperties": false,
+          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send.",
+          "examples": [
+            {
+              "cols": 60,
+              "kind": "session.continue",
+              "request": "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
+              "rows": 40,
+              "session": "session_5e55105e000040008000000000000001"
+            }
+          ],
+          "properties": {
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "session.continue",
+              "type": "string"
+            },
+            "request": {
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "session": {
+              "$ref": "#/$defs/LfSessionId"
+            }
+          },
+          "required": [
+            "kind",
+            "session",
+            "request",
+            "rows",
+            "cols"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Mobile access readiness; same-user local socket only.",
+          "examples": [
+            {
+              "kind": "mobile.status"
+            }
+          ],
+          "properties": {
+            "kind": {
+              "const": "mobile.status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Status"
+          },
+          "x-result-example": {
+            "configuration": {
+              "enabled": true,
+              "endpoint": "https://host.tail.ts.net:8443",
+              "owner": {
+                "node": "node-host",
+                "user": 1
+              }
+            },
+            "error": "Sign in to Tailscale on this Machine",
+            "ready": false
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Turn mobile access on with `configuration`, or off with null; same-user\nlocal socket only. Answers `{configuration}`.",
+          "examples": [
+            {
+              "configuration": {
+                "enabled": true,
+                "endpoint": "https://host.tail.ts.net:8443",
+                "owner": {
+                  "node": "node-host",
+                  "user": 1
+                }
+              },
+              "kind": "mobile.configure"
+            }
+          ],
+          "properties": {
+            "configuration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Configuration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "mobile.configure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "configuration"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "properties": {
+              "configuration": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Configuration"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "configuration"
+            ],
+            "type": "object"
+          },
+          "x-result-example": {
+            "configuration": {
+              "enabled": true,
+              "endpoint": "https://host.tail.ts.net:8443",
+              "owner": {
+                "node": "node-host",
+                "user": 1
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticket for a connection that carries one request of `bytes` bytes,\nlarger than `limits.max_message`; answers `{ticket}`. The uploaded\nrequest is answered here under its own id.",
+          "examples": [
+            {
+              "bytes": 2097152,
+              "kind": "request.upload"
+            }
+          ],
+          "properties": {
+            "bytes": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "request.upload",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bytes"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "properties": {
+              "ticket": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ticket"
+            ],
+            "type": "object"
+          },
+          "x-result-example": {
+            "ticket": "f06b5872-b113-47e5-be82-4320e33d7a3d"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "A provider hook at a turn or tool boundary. The server records what the\nboundary says (the native turn, the acknowledged input, `gap`) and\nanswers the Session's pending steers. At `stop` it answers first, then\nrefreshes planning and applies a pending Session move.",
           "examples": [
             {
@@ -10416,7 +10713,7 @@
           "description": "The held terminal the bridge reaches; null for an owner."
         },
         "ticket": {
-          "description": "16 random bytes as 22 base64url characters; single use.",
+          "description": "Opaque random ticket; single use.",
           "type": "string"
         }
       },
@@ -11747,6 +12044,35 @@
       "type": "string"
     },
     "Status": {
+      "properties": {
+        "configuration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Configuration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration",
+        "ready",
+        "error"
+      ],
+      "type": "object"
+    },
+    "Status2": {
       "enum": [
         "ok",
         "warn",
@@ -12270,6 +12596,26 @@
         "merge_target"
       ],
       "type": "string"
+    },
+    "TailscaleIdentity": {
+      "description": "A device's Tailscale identity, as `tailscale status` and `whois` report it.",
+      "properties": {
+        "node": {
+          "description": "The device's Tailscale StableID.",
+          "type": "string"
+        },
+        "user": {
+          "description": "The Tailscale user ID that owns the device.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "user"
+      ],
+      "type": "object"
     },
     "Task": {
       "properties": {
@@ -15104,6 +15450,13 @@
             }
           ]
         },
+        "identifier": {
+          "description": "A Task's short name, as people say it: `LOO-809`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "location": {
           "anyOf": [
             {
@@ -15153,6 +15506,7 @@
         "work",
         "title",
         "states",
+        "identifier",
         "primary_session",
         "location",
         "argv",
@@ -15212,6 +15566,10 @@
         "repo": {
           "type": "string"
         },
+        "repo_path": {
+          "description": "The repository's canonical path on this Machine; its last component is\nthe name people see.",
+          "type": "string"
+        },
         "resolution": {
           "$ref": "#/$defs/SelectionResolution"
         },
@@ -15235,6 +15593,7 @@
         "pinned",
         "dashboard_id",
         "repo",
+        "repo_path",
         "selection",
         "saved_revision",
         "resolution",
@@ -16228,6 +16587,17 @@
               "run": false,
               "session": "session_5e55105e000040008000000000000001",
               "title": "Keep the conversation",
+              "wave": null
+            },
+            {
+              "directory": "/repo",
+              "graph": null,
+              "kind": "task.create",
+              "request": "Fix the retry test",
+              "request_id": "00000000-0000-4000-8000-000000000001",
+              "run": true,
+              "session": null,
+              "title": null,
               "wave": null
             }
           ],

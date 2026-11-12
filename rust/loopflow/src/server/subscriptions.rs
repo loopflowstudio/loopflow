@@ -11,7 +11,7 @@ use tokio::task::AbortHandle;
 
 use super::outbox::{Materializing, Outbox, Retained};
 use super::service::{deliver, lock, reading_checkpoint, unavailable};
-use super::wire::{ServerMessage, SubscriptionEvent, MAX_MESSAGE};
+use super::wire::{ServerMessage, SubscriptionEvent, MAX_BULK};
 use crate::engine::Error;
 use crate::lf::commands::{read::Read, subscribe::Subscription};
 
@@ -508,7 +508,7 @@ impl Producer {
             for event in &update.events {
                 bytes += serde_json::to_vec(event)?.len() + 1024;
                 anyhow::ensure!(
-                    bytes <= MAX_MESSAGE,
+                    bytes <= MAX_BULK,
                     "subscription event batch exceeds retained bytes; subscribe again for current state"
                 );
             }
@@ -657,6 +657,7 @@ mod tests {
 
     fn sessions() -> Read {
         Read::SessionList {
+            task: None,
             directory: "/".into(),
             headless: true,
             after: None,
@@ -1130,6 +1131,7 @@ mod tests {
                     &registry,
                     "two",
                     Read::SessionList {
+                        task: None,
                         directory: "/".into(),
                         headless: false,
                         after: None,

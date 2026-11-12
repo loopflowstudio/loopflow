@@ -67,7 +67,7 @@ DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
 GHOSTTY_VT_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos",
@@ -228,6 +228,16 @@ def _normalize_ghostty_library(framework: Path) -> None:
     manifest.write_bytes(plistlib.dumps(info))
 
 
+def _strip_ghostty_debug_info(framework: Path) -> None:
+    """Ghostty strips its own Zig code in ReleaseFast; its C++ dependencies (glslang,
+    SPIRV-Cross) keep DWARF, about 80% of each slice. Apps never ship it: the linker
+    leaves DWARF out of the executable.
+    """
+    for library in plistlib.loads((framework / "Info.plist").read_bytes())["AvailableLibraries"]:
+        path = framework / library["LibraryIdentifier"] / library["LibraryPath"]
+        subprocess.run(["xcrun", "strip", "-S", str(path)], check=True)
+
+
 def cmd_ghostty_build() -> int:
     """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
     build_root = SWIFT_DIR / ".build" / "ghostty-kit"
@@ -255,6 +265,7 @@ def cmd_ghostty_build() -> int:
             "-Dtest-filter=terminal contrast",
             "-Dtest-filter=terminal feedback",
             "-Dtest-filter=renderer.cell",
+            "-Dtest-filter=external io",
         ],
         cwd=source,
         check=False,
@@ -270,7 +281,7 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     result = run(
-        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false"],
+        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false", "-Di18n=false"],
         cwd=source,
         check=False,
     )
@@ -288,14 +299,15 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     _normalize_ghostty_library(local_framework)
+    _strip_ghostty_debug_info(local_framework)
     run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts/third_party.py"),
             "package",
             str(local_framework),
-            "--framework",
-            str(local_framework),
+            "--scope",
+            "GhosttyKit",
         ]
     )
 

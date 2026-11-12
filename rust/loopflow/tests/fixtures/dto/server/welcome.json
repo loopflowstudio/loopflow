@@ -15,7 +15,7 @@
     "observed_at": "2026-11-05T12:00:00Z"
   },
   "limits": {
-    "max_message": 33554432,
+    "max_message": 1048576,
     "max_connections": 64,
     "max_open": 256,
     "max_retained_bytes": 67108864

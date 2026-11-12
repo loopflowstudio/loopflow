@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Loopflow
+@testable import LoopflowMac
 
 @Suite("Loopflow state")
 struct LoopflowStateTests {

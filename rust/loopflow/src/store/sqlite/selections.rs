@@ -94,8 +94,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = super::children::tasks_in(conn, None)?;
-    tasks.retain(|task| &task.repository_id == repository);
+    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -281,6 +280,7 @@ fn plan_in(
             work: key.clone(),
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+            identifier: None,
             primary_session: None,
             location: None,
             argv: None,
@@ -293,6 +293,7 @@ fn plan_in(
         } else if key.kind == WorkWorkspaceKind::Task {
             let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
+            content.identifier = Some(task.identifier);
             content.title = task.title;
             let primary = super::sessions::primary_session_in(
                 conn,
@@ -358,11 +359,20 @@ fn plan_in(
     } else {
         SlotLayout::golden()
     };
+    let repo_path = conn
+        .query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [repository.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
     Ok(ViewPlan {
         name: saved.and_then(|saved| saved.name.clone()),
         pinned: saved.is_some_and(|saved| saved.pinned),
         dashboard_id: saved.map(|saved| saved.id.clone()),
         repository: repository.to_string(),
+        repo_path,
         selection,
         saved_revision: saved.map(|saved| saved.revision),
         resolution,
@@ -373,6 +383,26 @@ fn plan_in(
             .unwrap_or(default_slots),
         contents,
     })
+}
+
+fn plan_selection_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    selection: Selection,
+) -> StoreResult<crate::work::selection::ViewPlan> {
+    let catalog = catalog_in(conn, repository)?;
+    let work = work_in(conn, repository)?;
+    let saved = selection
+        .referenced_query()
+        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
+    plan_in(
+        conn,
+        repository,
+        saved.map_or(selection, |saved| saved.selection.clone()),
+        saved,
+        &definitions(&catalog),
+        &work,
+    )
 }
 
 impl SqliteStore {
@@ -396,19 +426,45 @@ impl SqliteStore {
     ) -> StoreResult<crate::work::selection::ViewPlan> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let catalog = catalog_in(&snapshot, repository)?;
-        let work = work_in(&snapshot, repository)?;
-        let saved = selection
-            .referenced_query()
-            .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-        plan_in(
-            &snapshot,
-            repository,
-            saved.map_or(selection, |saved| saved.selection.clone()),
-            saved,
-            &definitions(&catalog),
-            &work,
-        )
+        plan_selection_in(&snapshot, repository, selection)
+    }
+
+    /// One consistent reading of the same selection across `repos` (canonical
+    /// repository paths); a repository with no recorded Work identity has no
+    /// plan, and neither does one that holds none of the Waves it scopes to.
+    pub fn all_view_plans(
+        &self,
+        source: Option<&str>,
+        repos: &[String],
+    ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
+        let selection = match source {
+            Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
+            None => repository_default(),
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let waves = selection.waves();
+        let mut plans = Vec::new();
+        for repo in repos {
+            if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                if !waves.is_empty()
+                    && !work_in(&snapshot, &repository)?.iter().any(|item| {
+                        item.key.kind == WorkWorkspaceKind::Wave
+                            && waves.iter().any(|wave| {
+                                item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
+                            })
+                    })
+                {
+                    continue;
+                }
+                plans.push(plan_selection_in(
+                    &snapshot,
+                    &repository,
+                    selection.clone(),
+                )?);
+            }
+        }
+        Ok(plans)
     }
 
     /// The observer and one-shot plans expose the same repository/default and saved views.
@@ -1006,6 +1062,39 @@ mod tests {
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [three, two, one]
         );
+    }
+
+    #[test]
+    fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
+        let (_dir, store, _repo) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_22222222222222222222222222222222','/other',1)",
+                [],
+            )
+            .unwrap();
+        let repos = ["/repo".to_string(), "/other".to_string()];
+        let all = store
+            .all_view_plans(Some("kind:task state:working"), &repos)
+            .unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|plan| plan.repo_path.as_str())
+                .collect::<Vec<_>>(),
+            ["/repo", "/other"]
+        );
+        let scoped = store
+            .all_view_plans(
+                Some("wave:11111111-1111-1111-1111-111111111111 kind:task state:working"),
+                &repos,
+            )
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].repo_path, "/repo");
+        assert!(scoped[0].resolution.unavailable.is_empty());
     }
 
     #[test]

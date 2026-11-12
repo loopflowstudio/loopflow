@@ -1,64 +1,34 @@
 # LOO-809: remote attach tickets
 
-Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract).
-This checkout documents the planned contract; implementation and authenticated
-acceptance await LOO-718.
-The listener, mobile settings and bulk protocol are outside this Task.
+Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
+on the shared transport. The listener, mobile settings and bulk protocol are
+outside this Task.
 
 ## Transport dependency
 
-At November 12 15:30 UTC, GitHub's PR metadata reported #1812 open and
-unmerged, at head `14044268c29d003add3899ced792183bfb2ae798`, which does not
-contain `origin/main` `602d4f7b29`; this checkout has merged `602d4f7b29` (#1895), whose holder split leaves the remote attach contract unchanged.
-Since `28e2321c`, `ticket.rs` changed only `Purpose::Terminal(LfProcessId)` to
-`Purpose::Terminal(transport::Host)` (owner or held terminal). `origin/main` does not contain
-`server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
-Reinspect when the shared transport lands; landing its PR is outside this Task.
-
-Inspection of #1812 found
-`remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
-`mobile.rs::permits_peer` binds admission to node/user identity;
-`mobile-same-device` permits the host's own node without changing that identity.
-`ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
-attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
-foreign attempts and background release of abandoned reservations.
-
-The November 12 15:30 UTC `lf task status LOO-718 --json` read reported
-`active`: "required checks have not passed for the requested merge".
-Earlier observations and history references are in
-`23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
-Desktop QA remains deferred in `questions.md`.
+#1812 (LOO-718's transport) merged November 12 15:54 UTC; this branch merged
+`origin/main` `3f3153d95c`, which contains `server/{mobile,remote,ticket}.rs`.
 
 ## Delete — do not maintain
 
-Keep the transport's replacement of `server/service.rs::{Ticket, Tickets}`
-with `server/ticket.rs`; do not extend the UID-only predecessor. Restore the
-deleted `a_ticket_opens_one_bridge_for_its_user_within_its_lifetime` coverage
-on the shared store. Retain bulk cases, service-level bridge tests and wire fixtures.
+`server/service.rs::{Ticket, Tickets}` is gone on main, replaced by
+`server/ticket.rs`; nothing of the UID-only store remains. Local admission is
+`Admission::Local` (peer UID matched the server's); no per-ticket UID field.
 
-The transport represents local admission as `Admission::Local` after checking
-the socket peer UID against the server's effective UID. Keep that admission
-model; local/remote separation does not require a second per-ticket UID field.
+## Status
 
-## Remaining implementation and acceptance
+Implemented Nov 12:
 
-Restore terminal consume-on-attempt without changing authentication policy:
+- `ticket.rs`: `SystemTime` expiry; any attempt spends a terminal ticket; bulk
+  tickets survive another device's attempt. `issue_at`/`redeem_at` take `now`.
+- Store tests: one bridge per ticket, foreign node/user/local↔remote spend,
+  60 s with a sleep-sized clock jump, sweep, bulk foreign attempt, abandoned
+  download release.
+- Remote `/v1/ticket`: bridges one owner, refuses and spends replay, another
+  node and a local ticket; unadmitted peers refused before upgrade on both paths.
+- Local service: replay and a phone's ticket refused and spent.
+- README contract and `docs/server.md` phone access no longer marked planned.
 
-| Boundary | Acceptance |
-|---|---|
-| Shared ticket store | Matching node/user succeeds once; replay fails. Different node, different user and both directions of local/remote mismatch consume the ticket. |
-| Authenticated control and bridge | Issue a ticket, open one bridge, refuse replay. An admitted different node or local/remote mismatch consumes the ticket. |
-| Both WebSocket endpoints | Reject another Tailscale user before upgrade. That connection cannot present a ticket; different-user redemption is tested at the store. |
-
-Replace ticket timing with `SystemTime`; test expiry at 60 seconds with a clock
-advance representing host sleep, expired-ticket sweeping, and unchanged bulk
-redemption behavior, including release of abandoned bulk reservations without
-another request. Leave unrelated throttles on `Instant` and retain watch resumption.
-
-Keep redemption, retry and recovery rules in their shared sections: failed
-redemption consumes local and remote terminal tickets, and either bridge can
-lose its acknowledgement. Bulk tickets retain their existing foreign-attempt behavior.
-The remote contract adds only transport differences. Keep it and
-[phone access](../docs/server.md#phone-access) marked planned until integration.
-
-`git diff --check` and README anchor check — passed Nov 12 after compress folded the spend-on-attempt rule into the ticket paragraph (prose only; no build or test run).
+Checks Nov 12: `cargo test -p loopflow --lib` (server::ticket::, server::remote::tests::,
+two service ticket tests) 13 passed; `documented_commands::` passed; clippy clean.
+Gate runs the affected suites.

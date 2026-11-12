@@ -2399,7 +2399,9 @@ fn view(
                         wire::Piece::Event(_, event) => event,
                     };
                     match event {
-                        Event::Resize { .. } | Event::Theme { .. } => {}
+                        Event::Resize { .. }
+                        | Event::Theme { .. }
+                        | Event::ProgramStatus { .. } => {}
                         Event::Directory { cwd } => {
                             if let Err(error) = std::env::set_current_dir(&cwd) {
                                 tracing::debug!(%error, "viewer cannot enter execution directory");

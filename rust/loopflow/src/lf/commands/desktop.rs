@@ -739,7 +739,82 @@ pub(crate) fn subscribe_plans(
     )
 }
 
-/// `lf desktop view show [expression]`: what a view shows, in `selected`
+/// `desktop.view.get` kept current: one repository's plan for `expression`,
+/// the list Desktop's sidebar and the phone both show.
+pub(crate) fn subscribe_view_plan(
+    directory: std::path::PathBuf,
+    expression: Option<String>,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    if let Some(expression) = &expression {
+        crate::work::selection::Selection::parse(expression, None)?;
+    }
+    super::subscribe::start(
+        (),
+        move |store, ()| {
+            let result = store
+                .ok_or(crate::store::StoreError::NotFound)
+                .context("Work registry is unavailable")
+                .and_then(|store| {
+                    let repository = repository_in(None, &directory, &store.sqlite)?;
+                    Ok(store.sqlite.view_plan(&repository, expression.as_deref())?)
+                });
+            async move { result }
+        },
+        transport,
+    )
+}
+
+/// The portfolio's repositories as canonical paths: the set Desktop's sidebar
+/// lists and the phone creates Tasks in. Unreadable members have no Work.
+fn portfolio_repos() -> Result<Vec<String>> {
+    let mut repos = Vec::new();
+    for member in crate::portfolio::read()?.repos {
+        if member.error.is_some() {
+            continue;
+        }
+        if let Some(repo) =
+            crate::repository::CanonicalRepo::containing(std::path::Path::new(&member.path))?
+        {
+            repos.push(repo.to_string());
+        }
+    }
+    Ok(repos)
+}
+
+pub(crate) fn read_all_view_plans(
+    expression: Option<&str>,
+) -> Result<Vec<crate::work::selection::ViewPlan>> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    Ok(store
+        .sqlite
+        .all_view_plans(expression, &portfolio_repos()?)?)
+}
+
+pub(crate) fn subscribe_all_view_plans(
+    expression: Option<String>,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    #[derive(Debug, Clone, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Arguments {
+        expression: Option<String>,
+    }
+    super::subscribe::start(
+        Arguments { expression },
+        |store, args| async move {
+            let store = super::subscribe::require_store(store)?;
+            Ok(store
+                .sqlite
+                .all_view_plans(args.expression.as_deref(), &portfolio_repos()?)?)
+        },
+        transport,
+    )
+}
+
+/// `lf desktop view [expression] --plan`: what a view shows, in `selected`
 /// or the repository containing `directory`.
 pub fn plan_view(
     selected: Option<&crate::durable::RepositoryId>,
@@ -1251,9 +1326,29 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             return Ok(());
         }
         DesktopCommand::View {
-            cmd: Some(DesktopViewCommand::List { subscribe, .. }),
+            cmd:
+                Some(DesktopViewCommand::List {
+                    all,
+                    expression,
+                    subscribe,
+                    ..
+                }),
             ..
-        } => return plans(cli, *subscribe),
+        } => {
+            if !all {
+                return plans(cli, *subscribe);
+            }
+            if *subscribe {
+                return subscribe_all_view_plans(expression.clone(), Transport::Stdio).map(drop);
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&super::subscribe::selected_answer(&read_all_view_plans(
+                    expression.as_deref()
+                )?)?)?
+            );
+            return Ok(());
+        }
         DesktopCommand::View {
             cmd: Some(DesktopViewCommand::Show { expression, json }),
             ..

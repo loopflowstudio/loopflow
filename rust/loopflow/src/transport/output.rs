@@ -118,6 +118,10 @@ impl Output {
         }
     }
 
+    pub fn program_status(&self) -> Option<&crate::program_status::Records> {
+        self.terminal().map(ghostty_vt::Terminal::program_status)
+    }
+
     /// Feed the program's output to the retained state. Returns the replies
     /// its queries are owed while no viewer's terminal is there to answer.
     pub fn process(&mut self, stream: u8, bytes: &[u8], detached: bool) -> Vec<u8> {

@@ -1,7 +1,8 @@
 //! Carrier-independent server protocol, revision 5: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
-//! same-user only. Each carrier delimits messages its own way; the Unix socket
-//! carries one JSON object per line.
+//! same-user only; the remote carrier admits the Machine owner's other
+//! Tailscale devices. Each carrier delimits messages its own way: the Unix
+//! socket carries one JSON object per line, the WebSocket one per text frame.
 use crate::engine::{Error, ErrorCode};
 use crate::id::LfProcessId;
 use crate::lf::commands::{read::Read, subscribe::SubscriptionFrame, write::Write};
@@ -13,7 +14,11 @@ use serde::{Deserialize, Serialize};
 pub const REVISION: u32 = 5;
 /// The oldest revision this build speaks.
 pub const MIN_REVISION: u32 = 5;
-pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
+/// The largest message a control connection carries, so a reading never waits
+/// behind a large body. Larger messages travel on a ticketed connection.
+pub const MAX_MESSAGE: usize = 1024 * 1024;
+/// The largest message a ticketed connection carries in either direction.
+pub const MAX_BULK: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
 /// How long a `session.attach` ticket opens a bridge.
@@ -129,6 +134,35 @@ pub enum ServerOperation {
         #[serde(deserialize_with = "Option::deserialize")]
         placement: Option<String>,
     },
+    /// Continue an existing Session in a held terminal: `lf session resume`
+    /// of exactly `session`, in its directory, with the server's environment.
+    /// Answers `{terminal_id}`; repeating `request` answers the terminal it
+    /// started. For a client with no environment of its own to send.
+    #[serde(rename = "session.continue")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    SessionContinue {
+        session: crate::id::LfSessionId,
+        request: String,
+        rows: u16,
+        cols: u16,
+    },
+    /// Mobile access readiness; same-user local socket only.
+    #[serde(rename = "mobile.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::mobile::Status>()))]
+    MobileStatus,
+    /// Turn mobile access on with `configuration`, or off with null; same-user
+    /// local socket only. Answers `{configuration}`.
+    #[serde(rename = "mobile.configure")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"configuration": generator.subschema_for::<Option<super::mobile::Configuration>>()}, "required": ["configuration"], "additionalProperties": false}))) ]
+    MobileConfigure {
+        configuration: Option<super::mobile::Configuration>,
+    },
+    /// A ticket for a connection that carries one request of `bytes` bytes,
+    /// larger than `limits.max_message`; answers `{ticket}`. The uploaded
+    /// request is answered here under its own id.
+    #[serde(rename = "request.upload")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "properties": {"ticket": {"type": "string"}}, "required": ["ticket"], "additionalProperties": false}))) ]
+    RequestUpload { bytes: usize },
     /// A provider hook at a turn or tool boundary. The server records what the
     /// boundary says (the native turn, the acknowledged input, `gap`) and
     /// answers the Session's pending steers. At `stop` it answers first, then
@@ -227,7 +261,7 @@ pub struct SessionStarted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAttached {
-    /// 16 random bytes as 22 base64url characters; single use.
+    /// Opaque random ticket; single use.
     pub ticket: String,
     /// The owner the bridge reaches; null for a held terminal.
     #[serde(deserialize_with = "Option::deserialize")]
@@ -302,6 +336,15 @@ pub enum ServerMessage {
         #[schemars(with = "SubscriptionFrame<'static, Untyped>")]
         frame: serde_json::Value,
     },
+    /// The answer for `id` is `bytes` long, more than `limits.max_message`:
+    /// a ticketed connection delivers it as one message.
+    Bulk {
+        id: String,
+        ticket: String,
+        bytes: usize,
+    },
+    /// A ticketed connection's answer; what follows is what the ticket names.
+    Admitted,
     /// Connection-local ordering; never a replay or reading checkpoint.
     Event {
         id: String,
@@ -414,6 +457,14 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../tests/fixtures/dto/server/task_from_session.json"),
+            include_str!("../../tests/fixtures/dto/server/task_create.json"),
+            include_str!("../../tests/fixtures/dto/server/session_continue.json"),
+            include_str!("../../tests/fixtures/dto/server/session_page.json"),
+            include_str!("../../tests/fixtures/dto/server/view_select.json"),
+            include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
+            include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
+            include_str!("../../tests/fixtures/dto/server/upload.json"),
+            include_str!("../../tests/fixtures/dto/server/ticket.json"),
             include_str!("../../tests/fixtures/dto/server/task_run.json"),
             include_str!("../../tests/fixtures/dto/server/task_ship.json"),
             include_str!("../../tests/fixtures/dto/server/task_hold.json"),
@@ -475,6 +526,11 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../tests/fixtures/dto/server/error.json"),
             include_str!("../../tests/fixtures/dto/server/not_found.json"),
+            include_str!("../../tests/fixtures/dto/server/remote.json"),
+            include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+            include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+            include_str!("../../tests/fixtures/dto/server/bulk.json"),
+            include_str!("../../tests/fixtures/dto/server/admitted.json"),
             include_str!("../../tests/fixtures/dto/server/task_running.json"),
             include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
             include_str!("../../tests/fixtures/dto/server/task_held.json"),

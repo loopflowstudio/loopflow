@@ -4,151 +4,16 @@ import Observation
 import SwiftUI
 import Loopflow
 
-struct SubmittedCreation: Codable, Sendable, Identifiable {
-    let requestID: String
-    let destination: String
-    let payload: Data
-    let version: Int
-    let submittedAt: Date
-    var id: String { requestID }
-}
+extension CreationSubmissions {
+    static let shared = CreationSubmissions(
+        directory: WorkCache.homeDirectory.appendingPathComponent("submissions"),
+        machine: { try await localMachine() },
+        lookup: { try await ServerClient.read(.creationGet(requestID: $0)) },
+        send: { try await ServerClient.submittedCreation($0) })
 
-struct CreationLookup: Codable, Sendable {
-    enum Disposition: String, Codable, Sendable { case complete, `continue`, inspect }
-    let disposition: Disposition
-    let explanation: String
-    let run: Bool
-    let artifactKey: String?
-    let launch: JSONValue?
-    let createdAt: Int64
-    let updatedAt: Int64
-    let requestId: String
-    let kind: String
-    let milestone: String
-    let result: JSONValue?
-    let taskId: String?
-    let sessionId: String?
-    enum CodingKeys: String, CodingKey {
-        case kind, milestone, result, disposition, explanation, run, launch
-        case artifactKey = "artifact_key", createdAt = "created_at", updatedAt = "updated_at"
-        case requestId = "request_id", taskId = "task_id", sessionId = "session_id"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var fields = encoder.container(keyedBy: CodingKeys.self)
-        try fields.encode(requestId, forKey: .requestId)
-        try fields.encode(kind, forKey: .kind)
-        try fields.encode(milestone, forKey: .milestone)
-        try fields.encode(disposition, forKey: .disposition)
-        try fields.encode(explanation, forKey: .explanation)
-        try fields.encode(run, forKey: .run)
-        try fields.encode(taskId, forKey: .taskId)
-        try fields.encode(sessionId, forKey: .sessionId)
-        try fields.encode(artifactKey, forKey: .artifactKey)
-        try fields.encode(result, forKey: .result)
-        try fields.encode(launch, forKey: .launch)
-        try fields.encode(createdAt, forKey: .createdAt)
-        try fields.encode(updatedAt, forKey: .updatedAt)
-    }
-}
-
-struct SubmittedCreationError: LocalizedError {
-    let requestID: String
-    let cause: any Error
-    var errorDescription: String? {
-        "Creation \(requestID) is saved for recovery. \(cause.localizedDescription)"
-    }
-}
-
-actor CreationSubmissions {
-    static let shared = CreationSubmissions(directory: WorkCache.homeDirectory.appendingPathComponent("submissions"))
-    private let directory: URL
-    private var active: Set<String> = []
-    private let currentMachine: @Sendable () async throws -> String
-    private let lookup: @Sendable (String) async throws -> String
-    private let send: @Sendable (Data) async throws -> String
-
-    init(directory: URL,
-         machine: @escaping @Sendable () async throws -> String = CreationSubmissions.machine,
-         lookup: @escaping @Sendable (String) async throws -> String = { try await ServerClient.read(.creationGet(requestID: $0)) },
-         send: @escaping @Sendable (Data) async throws -> String = { try await ServerClient.submittedCreation($0) }) {
-        self.directory = directory
-        self.currentMachine = machine
-        self.lookup = lookup
-        self.send = send
-    }
-
-    private func url(_ id: String) -> URL {
-        let name = Data(id.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
-        return directory.appendingPathComponent(name).appendingPathExtension("json")
-    }
-
-    func save(_ record: SubmittedCreation) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = url(record.id)
-        if FileManager.default.fileExists(atPath: file.path) {
-            let existing = try JSONDecoder().decode(SubmittedCreation.self, from: Data(contentsOf: file))
-            guard existing.payload == record.payload, existing.destination == record.destination else {
-                throw RegistryQueryError("This creation identity already has another submitted request")
-            }
-            return
-        }
-        try JSONEncoder().encode(record).write(to: file, options: .atomic)
-    }
-
-    func pending() throws -> [SubmittedCreation] {
-        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-            .map { try JSONDecoder().decode(SubmittedCreation.self, from: Data(contentsOf: $0)) }
-            .sorted { $0.submittedAt < $1.submittedAt }
-    }
-
-    func presented(_ id: String) async throws {
-        let file = url(id)
-        guard FileManager.default.fileExists(atPath: file.path) else { return }
-        let record = try JSONDecoder().decode(SubmittedCreation.self, from: Data(contentsOf: file))
-        guard try await currentMachine() == record.destination else {
-            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
-        }
-        try Task.checkCancellation()
-        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
-    }
-
-    static func machine() async throws -> String {
+    static func localMachine() async throws -> String {
         struct Identity: Decodable { let id: String }
         return try JSONDecoder().decode(Identity.self, from: Data(try await ServerClient.read(.machineSelf).utf8)).id
-    }
-
-    func submit(_ change: ServedWrite, requestID: String) async throws -> String {
-        let record = SubmittedCreation(requestID: requestID, destination: try await currentMachine(),
-            payload: try JSONEncoder().encode(change), version: ServerProtocol.revision, submittedAt: Date())
-        try save(record)
-        active.insert(requestID)
-        defer { active.remove(requestID) }
-        // Saving precedes the first send. A lost answer leaves this exact record.
-        do { return try await send(record.payload) }
-        catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
-    }
-
-    func reconcile(_ record: SubmittedCreation) async throws -> CreationLookup? {
-        // Own recovery before the first await, including destination lookup.
-        guard active.insert(record.id).inserted else { return nil }
-        defer { active.remove(record.id) }
-        guard record.version == ServerProtocol.revision else {
-            throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
-        }
-        guard try await currentMachine() == record.destination else {
-            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
-        }
-        let data = Data(try await lookup(record.id).utf8)
-        let receipt = try JSONDecoder().decode(CreationLookup?.self, from: data)
-        if receipt == nil || receipt?.disposition == .continue {
-            _ = try await send(record.payload)
-            return try JSONDecoder().decode(CreationLookup.self,
-                from: Data(try await lookup(record.id).utf8))
-        }
-        return receipt
     }
 }
 
@@ -297,7 +162,7 @@ private struct RecoveredCreationInspector: View {
         .padding(20).frame(minWidth: 600, minHeight: 400)
         .task {
             do {
-                guard try await CreationSubmissions.machine() == resource.destination else {
+                guard try await CreationSubmissions.localMachine() == resource.destination else {
                     throw RegistryQueryError("The original Machine is unavailable; this request has not moved.")
                 }
                 if let task = resource.task {

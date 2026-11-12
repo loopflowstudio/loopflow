@@ -126,6 +126,15 @@ struct WorkNavigator: View {
             actionTaskID = focusedWork.id
             return .handled
         }
+        .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
+            guard !empty else { return }
+            Perf.endAfterCommit(Perf.coldStart, id: "launch")
+            let source = model.showsSavedWork ? "saved" : "fresh"
+            DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
+        }
+        .onChange(of: model.navigation.sidebarFilter) { _, _ in
+            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
             focusMemory.window = NSApp.keyWindow

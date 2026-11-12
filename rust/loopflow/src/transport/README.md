@@ -13,8 +13,8 @@ settlement with the detached owner; `lf session list` shows its Session as
 `detached` and `lf resume` reattaches it. Attaching takes control: the previous
 viewer's input token is revoked and that terminal says where the conversation went.
 `lf resume SESSION --json` prints the Session record after a successful return,
-including detaching or moving to another viewer. The live relay opens no store;
-it reads the final record only after relaying ends.
+including detaching or moving to another viewer. Terminal traffic does not wait
+for store reads; the final record is read after relaying ends.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs, without
 opening a socket or starting a provider. Desktop decides from the record's `state`
 whether showing a pane reattaches: a `detached` Session reattaches, an `active` one
@@ -225,7 +225,7 @@ printing the same bytes passes through as output. An event may span frames.
 Pending events share the viewer's 4 MiB output queue limit even while waiting
 for a terminal sequence to finish. Each carries a gapless `seq`
 per viewer, and every reply carries the `seq` of the last event queued when it
-was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
+was computed. Kinds: `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
 `owner {viewer,name,held}`, `control {held,notice}` (input control left this
 connection), `child_exited {code}`, `detached`, `hint {text}` and
 `return {detach}` and `live`. A viewer that receives `control` with `held: false` restores
@@ -259,10 +259,15 @@ public command. The owner leaves the launcher's session and drops every
 descriptor the launcher inherited (a terminal host's pipes to its other
 children), since it outlives that host. Session rows name that Process; viewer
 tokens and unwritten input remain in memory. A Claude conversation keeps one lf owner
-and one relay per terminal showing it. `lf resume` resolves the Session,
-then execs into `lf session attach OWNER`, which
+and one relay per terminal showing it. For an existing owner, `lf resume`
+resolves the Session, then execs into `lf session attach OWNER`, which
 opens no store while relaying and parses no commands. It carries the original
 command's receipt through exec and records its result when relaying ends.
+When starting an owner, the caller relays immediately in its current process.
+A short-lived worker keeps concurrent starts behind the shared startup lock
+until Session registration, without delaying launcher output or errors. Background
+starts wait for that confirmation. A non-replacing prepared Start lets its child
+recheck the opening intent instead of silently attaching to a later owner.
 A Claude launcher under an owner hands
 the owner what it would record at exit, then execs into the provider, so Claude
 is the owner's direct child and no `lf -i` waits beside it; the owner records
@@ -315,6 +320,11 @@ The owner answers status-support queries while detached and retains the latest
 records with that current status, including completed work and pending questions.
 Clear removes the named record and its children; a shell prompt retires live
 claims, and a terminal reset removes all records.
+The same validated Records are sent as `program_status` on attachment and after
+changes, coalesced at complete output boundaries. Mobile consumes this shared
+shape without parsing OSC reports again or relying on Desktop to publish them.
+These snapshots confer no control or Task-completion authority; CLI renderers
+continue consuming the original terminal sequences.
 
 Desktop terminal placement is validated on the launching viewer’s PTY, then carried
 across the owner’s private PTY before native admission. Stale inherited placement

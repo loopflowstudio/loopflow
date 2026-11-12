@@ -1261,3 +1261,16 @@ it; a longer outage can leave a completed Task without its checkout. Failed Quit
 delivery follows that same bounded absence policy.
 Conversation history remains; a deleted checkout is not recreated. See the
 [shared transport contract](../rust/loopflow/src/transport/README.md#task-shells-and-completed-workspaces).
+
+## iOS client
+
+```sh
+xcodegen generate --spec swift/ios.yml
+open swift/LoopflowMobile.xcodeproj
+```
+
+The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
+Disable its `--fixture` argument to connect a Machine over host Tailscale.
+[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
+renderer choice and remaining device/live-integration proof. Desktop's project
+and package remain unchanged.

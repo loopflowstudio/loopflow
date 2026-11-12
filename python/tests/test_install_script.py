@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import platform
 import plistlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,9 @@ def _stage_build_artifacts(root: Path) -> None:
     (swift_rel / "Sparkle.framework" / "Versions" / "B").mkdir(parents=True)
     _write_fake_macho(swift_rel / "Sparkle.framework" / "Versions" / "B" / "Sparkle")
     _write_fake_macho(swift_rel / "LoopflowMac")
+    fonts = swift_rel / "LoopflowSwift_Loopflow.bundle/Fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "Lato-Regular.ttf").write_bytes(b"font")
 
     swift_loopflow = root / "swift" / "LoopflowMac"
     swift_loopflow.mkdir(parents=True)
@@ -46,6 +50,7 @@ def _stage_build_artifacts(root: Path) -> None:
         plistlib.dumps({"CFBundleExecutable": "Loopflow", "CFBundleName": "Loopflow"})
     )
     (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
+    shutil.copytree(SCRIPTS_DIR.parent / "swift/LaunchAgents", root / "swift/LaunchAgents")
 
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
@@ -97,6 +102,7 @@ def _patch_subprocess(
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(install.subprocess, "run", fake_run)
+    monkeypatch.setattr(install, "_run_or_raise", lambda *args, **kwargs: None)
 
 
 # --- Tests ---
@@ -116,6 +122,15 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
     assert (spec.macos_dir / "lf").exists()
     assert not (spec.macos_dir / "lfd").exists()
     assert (spec.contents_dir / "Frameworks" / "Sparkle.framework" / "Versions" / "B").is_dir()
+    service = plistlib.loads(
+        (spec.contents_dir / "Library/LaunchAgents/com.loopflow.server.plist").read_bytes()
+    )
+    assert (spec.app_path / service["BundleProgram"]).is_file()
+    assert service["ProgramArguments"] == ["lf", "server", "run"]
+    shutil.rmtree(spec.swift_build_dir)
+    assert (
+        spec.resources_dir / "LoopflowSwift_Loopflow.bundle/Fonts/Lato-Regular.ttf"
+    ).read_bytes() == b"font"
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"

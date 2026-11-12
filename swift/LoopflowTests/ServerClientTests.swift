@@ -273,6 +273,83 @@ struct ServerClientTests {
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
     }
 
+    @Test func delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() async throws {
+        let peer = try ServerPeer()
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        peer.serve { message, respond in
+            let id = message["id"] as? String ?? ""
+            switch message["type"] as? String {
+            case "subscribe":
+                respond(["type": "bulk", "id": id, "ticket": "baseline", "bytes": 100])
+                Thread.detachNewThread {
+                    try? peer.admit("baseline") { connection in
+                        guard release.wait(timeout: .now() + 10) == .success else { return }
+                        try connection.write(["type": "reading", "id": id, "checkpoint": "first",
+                                              "frame": "first"])
+                    }
+                }
+                respond(["type": "reading", "id": id, "checkpoint": "second", "frame": "second"])
+                respond(["type": "ended", "id": id])
+            case "request":
+                respond(["type": "response", "id": id, "trace_id": "trace", "result": "independent"])
+            default: break
+            }
+            return true
+        }
+        let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
+        defer { Task { await subscription.cancel() } }
+        peer.waitForMessage { $0["type"] as? String == "subscribe" }
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "independent")
+        release.signal()
+        var frames = subscription.lines.makeAsyncIterator()
+        let first = try await frames.next()
+        let second = try await frames.next()
+        #expect(first.map { String(decoding: $0, as: UTF8.self) } == "\"first\"")
+        #expect(second.map { String(decoding: $0, as: UTF8.self) } == "\"second\"")
+        #expect(try await frames.next() == nil)
+    }
+
+    @Test func bulkAnswersAndOversizeRequestsTravelByTicket() async throws {
+        let peer = try ServerPeer()
+        let big = String(repeating: "x", count: ServerProtocol.maxMessage)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request", let id = message["id"] as? String,
+                  let operation = message["operation"] as? [String: Any] else { return true }
+            switch operation["kind"] as? String {
+            case "repo.path":
+                respond(["type": "bulk", "id": id, "ticket": "download", "bytes": big.utf8.count])
+                try? peer.admit("download", initial: ["type": "response", "id": id, "trace_id": "trace", "result": big]) { _ in }
+            case "request.upload":
+                respond(["type": "response", "id": id, "trace_id": "trace", "result": ["ticket": "upload"]])
+                try? peer.admit("upload") { connection in
+                    let request = try connection.read()
+                    let uploaded = ((request?["operation"] as? [String: Any])?["value"] as? String)?.utf8.count ?? 0
+                    respond(["type": "response", "id": request?["id"] ?? "", "trace_id": "trace", "result": uploaded])
+                }
+            default: break
+            }
+            return true
+        }
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == big)
+        let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
+        #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
+    }
+
+    @Test func oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() async throws {
+        let peer = try ServerPeer()
+        let big = String(repeating: "x", count: ServerProtocol.maxMessage + 1)
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace", "result": big])
+            return true
+        }
+        do {
+            _ = try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location)
+            Issue.record("An oversized response bypassed the control connection's limit")
+        } catch { #expect(error is RegistryQueryError) }
+    }
+
     @Test func eventWatchReconnectsWithAFreshBaseline() async throws {
         let peer = try ServerPeer()
         peer.serve { message, respond in
@@ -299,8 +376,7 @@ struct ServerClientTests {
         }
         subscription.send(Data(#"{"id":1}"#.utf8))
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
-        guard case .object(let fields) = frame else { Issue.record("Missing reading body"); return }
-        #expect(fields["body"] == .string("fresh"))
+        #expect(try frame.fields()["body"]?.string == "fresh")
         await subscription.cancel()
     }
 
@@ -545,7 +621,7 @@ private final class ServerPeer: @unchecked Sendable {
                 try connection.write([
                     "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
-                    "limits": ["max_message": 33_554_432, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
+                    "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])
                 while let message = try connection.read() {
                     lock.withLock { messages.append(message) }
@@ -553,6 +629,23 @@ private final class ServerPeer: @unchecked Sendable {
                 }
             } catch {}
         }
+    }
+
+    /// Accept one ticketed connection presenting `ticket`, admit it, then let
+    /// `handle` exchange on it.
+    func admit(_ ticket: String, initial: [String: Any]? = nil, _ handle: (PeerConnection) throws -> Void) throws {
+        let fd = accept(listener, nil, nil)
+        guard fd >= 0 else { throw RegistryQueryError("No ticketed connection arrived") }
+        let connection = PeerConnection(fd: fd)
+        defer { connection.close() }
+        let presented = try connection.read()
+        guard presented?["type"] as? String == "attach", presented?["ticket"] as? String == ticket else {
+            throw RegistryQueryError("The ticketed connection presented \(presented ?? [:])")
+        }
+        // Coalesce admission and payload so the client's greeting read may
+        // already contain the beginning of the bulk response.
+        try connection.write([["type": "admitted"]] + (initial.map { [$0] } ?? []))
+        try handle(connection)
     }
 
     /// Accept one connection and answer nothing until the client closes it.
@@ -599,7 +692,14 @@ private final class PeerConnection: @unchecked Sendable {
     }
 
     func write(_ message: [String: Any]) throws {
-        let bytes = try JSONSerialization.data(withJSONObject: message) + [10]
+        try write([message])
+    }
+
+    func write(_ messages: [[String: Any]]) throws {
+        let bytes = try messages.reduce(into: Data()) { bytes, message in
+            bytes.append(try JSONSerialization.data(withJSONObject: message))
+            bytes.append(10)
+        }
         try bytes.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {

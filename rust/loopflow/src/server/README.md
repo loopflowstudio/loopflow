@@ -37,12 +37,20 @@ Work and credentials stay in place.
 ## Local protocol, revision 5
 
 One connection per client over the same-user Unix socket. Every message is one
-JSON object per line (`serde_json` never emits a raw newline). Messages are
-capped at 32 MiB and client connections at 64; terminal bridges are separate
-connections that never count against that cap. A connection has five seconds to
-send its first message and five seconds to take any message the server sends. The
-socket and its directory are private; remote proxies must never forward this
-endpoint. Remote admission is outside this revision.
+JSON object per line (`serde_json` never emits a raw newline). Control messages
+are capped at 1 MiB and connections at 64; a connection has five seconds to send
+its first message and five seconds to take any message the server sends. Larger
+messages and terminal bytes travel on ticketed connections (below). The socket
+and its directory are private; remote proxies must never forward this endpoint.
+The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
+over WebSocket on the host's Tailscale address: one text frame per message on
+`/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
+bytes. It admits another untagged node of the approved owner through
+`tailscale whois`. The Machine's own node is refused unless
+`mobile-same-device` exists in the lf home, which is how an iOS Simulator on the
+same Mac connects; create it only on a Mac with one account. Setup saves the endpoint, owner and enabled choice in
+Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
+add service state to `config.yaml` or the preferences catalogue.
 
 `wire.rs` owns the Rust types; `swift/Loopflow/Services/ServerProtocol.swift`
 mirrors them. Executable fixtures live in `rust/loopflow/tests/fixtures/dto/server/`.
@@ -83,9 +91,9 @@ by a test and every server fixture must decode.
 
 ```text
 → {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":33554432,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"],"resume":null}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
@@ -103,13 +111,21 @@ The first message is `hello` with the revisions the client speaks. The server
 chooses the newest revision both sides speak and answers `welcome` with it, a
 server-assigned `client_id`, the server's own range, its incarnation (`instance` changes with every start), build,
 executable SHA-256, the Machine reading (`null` while the registry is
-unavailable or uninitialized) and limits. What the server can do is its
-revision and `lf server describe`, not a list in the welcome. With no revision in
+unavailable or uninitialized) and limits. The negotiated revision is the whole
+compatibility check: a server that speaks it offers every operation below, so
+no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
 its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 5 only; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
+
+Revision 5 combines bulk/upload tickets, mobile access, shared subscription
+readers and typed events. Control messages are limited to 1 MiB; ticketed
+messages retain the shared engine's 32 MiB response limit and 64 MiB per-client
+budget, leaving headroom for other reads during one large transfer. Older
+clients must update. Install the matching Desktop/CLI/server together and
+update the phone app before connecting.
 
 `status` before `hello` is the readiness probe: `status {revision, min_revision,
 instance, executable_sha256, clients}`, then the server closes. `lf server status` and
@@ -262,6 +278,10 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
+| `view.select` | `lf desktop view list --all` | read |
+| `session.continue` | the phone's Continue | held-terminal launch |
+| `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
+| `request.upload` | none | upload ticket for an oversized request |
 
 "CLI handler; not served" is an operation only the CLI dispatcher runs today;
 its kind fixes the name a served version keeps.
@@ -271,9 +291,9 @@ Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
 settings, `desktop` for the app and `plan` for every Wave's plan at once;
 nothing gets a namespace of its own for a client.
 
-`desktop.*` is Desktop's own arrangement state: which repositories its windows
-show, saved pane layouts and Dashboards. It is served for Desktop and is not
-part of what a phone or bot client is offered.
+`desktop.*` is Desktop's own arrangement state: saved pane layouts and
+Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
+the phone's `view.select` Task list and its creation destinations all read it.
 
 - `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
   lists the typed settings, `config.settings {directory, wave, skill, graph,
@@ -285,12 +305,11 @@ part of what a phone or bot client is offered.
   omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
-  (`repo path`) answers a JSON string. Every shared read is
+  (`config repository --path`) answers a JSON string. Every shared read is
   supported. Repository IDs resolve on the destination with `repo.path`;
-  paths in local reads are destination paths. `desktop.view.get` returns the existing
-  WorkViewPlan, including the recorded primary Session; planning membership alone
-  cannot select one. A missing primary stays absent. Attach to it with
-  `session.attach`; no owner lookup comes first.
+  paths in local reads are destination paths. `view.get` returns the existing
+  WorkViewPlan, including the recorded primary Session; roadmap membership alone
+  cannot select one. A missing primary stays absent. Attach by that Session ID; the server resolves its current owner.
 - `select` on a `request` or `subscribe` keeps only those dotted paths of a
   read's answer: `["task.identifier","pr.url"]` keeps each path's ancestors as
   objects, applies a path through an array to each element, and leaves a path
@@ -303,7 +322,7 @@ part of what a phone or bot client is offered.
   typed client such as the Swift app decodes every DTO strictly with no
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
-- `subscribe` takes a read with a subscription: `desktop.view.list`,
+- `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
   `plan.list`, `repo.plan` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
@@ -369,19 +388,43 @@ part of what a phone or bot client is offered.
   nothing, and a start whose holder reply was lost is reconciled against the
   holder's inventory first; a start that could not be reconciled answers
   `outcome_unknown`, and repeating the same `request` settles it. It creates
-  a process and is the only operation here that does; attaching never does.
+  a process and, with `session.continue`, the only operation here that does;
+  attaching never does.
+- `session.continue {session, request, rows, cols}` starts `lf session resume`
+  of exactly that Session in a held terminal, in its recorded directory, with
+  the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
+  with no environment to send (the phone). It answers and repeats like
+  `session.start`; a Session `run_refusal` refuses is `conflict`.
+- Bulk. An answer or reading larger than `limits.max_message` never travels on
+  the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
+  the ticket on a second connection, and reads `admitted` followed by the original
+  message as one line. A request larger than the limit asks for
+  `request.upload {bytes}`, receives `{ticket}`, and sends its one `request`
+  line on the ticketed connection;
+  the answer arrives on the control connection under the request's id. Ticketed
+  connections carry up to 32 MiB and a transfer has two minutes; larger messages
+  are refused with `unavailable`. Clients fetch spills off their reader so other
+  request IDs never wait. Within one ID, the ticket keeps its place: deliver its
+  payload before later readings, errors or `ended`, and advance the resume
+  checkpoint only with the delivered reading. Swift clients bound deferred
+  messages to 64 frames and 32 MiB; falling behind requires reconnecting.
+  A control line over the limit is answered
+  `error {id: null, invalid}` whose data names `max_message`, and the connection
+  closes. Nothing is paged.
 
 ## Terminal attachment
 
 `session.attach` answers a ticket on an ordinary client connection. A separate
 bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only JSON message
-and is answered `bridged`. A ticket is 16 random bytes as 22 base64url
-characters and lasts 60 seconds; expiry does not close an open bridge. Local
-tickets bind to the requesting client's Unix peer UID. Every redemption attempt
-spends the ticket, successful or not: an unknown, spent, expired or foreign
-ticket is `not_found` with a null `id` and closes the connection. After a
-failure or a disconnect before `bridged`, request a new ticket and bridge.
-Bridges do not occupy the 64 client slots.
+and is answered `bridged`. A ticket (`ticket.rs`) is 16 random bytes as 22 base64url
+characters and lasts 60 seconds by the wall clock, so host sleep counts; expiry
+does not close an open bridge. A ticket binds to the admission that requested
+it: the Machine's own user on the local socket, or one Tailscale node and user
+remotely. Every redemption attempt spends a terminal ticket, successful or not:
+an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
+`id` and closes the connection. After a failure or a disconnect before
+`bridged`, request a new ticket and bridge. Bridges read no Work and do not
+occupy the 64 client slots.
 
 `session.attach {session}` prefers the Session's held terminal to an owner,
 and `{session, terminal_id}` attaches only to that terminal. Either answers
@@ -399,8 +442,10 @@ answering, gets the same two errors with a null `id` in place of `bridged`.
 `session.attach {session, owner_lf_process_id}` serves owners only and answers
 `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`; its bridge
 answers `bridged {owner_lf_process_id, terminal_id: null}` and then speaks the
-[binary owner protocol](../transport/README.md). An owner ID is never a
-terminal ID.
+[binary owner protocol](../transport/README.md): raw bytes locally, binary
+frames remotely. A non-null owner ID requires that exact owner; with a null
+one and no held terminal, the Session's current owner after replacement is
+reached. An owner ID is never a terminal ID.
 
 The owner is the LfProcess holding the Session's terminal (`lf session serve`),
 never the provider's AgentProcess beneath it. The server resolves the Session's
@@ -416,9 +461,8 @@ bytes and a control failure never closes a bridged terminal. Follow
 
 ### Remote attach contract
 
-Planned for LOO-718's authenticated remote transport; not available in this
-build. The [attachment contract above](#terminal-attachment) applies, with
-these transport differences.
+The [attachment contract above](#terminal-attachment) applies over the remote
+carrier (`lf server mobile`), with these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
@@ -786,7 +830,7 @@ After reconnecting and completing `hello`/`welcome`, resume the `session.list`
 watch above with the checkpoint from its last applied reading:
 
 ```text
-→ {"type":"subscribe","id":"b2","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null},"select":["id","title","state"],"resume":"opaque-reading-token"}
+→ {"type":"subscribe","id":"b2","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":"opaque-reading-token"}
 ← {"type":"response","id":"b2","trace_id":"…","result":null}
 ```
 
@@ -819,6 +863,12 @@ Cancelling the watch cancels recovery. A watch without a baseline, a server refu
 consumer that overflows its frame queue ends the stream; the window then opens a
 fresh watch. If reopening the connection fails, the stream also ends with that
 error so the window reports unavailability and retries.
+
+
+Bulk fetches and oversize uploads use ticketed connections of their own. The phone
+(`swift/LoopflowiOS/MachineConnection.swift`) keeps one control connection per
+foreground session and the same ticket flow. It starts a fresh subscription with
+`resume: null`, then replaces its cached Task rows with the current reading.
 
 Every client gives the server ten seconds to answer `status`, `hello`,
 `session.attach` or `attach`; a server that accepts and stalls fails the open
@@ -943,8 +993,10 @@ Clients use advertised limits rather than hardcoding server defaults.
 
 The initial limits are 256 open requests/subscriptions, 16 concurrent writes,
 64 MiB retained per connection and 256 MiB process-wide. A producer reserves
-one maximum-size message (32 MiB) before work starts, then holds the serialized
-answer through delivery. These provisional limits bound retained output, not
+one maximum-size ticketed message (32 MiB) before work starts, then holds the serialized
+answer through delivery or ticket expiry. Admitted requests wait for producer
+headroom before executing; cancellation during that wait runs nothing. Upload
+tickets reserve their headroom before accepting a body. These provisional limits bound retained output, not
 the size of the store or total process memory.
 
 Shared readers reserve from that same process budget before constructing a
@@ -1059,3 +1111,9 @@ when known. Missing lineage remains unknown. A fork's `original_running`
 describes liveness at the transition; current liveness requires a fresh reading.
 Desktop shows the short explanation beside the terminal and keeps the detail in
 history. Reading either grants no authority to drive the provider.
+
+Large answers retain their connection and process memory reservations until the
+ticket is downloaded or expires. Expiry releases abandoned downloads without
+waiting for another request. Events remain within the control-message limit;
+clients check connection-wide sequence before deferring delivery behind a bulk
+reading.

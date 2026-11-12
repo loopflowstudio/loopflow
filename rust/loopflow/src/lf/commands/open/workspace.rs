@@ -1186,6 +1186,7 @@ mod tests {
             },
             title: "Task".into(),
             states: Default::default(),
+            identifier: None,
             primary_session: None,
             location: None,
             argv: None,

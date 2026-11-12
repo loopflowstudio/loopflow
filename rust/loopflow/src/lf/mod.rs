@@ -1006,6 +1006,12 @@ impl DesktopCommand {
 pub enum DesktopViewCommand {
     /// Print the repository's default and saved Dashboard plans as JSON
     List {
+        /// Apply one selection across every portfolio repository
+        #[arg(long)]
+        all: bool,
+        /// Selection to apply with --all; omitted uses each repository's default
+        #[arg(long, requires = "all")]
+        expression: Option<String>,
         #[arg(long, required = true)]
         json: bool,
         /// Print a JSON line now and each time the plans change, until stdin closes
@@ -1423,6 +1429,15 @@ pub enum ServerCommand {
     Run,
     /// Report local readiness without registering or starting anything.
     Status,
+    /// Configure private mobile access using this host's signed-in Tailscale installation.
+    Mobile {
+        /// Stop remote access without stopping local Sessions.
+        #[arg(long, conflicts_with = "status")]
+        off: bool,
+        /// Report saved approval and live mobile readiness without enabling access.
+        #[arg(long)]
+        status: bool,
+    },
     /// Summarize the protocol this build speaks; needs no server.
     Describe {
         /// Print its JSON Schema, generated from the wire types

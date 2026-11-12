@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, TaskState};
+use crate::durable::{Author, RepositoryId, TaskState};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
@@ -593,7 +593,11 @@ impl SqliteStore {
     pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
+        tasks_where(
+            &conn,
+            wave_id.map(|id| ("p.wave_id", id.as_str())),
+            &super::durable::task_open_sql("t"),
+        )
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -2455,24 +2459,28 @@ pub(super) fn request_completion_in(
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-    tasks_where(conn, wave_id, "1")
+    tasks_where(conn, wave_id.map(|id| ("p.wave_id", id.as_str())), "1")
+}
+
+pub(super) fn repository_tasks_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+) -> StoreResult<Vec<Task>> {
+    tasks_where(conn, Some(("t.repository_id", repository.as_str())), "1")
 }
 
 fn tasks_where(
     conn: &Connection,
-    wave_id: Option<&WaveId>,
+    scope: Option<(&str, &str)>,
     condition: &str,
 ) -> StoreResult<Vec<Task>> {
-    let filter = match wave_id {
-        Some(_) => "p.wave_id=?1 AND ",
-        None => "",
-    };
+    let filter = scope.map_or_else(String::new, |(column, _)| format!("{column}=?1 AND "));
     let query = format!(
         "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"
     );
     let identifiers = TaskIdentifiers::read(conn)?;
     let mut statement = conn.prepare(&query)?;
-    let rows = statement.query_map(params_from_iter(wave_id), |row| {
+    let rows = statement.query_map(params_from_iter(scope.map(|(_, value)| value)), |row| {
         map_listed_task_row(&identifiers, row)
     })?;
     rows.collect::<rusqlite::Result<_>>()

@@ -119,6 +119,12 @@ const REQUESTS: &[&str] = &[
     include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
     include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
     include_str!("../../tests/fixtures/dto/server/wave_plan_reteam.json"),
+    include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
+    include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
+    include_str!("../../tests/fixtures/dto/server/session_page.json"),
+    include_str!("../../tests/fixtures/dto/server/session_continue.json"),
+    include_str!("../../tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../tests/fixtures/dto/server/upload.json"),
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
@@ -263,6 +269,21 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         "wave_plan_reteamed",
         "wave.plan.reteam",
         include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+    ),
+    (
+        "ticket_reply",
+        "request.upload",
+        include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+    ),
+    (
+        "mobile_status",
+        "mobile.status",
+        include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+    ),
+    (
+        "remote",
+        "mobile.configure",
+        include_str!("../../tests/fixtures/dto/server/remote.json"),
     ),
 ];
 

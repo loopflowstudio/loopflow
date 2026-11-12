@@ -6,7 +6,13 @@ import Foundation
 public enum ServerProtocol {
     public static let revision = 5
     public static let minRevision = 5
-    public static let maxMessage = 32 * 1024 * 1024
+    /// The largest control-connection message; larger ones travel by ticket.
+    public static let maxMessage = 1024 * 1024
+    /// The largest message a ticketed connection carries.
+    public static let maxBulk = 32 * 1024 * 1024
+    /// The remote control connection; a ticketed connection opens the ticket path.
+    public static let machinePath = "/v1/machine"
+    public static let ticketPath = "/v1/ticket"
 }
 
 /// Who connected, for diagnostics; it grants nothing.
@@ -121,6 +127,26 @@ public enum ServerClientMessage: Encodable, Sendable {
     }
 }
 
+/// Mobile access as `lf server mobile --status` reports it; Desktop reads it
+/// through that command, so no client sends `mobile.*` operations.
+public struct MachineMobileConfiguration: Codable, Sendable {
+    /// A device's Tailscale identity: its StableID and the user ID that owns it.
+    public struct TailscaleIdentity: Codable, Sendable {
+        public let node: String
+        public let user: UInt64
+    }
+    public let enabled: Bool
+    public let endpoint: String
+    public let owner: TailscaleIdentity
+}
+
+/// What `lf server mobile --status` prints.
+public struct MachineMobileStatus: Codable, Sendable {
+    public let configuration: MachineMobileConfiguration?
+    public let ready: Bool
+    public let error: String?
+}
+
 /// What a request asks for, named by its `kind`: a dotted resource and verb.
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
@@ -132,23 +158,31 @@ public enum ServerOperation: Encodable, Sendable {
     /// A ticket for the Session's terminal, answered `{ticket, owner_lf_process_id,
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
+    case requestUpload(bytes: Int)
     /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
     /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
     /// pane (`LF_TERMINAL_ID`) the child continues.
     case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
+    /// Continue an existing Session in a held terminal the server starts with its own
+    /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
+    case sessionContinue(session: String, request: String, rows: Int, cols: Int)
     /// A provider hook's turn or tool boundary, answered `{steers, update, waiting}`.
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String], inbox: JSONValue?)
 
     private enum Keys: String, CodingKey {
-        case kind, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
+        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
         case moment, delivery, adapter, callback, gap, printed, inbox
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
         case .command(let change): try change.encode(to: encoder)
+        case .requestUpload(let bytes):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("request.upload", forKey: .kind)
+            try box.encode(bytes, forKey: .bytes)
         case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
         case .sessionAttach(let session, let owner):
@@ -169,6 +203,13 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
             try box.encode(placement, forKey: .placement)
+        case .sessionContinue(let session, let request, let rows, let cols):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.continue", forKey: .kind)
+            try box.encode(session, forKey: .session)
+            try box.encode(request, forKey: .request)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
         case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed, let inbox):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)
@@ -261,17 +302,22 @@ public struct Steer: Decodable, Sendable {
     public let text: String
 }
 
-/// One message from the server.
-public enum ServerMessage: Decodable, Sendable {
+/// One message from the server. Answers keep their bytes: the caller who asked
+/// knows their type and decodes them once.
+public enum ServerMessage: Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
     /// What the request returned: a read's or write's value, or the ticket for
     /// `session.attach`; null once a subscription is confirmed.
-    case response(id: String, traceID: String, result: JSONValue)
+    case response(id: String, traceID: String, result: RawJSON)
     /// The answer to `attach`: the connection now speaks the viewer protocol
     /// with this owner LfProcess or held terminal.
     case bridged(ServerBridge)
-    case reading(id: String, checkpoint: String, frame: JSONValue)
+    case reading(id: String, checkpoint: String, frame: RawJSON)
+    /// The answer for `id` is `bytes` long; a ticketed connection delivers it.
+    case bulk(id: String, ticket: String, bytes: Int)
+    /// A ticketed connection's answer; what follows is what the ticket names.
+    case admitted
     case event(id: String, seq: UInt64, event: SubscriptionEvent)
     /// The subscription's last reading was its answer (`task.wait` reached
     /// its state); nothing follows for `id`.
@@ -282,35 +328,50 @@ public enum ServerMessage: Decodable, Sendable {
     /// structured detail, `.null` when there is none.
     case error(id: String?, code: String, message: String, data: JSONValue)
 
-    private enum Keys: String, CodingKey {
-        case type, id, result, frame, checkpoint, code, message, data, seq, event, traceID = "trace_id", ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
-    }
-    public init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: Keys.self)
-        switch try box.decode(String.self, forKey: .type) {
-        case "welcome": self = .welcome(try ServerWelcome(from: decoder))
-        case "status": self = .status(try ServerStatus(from: decoder))
-        case "response":
-            self = .response(id: try box.decode(String.self, forKey: .id), traceID: try box.decode(String.self, forKey: .traceID),
-                             result: try box.decode(JSONValue.self, forKey: .result))
+    /// One message's line. The envelope is scanned, not parsed: a reading of
+    /// hundreds of kilobytes is read once, by its consumer.
+    public init(line: Data) throws {
+        let fields = try RawJSON(line).fields()
+        func field(_ key: String) throws -> RawJSON {
+            guard let value = fields[key] else { throw RegistryQueryError("Server message is missing `\(key)`; update the client") }
+            return value
+        }
+        func text(_ key: String) throws -> String {
+            guard let text = try field(key).string else { throw RegistryQueryError("Server message `\(key)` is not a string") }
+            return text
+        }
+        switch try text("type") {
+        case "welcome": self = .welcome(try JSONDecoder().decode(ServerWelcome.self, from: line))
+        case "status": self = .status(try JSONDecoder().decode(ServerStatus.self, from: line))
+        case "response": self = .response(id: try text("id"), traceID: try text("trace_id"), result: try field("result"))
         case "bridged":
             // Both keys are required; exactly one is not null.
-            switch (try box.decode(String?.self, forKey: .ownerLfProcessID), try box.decode(String?.self, forKey: .terminalID)) {
+            func optional(_ key: String) throws -> String? { try field(key).isNull ? nil : text(key) }
+            switch (try optional("owner_lf_process_id"), try optional("terminal_id")) {
             case (let owner?, nil): self = .bridged(.owner(lfProcessID: owner))
             case (nil, let terminal?): self = .bridged(.terminal(id: terminal))
-            default: throw DecodingError.dataCorruptedError(forKey: .ownerLfProcessID, in: box, debugDescription: "A bridge names one owner or one terminal")
+            default: throw RegistryQueryError("A bridge names one owner or one terminal")
             }
-        case "reading":
-            self = .reading(id: try box.decode(String.self, forKey: .id), checkpoint: try box.decode(String.self, forKey: .checkpoint), frame: try box.decode(JSONValue.self, forKey: .frame))
+        case "reading": self = .reading(id: try text("id"), checkpoint: try text("checkpoint"), frame: try field("frame"))
+        case "bulk": self = .bulk(id: try text("id"), ticket: try text("ticket"), bytes: try field("bytes").decode(Int.self))
+        case "admitted": self = .admitted
         case "event":
-            self = .event(id: try box.decode(String.self, forKey: .id), seq: try box.decode(UInt64.self, forKey: .seq),
-                          event: try box.decode(SubscriptionEvent.self, forKey: .event))
-        case "ended": self = .ended(id: try box.decode(String.self, forKey: .id))
+            self = .event(id: try text("id"), seq: try field("seq").decode(UInt64.self),
+                          event: try field("event").decode(SubscriptionEvent.self))
+        case "ended": self = .ended(id: try text("id"))
         case "error":
-            self = .error(id: try box.decodeIfPresent(String.self, forKey: .id), code: try box.decode(String.self, forKey: .code),
-                          message: try box.decode(String.self, forKey: .message), data: try box.decode(JSONValue.self, forKey: .data))
-        default: throw DecodingError.dataCorruptedError(forKey: .type, in: box, debugDescription: "Unsupported server message; update the client")
+            self = .error(id: try fields["id"].flatMap { $0.isNull ? nil : try text("id") }, code: try text("code"),
+                          message: try text("message"), data: try field("data").decode(JSONValue.self))
+        default: throw RegistryQueryError("Unsupported server message; update the client")
         }
+    }
+}
+
+extension JSONValue {
+    /// One field of an object result; `.null` for anything else.
+    public subscript(field: String) -> JSONValue {
+        if case .object(let fields) = self { return fields[field] ?? .null }
+        return .null
     }
 }
 

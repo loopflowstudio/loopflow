@@ -121,8 +121,13 @@ helper. For a mismatched build or another startup error, read the diagnosis from
 
 ## Phone access
 
-Phone access is planned, pending LOO-718's authenticated remote transport.
-A phone signed in as the host owner's Tailscale user will be able to
+```bash
+lf server mobile            # private remote access over this host's Tailscale
+lf server mobile --status   # saved approval and live readiness
+lf server mobile --off      # stop remote access; local Sessions keep running
+```
+
+A phone signed in as the host owner's Tailscale user can then
 [attach to a Session's running terminal](../rust/loopflow/src/server/README.md#remote-attach-contract)
 without starting or resuming a provider.
 Local server readiness and adding a Machine as an execution destination do not

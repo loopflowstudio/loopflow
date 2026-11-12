@@ -267,12 +267,32 @@ pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
     }
 }
 
+/// The main checkout a linked worktree belongs to, read from the files Git
+/// keeps: the worktree's `.git` names its Git directory, whose `commondir`
+/// names the shared one, which the main checkout holds as `.git`. `None` for
+/// a submodule, a bare repository or a layout only Git can read.
+fn linked_main_root(root: &Path) -> Option<PathBuf> {
+    let marker = std::fs::read_to_string(root.join(".git")).ok()?;
+    let git_dir = root.join(marker.strip_prefix("gitdir:")?.trim());
+    let shared = std::fs::read_to_string(git_dir.join("commondir")).ok()?;
+    let common = git_dir.join(shared.trim()).canonicalize().ok()?;
+    (common.file_name()? == ".git" && common.is_dir())
+        .then(|| common.parent().map(Path::to_path_buf))?
+}
+
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
     match crate::git::worktree_root(repo) {
         Ok(root) if root.join(".git").is_dir() => return Ok(root),
+        Ok(root) => {
+            // Listing a folder of checkouts asks this once per worktree; launching
+            // Git for each made that read cost a `git worktree list` per checkout.
+            if let Some(main) = linked_main_root(&root) {
+                return Ok(main);
+            }
+        }
         // A path that cannot be resolved holds no repository; `git` cannot say otherwise.
         Err(GitError::Io(error)) => return Err(GitError::Io(error)),
-        _ => {}
+        Err(_) => {}
     }
     let worktrees = list_porcelain(repo)?;
     // A bare or separate Git directory can appear first instead of a checkout.

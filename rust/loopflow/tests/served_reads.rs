@@ -981,6 +981,7 @@ fn server_operations_match_their_lf_commands() {
         headless,
         after: None,
         limit: None,
+        task: None,
     };
     let task_pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
@@ -995,6 +996,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::CreationGet { .. }
         | Read::ProcessList
         | Read::DesktopViewList { .. }
+        | Read::ViewSelect { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
         | Read::TaskDetail { .. }
@@ -1175,6 +1177,14 @@ fn server_operations_match_their_lf_commands() {
                     headless: true,
                     after: None,
                     limit: Some(100),
+                    task: None,
+                },
+                Read::SessionList {
+                    directory: repo.path().to_owned(),
+                    headless: false,
+                    after: None,
+                    limit: Some(100),
+                    task: Some("INF-123".into()),
                 },
                 Read::RepoTokens {
                     directory: repo.path().to_owned(),
@@ -1205,6 +1215,9 @@ fn server_operations_match_their_lf_commands() {
                 history(),
                 Read::ProcessList,
                 all_plans(),
+                Read::ViewSelect {
+                    expression: Some("kind:task state:open".into()),
+                },
                 plans(),
                 sessions(false),
                 sessions(true),

@@ -1649,6 +1649,10 @@ struct DetailReads<'a> {
     >,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
+    /// Agents already resolved in this reading, by the configuration that chose
+    /// them. Checkouts of one repository usually share their files, and resolving
+    /// validates every setting, so each distinct configuration resolves once.
+    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs: HashMap<crate::durable::TaskId, crate::ops::graph_process::GraphProcess>,
     execution: crate::store::sqlite::GraphExecutionFacts,
@@ -1726,7 +1730,39 @@ impl<'a> DetailReads<'a> {
             shipping,
             graphs,
             execution,
+            agents: Default::default(),
         })
+    }
+
+    /// The agent Task work at `checkout` would launch with, resolved once per
+    /// distinct configuration in this reading.
+    fn agent(
+        &self,
+        checkout: &Path,
+        wave: Option<&str>,
+        personal: &crate::config::PersonalSettings,
+    ) -> Option<String> {
+        let resolve = || crate::ops::task::resolve_task_agent(checkout, wave, personal, None).ok();
+        let Ok(layers) = crate::config::config_layers_with(Some(checkout), wave, personal) else {
+            return resolve();
+        };
+        // Paths only name where a value came from; the agent depends on the values.
+        let key = serde_json::to_string(
+            &layers
+                .iter()
+                .map(|layer| (&layer.source, &layer.scope, &layer.value))
+                .collect::<Vec<_>>(),
+        )
+        .expect("configuration values serialize");
+        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
+            return agent.clone();
+        }
+        let agent = resolve();
+        self.agents
+            .lock()
+            .expect("agent memo poisoned")
+            .insert(key, agent.clone());
+        agent
     }
 }
 
@@ -1779,13 +1815,8 @@ async fn snapshot_task_detail(
         .personal
         .get(&(task.wave_id.clone(), task.repository_id.clone()))
         .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = crate::ops::task::resolve_task_agent(
-        task.worktree.as_deref().unwrap_or(repo),
-        wave,
-        personal,
-        None,
-    );
-    let provider = agent.ok().map(|agent| crate::config::parse_agent(&agent).0);
+    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
+    let provider = agent.map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts

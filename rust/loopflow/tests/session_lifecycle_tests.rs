@@ -1746,7 +1746,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
     // A bare run returns after registration; wait for Y to stop at demo.
-    // -b would execute demo headlessly and start Y's provider.
+    // Its background conversation opens separately from the Graph's demo step.
     let deadline = Instant::now() + PATIENCE;
     let graphs = loop {
         let graphs = support::recorded_graphs(fixture.home.path());
@@ -1766,7 +1766,27 @@ fn declared_agent_can_start_another_tasks_graph() {
         status["execution"]["work"]["graph"]["position"],
         serde_json::json!({"kind": "at", "step": "demo"})
     );
-    assert_eq!(fixture.launches().len(), 1);
+    let deadline = Instant::now() + PATIENCE;
+    let captures = loop {
+        let captures = fixture.launches();
+        if captures.len() >= 2 {
+            break captures;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Y's background conversation never opened: {captures:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(captures.len(), 2);
+    let mut launched_tasks: Vec<_> = captures
+        .iter()
+        .map(|capture| fixture.run_parents(capture).0.unwrap())
+        .collect();
+    launched_tasks.sort();
+    let mut expected = vec![caller.id.to_string(), target.task.id.to_string()];
+    expected.sort();
+    assert_eq!(launched_tasks, expected);
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)

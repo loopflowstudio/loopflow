@@ -38,33 +38,6 @@ extension WorkSectionHeading where Trailing == EmptyView {
     }
 }
 
-/// Tone shared by plan chips, Session state, status dots, and Graph nodes.
-enum WorkTone {
-    case running, done, available, warning, failure, stopped, neutral
-
-    func ink(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .stopped: palette.textSecondary
-        case .neutral: palette.textTertiary
-        default: style(in: palette).ink
-        }
-    }
-
-    private func style(in palette: LoopflowPalette) -> ThemeTone {
-        switch self {
-        case .running: palette.workingTone
-        case .done: palette.successTone
-        case .available: palette.availableTone
-        case .warning: palette.warningTone
-        case .failure: palette.failureTone
-        case .stopped, .neutral: palette.stoppedTone
-        }
-    }
-    func fill(in palette: LoopflowPalette) -> Color { self == .neutral ? .clear : style(in: palette).fill }
-    func stroke(in palette: LoopflowPalette) -> Color { style(in: palette).stroke }
-    func text(in palette: LoopflowPalette) -> Color { style(in: palette).text }
-}
-
 extension TaskExecutionState {
     /// Shared by Graph status, plan chips and navigation dots. Quiet states have no chip.
     var presentation: (label: String?, tone: WorkTone) {

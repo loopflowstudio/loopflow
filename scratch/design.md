@@ -12,18 +12,16 @@ question is open.
 
 ## Transport dependency
 
-At November 12 00:07 UTC, `gh pr view 1812` still reported `OPEN`,
+At November 12 00:44 and 01:18 UTC, `gh pr view 1812` still reported `OPEN`,
 `mergedAt: null`, `autoMergeRequest: null`, at head
 `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetching `origin/main` returned
-`1570bef610a0a0cee0402ecc37d3a31461b213a8`, without `server/mobile.rs` or
+`d382d0b72e4b7c41773e4c4070322387f8b4ce65`, without `server/mobile.rs` or
 `server/ticket.rs`. Implementation and authenticated acceptance await LOO-718
 landing; landing its PR is outside this Task. Reinspect the shared store and
 endpoints when it lands.
 
-At November 12 00:41 UTC, PR #1812 remained open at the same head, with no
-merge or auto-merge request. Fetched `origin/main` advanced to
-`d382d0b72e4b7c41773e4c4070322387f8b4ce65`; both transport files remain absent.
-Implementation is still blocked on LOO-718, not on a product decision or QA.
+Earlier dependency observations are recorded in
+`6d8057efc7e0b4dcdc4605d924b173017e716a98:scratch/design.md`.
 
 The November 11 23:27 UTC inspection of that head found
 `remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
@@ -32,10 +30,14 @@ The November 11 23:27 UTC inspection of that head found
 `ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations. Reinspection
-of `ticket.rs` at November 12 00:08 UTC found the same behavior.
+of `ticket.rs` at November 12 00:44 UTC found the same behavior. The current
+checkout still uses the UID-bound store in `service.rs`; its redemption removes
+the ticket before checking identity, as the local attachment docs describe.
 
 The last successful LOO-718 status read, November 11 17:27 UTC, reported
-`feature` / `demo`. Earlier observations and their history references are in
+`feature` / `demo`. On November 12 00:44 UTC, the Task status inspection did
+not return and was cancelled; current Graph positions remain unverified.
+Earlier observations and their history references are in
 `4f9f541ecce0e6db4055d52b61fb55a9a8eab953:scratch/design.md`; repeated status
 notes are consolidated here. Desktop QA remains deferred in `questions.md`.
 

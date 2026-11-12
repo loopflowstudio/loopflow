@@ -351,13 +351,33 @@ answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
 The model runs tools in the checkout, so keep it disposable and stop the
-`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model
-key; a private home has none.
+`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model;
+a private home has no key. Both reach a scripted local model instead: a small
+OpenAI-compatible HTTP server (streamed `chat/completions`, scripted `bash`
+calls for Pi, `shell` for OpenCode 2.x, then a reply naming what it saw) named
+in `$HOME/.pi/agent/models.json` (`api: openai-completions`, plus
+`defaultProvider`/`defaultModel` in `settings.json`) and in
+`$HOME/.config/opencode/opencode.json` (`npm: @ai-sdk/openai-compatible`).
+Logging each request body shows whether steers and the context block reached
+the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
+runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
+the scripted tool a few thousand lines of output first, and type the command
+and Enter separately or its autocomplete picks another command.
+
+To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
+that appends its argv to a file and execs the branch binary; plugins run
+`spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
+processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
+stop owners whose argv names the private Task, with their descendants, after
+every run. Freeze the private server by the PID its `nohup` recorded, never by
+`pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers
 `com.loopflow.server.<hash>` for the private home; boot it out with the label in
 `$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
-server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
+server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log` for hooks,
+`$LF_HOME/logs/pi-extension.log` for Pi and
+`$LF_HOME/runs/<xx>/<run>/opencode.stderr.log` for OpenCode;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.

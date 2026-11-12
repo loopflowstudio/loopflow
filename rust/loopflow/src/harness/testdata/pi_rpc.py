@@ -1,6 +1,7 @@
 # Isolated Pi 1.3 protocol stand-in; no provider, credential or network access.
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -79,6 +80,30 @@ def _record(text):
 
 
 if "--mode" not in args:
+    # The extension's one Machine server connection, opened with the address
+    # its launch spec (the source's first line) carries.
+    extension = Path(args[args.index("--extension") + 1]).read_text()
+    spec = json.loads(extension.split("\n", 1)[0].removeprefix("const spec = ").removesuffix(";"))
+    connection = socket.socket(socket.AF_UNIX)
+    connection.connect(spec["server"]["socket"])
+    server = connection.makefile("rw")
+
+    def _send(message):
+        server.write(json.dumps(message) + "\n")
+        server.flush()
+        answer = json.loads(server.readline())
+        if answer["type"] == "error":
+            raise SystemExit(f"session.boundary refused: {answer['message']}")
+        return answer
+
+    _send(
+        {
+            "type": "hello",
+            "revision": spec["server"]["revision"],
+            "min_revision": spec["server"]["min_revision"],
+            "client": {"kind": "plugin", "platform": "fixture", "name": "pi", "version": "0"},
+        }
+    )
 
     def _append(entry_id, parent, message):
         # Pi appends each message to its session file, the usage source.
@@ -92,11 +117,21 @@ if "--mode" not in args:
             dict(sessionFile=str(file), turn="native-fixture-turn", openTools=0, pendingInput=0)
             | event
         )
-        subprocess.run(
-            [os.environ["LF_BIN"], "__context-block", "--moment", "pi-event"],
-            input=json.dumps(event),
-            text=True,
-            check=True,
+        _send(
+            {
+                "type": "request",
+                "id": "event",
+                "operation": {
+                    "kind": "session.boundary",
+                    "moment": "event",
+                    "delivery": os.environ["LF_CONTEXT_DELIVERY"],
+                    "adapter": json.loads(os.environ["LF_PROVIDER_CONTEXT"]),
+                    "callback": event,
+                    "gap": None,
+                    "printed": [],
+                },
+                "select": None,
+            }
         )
 
     _callback({"type": "session_start"})

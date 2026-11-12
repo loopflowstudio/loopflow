@@ -520,13 +520,6 @@ impl SqliteStore {
         )
     }
 
-    /// Open for a provider hook at a turn or tool boundary. It waits at most
-    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
-    /// a recording gap and lets the turn continue.
-    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
-    }
-
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");

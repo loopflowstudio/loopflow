@@ -61,7 +61,6 @@ lf                         foreground command and Skill/Graph launches
 lf-prompt                  prompt-oriented executable surface
 lf-world                   builds fake worlds for demos and tests through production writers
 lf __context-block         provider turn-boundary hook: renders context at start/compaction and asks the Machine server for turn recording and steers (`session.boundary`); opens no store
-lf __codex-observe         side subscriber to a Codex Session's app-server: records turns, sends the first turn and Task updates
 Loopflow.app               client over shared server/CLI DTOs
 ```
 

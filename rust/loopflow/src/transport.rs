@@ -78,18 +78,23 @@ fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
 
 /// A handed-off exit being recorded off the serve loop. Its records wait on
 /// the store; the person's terminal waits only `SETTLE_WAIT` for them, then
-/// gets the provider's own exit back.
+/// gets the provider's own exit back, or a move already judged by the owner.
 struct Settling {
     settled: mpsc::Receiver<Settled>,
     since: Instant,
-    code: u8,
+    fallback: Settled,
     process: String,
     /// The terminal has its exit; only the records are still being written.
     delivered: bool,
 }
 
 impl Settling {
-    fn spawn(record: Box<NativeExit>, status: std::process::ExitStatus, waker: UnixStream) -> Self {
+    fn spawn(
+        record: Box<NativeExit>,
+        status: std::process::ExitStatus,
+        waker: UnixStream,
+        departure: Option<Settled>,
+    ) -> Self {
         let process = format!(
             "lf/{}",
             record
@@ -106,7 +111,10 @@ impl Settling {
         Self {
             settled,
             since: Instant::now(),
-            code: provider_exit_code(status),
+            fallback: departure.unwrap_or_else(|| Settled {
+                code: provider_exit_code(status),
+                lines: Vec::new(),
+            }),
             process,
             delivered: false,
         }
@@ -125,10 +133,10 @@ impl Settling {
             Ok(settled) => settled,
             Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => return None,
             Err(_) => {
-                tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with the provider's own exit");
+                tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with its known outcome");
                 Settled {
-                    code: self.code,
-                    lines: Vec::new(),
+                    code: self.fallback.code,
+                    lines: std::mem::take(&mut self.fallback.lines),
                 }
             }
         };
@@ -980,7 +988,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (wake, waker) = UnixStream::pair()?;
     wake.set_nonblocking(true)?;
     waker.set_nonblocking(true)?;
-    let (activity, ending) = lifetime::spawn(id.clone(), terminal, waker.try_clone()?);
+    let attachment = Arc::new(lifetime::Client::default());
+    let (activity, ending) = lifetime::spawn(
+        id.clone(),
+        terminal,
+        waker.try_clone()?,
+        Arc::clone(&attachment),
+    );
     let child_pid = child.id();
     let settle_waker = waker.try_clone()?;
     let (finished, child_exit) = mpsc::channel();
@@ -992,6 +1006,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut observed = lifetime::Activity::default();
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
+    let mut departure = None;
     let mut execution_directory_reported = false;
     let mut planning = None;
     let mut title = terminal.then(|| crate::terminal_title::OutputTitle::new(&id));
@@ -1112,11 +1127,15 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 tracing::warn!(%error, "planning sync unavailable to this owner")
                             })
                             .ok();
+                            attachment.set(Some(&record));
+                            departure = None;
                             exit_record = Some(record);
                             viewer.reply(answers, Reply::Accepted);
                         }
                         Request::DropExitRecord { key } if key == control_key => {
                             exit_record = None;
+                            attachment.set(None);
+                            departure = None;
                             planning = None;
                             viewer.reply(answers, Reply::Accepted);
                         }
@@ -1466,6 +1485,17 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         // The child wait reports once. A returning launcher announces its
         // client's end; an exec'd launcher leaves that announcement to our wait.
         let status = child_exit.try_recv().ok().transpose()?;
+        if let Some(moved) = attachment.take_departure() {
+            departure = Some(moved);
+            if status.is_none() {
+                // SAFETY: this is the native client in the child we own. Its
+                // provider lives separately and may already have been replaced.
+                unsafe { libc::kill(child_pid as libc::pid_t, libc::SIGTERM) };
+            }
+        }
+        if status.is_some() {
+            attachment.set(None);
+        }
         if viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && exit_record.is_some())
         {
@@ -1494,7 +1524,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
             }
             if let Some(record) = exit_record.take() {
-                settling = Some(Settling::spawn(record, status, settle_waker.try_clone()?));
+                settling = Some(Settling::spawn(
+                    record,
+                    status,
+                    settle_waker.try_clone()?,
+                    departure.take(),
+                ));
             } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = client.take().map(native::NativeClient::release) {
@@ -3174,6 +3209,25 @@ mod tests {
         CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
+
+    #[test]
+    fn slow_exit_recording_keeps_an_already_observed_move() {
+        let (_sender, settled) = std::sync::mpsc::channel();
+        let mut settling = super::Settling {
+            settled,
+            since: std::time::Instant::now() - super::SETTLE_WAIT,
+            fallback: crate::harness::native_exit::Settled {
+                code: 0,
+                lines: vec!["This conversation moved to tmux %9".into()],
+            },
+            process: "test".into(),
+            delivered: false,
+        };
+        let outcome = settling.poll().unwrap();
+        assert_eq!(outcome.code, 0);
+        assert_eq!(outcome.lines, ["This conversation moved to tmux %9"]);
+        assert!(settling.poll().is_none());
+    }
 
     #[test]
     fn heartbeat_requires_thirty_seconds_of_uptime() {

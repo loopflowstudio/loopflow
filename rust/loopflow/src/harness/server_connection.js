@@ -6,6 +6,12 @@ import { createConnection as connectMachineServer } from "node:net";
 // an unanswered boundary is a recording gap, one `recording gap` line per
 // changed failure through `log`, and the next boundary sends the open gap and
 // the printed batches.
+// What a boundary answer brings the conversation: its steers, then what
+// changed on its Tasks, as `lf __context-block` prints them for hooks.
+function news(answer) {
+  return `${answer?.steers?.text ?? ""}${answer?.update ? `${answer.update}\n` : ""}`;
+}
+
 function machineServer(delivery, log) {
   const adapter = process.env.LF_PROVIDER_CONTEXT ? JSON.parse(process.env.LF_PROVIDER_CONTEXT) : null;
   let queue = Promise.resolve();
@@ -59,7 +65,7 @@ function machineServer(delivery, log) {
     const claimed = [...printed];
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
-        gap: gap ? { first: gap.first, last: gap.last } : null, printed: claimed });
+        gap: gap ? { first: gap.first, last: gap.last } : null, printed: claimed, inbox: null });
       printed.splice(0, claimed.length);
       if (gap) log(`recording gap closed (${gap.message}); lf records from here`);
       gap = undefined;

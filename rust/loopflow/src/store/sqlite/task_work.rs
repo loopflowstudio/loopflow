@@ -566,8 +566,9 @@ impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
-            session_membership("a")
+            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
+             WHERE a.id=?1 ORDER BY tw.id",
+            session_tasks("a")
         ))?;
         let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
         rows.map(|row| {

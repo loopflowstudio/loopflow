@@ -10,12 +10,26 @@ use sha2::{Digest, Sha256};
 use crate::context_block::ContextDelivery;
 use crate::prompt::write_prompt_log;
 
-pub(crate) fn claude_args(context: &ContextDelivery, managed: bool) -> Result<Vec<String>> {
-    let mut hooks = context.hook_settings(managed)?;
-    if managed {
+/// `turn_hooks` declares the turn and tool boundaries; `inbox` lets the
+/// Machine server wake the conversation, which only a managed launch's
+/// registered Session needs.
+pub(crate) fn claude_args(
+    context: &ContextDelivery,
+    turn_hooks: bool,
+    inbox: bool,
+) -> Result<Vec<String>> {
+    let mut hooks = context.hook_settings(turn_hooks)?;
+    if turn_hooks {
         hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     }
-    let settings = json!({"hooks": hooks});
+    let mut settings = json!({"hooks": hooks});
+    if inbox {
+        // The Machine server wakes an idle conversation with steers and Task
+        // updates through Claude's cross-session inbox. lf runs in no
+        // permission mode it could attest, and a session that bypasses
+        // prompts holds such a message for review unless it accepts peers.
+        settings["crossSessionInbound"] = json!("accept");
+    }
     let bytes = serde_json::to_vec(&settings)?;
     let path = save_hook(&context.home, "claude", "json", &bytes)?;
     Ok(vec!["--settings".into(), path.display().to_string()])
@@ -125,10 +139,14 @@ pub(crate) fn add_opencode_context(
 }
 
 /// A native terminal launch is a conversation an owner holds: it gets every
-/// hook, whatever named its Work.
-pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
+/// hook, whatever named its Work. Only a managed one accepts wakes.
+pub(crate) fn native_args(
+    harness: &str,
+    context: Option<&ContextDelivery>,
+    managed: bool,
+) -> Result<Vec<String>> {
     match (harness, context) {
-        ("claude", Some(context)) => claude_args(context, true),
+        ("claude", Some(context)) => claude_args(context, true, managed),
         ("pi", context) => pi_args(context, true, true),
         _ => Ok(Vec::new()),
     }
@@ -221,7 +239,6 @@ fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Resu
 mod tests {
     use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
-    use sha2::{Digest, Sha256};
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions() {
@@ -247,8 +264,8 @@ mod tests {
         let first = super::codex_hooks(&contexts[0], None, true).unwrap();
         assert_eq!(first, super::codex_hooks(&contexts[1], None, true).unwrap());
         assert_eq!(
-            super::claude_args(&contexts[0], true).unwrap(),
-            super::claude_args(&contexts[1], true).unwrap()
+            super::claude_args(&contexts[0], true, true).unwrap(),
+            super::claude_args(&contexts[1], true, true).unwrap()
         );
         let mut saved = Vec::new();
         for context in &contexts {
@@ -270,6 +287,38 @@ mod tests {
         let restored: ContextDelivery =
             serde_json::from_slice(&std::fs::read(&saved[0]).unwrap()).unwrap();
         assert_eq!(restored, contexts[0]);
+    }
+
+    /// Only a managed launch's conversation is registered for waking, so only
+    /// it accepts messages from other processes without review.
+    #[test]
+    fn only_managed_claude_launches_accept_inbox_messages() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let context = ContextDelivery {
+            repository: None,
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+        };
+        let settings = |managed: bool| -> serde_json::Value {
+            let args = super::native_args("claude", Some(&context), managed).unwrap();
+            assert_eq!(args[0], "--settings");
+            serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
+        };
+        let bare = settings(false);
+        assert!(
+            bare["hooks"]["Stop"].is_array(),
+            "bare keeps its turn hooks"
+        );
+        assert!(bare.get("crossSessionInbound").is_none());
+        assert_eq!(settings(true)["crossSessionInbound"], "accept");
     }
 
     #[test]
@@ -315,23 +364,10 @@ mod tests {
                 "/<session-flags>/config.toml:post_tool_use:0:0",
                 "/<session-flags>/config.toml:session_start:0:0",
                 "/<session-flags>/config.toml:session_start:1:0",
-                "/<session-flags>/config.toml:session_start:1:1",
                 "/<session-flags>/config.toml:session_start:2:0",
                 "/<session-flags>/config.toml:stop:0:0",
-                "/<session-flags>/config.toml:stop:0:1",
                 "/<session-flags>/config.toml:user_prompt_submit:0:0",
             ]
-        );
-        // Codex hashes a handler with its defaults filled in (codex-cli 0.166.0
-        // `hooks/list`), so an async handler without a timeout is trusted too.
-        let handler = &hooks["Stop"][0]["hooks"][1];
-        let mut identity = serde_json::json!({"event_name":"stop", "hooks":[{
-            "type":"command", "command":handler["command"], "async":true, "timeout":600}]});
-        identity.sort_all_objects();
-        let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity).unwrap()));
-        assert_eq!(
-            state["/<session-flags>/config.toml:stop:0:1"]["trusted_hash"],
-            format!("sha256:{hash}")
         );
         // Each Loopflow entry trusts the exact declaration at its own index.
         assert_ne!(

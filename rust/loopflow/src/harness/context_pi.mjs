@@ -1,6 +1,5 @@
 import { createBashToolDefinition, createLocalBashOperations } from "@earendil-works/pi-coding-agent";
-import { execFileSync, spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,29 +55,6 @@ export default function (pi) {
   let context = "";
   let lastProgress = 0;
   let pendingInput = 0;
-  let updates;
-  const stopUpdates = () => { updates?.kill(); updates = undefined; };
-  const watchUpdates = (ctx) => {
-    stopUpdates();
-    if (!spec.native || !process.env.LF_CONTEXT_DELIVERY) return;
-    const session = ctx.sessionManager.getSessionFile();
-    const child = spawn(spec.executable, ["__context-block", "--moment", "task-updates"],
-      { stdio: ["pipe", "pipe", "ignore"] });
-    updates = child;
-    child.stdin.on("error", () => {});
-    child.on("error", (error) => recordingGap("Task updates", error));
-    child.stdin.end(JSON.stringify({ session_id: session, hook_event_name: "PiTaskUpdates" }));
-    createInterface({ input: child.stdout }).on("line", (line) => {
-      // A queued line from the previous selection must not reach a new Session.
-      if (updates !== child || ctx.sessionManager.getSessionFile() !== session) return;
-      try {
-        const update = JSON.parse(line);
-        if (update.session !== session) return;
-        pi.sendMessage({ customType: "loopflow-task-update", content: update.text, display: false },
-          { triggerTurn: true, deliverAs: "followUp" });
-      } catch (error) { recordingGap("Task update", error); }
-    });
-  };
   const tools = new Set();
   // lf's records are best-effort: an lf the extension cannot run, or a server
   // it cannot reach, is a recording gap, never a failed turn or a notice in the
@@ -115,10 +91,9 @@ export default function (pi) {
       timeout: 30000, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] }))
       .hookSpecificOutput.additionalContext;
     if (answer?.steers) server.printed(answer.steers.batch);
-    return `${answer?.steers?.text ?? ""}${block}`;
+    return `${news(answer)}${block}`;
   };
   const shutdown = (ctx) => {
-    stopUpdates();
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
   // Every event a native launch reports is recorded, and during a turn
@@ -139,12 +114,13 @@ export default function (pi) {
       answer = await server.boundary("tool", { session_id: sessionFile, hook_event_name: "PiSteer",
         adapter_invocation_id: randomUUID() }, { skippable });
     }
-    if (!answer?.steers) return;
+    const content = news(answer);
+    if (!content) return;
     // With triggerTurn omitted, Pi queues during streaming and only stores if
     // idle. A settlement race must never start another run.
-    pi.sendMessage({ customType: "loopflow-steer", content: answer.steers.text, display: true },
+    pi.sendMessage({ customType: "loopflow-steer", content, display: true },
       { deliverAs: "steer" });
-    server.printed(answer.steers.batch);
+    if (answer.steers) server.printed(answer.steers.batch);
   };
   pi.on("session_start", async (event, ctx) => {
     try { await guardBashTools(pi, ctx); } catch (error) {
@@ -153,7 +129,6 @@ export default function (pi) {
     }
     await report({ type: "session_start" }, ctx);
     started = true;
-    watchUpdates(ctx);
   });
   pi.on("session_compact", async () => { refreshMoment = "compact"; });
   pi.on("before_agent_start", async () => { refreshMoment ??= "start"; });
@@ -212,7 +187,6 @@ export default function (pi) {
     pendingInput = Math.max(0, pendingInput - 1);
     await report(event, ctx);
   });
-  pi.on("session_shutdown", async () => { stopUpdates(); });
   pi.on("agent_settled", async (event, ctx) => {
     await report(event, ctx, { events });
     turn = undefined; events = []; tools.clear();

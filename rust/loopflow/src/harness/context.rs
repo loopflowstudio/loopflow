@@ -11,12 +11,21 @@ use crate::context_block::ContextDelivery;
 use crate::prompt::write_prompt_log;
 use crate::session::Holder;
 
+/// `Holder::Server` launches are registered Sessions the Machine server
+/// wakes through Claude's inbox.
 pub(crate) fn claude_args(context: &ContextDelivery, holder: Holder) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings(holder)?;
     if holder.reports_turns() {
         hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     }
-    let settings = json!({"hooks": hooks});
+    let mut settings = json!({"hooks": hooks});
+    if holder == Holder::Server {
+        // The Machine server wakes an idle conversation with steers and Task
+        // updates through Claude's cross-session inbox. lf runs in no
+        // permission mode it could attest, and a session that bypasses
+        // prompts holds such a message for review unless it accepts peers.
+        settings["crossSessionInbound"] = json!("accept");
+    }
     let bytes = serde_json::to_vec(&settings)?;
     let path = save_hook(&context.home, "claude", "json", &bytes)?;
     Ok(vec!["--settings".into(), path.display().to_string()])
@@ -225,7 +234,6 @@ mod tests {
     use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
     use crate::session::Holder;
-    use sha2::{Digest, Sha256};
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions() {
@@ -239,6 +247,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, repo)| ContextDelivery {
+                identity: None,
                 repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),
@@ -279,6 +288,37 @@ mod tests {
         assert_eq!(restored, contexts[0]);
     }
 
+    /// Only a server-held launch's conversation is registered for waking, so only
+    /// it accepts messages from other processes without review.
+    #[test]
+    fn only_server_held_claude_launches_accept_inbox_messages() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let context = ContextDelivery {
+            identity: None,
+            repository: None,
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+        };
+        let settings = |holder: Holder| -> serde_json::Value {
+            let args = super::native_args("claude", Some(&context), holder).unwrap();
+            assert_eq!(args[0], "--settings");
+            serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
+        };
+        let owned = settings(Holder::Owner);
+        assert!(owned["hooks"]["Stop"].is_array(), "an owner keeps turn hooks");
+        assert!(owned.get("crossSessionInbound").is_none());
+        assert!(settings(Holder::Caller).get("crossSessionInbound").is_none());
+        assert_eq!(settings(Holder::Server)["crossSessionInbound"], "accept");
+    }
+
     #[test]
     fn codex_trusts_only_loopflow_declarations_after_host_hooks() {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
@@ -287,6 +327,7 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: home.path().to_owned(),
             home: home.path().to_owned(),
@@ -322,23 +363,10 @@ mod tests {
                 "/<session-flags>/config.toml:post_tool_use:0:0",
                 "/<session-flags>/config.toml:session_start:0:0",
                 "/<session-flags>/config.toml:session_start:1:0",
-                "/<session-flags>/config.toml:session_start:1:1",
                 "/<session-flags>/config.toml:session_start:2:0",
                 "/<session-flags>/config.toml:stop:0:0",
-                "/<session-flags>/config.toml:stop:0:1",
                 "/<session-flags>/config.toml:user_prompt_submit:0:0",
             ]
-        );
-        // Codex hashes a handler with its defaults filled in (codex-cli 0.166.0
-        // `hooks/list`), so an async handler without a timeout is trusted too.
-        let handler = &hooks["Stop"][0]["hooks"][1];
-        let mut identity = serde_json::json!({"event_name":"stop", "hooks":[{
-            "type":"command", "command":handler["command"], "async":true, "timeout":600}]});
-        identity.sort_all_objects();
-        let hash = hex::encode(Sha256::digest(serde_json::to_vec(&identity).unwrap()));
-        assert_eq!(
-            state["/<session-flags>/config.toml:stop:0:1"]["trusted_hash"],
-            format!("sha256:{hash}")
         );
         // Each Loopflow entry trusts the exact declaration at its own index.
         assert_ne!(
@@ -471,6 +499,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         std::env::set_var("LF_HOME", repo.path().join("machine"));
         std::env::set_var("LF_BIN", recording_lf(repo.path()));
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),
@@ -806,6 +835,7 @@ assert.deepEqual(steers, {steers});
         std::env::set_var("LF_HOME", repo.path().join("machine"));
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),

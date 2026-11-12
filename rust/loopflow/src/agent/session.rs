@@ -35,14 +35,12 @@ pub(crate) struct SessionCommand {
 }
 
 /// The native client joins this running conversation at the provider's own
-/// endpoint. `input` is its first turn, for the observer to submit: a turn has
-/// no size limit where an argument does, and Codex replays pending approvals to
-/// a client that joins mid-turn.
+/// endpoint, possibly mid-turn: lf sends the first turn before it starts, and
+/// Codex replays pending approvals to a client that joins.
 pub(crate) fn native_connection_command(
     cwd: PathBuf,
     session_id: &AgentSessionId,
     remote: PathBuf,
-    input: Option<String>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> SessionCommand {
     let args = vec![
@@ -57,7 +55,7 @@ pub(crate) fn native_connection_command(
     SessionCommand {
         launch: None,
         holder: crate::session::Holder::Caller,
-        input,
+        input: None,
         program: "codex".into(),
         args,
         cwd,

@@ -2,7 +2,7 @@
 
 ```bash
 lf -b implement
-lf session list --interactive false --json
+lf session list --headless --json
 lf resume SESSION
 ```
 
@@ -226,21 +226,22 @@ lifeline writer crosses the exec, so the client holds the provider alive and no 
 process has to. The execution owner settles the client's exit from a `NativeExit`
 marked as a client, which leaves the AgentProcess's own exit to attachment close.
 
-`lf __codex-observe` watches from the side as one more subscriber, in its own
-session. app-server sends every subscriber every event, so it records turns, usage
-and attention, submits the launch's first turn, and delivers Task updates while the
-conversation is idle, each under the Session fence. A pending approval goes to every
-subscriber and the first answer wins; the observer never answers, and Codex replays
-a pending approval to a client that joins mid-turn. Store errors are recording gaps:
-the observer logs one per outage, retries the store, and history recovery fills the
-gap at the next launch. Stopping the observer stops recording, not the conversation.
-When the person starts or forks a conversation, the observer selects it as the
-Session's AgentSession and binds it to the Session's context, so lf's hooks answer
-there too.
+Nothing of lf's subscribes beside the client. lf sends the launch's first turn
+on the app-server before the client starts, recorded as lf's input; Codex
+replays a pending approval to a client that joins mid-turn. The app-server's
+hooks reach the Machine server like Claude's: at a turn end the server reads the
+thread's turns from the app-server into the Session's history, and an idle
+Session with a Task update gets a `turn/start` whose tool output is the update.
+A store or server that is unavailable is a recording gap; history recovery fills
+it at the next turn end or launch. The app-server carries the launch's context
+delivery file in its environment, so a conversation the person starts with
+`/new` or `/fork` reaches lf's hooks too, and its first boundary selects it as
+the Session's AgentSession.
 
-Attachment alone does not revoke the old client's writes, and with lf out of the path
-no dispatch can check them. The observer ends the exact client its attachment opened
-once a mover replaces that attachment. Native launch carries the frozen attachment
+Attachment alone does not revoke the old client's writes, and with lf out of the
+path no dispatch can check them. A client lf waits on checks its attachment every
+two seconds and stops once a mover replaces it; an execution owner performs the
+same check for its exec'd client. Native launch carries the frozen attachment
 in memory, separately from stable tool provenance. Admission validates that token;
 it never reconstructs authority from the current record. Both initial validation
 and the launch reject a replaced attachment, including A → B → A.

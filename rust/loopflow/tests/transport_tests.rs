@@ -2779,9 +2779,11 @@ fn native_exit_preserves_returning_launcher_results() {
                 .unwrap();
             let result = wait_for_viewer(viewer, Duration::from_secs(30));
             fixture.ends(&owner);
+            // A handed-off provider's failure carries its own code; a Graph's is 1.
+            let expected = if handoff { code } else { 1 };
             assert_eq!(
                 result.status.code(),
-                Some(1),
+                Some(expected),
                 "handoff={handoff}, provider={code}: {result:?}"
             );
             assert!(
@@ -2796,7 +2798,12 @@ fn native_exit_preserves_returning_launcher_results() {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!(recorded, (1, "failed".into()));
+            let outcome = if expected == 130 {
+                "interrupted"
+            } else {
+                "failed"
+            };
+            assert_eq!(recorded, (expected, outcome.into()));
             let capture: String = fixture.sql().query_row(
                 "SELECT json_extract(payload,'$.evidence.outcome') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.source')='terminal.json'",
                 [&session], |r| r.get(0),
@@ -2865,25 +2872,17 @@ fn a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait() {
 }
 
 #[test]
-fn failed_native_exec_settles_once_without_launching_a_provider() {
+fn failed_native_provider_settles_once_with_its_own_code() {
     let fixture = Fixture::new();
-    // Discovery succeeds, then exec meets an absent interpreter. No real
-    // provider or substitute from the Machine can run.
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then
-    printf '#!/absent/fixture-interpreter\n' > "$0"
-    echo '2.1.302'
-    exit
-fi
-exit 99
-"#,
-    );
-    let owner =
-        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "exec failure"));
+    let path = fixture.provider("#!/bin/sh\nexit 99\n");
+    let owner = fixture.owner(fixture.native(
+        Path::new(env!("CARGO_BIN_EXE_lf")),
+        &path,
+        "failed provider",
+    ));
     let mut viewer = fixture.viewer(&owner, true);
     let frames = viewer.until_event("child_exited");
-    assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 1);
+    assert_eq!(events(&frames, "child_exited").last().unwrap()["code"], 99);
     fixture.ends(&owner);
     assert!(!fixture.home.path().join("launches").exists());
     let sql = fixture.sql();
@@ -2892,7 +2891,7 @@ exit 99
         [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
     ).unwrap();
     assert_eq!(provider_outcome, None);
-    assert_eq!(code, 1);
+    assert_eq!(code, 99);
     assert_eq!(outcome, "failed");
     let captures: i64 = sql.query_row(
         "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source')='terminal.json' AND json_extract(payload,'$.evidence.outcome')='failed'",

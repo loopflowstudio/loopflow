@@ -575,7 +575,6 @@ pub enum Commands {
         cmd: ServerCommand,
     },
     /// Keep this build's Task and Wave terminals; started only by the server
-    #[command(hide = true)]
     Holder {
         #[command(subcommand)]
         cmd: HolderCommand,
@@ -673,10 +672,6 @@ pub enum Commands {
         #[arg(long, value_enum, default_value = "stop")]
         moment: crate::context_block::ContextMoment,
     },
-    /// Subscription a Codex conversation beside its native client. Started by the
-    /// launcher, which sends the launch on stdin.
-    #[command(name = "__codex-observe", hide = true)]
-    CodexObserve,
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1165,9 +1160,7 @@ impl Commands {
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } | Self::CodexObserve => {
-                false
-            }
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
             | Self::Open(_)
             | Self::Workspace(_)
@@ -1617,25 +1610,6 @@ pub enum GraphCommand {
     External(Vec<String>),
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum SessionMode {
-    #[value(name = "true")]
-    Interactive,
-    #[value(name = "false")]
-    Headless,
-    All,
-}
-
-impl SessionMode {
-    pub fn interactive(self) -> Option<bool> {
-        match self {
-            Self::Interactive => Some(true),
-            Self::Headless => Some(false),
-            Self::All => None,
-        }
-    }
-}
-
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
@@ -1710,7 +1684,7 @@ impl SessionConnectionArgs {
     }
 }
 
-/// Which Sessions `lf session list` and `lf desktop sessions` read.
+/// Which unfinished Sessions `lf session list` reads.
 #[derive(Args, Debug, Clone)]
 pub struct SessionListArgs {
     #[command(flatten)]
@@ -1720,29 +1694,33 @@ pub struct SessionListArgs {
     /// Include Sessions from every repository on this machine
     #[arg(long)]
     pub all: bool,
-    /// Select interactive (true), headless (false), or both (all)
-    #[arg(long, value_enum, default_value = "true")]
-    pub interactive: SessionMode,
-    /// Include completed conversations and historical reviews
+    /// Include headless Sessions alongside interactive conversations
     #[arg(long)]
-    pub history: bool,
+    pub headless: bool,
     /// Only conversations available for your input
     #[arg(long)]
     pub available: bool,
+    /// Leave out raw conversations: a plain `claude` or `codex` lf never launched
+    #[arg(long)]
+    pub no_raw: bool,
     /// Maximum conversations; 0 reads the complete matching inventory
     #[arg(long, default_value_t = 100)]
     pub limit: usize,
-    #[arg(long, default_value_t = 0)]
-    pub offset: usize,
     /// Return a bounded stable-ID page with a continuation cursor
-    #[arg(long, requires = "json", conflicts_with = "offset")]
+    #[arg(long, requires = "json")]
     pub page: bool,
     /// Previous page's next identity; keep the same filters
     #[arg(long, requires = "page")]
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Only Sessions without a Task association
+    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    #[arg(long, id = "session_wave", value_name = "W")]
+    pub wave: Option<String>,
+    /// Current primary conversations; omit the value to include all three scopes
+    #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "all", value_name = "task|wave|repository")]
+    pub primary: Option<crate::session::SessionPrimary>,
+    /// Outside the work model: no Task association and no Wave
     #[arg(long, conflicts_with = "task")]
     pub orphan: bool,
     #[arg(long)]
@@ -1858,7 +1836,7 @@ pub enum SessionCommand {
         #[command(flatten)]
         selection: crate::lf::Selection,
     },
-    /// List Sessions
+    /// List unfinished Sessions; use `lf history` for finished conversations
     List(SessionListArgs),
     /// Show direct provider-authored usage from recorded Session inputs
     Usage(commands::history::UsageArgs),
@@ -1910,7 +1888,7 @@ pub enum SessionCommand {
     },
     /// Bind a Session as the Task's primary conversation without starting work
     #[command(
-        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Runs cannot become primary. Remote calls use the target Machine's Sessions and paths."
+        after_help = "Select an unfinished interactive Session by its Loopflow ID or recorded provider ID. Binding is permanent; repeating it selects the same conversation again. The Task keeps its existing worktree and binding immediately sets the Session directory to it. Already-running clients may keep their original directory. Files and live input stay intact. An open Task without a worktree adopts the Session's unowned linked checkout; main and Wave checkouts stay shared. Done Tasks remain done; without a checkout, their conversation stays in place. Closed Sessions and headless Sessions cannot become primary. Remote calls use the target Machine's Sessions and paths."
     )]
     Bind {
         /// Session ID or provider conversation ID
@@ -2230,7 +2208,8 @@ pub enum TaskCommand {
 conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
 terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
 which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
-until `lf ship`."
+until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
+using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
         issue: Option<String>,
@@ -2258,6 +2237,9 @@ until `lf ship`."
         /// Print where it would run and the most it could cost; run nothing
         #[arg(long)]
         quote: bool,
+        /// Open the Task's primary conversation locally after launch returns
+        #[arg(long)]
+        open: bool,
         /// Print what the run set out to do, as `task.run` returns it
         #[arg(long)]
         json: bool,
@@ -3653,6 +3635,58 @@ mod tests {
     }
 
     #[test]
+    fn session_list_selects_wave_and_optional_primary_without_changing_launch_wave() {
+        use crate::session::SessionPrimary;
+        for (words, expected) in [
+            (vec!["--primary"], SessionPrimary::All),
+            (vec!["--primary", "task"], SessionPrimary::Task),
+            (vec!["--primary=wave"], SessionPrimary::Wave),
+            (vec!["--primary", "repository"], SessionPrimary::Repository),
+        ] {
+            let cli = Cli::try_parse_from(
+                ["lf", "session", "list", "--wave", "craft", "--all"]
+                    .into_iter()
+                    .chain(words),
+            )
+            .unwrap();
+            assert!(cli.wave.is_none());
+            let Some(Commands::Session {
+                cmd: SessionCommand::List(args),
+            }) = cli.command
+            else {
+                panic!("session list")
+            };
+            assert_eq!(args.primary, Some(expected));
+            assert_eq!(args.wave.as_deref(), Some("craft"));
+            assert!(!args.headless);
+            assert!(args.all);
+        }
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--offset", "1"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "session", "list", "--primary", "former"]).is_err());
+    }
+
+    #[test]
+    fn session_list_adds_headless_and_rejects_history_and_mode_filters() {
+        let cli = Cli::try_parse_from(["lf", "session", "list", "--headless"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List(SessionListArgs { headless: true, .. })
+            })
+        ));
+        for flags in [
+            vec!["--history"],
+            vec!["--interactive", "true"],
+            vec!["--interactive", "false"],
+            vec!["--interactive", "all"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["lf", "session", "list"].into_iter().chain(flags)).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
         let cli = Cli::try_parse_from(["lf", "session", "list", "--orphan", "--json"]).unwrap();
         assert!(matches!(
@@ -4039,7 +4073,7 @@ mod tests {
             .filter(|command| command.is_hide_set())
             .map(|command| command.get_name().to_string())
             .collect::<Vec<_>>();
-        assert_eq!(hidden, ["__context-block", "__codex-observe"]);
+        assert_eq!(hidden, ["__context-block"]);
         fn internal(command: &clap::Command) -> Vec<String> {
             command
                 .get_subcommands()
@@ -4052,7 +4086,7 @@ mod tests {
                 })
                 .collect()
         }
-        assert_eq!(internal(&root), ["__context-block", "__codex-observe"]);
+        assert_eq!(internal(&root), ["__context-block"]);
         let hidden_flags = root
             .get_arguments()
             .filter(|arg| arg.is_hide_set())
@@ -4394,6 +4428,25 @@ mod tests {
             cmd: TaskCommand::Delete { issue }
         }) if issue == "LOO-42"));
         assert!(Cli::try_parse_from(["lf", "task", "delete"]).is_err());
+    }
+
+    #[test]
+    fn task_run_open_is_optional_and_has_no_start_alias() {
+        for (args, expected) in [
+            (vec!["lf", "task", "run", "LOO-42"], false),
+            (vec!["lf", "task", "run", "LOO-42", "--open"], true),
+            (
+                vec!["lf", "--task", "LOO-42", "task", "run", "--open"],
+                true,
+            ),
+            (vec!["lf", "task", "run", "--open"], true),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Task {
+                cmd: TaskCommand::Run { open, .. }
+            }) if open == expected));
+        }
+        assert!(Cli::try_parse_from(["lf", "task", "start", "LOO-42"]).is_err());
     }
 
     #[test]

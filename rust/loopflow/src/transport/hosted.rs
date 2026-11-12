@@ -8,7 +8,7 @@ use std::io::{self, Read};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::process::ExitStatus;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
@@ -286,6 +286,10 @@ pub(super) struct Hosted {
     settling: Option<Settling>,
     observed_hold: Option<ViewerHold>,
     exit_record: Option<Box<NativeExit>>,
+    /// The exec'd native client's attachment, checked off the byte path.
+    attachment: Arc<lifetime::Client>,
+    /// Where that client's conversation moved, once the watcher saw it go.
+    departure: Option<crate::harness::native_exit::Settled>,
     /// Where a held terminal keeps what its launcher handed off, so a server
     /// that takes it up later has it too.
     kept: Option<std::path::PathBuf>,
@@ -326,10 +330,13 @@ impl Hosted {
         waker: UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
-        let (viewing, closing) =
-            watchers
-                .lifetime
-                .watch(id.clone(), shell.is_some(), waker.try_clone()?);
+        let attachment = Arc::new(lifetime::Client::default());
+        let (viewing, closing) = watchers.lifetime.watch(
+            id.clone(),
+            shell.is_some(),
+            waker.try_clone()?,
+            Arc::clone(&attachment),
+        );
         Ok(Self {
             terminal,
             control_key,
@@ -354,6 +361,8 @@ impl Hosted {
             settling: None,
             observed_hold: None,
             exit_record: None,
+            attachment,
+            departure: None,
             kept: None,
             execution_directory_reported: false,
             planning: None,
@@ -378,6 +387,7 @@ impl Hosted {
     pub fn keep_in(&mut self, directory: std::path::PathBuf) {
         if let Some(record) = read_kept::<Box<NativeExit>>(&directory.join(EXIT_RECORD)) {
             self.planning = start_planning(&record.cwd);
+            self.attachment.set(Some(&record));
             self.exit_record = Some(record);
         }
         if let Some(started) = read_kept::<NativeStarted>(&directory.join(NATIVE_CLIENT)) {
@@ -453,6 +463,8 @@ impl Hosted {
                 hint_due,
                 attached,
                 exit_record,
+                attachment,
+                departure,
                 kept,
                 execution_directory_reported,
                 planning,
@@ -556,11 +568,15 @@ impl Hosted {
                                 if let Some(directory) = kept {
                                     keep(&directory.join(EXIT_RECORD), &record);
                                 }
+                                attachment.set(Some(&record));
+                                *departure = None;
                                 *exit_record = Some(record);
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::DropExitRecord { key } if key == *control_key => {
                                 *exit_record = None;
+                                attachment.set(None);
+                                *departure = None;
                                 if let Some(directory) = kept {
                                     remove_kept(&directory.join(EXIT_RECORD));
                                 }
@@ -894,6 +910,18 @@ impl Hosted {
         // The child wait reports once. A returning launcher announces its
         // client's end; an exec'd launcher leaves that announcement to our wait.
         let status = child.exited()?;
+        if let Some(moved) = self.attachment.take_departure() {
+            self.departure = Some(moved);
+            if status.is_none() {
+                // SAFETY: kill reads no memory. The child is the native client
+                // this host serves and has not been reaped; its provider lives
+                // separately and may already have been replaced.
+                unsafe { libc::kill(child_pid as libc::pid_t, libc::SIGTERM) };
+            }
+        }
+        if status.is_some() {
+            self.attachment.set(None);
+        }
         if self.viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && self.exit_record.is_some())
         {
@@ -912,7 +940,12 @@ impl Hosted {
         if let Some(status) = status {
             child.end_jobs(&self.id)?;
             if let Some(record) = self.exit_record.take() {
-                self.settling = Some(Settling::spawn(record, status, self.waker.try_clone()?));
+                self.settling = Some(Settling::spawn(
+                    record,
+                    status,
+                    self.waker.try_clone()?,
+                    self.departure.take(),
+                ));
             } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = self.client.take().map(native::NativeClient::release) {

@@ -73,6 +73,7 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
+    &["session", "list"],
     &["task", "list"],
     &["session", "history"],
     &["repo", "ci"],

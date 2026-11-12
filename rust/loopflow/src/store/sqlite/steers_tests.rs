@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use super::{save_in, SqliteStore};
 use crate::durable::Author;
@@ -202,6 +202,56 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         .record_native_turn(&current, "native", true, Some(0))
         .unwrap();
     assert_eq!(store.owner_retention(owner).unwrap(), None);
+}
+
+/// Interactive Codex: lf spawned its app-server, so the AgentProcess is not a
+/// native terminal, but a person's client takes the turns and only its hooks
+/// see them end. A headless run reports through lf's own stream instead.
+#[test]
+fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
+    let (_home, store, adapter) = fixture();
+    let interactive = |value: bool| {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=?1 WHERE id='session'",
+                [value],
+            )
+            .unwrap();
+    };
+    interactive(false);
+    let yielded = |store: &SqliteStore| -> Option<bool> {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT yielded FROM session_activity WHERE session_id='session'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+    };
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(yielded(&store), None, "headless: lf's stream reports");
+    interactive(true);
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert_eq!(yielded(&store), Some(false));
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert_eq!(
+        yielded(&store),
+        Some(true),
+        "idle, so the server can wake it"
+    );
 }
 
 #[test]

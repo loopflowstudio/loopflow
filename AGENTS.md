@@ -334,6 +334,7 @@ them.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
 - Lifetime tests start a terminal owner with `Fixture::serve(true, …)`; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
+- Native Claude fixtures consume prompt-file stdin, then read `/dev/tty` under a terminal owner. Resume acknowledgments must recognize the new viewer's input, not the initial prompt.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store; pin blocking workers with `journal::with_test_ledger`.
 
 # Documentation

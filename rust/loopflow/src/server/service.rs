@@ -163,7 +163,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
-    let _observations = crate::observe::Cache::shared();
+    let observations = crate::observe::Cache::shared();
+    let _transcripts = crate::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -191,6 +192,7 @@ pub(super) async fn run() -> Result<()> {
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    super::wake::start();
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {

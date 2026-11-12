@@ -160,6 +160,13 @@ pub struct SessionBoundary {
     /// Steer batches from earlier answers that this conversation's hooks
     /// printed and have not yet told the server about.
     pub printed: Vec<crate::id::SteerBatchId>,
+    /// The key file Claude publishes for the conversation's cross-session
+    /// inbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory, where an idle conversation takes steers and Task updates.
+    /// A path; the server reads the key when it sends. Null for other
+    /// providers and a Claude with no inbox.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub inbox: Option<std::path::PathBuf>,
 }
 
 /// Where in a native conversation a hook fired.
@@ -190,6 +197,11 @@ pub struct SessionBoundaryAnswer {
     /// The next pending steers; null when none are ready.
     #[serde(deserialize_with = "Option::deserialize")]
     pub steers: Option<SteerBatch>,
+    /// What changed on the Session's Tasks since its last update, rendered
+    /// for the provider; null when nothing did. Recorded as delivered when
+    /// answered.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub update: Option<String>,
     /// An earlier answer's batch is unconfirmed and its hook may still print
     /// it: the hook asks again at its next tool boundary.
     pub waiting: bool,

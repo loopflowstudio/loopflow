@@ -56,7 +56,7 @@ pub(crate) fn spawn(
 ) -> Result<tokio::process::Child> {
     let (store, session, attachment) = owner;
     super::dispatch::off_reactor(|| -> Result<tokio::process::Child> {
-        steer_environment(command.as_std_mut(), owner, holder)?;
+        context_environment(command.as_std_mut(), owner, holder)?;
         let program = command
             .as_std()
             .get_program()
@@ -86,7 +86,7 @@ pub(crate) fn spawn_native(
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
-    steer_environment(&mut command, owner, holder)?;
+    context_environment(&mut command, owner, holder)?;
     let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
     let child = store
         .with_session_attachment(session, attachment, || {
@@ -138,17 +138,28 @@ pub(crate) fn require_server() -> Result<()> {
     )
 }
 
-/// A launch the Machine server holds starts beside it and carries a steer
+/// Capture identity in the launch's delivery file. A launch the Machine
+/// server holds starts beside it and carries a steer
 /// capability, which its hooks present to that server. So does a conversation
 /// an owner holds, without the server check: its hooks say when it can take a
 /// reply and acknowledge typed input. A bare launch carries none: its two
 /// context hooks reach no server.
-fn steer_environment(
+fn context_environment(
     command: &mut std::process::Command,
     owner: &AttachmentOwner,
     holder: Holder,
 ) -> Result<()> {
     let (store, session, attachment) = owner;
+    if let Some(path) = command.get_envs().find_map(|(name, value)| {
+        (name == crate::context_block::CONTEXT_DELIVERY_ENV)
+            .then_some(value)
+            .flatten()
+    }) {
+        let path = std::path::Path::new(path);
+        let mut delivery = crate::context_block::ContextDelivery::load(path)?;
+        delivery.identify(store, session)?;
+        delivery.save(path)?;
+    }
     match holder {
         Holder::Caller => return Ok(()),
         Holder::Owner => {}
@@ -178,7 +189,7 @@ pub(crate) fn exec_native(
     use std::os::unix::process::CommandExt;
     let (store, session, attachment) = owner;
     crate::agent_input_timing::record("provider_exec_begin", session);
-    if let Err(error) = steer_environment(&mut command, owner, holder) {
+    if let Err(error) = context_environment(&mut command, owner, holder) {
         return std::io::Error::other(error.to_string());
     }
     let pid = std::process::id();

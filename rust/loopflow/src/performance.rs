@@ -107,8 +107,6 @@ pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
         );
         return;
     }
-    #[cfg(test)]
-    observer_measurement::observe(connection);
     if ENABLED.load(Ordering::Relaxed) {
         CONNECTIONS.fetch_add(1, Ordering::Relaxed);
         connection.trace_v2(
@@ -118,8 +116,6 @@ pub(crate) fn observe_sqlite(connection: &rusqlite::Connection) {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod observer_measurement;
 #[cfg(test)]
 pub(crate) mod subscription_measurement;
 

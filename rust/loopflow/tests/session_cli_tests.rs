@@ -41,17 +41,6 @@ fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
     }
 }
 
-/// Every Session row, whatever its mode or state.
-const EVERY_SESSION: &[&str] = &[
-    "session",
-    "list",
-    "--all",
-    "--interactive",
-    "all",
-    "--history",
-    "--json",
-];
-
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
     command(home, args).output().unwrap()
 }
@@ -241,14 +230,14 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert_eq!(inspected["artifact_key"], run_id.as_str());
     assert_eq!(inspected["caller_artifact_key"], CALLER);
     assert!(inspected["recorded_outcome"].is_null());
-    let listed = run(home.path(), EVERY_SESSION);
+    let listed = run(home.path(), &["session", "card", &id, "--json"]);
     assert!(
         listed.status.success(),
         "{}",
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert!(listed[0].get("run_id").is_none());
+    assert!(listed["session"].get("run_id").is_none());
     assert!(!dir.join("events.jsonl").exists());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
@@ -404,7 +393,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let mut reopened = second.wait_with_output().unwrap();
         reopened.stdout = std::fs::read(metadata_stdout).unwrap();
         reopened.stderr = std::fs::read(metadata_stderr).unwrap();
-        let active = run(home.path(), EVERY_SESSION);
+        let active = run(home.path(), &["session", "card", id, "--json"]);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
         let first = first.wait_with_output().unwrap();
@@ -443,15 +432,10 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let state = |output: std::process::Output| {
             assert!(output.status.success(), "{output:?}");
             let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["id"] == id)
-                .unwrap_or_else(|| panic!("{rows}"))["state"]
-                .clone()
+            rows["session"]["state"].clone()
         };
         assert_eq!(state(active), "active");
-        let ended = run(home.path(), EVERY_SESSION);
+        let ended = run(home.path(), &["session", "card", id, "--json"]);
         assert_ne!(state(ended), "active");
         if !resume {
             let manifest: serde_json::Value =
@@ -813,16 +797,10 @@ fn available_lists_only_conversations_ready_for_input() {
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(
-        home,
-        &["desktop", "sessions", "--all", "--history", "--json"],
-    );
+    let output = run(home, &["session", "card", id, "--json"]);
     assert!(output.status.success(), "{output:?}");
-    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    sessions
-        .into_iter()
-        .find(|session| session["id"] == id)
-        .unwrap_or_else(|| panic!("Session {id} is not listed"))
+    let card: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    card["session"].clone()
 }
 
 fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
@@ -1120,16 +1098,8 @@ exit 2
                 terminal.contains("latest agent message: done"),
                 "{terminal}"
             );
-            let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
-            assert_eq!(
-                listed
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|row| row["id"] == id)
-                    .unwrap()["title"],
-                "Release notes"
-            );
+            let card = inspect(&["session", "card", &id, "--json"]);
+            assert_eq!(card["session"]["title"], "Release notes");
         }
     }
 }
@@ -1244,15 +1214,11 @@ fn session_names_survive_capture_replacement() {
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // A capture never appears as a second conversation.
-    let all: Vec<serde_json::Value> = serde_json::from_slice(
-        &run(
-            home.path(),
-            &["session", "list", "--all", "--history", "--json"],
-        )
-        .stdout,
-    )
-    .unwrap();
-    assert_eq!(all.len(), 1, "{all:?}");
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
     assert_eq!(readback["state"], "closed", "the exited orphan is retired");
 
     assert!(!home
@@ -1288,6 +1254,75 @@ fn session_inventory_pages_are_explicit_bounded_and_complete() {
         assert!(
             !run(home.path(), args).status.success(),
             "accepted {args:?}"
+        );
+    }
+}
+
+#[test]
+fn session_subscription_headless_filter_excludes_completed_conversations() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(database.clone()),
+        ))
+        .unwrap();
+    let db = rusqlite::Connection::open(database).unwrap();
+    for (id, interactive, completed) in [
+        ("interactive", true, None),
+        ("headless", false, None),
+        ("closed", true, Some(2)),
+        ("closed-headless", false, Some(2)),
+    ] {
+        db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,completed_at,cwd)
+            VALUES(?1,?1,'human',1,0,?2,?3,?4)",
+            rusqlite::params![id, interactive, completed, home.path().to_str().unwrap()]).unwrap();
+    }
+    for headless in [false, true] {
+        let mut child = command(
+            home.path(),
+            &[
+                "session",
+                "list",
+                "--all",
+                "--no-raw",
+                "--json",
+                "--subscribe",
+            ],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+        let request = serde_json::json!({"id":1,"args":{"repo":null,"task":null,"search":null,"headless":headless}});
+        writeln!(child.stdin.take().unwrap(), "{request}").unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let frame = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|frame| frame["answers"] == 1)
+            .unwrap();
+        assert!(frame["unavailable"].is_null(), "{frame}");
+        let ids = frame["body"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            if headless {
+                vec!["headless", "interactive"]
+            } else {
+                vec!["interactive"]
+            }
         );
     }
 }

@@ -967,7 +967,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
         );
         assert!(saved.context.is_some());
         let current = store.session(&session.id)?.unwrap();
-        assert!(current.completed_at.is_some());
+        assert!(current.completed_at.is_none());
         assert!(store
             .session_history(&session.id, 0, 0)?
             .starts_with(&history));
@@ -989,6 +989,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             manifest
         );
         next.finish("failed")?;
+        assert!(store.session(&session.id)?.unwrap().completed_at.is_some());
         Ok(())
     })
     .unwrap();

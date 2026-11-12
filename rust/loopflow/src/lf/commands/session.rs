@@ -325,6 +325,10 @@ impl SessionFacts {
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
     let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.subscribe {
+        // This process reads the subscription itself, so it watches
+        // transcripts the way the Machine server does.
+        let observations = crate::observe::Cache::shared();
+        let _transcripts = crate::transcript::watch::watch(&observations);
         return subscribe_list(filter, super::subscribe::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -343,18 +347,29 @@ pub(crate) fn list_filter(
         blocked: args.selector.blocked,
         on: args.selector.on.clone(),
         available: args.available,
+        raw: !args.no_raw,
         repo: if args.all {
             None
         } else {
             crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
+        wave: args
+            .wave
+            .as_deref()
+            .map(|wave| {
+                crate::work::wave::context::resolve_managed_wave_sync(
+                    (!args.all).then_some(directory),
+                    Some(wave),
+                )
+                .map(|wave| wave.id().clone())
+            })
+            .transpose()?,
+        primary: args.primary,
         orphan: args.orphan,
         search: args.search.clone(),
-        interactive: args.interactive.interactive(),
-        history: args.history,
+        headless: args.headless,
         limit: args.limit,
-        offset: args.offset,
         after: args.page.then(|| args.after.clone().unwrap_or_default()),
     })
 }
@@ -367,8 +382,8 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects both Sessions and Runs.
-    interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    headless: bool,
 }
 
 pub(crate) fn subscribe_list(
@@ -379,7 +394,7 @@ pub(crate) fn subscribe_list(
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
-        interactive: filter.interactive,
+        headless: filter.headless,
     };
     super::subscribe::start(
         args,
@@ -388,7 +403,7 @@ pub(crate) fn subscribe_list(
                 repo: args.repo,
                 task: args.task,
                 search: args.search,
-                interactive: args.interactive,
+                headless: args.headless,
                 ..filter.clone()
             };
             async move {
@@ -576,8 +591,18 @@ async fn list(
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
         for session in sessions {
-            println!(
+            let place = if session.raw {
+                format!("raw {}", session.provider.as_deref().unwrap_or_default())
+            } else {
+                session
+                    .work_path
+                    .as_deref()
+                    .unwrap_or("Repository")
+                    .to_owned()
+            };
+            let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
@@ -587,12 +612,16 @@ async fn list(
                     SessionState::Detached => "detached",
                     SessionState::Closed => "closed",
                 },
-                session.work_path.as_deref().unwrap_or("Repository"),
+                place,
                 match &session.account {
                     Some(account) => format!("{}  on {account}", session.title),
                     None => session.title.clone(),
                 }
             );
+            if let Some(turn) = &session.turn {
+                line.push_str(&format!("  {}", turn.describe(now)));
+            }
+            println!("{line}");
             for action in session.actions {
                 println!(
                     "  {} — {}",

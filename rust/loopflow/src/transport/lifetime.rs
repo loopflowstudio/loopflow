@@ -6,14 +6,85 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+use anyhow::Result;
+
 use super::Host;
-use crate::store::sqlite::ViewerHold;
+use crate::harness::native_exit::{NativeExit, Settled};
+use crate::process::SessionAttachment;
+use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 
 pub(super) const POLL: Duration = Duration::from_secs(2);
+
+/// The exec'd native client whose attachment the watcher checks. Store reads
+/// never run in the terminal's descriptor loop.
+#[derive(Debug, Default)]
+pub(super) struct Client(Mutex<ClientState>);
+
+#[derive(Debug, Default)]
+struct ClientState {
+    attached: Option<(String, SessionAttachment)>,
+    departure: Option<Settled>,
+}
+
+impl Client {
+    pub fn set(&self, record: Option<&NativeExit>) {
+        let mut state = self.0.lock().expect("client attachment lock poisoned");
+        state.attached = record
+            .filter(|record| record.client)
+            .map(|record| (record.session.clone(), record.attachment.clone()));
+        state.departure = None;
+    }
+
+    pub fn take_departure(&self) -> Option<Settled> {
+        self.0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .departure
+            .take()
+    }
+
+    fn attached(&self) -> bool {
+        self.0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .attached
+            .is_some()
+    }
+
+    fn check(&self, store: &SqliteStore) -> Result<bool> {
+        let attached = self
+            .0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .attached
+            .clone();
+        let Some((session, expected)) = &attached else {
+            return Ok(false);
+        };
+        if store.session_attachment(session)?.as_ref() == Some(expected) {
+            return Ok(false);
+        }
+        let notice = store
+            .attachment_departure(session, expected)?
+            .map(|departure| crate::lf::commands::util::departure_notice(store, session, departure))
+            .transpose()?;
+        let mut state = self.0.lock().expect("client attachment lock poisoned");
+        if state.attached != attached {
+            return Ok(false);
+        }
+        state.attached = None;
+        // Keep the known move even if recording the exit later takes too long.
+        state.departure = Some(Settled {
+            code: 0,
+            lines: notice.into_iter().collect(),
+        });
+        Ok(true)
+    }
+}
 
 /// One thread recording viewing for every execution a host serves: the
 /// Machine server's held terminals share one, a Session owner process has its
@@ -65,12 +136,14 @@ impl Watcher {
 
     /// Record `host`'s viewing sent through the returned handle. A Desktop
     /// shell's owner (`shell`) also learns of its explicit Close on the
-    /// receiver, after `waker` wakes its wait.
+    /// receiver, after `waker` wakes its wait; so does any host whose
+    /// `client` moved to another attachment, through `client` itself.
     pub fn watch(
         &self,
         host: Host,
         shell: bool,
         waker: UnixStream,
+        client: Arc<Client>,
     ) -> (Viewing, mpsc::Receiver<()>) {
         let key = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (close, closing) = mpsc::channel();
@@ -79,10 +152,12 @@ impl Watcher {
             shell,
             close,
             waker,
+            client,
             hold: None,
             recorded: None,
             hold_failure: RecordingGap::default(),
             close_failure: RecordingGap::default(),
+            client_failure: RecordingGap::default(),
         };
         let _ = self.messages.send(Message::Watch(key, watch));
         let viewing = Viewing {
@@ -99,18 +174,20 @@ struct Watch {
     shell: bool,
     close: mpsc::Sender<()>,
     waker: UnixStream,
+    client: Arc<Client>,
     hold: Option<ViewerHold>,
     /// None means no observation has been committed, including initial absence.
     recorded: Option<Option<ViewerHold>>,
     hold_failure: RecordingGap,
     close_failure: RecordingGap,
+    client_failure: RecordingGap,
 }
 
 impl Watch {
-    /// Only a failed write or an explicit shell Close needs another attempt
-    /// without a change.
+    /// Only a failed write, an explicit shell Close or an attached native
+    /// client needs another attempt without a change.
     fn waiting(&self) -> bool {
-        self.shell || self.recorded != Some(self.hold)
+        self.shell || self.recorded != Some(self.hold) || self.client.attached()
     }
 
     /// Record what changed; false once a shell's Close has been delivered.
@@ -124,6 +201,14 @@ impl Watch {
             .is_some()
         {
             self.recorded = Some(self.hold);
+        }
+        if report_result(
+            &mut self.client_failure,
+            "native client attachment",
+            self.client.check(store),
+        ) == Some(true)
+        {
+            let _ = (&self.waker).write_all(&[1]);
         }
         let Some(owner) = self.host.owner().filter(|_| self.shell) else {
             return true;
@@ -228,7 +313,12 @@ mod tests {
             crate::journal::with_test_ledger(db, || super::record(&received))
         });
         let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-        let (viewing, closing) = watcher.watch(Host::Owner(owner.clone()), false, waker);
+        let (viewing, closing) = watcher.watch(
+            Host::Owner(owner.clone()),
+            false,
+            waker,
+            std::sync::Arc::default(),
+        );
         viewing.send(Some(ViewerHold::Viewed(123)));
         std::thread::sleep(super::POLL * 2);
         let read = || {
@@ -258,5 +348,53 @@ mod tests {
         recorder.join().unwrap();
         assert_eq!(read(), Some(124));
         assert!(closing.try_recv().is_err());
+    }
+
+    #[test]
+    fn client_retirement_waits_for_a_readable_store_and_keeps_its_move_notice() {
+        use super::{Client, ClientState};
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
+            .unwrap();
+        let client = Client(std::sync::Mutex::new(ClientState {
+            attached: Some((session.id.to_string(), attachment.clone())),
+            departure: None,
+        }));
+        assert!(!client.check(&store).unwrap());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions RENAME TO agent_sessions_unavailable")
+            .unwrap();
+        assert!(client.check(&store).is_err());
+        assert!(client.take_departure().is_none());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions_unavailable RENAME TO agent_sessions")
+            .unwrap();
+        store
+            .finish_session_attachment(
+                &session.id,
+                &attachment,
+                "completed",
+                Some(&crate::process::Departure::Terminal {
+                    to: Some("tmux %9".into()),
+                }),
+                || Ok(true),
+            )
+            .unwrap();
+        assert!(client.check(&store).unwrap());
+        let moved = client.take_departure().unwrap();
+        assert_eq!(moved.code, 0);
+        assert!(moved.lines[0].contains("moved to tmux %9"));
+        assert!(!client.check(&store).unwrap());
+        assert!(client.take_departure().is_none());
     }
 }

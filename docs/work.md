@@ -10,7 +10,7 @@ Waves.
 ```bash
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
-lf task run LOO-12 --open                     # continue its Graph and open its conversation
+lf task run LOO-12 --open                    # continue its Graph and open its conversation
 lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```

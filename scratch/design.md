@@ -69,9 +69,7 @@ review (2026-11-11) found no remaining product choice in it; the demo shows it.
 Gate: `test(task_graph_launch_tests::) | test(lf::tests::) | binary(lf) |
 test(work_open_tests::) | test(documented_commands::) | test(cli_discovery::) |
 test(task_initialization_tests::) | test(machine_commands::task_run_open) | binary(global_commands) |
-(binary(transport_tests) & test(conversation_open_))`; clippy and affected
-documentation checks remain. Formatting passed on the current Rust tree;
-reuse that result unless the tree or gate's command plan changes.
+(binary(transport_tests) & test(conversation_open_))`.
 Demo: configured remote execution, direct terminal opening and agent sibling-tab
 opening through the real host.
 
@@ -84,6 +82,18 @@ lists the entry point alongside existing conversation commands.
 "No Desktop Files view attached; nothing opened."
 
 ## Focused checks
+
+Gate (2026-11-11, tree `108634779c`): `scripts/test.py` stopped twice at resource
+preflight ("cannot measure /Users/jack/.cache/uv: 15-second inventory deadline
+exceeded"; the 23 GB cache took 16 s to `du`), so its printed plan ran by hand.
+Architecture, test inventory, `cargo fmt --check`, build, clippy and
+`website/dev.py test` passed. Nextest with the filter above: 246 of 250 passed.
+Three `work_open_tests::rex_*` failures ("Rex did not answer within 2s", load
+average 67–117) passed on a serial rerun, where a different `rex_` test flaked
+instead; all 7 passed with a minimal PATH. `global_commands
+open_delivers_exact_task_to_desktop_without_preparing_its_execution` also fails
+on main: #1882 made `desktop_open` wait up to 30 s for Desktop to confirm, and the
+macOS-only test still expects an immediate `opening` receipt. Linux CI doesn't run it.
 
 `cargo test -p loopflow --test integration task_run_open_resolves_remote_selectors_before_opening_locally`: passed after compression, 1 test including `--` (2026-11-11), simulated SSH and attachment.
 `cargo test -p loopflow --lib task_graph_launch_tests::task_run_open` (with `LF_*` unset and null stdin): 6 passed after consolidating attachment fixtures (2026-11-11), including foreground ordering and the successful rental quote; macOS linker warned that `__eh_frame` exceeds 16MB.

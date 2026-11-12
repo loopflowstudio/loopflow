@@ -894,9 +894,9 @@ pub fn resolve_layers(
             }
         }
     }
-    // `default_agent` leads only a list declared no more specifically than
-    // it: a narrower `agents` is the whole order. The sole installed harness
-    // ranks below every authored list.
+    // `default_agent` leads only a list that ranks no higher than it by
+    // source, then scope, then target: a higher `agents` is the whole order.
+    // The sole installed harness ranks below every authored list.
     let rank = |key: &str| {
         let winner = explanations.get(key)?.candidates.last()?;
         Some((winner.source, winner.scope, winner.target.clone()))
@@ -967,7 +967,7 @@ pub fn resolve_layers(
                     "contributes"
                 }
             } else if key == "agent" && candidate.key == "default_agent" && outranked {
-                "unused: a more specific agents list is the whole order"
+                "unused: a higher agents list is the whole order"
             } else if index == last && !setting.value.is_null() {
                 "selected"
             } else if key == "agent" && candidate.key == "default_agent" && config.agent.is_some() {
@@ -1182,7 +1182,7 @@ mod tests {
             "agents: [claude]",
         );
         assert_eq!(order(&[personal.clone(), wave], None), ["claude"]);
-        // A default_agent leads only a list no more specific than it.
+        // A default_agent leads only a list that ranks no higher than it.
         let fallback = layer(
             ConfigSource::Personal,
             SettingScope::Global,
@@ -1212,7 +1212,7 @@ mod tests {
         };
         assert!(reasons(&narrowed).contains(&(
             "default_agent".into(),
-            "unused: a more specific agents list is the whole order".into()
+            "unused: a higher agents list is the whole order".into()
         )));
         assert!(reasons(&narrowed).contains(&("agents".into(), "selected".into())));
         let codex_wave = layer(

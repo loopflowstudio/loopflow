@@ -41,7 +41,7 @@ Concept review 2 ran global `default_agent: claude` with
 codex`. Now `default_agent` leads only when its winning declaration ranks at
 least as high as the winning `agents` by (source, scope, target); otherwise
 the list is the whole order and `--explain` marks the `default_agent`
-"unused: a more specific agents list is the whole order". The same comparison
+unused (reason reworded below). The same comparison
 drops the sole installed harness under any authored list.
 
 Run in a throwaway home with that config:
@@ -57,30 +57,19 @@ outranks repository. `docs/config.md` precedence table says so. A person with
 only a personal list and no `default_agent` no longer follows a repository's
 fallback; nobody has said which is wanted.
 
-## Next implement direction (concept review 3, 2026-11-12)
+## Built: the unused reason names rank (concept review 3, 2026-11-12)
 
-The rule is rank (source, then scope, then target), and the words say
-"specific". Run in a throwaway home with personal global `agents: [claude,
-codex]` and a repository `.lf/config.yaml` holding
-`skill.implement.default_agent: codex`:
+The rule is rank (source, then scope, then target), and the reason said "a
+more specific agents list", which sent a reader looking for a skill-level list
+that did not exist. The reason, the comments in `config/settings.rs` and both
+places in `docs/config.md` now say "higher"; the docs add that a repository
+`default_agent` does not lead a personal list. No behaviour changed.
+
+Run in a throwaway home with personal global `agents: [claude, codex]` and a
+repository `.lf/config.yaml` holding `skill.implement.default_agent: codex`:
 `lf config settings --skill implement --explain` showed `agent  claude, then
-codex` and, under `default_agent = codex · Shared project · skill implement`,
-`unused: a more specific agents list is the whole order`. The list there is
-global and the fallback is per skill; the reason sends a reader looking for a
-skill-level list that does not exist.
-
-1. The reason reads `unused: a higher agents list is the whole order`, the
-   word the neighbouring `overridden by a higher declaration` uses.
-2. `docs/config.md` says the same in both places: in "Keep going when a
-   provider runs out" ("A wider `default_agent` does not lead a narrower
-   list … at least as specifically") and in the precedence paragraph
-   ("declared more specifically"). State it by rank, and give the repository
-   case one sentence beside the skill one: a repository `default_agent` does
-   not lead a personal list.
-3. Comments and the test in `config/settings.rs` follow the wording.
-
-Done looks like: that repro prints the new reason; the focused config tests
-pass. No behaviour changes.
+codex  Personal global` and, over `default_agent = codex · Shared project ·
+skill implement`, `unused: a higher agents list is the whole order`.
 
 Also run, unchanged and as designed: the incident's config (global
 `default_agent: claude`, `skill.compress.default_agent: codex`, no `agents`)
@@ -132,7 +121,7 @@ Each has a default built; none stops the work.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass (after the narrowing rule).
+- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass (after the reason rewording).
 - Compress: `_split_agent_list` now keys off `old_default_agent_warning`; a
   `default_agent: ','` with no entries is left as written instead of dropped.
 - Compress 2: dropped a narrowing test case that could not fail (global

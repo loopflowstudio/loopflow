@@ -90,10 +90,13 @@ lf --wave frontend set agents claude         # this Wave: Claude only
 lf set --global skill.review.agents codex    # review: Codex only, everywhere
 ```
 
-A wider `default_agent` does not lead a narrower list: with a global
-`default_agent: claude`, review above still runs Codex only. `default_agent`
-leads when it is declared at least as specifically as the list, as
-`skill.compress.default_agent` is over a global `agents`.
+`default_agent` leads a list only when its declaration ranks at least as high
+as the list's, by source, then scope, then target (see
+[Which value wins](#which-value-wins)). A higher list is the whole order: with
+a global `default_agent: claude`, review above still runs Codex only, while
+`skill.compress.default_agent` leads a global `agents`. A repository
+`default_agent`, general or per skill, does not lead a personal list, because
+personal configuration outranks the repository's.
 
 A `default_agent` the list lacks is added in front, for the scope it applies
 to and nowhere else:
@@ -413,9 +416,10 @@ Agent selection first separates **choices** from **fallbacks**: every applicable
 `agent` beats every `default_agent`. Apply source, scope and target ordering within
 each class. A command-line `default_agent` is still a fallback. `agents` then
 supplies what a fallback may move to: the applicable list, with the winning
-`default_agent` first. A list declared more specifically than that
-`default_agent`, by the same source, scope and target ordering, is the whole
-order, and `--explain` marks the `default_agent` unused.
+`default_agent` first. A list that ranks higher than that `default_agent`, by
+the same source, scope and target ordering, is the whole order, and `--explain`
+marks the `default_agent` unused. So a repository `default_agent` does not lead
+a personal list.
 
 | Declarations | Selected agent |
 | --- | --- |

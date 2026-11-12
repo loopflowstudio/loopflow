@@ -2009,7 +2009,8 @@ mod tests {
             after: Some(String::new()),
             ..Default::default()
         };
-        for expected in ["b-repo", "c-wave", "d-orphan"] {
+        // A Wave conversation has a `wave_id`, so it is not an orphan.
+        for expected in ["b-repo", "d-orphan"] {
             let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);

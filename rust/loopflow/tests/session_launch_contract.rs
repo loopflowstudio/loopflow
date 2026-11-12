@@ -960,6 +960,28 @@ while not os.path.exists(home+'/quit'):
         .spawn()
         .unwrap();
     wait("the login never moved", &mut || signed_in("other"));
+    // Resume attaches after the login moves; until the first viewer hears
+    // it moved, quitting Claude would leave resume nothing to attach to.
+    let told = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    for stream in [
+        Box::new(first.stdout.take().unwrap()) as Box<dyn std::io::Read + Send>,
+        Box::new(first.stderr.take().unwrap()),
+    ] {
+        let told = told.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut stream = stream;
+            let mut buffer = [0; 4096];
+            while let Ok(read @ 1..) = stream.read(&mut buffer) {
+                told.lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buffer[..read]));
+            }
+        });
+    }
+    wait("the first viewer never heard it moved", &mut || {
+        told.lock().unwrap().contains("This conversation moved")
+    });
     fs::write(machine.join("quit"), "").unwrap();
     let output = output.wait_with_output().unwrap();
     let printed = format!(
@@ -1819,7 +1841,7 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 }
 
 #[test]
-fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
+fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     let output = fixture
         .command()
@@ -1830,12 +1852,19 @@ fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
     assert!(!output.status.success());
     let session = fixture.session();
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
-    let (count, tokens, final_receipt): (i64, i64, bool) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens'), json_extract(payload,'$.final') FROM session_events WHERE session_id=?1 AND kind='usage'",
-        [&session], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-    assert_eq!((count, tokens, final_receipt), (1, 13, false));
-    let completions: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(completions, 0);
+    let (count, tokens): (i64, i64) = db.query_row(
+        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    assert_eq!((count, tokens), (1, 13));
+    // The exit read closes the turn the transcript left open.
+    let statuses: Vec<String> = db
+        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .unwrap()
+        .query_map([&session], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(statuses, ["interrupted"]);
 }
 
 #[test]

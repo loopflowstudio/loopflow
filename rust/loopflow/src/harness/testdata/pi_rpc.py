@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 if "--version" in sys.argv:
@@ -79,6 +80,13 @@ def _record(text):
 
 if "--mode" not in args:
 
+    def _append(entry_id, parent, message):
+        # Pi appends each message to its session file, the usage source.
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
+        with file.open("a") as transcript:
+            transcript.write(json.dumps(entry | {"message": message}) + "\n")
+
     def _callback(event):
         event = (
             dict(sessionFile=str(file), turn="native-fixture-turn", openTools=0, pendingInput=0)
@@ -95,13 +103,16 @@ if "--mode" not in args:
     _callback({"type": "ui_prompt_start", "turn": None, "pendingInput": 1})
     _callback({"type": "ui_prompt_end", "turn": None})
     _record(args[-1] if "--" in args else "")
+    _append("fixture-user", None, {"role": "user", "content": [{"type": "text", "text": args[-1]}]})
     _callback({"type": "agent_start"})
     events = [_message("Checking")]
+    _append("fixture-step", "fixture-user", events[-1]["message"] | {"stopReason": "toolUse"})
     _callback(events[-1] | {"events": events})
     _callback(events[-1] | {"events": events})  # repeated observation is idempotent
     if os.environ.get("PI_FIXTURE_CRASH"):
         sys.exit(9)
     events.append(_message("native answer"))
+    _append("fixture-answer", "fixture-step", events[-1]["message"])
     _callback(events[-1] | {"events": events})
     _callback({"type": "agent_settled", "aborted": False, "events": events})
     sys.exit(0)

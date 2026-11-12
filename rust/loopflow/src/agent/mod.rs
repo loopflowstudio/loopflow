@@ -89,6 +89,8 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    // Before taking the hooks lock: the command's own return waits on it.
+    crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
     if let Some(hooks) = &hooks {
         for hook in hooks.iter().rev() {
@@ -1955,6 +1957,7 @@ fn run_interactive(
     let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
     let pid = child.id();
     let _pid_guard = ChildPidGuard::new(pid);
+    let _leading = foreground.as_ref().map(|foreground| foreground.lead(pid));
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"

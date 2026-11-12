@@ -92,6 +92,20 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Pi arguments that reopen a recorded thread. A bare launch's id with no file
+/// yet never got a reply, so Pi starts it fresh under that id, as it would
+/// alone; a held launch's recorded file must still exist.
+pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
+    let file = conversation_file(token);
+    if !Path::new(token.as_str()).is_absolute() && !file.is_file() {
+        return Ok(["--session-id".into(), token.to_string()]);
+    }
+    Ok([
+        "--session".into(),
+        validate_resume(token)?.display().to_string(),
+    ])
+}
+
 /// The file holding a recorded Pi thread. A held launch records the file Pi
 /// reports; a bare launch records the `--session-id` lf gave it, which Pi
 /// keeps as `<agent dir>/sessions/<cwd>/<time>_<id>.jsonl`.

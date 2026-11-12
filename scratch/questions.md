@@ -57,6 +57,12 @@ Its choices and reversible assumptions are in the parent branch,
   ("Holder, built"). A headless `-b` resume keeps its old rule: only the
   command's `--task`/`--wave` makes it `Server`, not the row's WorkSource.
 
+- A bare Pi resume whose minted id has no session file starts fresh on that
+  `--session-id` (what Pi does alone, with its own warning) instead of
+  refusing; a deleted file looks the same. The other option was a message
+  saying no reply was ever recorded.
+- A signal to lf while a bare provider leads the terminal is forwarded as
+  SIGTERM: ctrlc does not say which signal arrived.
 - A framed remote viewer (`lf ssh`, `LF_VIEWER_STREAM`) keeps an owner for a
   bare launch; direct output would be unframed on its stream.
 - Superseded on sync: LOO-823 gives the provider its own foreground process

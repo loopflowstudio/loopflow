@@ -196,7 +196,7 @@ fn spawn_session_command_with_env(
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
     }
-    outcome.result(&command.program, agent_session.is_some())
+    outcome.result(&command.program, agent_session.is_some(), command.holder)
 }
 
 pub(crate) fn departure_notice(
@@ -261,9 +261,22 @@ impl SessionCommandOutcome {
         self.moved.is_none() && !self.interrupted && !self.status.success()
     }
 
-    pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
+    /// A bare launch ends as its provider would alone, with the provider's
+    /// own status; only a held conversation can have another client.
+    pub(crate) fn result(
+        &self,
+        program: &str,
+        resuming: bool,
+        holder: crate::session::Holder,
+    ) -> Result<()> {
         if !self.failed() {
             Ok(())
+        } else if holder == crate::session::Holder::Caller {
+            eprintln!("{program} exited with {}", self.status);
+            let code = self.status.code().unwrap_or_else(|| {
+                128 + std::os::unix::process::ExitStatusExt::signal(&self.status).unwrap_or(0)
+            });
+            Err(crate::process::CommandExit(u8::try_from(code).unwrap_or(1)).into())
         } else if resuming {
             Err(anyhow!(
                 "{program} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
@@ -703,6 +716,9 @@ fn run_native_session(
     if owned.is_none() {
         client_opened(child.id());
     }
+    let _leading = foreground
+        .as_ref()
+        .map(|foreground| foreground.lead(child.id()));
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
@@ -730,14 +746,10 @@ fn run_native_session(
         }),
         None => false,
     };
-    // A provider leading the terminal gets Ctrl+C, a closed terminal or a
-    // `kill` instead of lf, and ends as it would started alone.
     let interrupted = interrupted
-        || (foreground.is_some()
-            && matches!(
-                std::os::unix::process::ExitStatusExt::signal(&status),
-                Some(libc::SIGINT | libc::SIGHUP | libc::SIGTERM)
-            ));
+        || foreground
+            .as_ref()
+            .is_some_and(|foreground| foreground.interrupted(&status));
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
@@ -1266,15 +1278,14 @@ mod tests {
         provider
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn provider_sigterm_without_stop_intent_remains_an_error() {
+    /// A bare launch's provider failure, without a terminal handing it signals.
+    fn bare_provider_error(body: &str) -> anyhow::Error {
         let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
         ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        let provider = fake_provider(&temp, "kill -TERM $$");
+        let provider = fake_provider(&temp, body);
         let capture = crate::session_record::SessionRecorder::begin_at(
             temp.path(),
             crate::session_record::SessionCaptureSpec {
@@ -1303,18 +1314,32 @@ mod tests {
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
         };
+        spawn_session_command_with_env(&command, &capture.environment(), None, None, None, None)
+            .expect_err("a failed provider fails its launch")
+    }
 
-        let error = spawn_session_command_with_env(
-            &command,
-            &capture.environment(),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect_err("unexplained SIGTERM must remain an error");
+    fn exit_code(error: &anyhow::Error) -> u8 {
+        error
+            .downcast_ref::<crate::process::CommandExit>()
+            .unwrap_or_else(|| panic!("not the provider's own status: {error:?}"))
+            .0
+    }
 
-        assert!(error.to_string().contains("signal: 15"));
+    #[cfg(unix)]
+    #[test]
+    fn provider_sigterm_without_stop_intent_remains_an_error() {
+        assert_eq!(exit_code(&bare_provider_error("kill -TERM $$")), 143);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_launch_returns_its_providers_own_status() {
+        let error = bare_provider_error("exit 7");
+        assert_eq!(exit_code(&error), 7);
+        assert!(
+            !format!("{error:?}").contains("another client"),
+            "{error:?}"
+        );
     }
 
     #[cfg(unix)]

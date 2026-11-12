@@ -66,7 +66,16 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
   transport. Bare Graphs at a terminal now run there (item 5).
 - Bare Pi (f69514edf): `--session-id <minted id>`; resume and the
   transcript reader resolve `*_<id>.jsonl` under `PI_CODING_AGENT_DIR`
-  (default `~/.pi/agent`) and still refuse a missing file.
+  (default `~/.pi/agent`). A minted id with no file (no reply yet) resumes
+  fresh on the same `--session-id` (`pi::resume_args`); a held Pi's
+  recorded path still refuses when missing.
+- Bare exits (QA follow-up): a failed bare provider returns its own status
+  (`CommandExit`, 128+signal) with "<program> exited with …"; the "another
+  client" hint is for held launches only. A signal to lf while its provider
+  leads the terminal (`foreground::end_leader`, called first in
+  `exit_on_interrupt`) SIGTERMs the provider group (SIGKILL after 5 s) and
+  leaves lf's own return to record the exit; the handler exits 130 only if
+  that return hangs 30 s.
 - Bare Codex (`Holder::Caller`): `codex [OPTIONS] -- <prompt>` /
   `codex resume -- <id> <prompt>`, options from
   `agent::codex_terminal_options`; no app-server, `open_thread`,
@@ -159,3 +168,4 @@ compaction), which loses nothing.
 - realign 5: no tests; the three docs items were already in `4f9b7796ff` (sessions.md list and table, troubleshooting `lf session serve`), matching `transport::runs_in_terminal` (`LF_SERVER_STATUS`, `-b`, no tty keep an owner).
 - concept review 3: no tests; no change. `Holder::of` reads where `transport::delegate` put the launch (inside an owner → `Owner`, Work → `Server`, else `Caller`), so one decider still holds; the steer question stays its own Task.
 - qa: live PTY walkthrough in `scratch/qa.html`. Fixed: a bare provider ended by SIGINT/SIGHUP/SIGTERM is interrupted, not "another client still owns this session"; bare Codex resume no longer re-sends its first turn (`bare_codex_resume_does_not_resend_its_first_turn`). `--lib` `lf::commands::util::` + `agent::session::` + `ops::human_session::` — 64 passed; clippy, fmt clean. Open from QA: a closed terminal leaves the agent row unfinished; nonzero exits still print the "another client" hint.
+- implement 6 (QA's three): `--lib lf::commands::util::` 13 passed (new `a_bare_launch_returns_its_providers_own_status`; the SIGTERM test now expects 143); `--test integration session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed, and failed (agent row open) with `end_leader` disabled; `--lib pi_` 32 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.

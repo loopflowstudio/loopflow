@@ -163,8 +163,7 @@ pub(crate) fn build_session_command(
             args.extend(crate::harness::pi::options(config, context_file)?);
             match invocation {
                 ProviderInvocation::Resume { session_id } => {
-                    let file = crate::harness::pi::validate_resume(session_id)?;
-                    args.extend(["--session".into(), file.display().to_string()]);
+                    args.extend(crate::harness::pi::resume_args(session_id)?);
                 }
                 ProviderInvocation::Terminal {
                     session_id: Some(id),

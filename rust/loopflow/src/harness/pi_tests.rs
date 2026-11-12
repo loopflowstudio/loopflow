@@ -544,11 +544,18 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         .windows(2)
         .any(|a| a == ["--session-id", id.as_str()]));
 
-    // Before Pi wrote the conversation, a resume refuses rather than starting fresh.
-    assert!(super::pi::validate_resume(&id)
-        .unwrap_err()
-        .to_string()
-        .contains("missing"));
+    // Before Pi wrote the conversation (no reply yet), a resume starts it
+    // fresh under the same id.
+    let fresh = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Resume { session_id: &id },
+        None,
+    )
+    .unwrap();
+    assert!(fresh
+        .args
+        .windows(2)
+        .any(|a| a == ["--session-id", id.as_str()]));
     let project = agent_dir.path().join("sessions").join("--repo--");
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));

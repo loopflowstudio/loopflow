@@ -221,6 +221,13 @@ against above. No open product choice. Its one fix is built: `tasks_held_by` tak
 from the ownership `tasks_held_in` read (no entry naming the Machine is
 `InvalidData`, never 0); compress folded `tasks_owned_by` into it.
 
+Second pass (2026-11-12), next implement direction: `lf task move`'s
+`after_help` (`rust/loopflow/src/lf/mod.rs`, `Move`) still says "`lf task run`
+there runs its route again", the behavior item 2 replaced. Say what the move
+does now: it continues a Graph it stopped on the new Machine at the step that
+was running, and the terminal showing the Session prints `lf resume --task X`.
+Then `documented_commands::`. Nothing else; no open product choice.
+
 ## Live check (for a person, both Machines on this build)
 
 ```sh

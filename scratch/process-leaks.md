@@ -227,9 +227,18 @@ its recorded results and limitations remain above and in `scratch/qa.html`.
 - Final `cargo clippy --all-targets -- -D warnings` and `git diff --check`: passed after the fixture repair. `/tmp/loo823-publish-final-clippy.log`.
 - Final audit: 284 lf processes in the opening snapshot and 284 when reads finished; `scratch/process-audit.html`.
 
+## QA, 2026-11-11 15:37–16:00
+
+`scratch/qa.html` top section. Bare `lf` (stand-in, real Claude 2.1.322, real Codex
+0.167.1) left the provider binary as the terminal's foreground group leader, no owner;
+Ctrl+Z/`fg`, quit and terminal close behaved like the provider alone. A Task conversation
+survived terminal close and Ctrl+], kept its draft, and ended on the first pass after
+completion +15 (+15:06). Fixed: `HOOK_BUSY_TIMEOUT` was dead after the ledger deletion
+and would fail CI's `-D warnings`; deleted. Rex's icon itself was not seen (no display).
+
 ## Remaining
 
-- Demo: bare `lf` with Claude and with Codex in Rex shows the provider icon.
+- Demo: bare `lf` with Claude and with Codex in Rex shows the provider icon (QA saw the foreground leader Rex reads, not the icon).
 - Gate: affected suites and the suite process census. Under load ~175,
   `a_headless_run_survives_without_viewers` once missed its 30 s `launched` wait
   (`/tmp/loo823-hooks-transport2.log`); 5/5 alone. Watch it there.
@@ -239,16 +248,13 @@ its recorded results and limitations remain above and in `scratch/qa.html`.
 
 ## Concept review, 2026-11-11
 
-At that review there was nothing to change; the later demo review (below)
-added bare-direct. The direct-signal implementation follows answer "1b". Conversation
-closure needs no stored intent; explicit shell Close and checkout retirement
-still do, because the request and unfinished deletion must survive a restart.
-Keep the return-between-decision-and-signal counterexample above. Resume restores
-history without reopening the Task or restoring its editor.
-
-The review page now shows the built interaction instead of asking the superseded
-close-request question. No next implement direction; gate and the process census
-remain as listed above. Resident-limit suspension is still deferred.
+Graph review at `ed74fefaa5`: nothing to change. Bare-direct ("1b", "2a"),
+direct cleanup signalling and the deletion list match the code. Explicit shell
+Close and checkout retirement keep stored intent because they must survive a
+restart. Conversation closure keeps none. Resume restores history without
+reopening the Task or its editor. `scratch/concept-review.html` shows the
+built interaction and has no open questions. No next implement direction: the
+Rex demo, gate with its process census, and the PR body remain.
 
 ## Historical concept-review finding, 2026-11-11
 

@@ -32,63 +32,36 @@
 </head>
 <body>
 <main>
-<p class="meta">LOO-823 · concept review at demo review (implement run <code>a2673ed2</code> live) · 2026-11-11 · branch <code>4b7531508c</code><br>
-Built from <code>transport.rs</code> (<code>delegate</code>, <code>start</code>), <code>transport/README.md</code>, <code>docs/sessions.md</code>, <code>docs/dev/server-first.md</code>, <code>server/README.md</code>, <code>scratch/process-leaks.md</code>.</p>
+<h1>LOO-823 concept review: nothing left to decide</h1>
+<p class="meta">LOO-823 · concept review (Graph, no person) · 2026-11-11 · branch <code>ed74fefaa5</code><br>
+Built from <code>scratch/process-leaks.md</code>, <code>rust/loopflow/src/bin/lf.rs</code> (<code>bare_conversation</code>), <code>rust/loopflow/src/os_process/foreground.rs</code>, <code>rust/loopflow/src/ops/task/retirement.rs</code>, <code>rust/loopflow/src/store/migrations/closed_task_cleanup.sql</code></p>
 
-<h1>Should bare <code>lf</code> stop starting an owner process in this PR?</h1>
+<p class="lead">No decision is needed. The earlier questions (bare owner vs. no owner; what counts as managed) were answered "1b" and "2a", and the code matches. What remains is the Rex icon demo, gate with its process census, and the PR body.</p>
 
-<p class="lead">Every interactive launch goes through <code>delegate</code> → <code>start</code>, which spawns <code>lf session serve</code> and relays the terminal to it. A bare <code>lf debug</code> gets the same detached owner a Task conversation gets. That owner is the only reason a bare session can outlive its terminal. To "behave like the underlying harness", the owner either has to end with the terminal or not exist.</p>
+<h2>Actions → concepts → APIs, as built</h2>
+<div class="scroll"><table>
+<tr><th>What a person does</th><th>Concept</th><th>What changes state</th></tr>
+<tr><td>Types <code>lf</code>, a prompt or a skill in a terminal</td><td>Bare conversation: no owner. The provider leads the terminal's foreground group</td><td><code>bare_conversation</code> skips <code>delegate_current</code>; <code>os_process::foreground</code></td></tr>
+<tr><td>Closes that terminal, mid-turn too</td><td>Whatever Claude/Codex does on hangup</td><td>Nothing in lf</td></tr>
+<tr><td>Opens a Task, Wave or repository conversation, then closes or detaches</td><td>Scope conversation: held by its owner until quit</td><td>Owner records viewing only</td></tr>
+<tr><td>Finishes or abandons the Task</td><td>Cleanup ends its conversations after 15 min unviewed, once work settles (abandon: right away)</td><td><code>retirement::close_conversations</code> → <code>human_session::end_owner</code> (shared with rollover)</td></tr>
+<tr><td>Clicks Close on a Desktop shell</td><td>Stored shell Close</td><td><code>desktop_shells.close_requested</code></td></tr>
+</table></div>
 
-<h2>What you said</h2>
+<h2>Removed</h2>
+<div class="built">
+<p>Two-minute idle ending, the native-input ledger, the sixteen-conversation background cap, stored automatic close requests with their triggers and owner polling.</p>
+</div>
+
+<h2>Counterexamples still holding</h2>
 <ul>
-  <li>"with bare lf, noting holds its at all"</li>
-  <li>"for a bare session, it jsut does whatever claude or codex would do"</li>
-  <li>"agian, just behaves like the underlying harness woudl"</li>
-  <li>"if its a managed task session, then neither ends the session"</li>
+<li>Someone returns between cleanup's decision and its signal: the conversation ends with “Task completed”, and resume keeps its history.</li>
+<li>A store read fails: closure is never authorized.</li>
+<li>An exec handoff starts a launcher with no parent link: cleanup also follows the Session's AgentProcess.</li>
 </ul>
 
-<h2>One interaction, three ways</h2>
-<p>In a repository you run <code>lf debug</code>. Claude is mid-turn. You close the tab, then later run <code>lf resume &lt;session&gt;</code>.</p>
-<div class="scroll"><table>
-  <tr><th></th><th>Close tab</th><th>Ctrl+]</th><th>Resume</th></tr>
-  <tr><td>Published PR</td><td><span class="bad">Owner keeps running until Claude quits</span></td><td>lf detaches; keeps running</td><td>Reattaches live</td></tr>
-  <tr><td>A. Owner tied to its terminal <span class="tag">(the live implement run is building this)</span></td><td>Owner hangs up the provider; ends</td><td>Forwarded to Claude</td><td>Continues from history</td></tr>
-  <tr><td>B. Bare goes direct <span class="tag">(proposed)</span></td><td>Claude gets SIGHUP from the tab</td><td>Claude sees it</td><td>Continues from history</td></tr>
-</table></div>
-<p>A and B look the same to you. They differ in what exists.</p>
-
-<h2>A: keep the owner, give it the terminal's lifetime</h2>
-<div class="built">
-<p>Owner and relay stay. The owner learns "if bare, end when the last viewer goes, and don't treat Ctrl+] as detach." That is a per-scope branch inside the owner's lifetime code, which has already gone through idle ending, an input ledger and close requests, and which server-first plans to delete. Bare turn hooks keep working because an owner still holds them. Small diff.</p>
-</div>
-
-<h2>B: bare runs in the terminal's foreground</h2>
-<div class="proposed">
-<p><span class="tag">Proposed, not built.</span> <code>delegate</code> starts an owner only for managed conversations. A bare launch runs the provider as the terminal's own foreground child. There is nothing to end, leak or clean up. This is the server-first piece "Bare launches go direct: no owner, agent in the terminal's foreground", pulled into this PR.</p>
-<div class="scroll"><table>
-  <tr><th></th><th>Goes away for bare</th><th>Changes</th></tr>
-  <tr><td>Process</td><td>Owner, relay, saved screen, takeover, the Ctrl+] key</td><td><code>delegate</code> branches on managed vs bare</td></tr>
-  <tr><td>Hooks</td><td>Turn hooks that report "can take a reply" (they need an owner)</td><td>Context hooks only, as bare headless runs already have</td></tr>
-  <tr><td>Desktop</td><td>Reattaching a bare pane after the app restarts</td><td>A bare pane ends with its pane, as plain Claude would</td></tr>
-  <tr><td>Status</td><td>Live working/idle for bare Sessions</td><td>From the transcript later (server-first "Transcript telemetry")</td></tr>
-</table></div>
-<p>Counterexample: a Graph started from inside bare Claude (<code>lf graph x</code>, no Task) runs its steps under that owner today. Under B, closing the tab ends them with Claude, as for any child of plain <code>claude</code>. A Task's Graph is managed and unaffected.</p>
-</div>
-
-<h2>Where "managed" stops</h2>
-<p>The line decides who gets an owner. The code has <code>PrimaryScope</code> (repository, Wave, Task) for each scope's ongoing conversation, and separately whether a Session names a Task. They disagree on <code>lf debug</code> typed inside a Task's checkout: it names the Task but isn't the Task's conversation.</p>
-
 <h2>Questions</h2>
-<h3>1. How does bare get the harness's behaviour?</h3>
-<dl class="q">
-  <dt>1a</dt><dd>A: keep the owner; it ends with its terminal and forwards Ctrl+]. Bare-direct stays a later server-first piece.</dd>
-  <dt>1b</dt><dd>B: bare launches no owner, in this PR. Implement switches to it.</dd>
-</dl>
-<h3>2. Which launches are managed (survive close and detach)?</h3>
-<dl class="q">
-  <dt>2a</dt><dd>Only a scope's ongoing conversation (Task, Wave, repository), however it is opened. A skill typed in a Task checkout is bare.</dd>
-  <dt>2b</dt><dd>Any interactive Session that names a Task or Wave, including a skill typed in a Task checkout.</dd>
-</dl>
+<p>None open. Resident-limit suspension went to LOO-824; resume-elsewhere, bare Graph targets, the Desktop bare-pane owner and the bare Codex observer went to LOO-820.</p>
 </main>
 </body>
 </html>

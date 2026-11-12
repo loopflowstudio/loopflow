@@ -79,10 +79,6 @@ pub(crate) use task_work::TaskShipping;
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// A provider hook at a turn or tool boundary waits this long for a locked
-/// store, then treats it as unavailable: a busy install never stalls a turn.
-pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
-
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 

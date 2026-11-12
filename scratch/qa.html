@@ -9,6 +9,44 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #e5e5ea;
 </style>
 <h1>LOO-823 QA: open conversations stay, done ones close</h1>
 
+<h2>Bare-direct and managed terminals, 2026-11-11 15:37–16:00 PST</h2>
+<p>HEAD <code>ed74fefaa5</code> plus one fix below. Branch <code>lf</code>/<code>lf-world</code> copied to <code>/tmp/lf-qa-823h</code>
+(SHA256 <code>f99c2cfa6fe36b94…</code>); <code>lf-world build one-task</code>, isolated <code>HOME</code>/<code>LF_HOME</code>/provider homes, stand-in Claude.
+A Python PTY driver ran an interactive <code>zsh -f -i</code> and typed <code>lf</code> as a person would. Load average 50–107 throughout.</p>
+<table><tr><th>Case</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>B1 bare <code>lf</code></td><td>Typed <code>lf</code>, then <code>hello b1</code></td><td>No <code>session serve</code>. Provider (stand-in, PID 80528) was its own group and the terminal's foreground (<code>tpgid</code> = its pgid); <code>lf</code> waited beside it. Reply arrived.</td></tr>
+<tr><td>B1 Ctrl+Z / <code>fg</code></td><td>Ctrl+Z, then <code>fg</code>, then a line</td><td><code>zsh: suspended (signal) lf</code>; both stopped, shell had the terminal. After <code>fg</code> the provider was foreground leader again (four samples over 2 s) and answered. One earlier sample 1.5 s after <code>fg</code> still showed both stopped; the repeat with output drained did not.</td></tr>
+<tr><td>B1 quit</td><td><code>quit</code>, then <code>echo back-$((40+2))</code></td><td>Prompt returned, shell printed <code>back-42</code>; nothing of the world left on the tty.</td></tr>
+<tr><td>B2 terminal close mid-conversation</td><td>New <code>lf</code>, typed an unsent line, closed the PTY master</td><td>Provider and <code>lf</code> gone within 0.5 s. Session recorded <code>closed</code>.</td></tr>
+<tr><td>B3 real Claude 2.1.322</td><td><code>lf -a claude</code> with an empty <code>CLAUDE_CONFIG_DIR</code></td><td>Foreground leader PID 66013, <code>comm</code> <code>claude</code>, the real binary. Closing the terminal left nothing.</td></tr>
+<tr><td>B4 real Codex 0.167.1</td><td><code>lf -a codex</code>, file credential store</td><td>Foreground leader PID 83022, <code>comm</code> <code>codex</code> (the <code>--remote</code> TUI); its app-server and plugin-clone <code>git</code> children sat in another group. Closing the terminal ended all of them. Sign-in screen only: no authenticated reply.</td></tr>
+<tr><td>B5 bare resume</td><td><code>lf session resume</code> of a closed bare Session</td><td>Without history the stand-in's own error showed (<code>No conversation found…</code>, then lf's hint), no owner. With history: <code>resumed …</code>, provider foreground leader, reply, gone when the terminal closed.</td></tr>
+<tr><td>M1 Task conversation</td><td><code>lf checkout fb378f</code> warmed owner 26855; attached from a terminal, <code>hello m1</code>, typed <code>draft m1 unsent</code>, closed the terminal</td><td>Owner and provider kept running. Reattaching showed the draft; Enter got its reply. Ctrl+] returned to the prompt; owner stayed.</td></tr>
+<tr><td>M2 plain <code>lf</code> in the Task checkout</td><td>Typed <code>lf</code> there</td><td>Bare ("2a"): new Session, provider foreground leader, no owner; the Task's owner untouched. <code>quit</code> gave the prompt back.</td></tr>
+<tr><td>C1 closed Task, current binary</td><td>Detached ~15:43:2x; <code>lf task complete</code> 15:44:19; <code>lf task retire</code> every 30 s</td><td>Alive through 15:58:55. Ended on the 15:59:25 pass (completion +15:06); provider gone too, Session <code>closed</code>, checkout kept (<code>Retained PR-less checkout</code>, exit 1).</td></tr>
+<tr><td>U1 returning state</td><td>Installed <code>lf 0.15.3+49037487d</code> created a Task and prepared a Session in a fresh home; branch build then listed, completed and retired</td><td>Both listed as before; complete and retire succeeded; no process left.</td></tr>
+</table>
+<h3>Fixed: dead constant would fail CI</h3>
+<p>The branch build warned <code>constant HOOK_BUSY_TIMEOUT is never used</code> (<code>store/sqlite.rs</code>). Its only user was the
+native-input ledger retry that this branch deletes; its doc claimed hooks wait one second, which nothing does now. CI runs Clippy with
+<code>-D warnings</code>. Deleted; <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> is clean.</p>
+<h3>Affected suites leave nothing</h3>
+<pre>cargo test -p loopflow --test transport_tests -- bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal
+  completed_task_cleanup_signals_shell_owner_and_settles_jobs desktop_shell_reconnects_without_replay_and_close_settles_its_jobs
+  completed_task_without_checkout_ends_a_conversation_with_typed_input
+test result: ok. 4 passed; 0 failed … 22.50s</pre>
+<p><code>ps</code> before 15:48:43, after 15:50:30: 75 new PIDs, none from this checkout's <code>target/</code>, a <code>/tmp/lf-7501-*</code> home or a Dev app.
+The <code>lf</code>/<code>codex</code> matches are installed-binary attaches and app-servers other agents started meanwhile (e.g. 7850 <code>~/.local/bin/lf session attach …</code>).</p>
+<h3>Audit</h3>
+<p>15:45 regenerate: 351 at its <code>ps</code>, 357 at its recount; a separate count at 15:46:47 gave 358. This world's live owner was listed as
+“temporary build” (<code>/tmp/lf-qa-823h/bin/lf × 1</code>), not under the fixture kill list.</p>
+<h3>Not reached</h3>
+<ul><li>Rex itself: no display in this run. The check above is what Rex reads (the <code>tcgetpgrp</code> leader's executable), not its icon.</li>
+<li>Authenticated Claude/Codex replies, and a real provider's mid-turn SIGHUP behaviour.</li>
+<li>Desktop opening a bare Session; explicit shell Close through Desktop (covered only by the transport test).</li></ul>
+<p>Left running and not mine: two installed-<code>lf</code> Claude conversations in <code>/tmp/lf-qa-823/world</code> (PIDs 27803, 84657, started 03:18). Every process from
+<code>/tmp/lf-qa-823h</code> and <code>/tmp/lf-qa-823u</code> had exited by 16:00; nothing else was signalled.</p>
+
 <h2>Open scopes and a mid-grace return, 2026-11-11 10:59–11:29 PST</h2>
 <p>HEAD <code>89181c49ac</code>, branch <code>lf</code> and <code>lf-world</code> copied out of <code>target/</code> into
 <code>/tmp/lf-qa-823g</code>. <code>lf-world build one-task</code> world, isolated <code>HOME</code>/<code>LF_HOME</code>/provider homes,

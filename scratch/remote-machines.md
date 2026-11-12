@@ -206,6 +206,15 @@ request reads the laptop's preferences, which never name the laptop, so it
 shows the Machine id. Whether the forwarded request should label its origin
 is for LOO-861, which reopens what `--machine` carries.
 
+Fourth pass (2026-11-12): done items 1 to 4 each have a test or a recorded
+reason, and `docs/dev/machines.md` matches the code. Nothing to change on this
+branch. One leftover for LOO-861: a Machine has a different name depending on
+where you ask. To move back from the laptop you type the laptop's host name
+(`local_label`), while mini calls it `laptop`. UX item 8 is written as
+`--machine laptop` from either side. Choosing between one name per Machine
+that travels with ownership entries and per-viewer labels is a product choice
+about what a Machine is. It belongs with the forwarded-origin label above.
+
 ## Live check (for a person, both Machines on this build)
 
 ```sh

@@ -91,8 +91,6 @@ when hands-on work resumes.
 
 ## Build order
 
-Each step is something to run and see.
-
 | Step | You run | You see | Needs |
 |---|---|---|---|
 | 0 | `lf task move X --machine mini` on a Task mini has never seen | It moves | This branch, installed on laptop and mini. Not yet run for real |
@@ -115,8 +113,7 @@ Kept open for more than one person, at no cost now:
 
 - Should `lf machine add` / `status` check that the remote's server is
   installed? A Task launch held on mini fails without it.
-- The "independent edits" preferences warning (Snags table) is still
-  uninvestigated.
+- The "independent edits" warning (Snags) is uninvestigated.
 
 ## Scope of this branch
 
@@ -236,12 +233,11 @@ lf task interrupt X && lf task abandon X     # clean up
 - 2026-11-12, move back: `machine_commands::` 45 passed;
   `two_people` 1, `planning_foreground_tests:: planning_exchange_tests::` 11,
   `--lib store::sqlite::task_ownership planning_peers task_comments
-  ops::task_ownership::` 15 passed; clippy clean. After the compress pass
-  (shared `exits_within_ten_seconds`, `live_graph`) both live-Graph move tests
-  passed, clippy clean; no launchd job or `lf` process from this checkout left.
+  ops::task_ownership::` 15 passed; after compress, both live-Graph move
+  tests; clippy clean; no launchd job or `lf` from this checkout left.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)
   | binary(two_people) | test(planning_foreground_tests::)` plus `lf::tests::`, and clippy.
-- End-to-end laptop → mini: left to a person (Live check above).
+- Laptop → mini for real: Live check above, for a person.
 
 ## Docs
 

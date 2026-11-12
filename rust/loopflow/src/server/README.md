@@ -372,6 +372,9 @@ peer UID. Every redemption attempt consumes the ticket, including a UID mismatch
 An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
 and closes the connection. Bridges do not occupy the 64 client slots.
 
+After a ticket failure or a disconnect before `bridged`, request a fresh ticket
+and bridge: the previous ticket may already be spent.
+
 The owner is the LfProcess holding the Session's terminal (`lf session serve`),
 never the provider's AgentProcess beneath it. The server resolves the Session's
 current owner when it issues the ticket, without starting or resuming a provider.
@@ -387,8 +390,8 @@ bytes and a control failure never closes a bridged terminal. Follow
 ### Remote attach contract
 
 Planned for LOO-718's authenticated remote transport; not available in this
-build. The [attachment](#terminal-attachment) and
-[recovery](#terminal-and-provider-recovery) rules apply, with these additions.
+build. The [attachment contract above](#terminal-attachment) applies, with
+these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
@@ -418,7 +421,6 @@ tickets are not interchangeable.
 
 The 60-second lifetime includes host sleep. Every admitted terminal redemption
 attempt consumes the ticket, including identity and local/remote mismatches.
-After a ticket failure, retry with a fresh ticket and bridge.
 
 ## Turn and tool boundaries
 

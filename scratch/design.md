@@ -5,9 +5,13 @@ This checkout documents the planned contract; implementation and authenticated
 acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
 
+Read the shipping docs in this checkout before implementation:
+[phone access](../docs/server.md#phone-access) and the
+[server attachment contract](../rust/loopflow/src/server/README.md#terminal-attachment).
+
 ## Transport dependency
 
-At November 12 00:44 and 01:18 UTC, `gh pr view 1812` still reported `OPEN`,
+At November 12 01:57 UTC, `gh pr view 1812` still reported `OPEN`,
 `mergedAt: null`, `autoMergeRequest: null`, at head
 `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetching `origin/main` returned
 `d382d0b72e4b7c41773e4c4070322387f8b4ce65`, without `server/mobile.rs` or
@@ -21,13 +25,14 @@ The November 11 23:27 UTC inspection of that head found
 `ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations. Reinspection
-of `ticket.rs` at November 12 00:44 UTC found the same behavior.
+of the admission paths at November 12 01:20 UTC and the ticket store at
+01:57 UTC found the same behavior.
 
-The last successful LOO-718 status read, November 11 17:27 UTC, reported
-`feature` / `demo`. On November 12 00:44 UTC, the Task status inspection did
-not return and was cancelled; current Graph positions remain unverified.
+The November 12 01:57 UTC `lf task status LOO-718 --json` inspection reported
+`feature` / `demo`, with PR #1812 open and settlement not armed. LOO-809's
+status read timed out after 20 seconds; its Graph position remains unverified.
 Earlier observations and history references are in
-`139c487f74817090775abe7496ae75eaa4d3a8f6:scratch/design.md`.
+`9e2a9aeaa1a0951a806e3a92ccd914c84ffd303f:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.
 
 ## Delete — do not maintain
@@ -66,5 +71,7 @@ Keep attachment and recovery rules in their shared sections; the remote
 contract adds only transport differences. Mark it planned until integration,
 then update its revision 4 anchor to the transport's revision 5 section.
 Keep phone prerequisites in `docs/server.md` consistent.
+Ticket retry guidance belongs in the shared attachment contract because local
+and remote bridges can both lose the acknowledgement after consuming a ticket.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

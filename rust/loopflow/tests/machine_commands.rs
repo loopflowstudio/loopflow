@@ -2610,34 +2610,8 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     // assertion fails.
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
     let (task, worktree) = placed_task(&plan, "graph-task");
-    // A route whose step runs until something stops it.
-    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
-    fs::write(
-        worktree.join(".lf/graphs/hold.yaml"),
-        // A first step that finishes, so restarting at the stopped step differs
-        // from restarting the route.
-        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
-    )
-    .unwrap();
-    let mut run = fixture
-        .command(&["-b", "task", "run", task.as_str(), "hold"])
-        .current_dir(&worktree)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let local_db = local_home.join("loopflow.db");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
     let remote_db = remote_home.join("loopflow.db");
-    if !wait_step_live(&local_db) {
-        let _ = run.kill();
-        let output = run.wait_with_output().unwrap();
-        panic!(
-            "the laptop's step never started: {}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
     // What the step had written so far travels in the checkpoint.
     fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
 
@@ -2721,6 +2695,162 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         )
         .unwrap();
     assert_eq!(first_steps, 0, "mini ran the route's first step again");
+}
+
+/// Back is the same act: the laptop runs `lf task move X --machine laptop`
+/// while mini owns the Task, and mini's Graph continues on the laptop.
+#[test]
+fn a_moved_task_comes_back_with_the_same_command() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (task, worktree) = placed_task(&plan, "back-task");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
+    let move_to = |machine: &str| {
+        let output = fixture
+            .command(&["task", "move", task.as_str(), "--machine", machine])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    move_to("mini");
+    let stopped = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        run.try_wait().unwrap().is_some()
+    });
+    if !stopped {
+        run.kill().unwrap();
+    }
+    assert!(stopped, "the laptop's run outlived the move to mini");
+    assert!(
+        wait_step_live(&remote_home.join("loopflow.db")),
+        "mini's step never started"
+    );
+
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    let laptop = laptop.split('.').next().unwrap().to_string();
+    let stderr = move_to(&laptop);
+    let step = format!("task wait {task} --timeout 120s");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    for stage in [
+        format!("Stopped {identifier} at `{step}`"),
+        "Committed and pushed".into(),
+        format!("Arrived on {laptop} (this Machine) (Graph at `{step}`)"),
+        format!("Running on {laptop} (this Machine) as Graph process"),
+    ] {
+        assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
+    }
+    // Mini's Graph stopped, and the laptop's runs at the step mini was on.
+    let mini_live: i64 = rusqlite::Connection::open(remote_home.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
+             WHERE g.task_id=?1 AND p.completed_at IS NULL",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(mini_live, 0, "mini's Graph kept running");
+    let here = fixture
+        .command(&["task", "status", task.as_str(), "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&here);
+    let here: Value = serde_json::from_slice(&here.stdout).unwrap();
+    assert_eq!(here["graph_processes"][0]["step"], step.as_str(), "{here}");
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop's step never started again"
+    );
+    // Mini says where the Task went. Forwarded from the laptop, the request
+    // reads the laptop's preferences, which never name the laptop itself.
+    let laptop_id = plan.local.local_machine().unwrap().id;
+    let forwarded = fixture
+        .command(&["--machine", "mini", "task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&forwarded);
+    let forwarded = String::from_utf8_lossy(&forwarded.stdout);
+    assert!(
+        forwarded.contains(&format!("{identifier}  Runs on {laptop_id} since ")),
+        "{forwarded}"
+    );
+    // On mini, with the laptop registered there, it reads by that name.
+    executable(
+        &fixture.root.path().join("remote/.local/bin/ssh"),
+        &format!(
+            "#!/bin/sh\nprintf 'lf {}\\n{laptop_id}\\n'\n",
+            loopflow::build_info::BUILD_VERSION
+        ),
+    );
+    let on_mini = |args: &[&str]| {
+        let output = fixture
+            .command(args)
+            .env("HOME", fixture.root.path().join("remote"))
+            .env("LF_HOME", &remote_home)
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    fixture.root.path().join("remote/.local/bin").display()
+                ),
+            )
+            .current_dir(&plan.remote_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    on_mini(&["machine", "add", "laptop"]);
+    let there = on_mini(&["task", "status", task.as_str()]);
+    assert!(
+        there.contains(&format!("{identifier}  Runs on laptop since ")),
+        "{there}"
+    );
+}
+
+/// Run a route on the laptop whose second step, `task wait`, holds until
+/// something stops it; returns once that step is live.
+fn start_hold_run(
+    fixture: &Machines,
+    task: &loopflow::durable::TaskId,
+    worktree: &Path,
+) -> std::process::Child {
+    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
+    fs::write(
+        worktree.join(".lf/graphs/hold.yaml"),
+        // A first step that finishes, so restarting at the stopped step differs
+        // from restarting the route.
+        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+    )
+    .unwrap();
+    let mut run = fixture
+        .command(&["-b", "task", "run", task.as_str(), "hold"])
+        .current_dir(worktree)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if !wait_step_live(&fixture.root.path().join("local/loopflow.db")) {
+        let _ = run.kill();
+        let output = run.wait_with_output().unwrap();
+        panic!(
+            "the laptop's step never started: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    run
 }
 
 /// Whether a `task wait` step recorded in `db` is running within a minute.

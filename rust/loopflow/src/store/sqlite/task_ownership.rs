@@ -407,20 +407,8 @@ fn append_in(
         },
         at: time::OffsetDateTime::now_utc().unix_timestamp(),
     };
-    let repo = task_repo_in(conn, task)?;
-    let remote = crate::ops::planning_client::connected(&repo);
-    // Without a remote provider, the planning journal is the provider and this write is its
-    // order: after every entry this Machine has seen, whatever their clocks said.
-    let ordered_at: Option<i64> = if remote {
-        None
-    } else {
-        Some(conn.query_row(
-            "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(ordered_at)+1,0))
-             FROM task_ownership WHERE task_id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
-    };
+    let remote = remote_planning_in(conn, task)?;
+    let ordered_at = journal_order_in(conn, task, remote)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
              at,ordered_at,written_here)
@@ -515,13 +503,43 @@ pub(super) fn claim_in(
     .map(Some)
 }
 
+fn remote_planning_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(crate::ops::planning_client::connected(&task_repo_in(
+        conn, task,
+    )?))
+}
+
+/// Without a remote provider, the planning journal is the provider and an
+/// entry this Machine takes in is ordered when it does: after every entry it
+/// has seen, whatever their clocks said.
+fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResult<Option<i64>> {
+    if remote {
+        return Ok(None);
+    }
+    Ok(Some(conn.query_row(
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(ordered_at)+1,0))
+         FROM task_ownership WHERE task_id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?))
+}
+
+/// The provider's order for an entry its comment carries: the comment's time.
+pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
+    created_at
+        .and_then(|at| {
+            time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64)
+}
+
 /// Parse a marked ownership comment into the log. Repeats are ignored; the
 /// provider's order is stamped once, the first time it is reported.
 pub(super) fn ingest_marker_in(
     conn: &Connection,
     task: &TaskId,
     body: &str,
-    ordered_at: Option<&str>,
+    ordered_at: Option<i64>,
 ) -> StoreResult<bool> {
     let Some(start) = body.find(MARKER) else {
         return Ok(false);
@@ -537,11 +555,6 @@ pub(super) fn ingest_marker_in(
     {
         return Ok(false);
     }
-    let ordered_at = ordered_at
-        .and_then(|at| {
-            time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64);
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_ownership(id,task_id,kind,person,person_key,machine_id,
              machine_label,at,ordered_at,written_here)
@@ -715,11 +728,14 @@ impl SqliteStore {
         Ok(entry)
     }
 
-    /// Take in an entry another Machine wrote, before planning delivers its comment.
+    /// Take in an entry another Machine wrote, before planning delivers its
+    /// comment. In the planning journal it follows every entry seen here, so
+    /// a handoff that arrives with a move outranks this Machine's earlier ones.
     pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let inserted = ingest_marker_in(&tx, task, marker, None)?;
+        let order = journal_order_in(&tx, task, remote_planning_in(&tx, task)?)?;
+        let inserted = ingest_marker_in(&tx, task, marker, order)?;
         tx.commit()?;
         Ok(inserted)
     }

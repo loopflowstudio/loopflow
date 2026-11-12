@@ -141,34 +141,15 @@ Built (see `git log`):
   changes or a process holds it. Test:
   `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
 
-Step 2 fix: a stopped run's restart point was where the run *began*
-(`select_task_run`: the Task's resting step, `start` in the fixture), so mini
-re-ran every step the run had finished. The first acceptance run showed
-`Stopped X at \`start\`` for a run interrupted at its second step. Now
-`stop_graphs` names the live Graph's running step (`GraphProcess::label` of its
-latest live step), `MovedTask.stopped: Option<StoppedGraph { step }>` carries
-it (replacing `running: bool`; `move.json` updated), the stage lines print it,
-and `StoppedRun::resume` runs `--from` it. No step running (between steps or
-before the first) leaves `step` absent and the run restarts where it began.
-Same-Machine `lf task interrupt` + `lf task run` still restarts where the run
-began; not changed here.
+Step 2: the move names the live Graph's running step (`StoppedGraph { step }`
+in `move.json`) and the run restarts `--from` it; same-Machine
+`lf task interrupt` + `lf task run` still restarts where the run began.
 
-Acceptance tests in `rust/loopflow/tests/machine_commands.rs`:
-- Item 1 (lands running, stage lines): `task_move_leaves_a_live_graph_running_on_mini`.
-- Item 2 (reopen command in the terminal):
-  `the_terminal_showing_a_moved_task_says_how_to_open_it_on_mini`. A stand-in
-  Claude runs under a `session serve --terminal` owner in the Task's checkout;
-  a socket viewer reads the owner's stream and sees
-  `This conversation moved to mini: lf resume --task X` after the move.
-- Item 3 (restart from checkpoint at the stopped step):
-  `task_move_leaves_a_live_graph_running_on_mini`. Its route is
-  `task status` → `task wait` → `demo`; the move interrupts `task wait`. The
-  test checks the half-written file on the pushed branch, that the printed
-  stopped step is `task wait …`, that `lf --machine mini task status --json`
-  shows mini's Graph process at that step, and that once mini's `task wait`
-  runs its Graph has recorded no `task status` step.
-- Item 4 (sending Machine's views, prune):
-  `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
+Acceptance tests in `machine_commands.rs`: items 1 and 3
+`task_move_leaves_a_live_graph_running_on_mini`; item 2
+`the_terminal_showing_a_moved_task_says_how_to_open_it_on_mini`; item 4
+`the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`; item 8
+`a_moved_task_comes_back_with_the_same_command`.
 
 Decided against, with the reason:
 - **View follow (step 1) stays a printed command.** The departure line reaches
@@ -179,8 +160,7 @@ Decided against, with the reason:
   terminal protocol that Desktop panes and the phone also read, and a viewer
   that may not be a shell (a Desktop pane) would have to start an SSH relay
   itself. A laptop terminal nobody is watching would also attach to mini's
-  Session, where step 4 (LOO-861) expects the phone to be the viewer. So the
-  terminal keeps printing `This conversation moved to mini: lf resume --task X`.
+  Session, where step 4 (LOO-861) expects the phone to be the viewer.
 - **A mid-run headless step restarts from the checkpoint (step 2), at that
   step, without its conversation.** No Graph re-run continues an interrupted
   step's conversation, even on one Machine:
@@ -194,15 +174,12 @@ Decided against, with the reason:
   `Move` admitted as headless (`admit` in `moves.rs` always makes the
   Task's primary and refuses a second). (a) also fixes the same-Machine case and
   is its own Task.
-- The laptop's worktree stays until `lf wt prune`.
+- The worktree stays until `lf wt prune`.
 - A repeated move after a failed receive does not continue the Graph: the
   second send finds nothing running.
 - Auto-Ship approval does not travel.
 
-Test hazard, fixed: tests that continue a run on the fixture's mini hold a
-`loopflow_test_support::MachineServer` for each home, and an `EndRecorded`
-guard ends every Process both homes recorded (by verified pid) on drop, also
-when an assertion fails.
+Test hazard, fixed: a `MachineServer` per home and an `EndRecorded` guard.
 
 Not approved: `lf install` on the laptop or the mini, or any real move of a
 live Task. The reply to "Should I install it on both and run a move with a
@@ -211,27 +188,26 @@ and 5 could be follow up tasks?", which doesn't say.
 
 ## Concept review (2026-11-12)
 
-The move, stage lines, restart-at-step and the laptop's views match "What a
-move should feel like" items 1, 2, 6, 7 and 9; items 3 and 4 stay as decided
-against above. No open product choice. Its one fix is built: `tasks_held_by` takes `since`
-from the ownership `tasks_held_in` read (no entry naming the Machine is
-`InvalidData`, never 0); compress folded `tasks_owned_by` into it.
+First two passes' fixes (`tasks_held_by` `since`, `lf task move` after_help)
+are built. Items 3 and 4 stay as decided against above.
 
-Second pass (2026-11-12): its one fix, `lf task move`'s stale `after_help`, is
-built (781e2509d0).
-
-Third pass (2026-11-12): item 8, "Back is the same act", has no test, though the
-Task's case ("comes back the same way") and `docs/dev/machines.md` ("run from
-either Machine") claim it. Every `task move` test runs on the laptop while the
-laptop owns the Task, so `relay_task`'s other branch (owner elsewhere: ssh
-`session send` to the owner, then a `StoppedRun` resumed on this Machine) never
-runs. Next implement: `a_moved_task_comes_back_with_the_same_command` in
-`machine_commands.rs`. Move a Task with a live Graph to mini (as
-`task_move_leaves_a_live_graph_running_on_mini`), then from the laptop
-`lf task move X --machine laptop`; assert the stage lines, that the laptop's
-Graph process runs at the step mini was on, and that `lf --machine mini task
-status X` says `Runs on laptop since …`. Fix whatever it shows. Same fixture
-rules: a `MachineServer` per home, `EndRecorded`.
+Third pass (2026-11-12): item 8, "Back is the same act", had no test. Built:
+`a_moved_task_comes_back_with_the_same_command` moves a live Graph to mini,
+then from the laptop `lf task move X --machine <laptop host name>`. It exposed
+two bugs, both fixed:
+- The laptop refused to continue the Graph ("is running graph hold from
+  start"): a local receive ran inside `lf task move`, so the arrived Graph's
+  carrier was the still-live move. `session_move::receive` now runs
+  `lf session receive` as its own Process here too, as over SSH.
+- Mini kept reading itself as owner: a handoff taken in from a move had no
+  journal order (`ordered_at` NULL sorts last), so mini's own later handoff
+  sorted before it. `ingest_ownership_marker` now orders it like a local
+  append when the journal is the provider (`journal_order_in`).
+Mini names the laptop `laptop` once registered there (`lf machine add laptop`
+on mini). Forwarded from the laptop (`lf --machine mini task status`), the
+request reads the laptop's preferences, which never name the laptop, so it
+shows the Machine id. Whether the forwarded request should label its origin
+is for LOO-861, which reopens what `--machine` carries.
 
 ## Live check (for a person, both Machines on this build)
 
@@ -247,26 +223,26 @@ lf task status X                             # "X  Runs on mini since …"
 lf task list && lf machine list              # X under mini
 lf --machine mini task status X              # Graph running there
 lf wt prune --dry-run                        # "Task X runs on mini"
-lf task move X --machine laptop              # back
+lf task move X --machine "$(hostname -s)"    # back, from the laptop
+lf --machine mini task status X              # "Runs on <laptop id> since …"
 lf task interrupt X && lf task abandon X     # clean up
 ```
 
 ## Checks
 
-- 2026-11-12, after folding `tasks_owned_by` into `tasks_held_by`:
-  `machine_commands::` 44 passed (prune test asserts `since > 0`), `--lib
-  ops::task_ownership:: store::sqlite::rentals rental::` 36; clippy clean. Earlier: `documented_commands::` 4,
-  `--lib server::schema::tests:: lf::tests:: ops::task_ownership::` 52,
-  `git::worktrees::` 22 passed.
-- 2026-11-12, `lf task move` after_help now describes the continued Graph and
-  printed `lf resume --task <ID>`: `documented_commands::` 4, `lf::tests::` 43
-  passed; clippy clean; no launchd job or `lf` process from this checkout left.
-- Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)`
-  plus `lf::tests::` for the CLI, and clippy.
+- Earlier passes (`git log scratch/remote-machines.md`): `machine_commands::`,
+  `documented_commands::`, `lf::tests::`, `server::schema::tests::`,
+  `git::worktrees::` passed; clippy clean.
+- 2026-11-12, move back: `machine_commands::` 45 passed;
+  `two_people` 1, `planning_foreground_tests:: planning_exchange_tests::` 11,
+  `--lib store::sqlite::task_ownership planning_peers task_comments
+  ops::task_ownership::` 15 passed; clippy clean; no launchd job or `lf`
+  process from this checkout left.
+- Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)
+  | binary(two_people) | test(planning_foreground_tests::)` plus `lf::tests::`, and clippy.
 - End-to-end laptop → mini: left to a person (Live check above).
 
 ## Docs
 
 `docs/dev/machines.md`, "Move a Task between your Machines", matches what was
-built: stage lines, the printed reopen command, restart from the checkpoint,
-the laptop's status/list/machine list/prune output.
+built, including moving back.

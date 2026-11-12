@@ -172,8 +172,8 @@ LOO-412 supplies user/shared destination selection and portable Work exchange.
 Ownership entries travel as marked Task comments ("Jack Heart claimed this on
 mini" plus a `loopflow-ownership` HTML comment carrying the entry) through the
 ordinary comment delivery to Linear or the Git planning journal; inbound comments
-are parsed into the log. In the journal each local append sorts after every entry
-its Machine has seen. An unknown Machine remains an entry reference, never an
+are parsed into the log. In the journal each local append, and each handoff a
+move delivers, sorts after every entry its Machine has seen. An unknown Machine remains an entry reference, never an
 invented SSH route.
 The journal does not carry RepositoryId: unbound import creates a local repository
 ID. Explicit association converges established roots on a selected ID without
@@ -245,7 +245,11 @@ Running on mini as Graph process 0199a213-81c0-7800-8aa1-bbab2a035a55
 ```
 
 The Graph is running on mini when the command returns, from the step it was on.
-Moving back is the same command with `--machine laptop`, run from either Machine.
+Moving back is the same command, run from either Machine: on the laptop
+`--machine` takes its host name, on mini the name you registered it under
+(`lf machine add laptop`). Mini then says `MTG-321  Runs on laptop since …`;
+asked from the laptop (`lf --machine mini task status`), it reads the laptop's
+preferences, which don't name the laptop, and shows its Machine id.
 
 **Reopen the conversation there.** The terminal that was showing the Task's
 Session ends it with `This conversation moved to mini: lf resume --task MTG-321`;

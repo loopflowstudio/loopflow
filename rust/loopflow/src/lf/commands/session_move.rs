@@ -265,21 +265,40 @@ async fn ready(
         })
 }
 
-/// Receive on `target`, over SSH unless it is this Machine (`None`).
+/// Receive on `target`, over SSH unless it is this Machine (`None`). Either
+/// way `lf session receive` is its own Process: a Graph it carries in arrives
+/// stopped, so this move can continue it.
 async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) -> Result<()> {
+    let args = ["session".to_string(), "receive".to_string()];
+    let input = serde_json::to_vec(moved)?;
     match target {
         Some(target) if target.id != store.sqlite.local_machine()?.id => {
-            super::ssh::request(
-                target,
-                &["session".into(), "receive".into()],
-                Some(&serde_json::to_vec(moved)?),
-            )
-            .await?;
+            super::ssh::request(target, &args, Some(&input)).await?;
         }
-        _ => {
-            moves::receive(store, moved.clone()).await?;
-        }
+        _ => receive_here(&args, &input).await?,
     }
+    Ok(())
+}
+
+async fn receive_here(args: &[String], input: &[u8]) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let mut child = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("start `lf session receive`")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input).await?;
+    }
+    let output = child.wait_with_output().await?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
     Ok(())
 }
 

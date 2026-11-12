@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-860 QA: resume on the latest input's provider</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f2;padding:.7rem;overflow-x:auto;font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border:1px solid #ddd;padding:.3rem .5rem;text-align:left;vertical-align:top}
+.ok{color:#1a7f37;font-weight:600}.bad{color:#b42318;font-weight:600}h2{margin-top:2rem}
+</style>
+<h1>LOO-860 QA: resume on the latest input's provider</h1>
+<p>Branch <code>lf</code> (target/debug), private <code>LF_HOME</code> under <code>/tmp/lf-qa-860</code>, real <code>HOME</code> so real Claude Code 2.1.322 and Codex 0.167.2 answered on their existing logins. Installed <code>lf 0.15.3+3f3153d95</code> built the returning-user stores.</p>
+
+<h2>1. Switch and resume, headless (real turns)</h2>
+<p>Prepared a repository Session, then sent turns with <code>lf -b [-a X] session resume S --message …</code>.</p>
+<table>
+<tr><th>Command</th><th>Reply</th><th>Row provider / thread</th><th>Capture provider</th></tr>
+<tr><td><code>-a claude</code> "Reply only with QA_ONE"</td><td>QA_ONE</td><td>claude / 879150e5…</td><td>claude</td></tr>
+<tr><td><code>-a codex</code> "QA_TWO, then the token you replied before"</td><td>QA_TWO / QA_ONE</td><td>codex / 01a1d128…</td><td>codex</td></tr>
+<tr><td>plain, "QA_THREE, then your model family"</td><td>QA_THREE / GPT</td><td>codex / 01a1d128… (same)</td><td>codex</td></tr>
+<tr><td><code>-a claude</code> "QA_FOUR, list every QA_ token"</td><td>QA_ONE, QA_TWO, QA_THREE, QA_FOUR</td><td>claude / 012e6fc4… (new, seeded)</td><td>claude</td></tr>
+<tr><td>plain, "QA_FIVE, your model family"</td><td>QA_FIVE / Claude</td><td>claude / 012e6fc4… (same)</td><td>claude</td></tr>
+</table>
+<p class="ok">Works: the switch sticks, plain resume follows it, the seeded log carries the history both ways.</p>
+
+<h2>2. Interactive and Desktop paths</h2>
+<ul>
+<li><code>lf -i -a codex session resume S</code> in a PTY: "Started a new codex thread for repo, seeded with what the claude thread knew." Row → codex / 01a1d129…, capture codex.</li>
+<li>Killed that Codex (kept its holder), then plain <code>lf -i session resume S</code>: launched <code>codex … resume -- 01a1d129-7cbf-72f3-b51d-d5020024483e</code>, no new capture, earlier QA_FIVE turn visible.</li>
+<li><code>lf session resume S --prepare --json</code> (Desktop's call): <code>provider: codex</code>, <code>availability: available</code>, action "Reconnect", same provider session in the transition.</li>
+</ul>
+<p class="ok">Works.</p>
+
+<h2>3. Returning user: a store 0.15.3 left wrong</h2>
+<p>With installed 0.15.3: <code>lf -a claude session resume --prepare --json</code>, then <code>lf -i -a codex session resume S</code> before any Claude turn (the original Desktop sequence). Result, reproducing the Task's bug:</p>
+<pre>provider|provider_thread
+claude|01a1d12c-fca0-7a33-9423-08507adaf78d     (a Codex thread)
+captured provider: claude ; manifest.json observation harness: codex
+provider_session_accounts: 0 rows (no connected accounts)</pre>
+<p>Opened with the branch (migration applied), plain <code>lf -i session resume S</code>:</p>
+<pre class="bad">Preparing claude … Opening claude terminal
+No conversation found with session ID: 01a1d12c-fca0-7a33-9423-08507adaf78d
+claude exited with 1.</pre>
+<p><b>Cause:</b> the migration repaired only Sessions whose thread had a <code>provider_session_accounts</code> row. On a Machine running on ambient logins there is none, so the row stayed on Claude and <code>resume_native_session</code> handed Claude the Codex thread.</p>
+<p><b>Fix (6b83d6a9d9):</b> <code>resume_on_latest_input_provider.sql</code> first moves a Session to the harness its current input's <code>manifest.json</code> observation recorded (model from the same manifest, <code>json_valid</code>-guarded, through <code>session_observation_receipt</code>), then lets a recorded thread account override it, as before. The account rule still has to win: two finished Runs on this Machine have a manifest that says claude, a capture that says codex and a Codex-owned thread.</p>
+<p>Repeated from a fresh 0.15.3 home (home4, same sequence, same broken row), opened with the rebuilt branch:</p>
+<pre>agent_sessions after migration: codex||01a1d137-ff81-7f21-8b4d-fb1540d9e2a2
+Preparing codex … Starting Codex … Opening codex terminal
+codex … resume -- 01a1d137-…   (earlier repo-session turn shown: "Ran lf wave list --json …")</pre>
+<p class="ok">Works now.</p>
+<p>Dry run on a <code>.backup</code> copy of <code>~/.lf/loopflow.db</code> (16,585 Sessions; copy deleted afterwards): 0.46 s, changed exactly <code>f505abc0e07647b58fdf9d33c5017c25</code>, <code>session_b5b0a13d…</code>, <code>session_c9a397ed…</code> → codex, the same three rows as the account-only version. The manifest rule alone selects only <code>f505abc0…</code>. An unindexed form of the same join took over 120 s, which is why the migration names the index.</p>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow --lib -- store::migrations::</code>: 132 pass (the new <code>unaccounted</code> case included; the first draft failed <code>canonical_ids_released_work_upgrades_without_replacing_history</code> on "malformed JSON", fixed with <code>json_valid</code>).</li>
+<li><code>ops::human_session::</code>: 51 pass (run before the SQL guard; the guard touches only the migration).</li>
+<li>Gate still owns clippy, <code>documented_commands::</code> and the affected-suite run.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>The account-route failure itself ("claude/… is outside the configured account route"): a private home can't get connected accounts without real OAuth. The account rule is covered by the migration test and the real-store dry run, not a live launch.</li>
+<li>Desktop and phone windows: only the <code>--prepare --json</code> answer they consume was checked.</li>
+<li>The Task's actual Session <code>f505abc0…</code> on the real Machine: it moves to Codex when the installed <code>lf</code> carries this migration.</li>
+</ul>
+
+<h2>Still wrong</h2>
+<ul>
+<li>Out of scope, from scratch/docs.md: <code>lf -a claude session resume</code> on a Codex bootstrap whose client failed after the server made a thread fails in <code>conversation_log::read</code> waiting for a transcript that never comes.</li>
+<li>Plain interactive <code>lf -i session resume</code> with the Machine's server stopped exits with "Loopflow server is not running; run lf server status" before launching anything. Not this change, but a dead end for a person who only typed resume.</li>
+</ul>

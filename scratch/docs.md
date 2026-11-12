@@ -22,3 +22,9 @@ Model: an input launches on the provider it recorded; an invocation that selects
 Done: `open_waiting_locked` skips `resume_native_session` when `handoff_agent` is set, so `lf -a claude session resume` on a Codex bootstrap with no provider thread appends and launches a Claude input. `session_launch_contract another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input` (stand-in `fail-server`) passes, and fails with the guard removed ("native history cannot resume in claude"). `ops::human_session::` 51 pass. Compress after a51dcd1dd2: no further cuts.
 
 Open (not in this Task's scope): a Codex bootstrap whose server started a thread but whose client failed (`fail-terminal`) has a provider thread and no transcript, so `lf -a claude session resume` takes `new_thread` and fails in `conversation_log::read`: "The codex transcript of Session … was not found. Keep this conversation open and retry after codex saves its first turn." That transcript never arrives for a failed bootstrap.
+
+# QA (2026-11-12)
+
+Real Claude and Codex, private `LF_HOME`, branch `lf`; report in `scratch/qa.html`. Claude → `-a codex` → plain → `-a claude` → plain, headless and interactive, plus Desktop `--prepare --json`: each resume ran on the latest input's provider and thread.
+
+Fixed: a 0.15.3 store with no account records (prepared Claude Session opened with `-a codex`) stayed `provider=claude` with a Codex thread; the branch resumed Claude with it ("No conversation found with session ID"). The migration now also moves a Session to its current input's observed manifest harness (`json_valid`-guarded, indexed: 0.46 s on a 16,585-Session copy of ~/.lf, still exactly the same 3 rows). `store::migrations::` 132 pass.

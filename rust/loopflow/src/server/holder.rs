@@ -308,8 +308,8 @@ struct Holder<'a> {
     waker: UnixStream,
 }
 
-/// Claim this build's socket and hold PTYs until the last child is gone and no
-/// start arrives for `IDLE`. `ready` runs once the socket accepts connections.
+/// Claim this build's socket and hold PTYs until the last child and reader are
+/// gone and no start arrives for `IDLE`. `ready` runs once the socket accepts connections.
 pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served> {
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -395,10 +395,14 @@ pub fn serve(place: &Place, build: &str, ready: impl FnOnce()) -> Result<Served>
             connection.flush();
         }
         connections.retain(|connection| !connection.closed);
+        // A reader still on its way to an exit keeps the holder too.
         let running = holder
             .terminals
             .values()
-            .any(|terminal| terminal.exit.is_none());
+            .any(|terminal| terminal.exit.is_none())
+            || connections
+                .iter()
+                .any(|connection| matches!(connection.mode, Mode::Reader { .. }));
         idle_since = match (running, idle_since) {
             (true, _) => None,
             (false, None) => Some(Instant::now()),
@@ -738,7 +742,11 @@ fn poll(
         if !full {
             events |= libc::POLLIN;
         }
-        if !connection.output.is_empty() {
+        // A reader with ring left to send waits on its socket, not the child.
+        let behind = matches!(&connection.mode, Mode::Reader { terminal, at, .. }
+            if !connection.closing
+                && terminals.get(terminal).is_some_and(|held| *at < held.written || held.exit.is_some()));
+        if !connection.output.is_empty() || behind {
             events |= libc::POLLOUT;
         }
         fds.push(pollfd(connection.socket.as_raw_fd(), events));

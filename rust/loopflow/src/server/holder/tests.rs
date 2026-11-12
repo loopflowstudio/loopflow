@@ -173,6 +173,35 @@ fn a_reader_behind_the_ring_is_told_where_it_resumes() {
 }
 
 #[test]
+fn a_slow_reader_of_an_exited_terminal_keeps_the_holder_until_its_exit() {
+    let fixture = holder();
+    let mut client = Client::connect(&fixture.place).unwrap();
+    client
+        .start(shell("t1", "r1", "head -c 1000000 /dev/zero | tr '\\0' a"))
+        .unwrap();
+    while client.list().unwrap()[0].exit.is_none() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    drop(client);
+
+    let mut output = Client::connect(&fixture.place)
+        .unwrap()
+        .read("t1", 0)
+        .unwrap();
+    // Longer than the fixture's idle, with the socket left full.
+    std::thread::sleep(Duration::from_millis(2500));
+    let mut bytes = 0;
+    loop {
+        match output.frame().unwrap() {
+            Frame::Out(out) => bytes += out.len(),
+            Frame::Exit(_) => break,
+            _ => {}
+        }
+    }
+    assert_eq!(bytes, 1_000_000);
+}
+
+#[test]
 fn input_and_size_reach_the_child() {
     let fixture = holder();
     let mut client = Client::connect(&fixture.place).unwrap();

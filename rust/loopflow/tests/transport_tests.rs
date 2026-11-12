@@ -1979,8 +1979,10 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
+        // The launching lf, which stays recorded after the provider exits and
+        // its attachment is released.
         let placement: Option<String> = fixture.sql().query_row(
-            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.parent_lf_process_id WHERE s.id=?1",
             [&session], |row| row.get(0),
         ).unwrap();
         terminal.stop();

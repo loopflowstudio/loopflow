@@ -53,8 +53,8 @@ A Run's id, running or finished, is refused with a pointer to its Task's Session
 only a Graph continues its own step's Run (structured-output correction).
 A Graph whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
-`--interactive false`, `--history`, `--task` and `--search`; `--all` means all
-repositories. `--page --json` uses stable ID pages; Desktop retains earlier
+`--headless`, `--task` and `--search`; `--all` means all
+repositories. Finished conversations belong in `lf history`. `--page --json` uses stable ID pages; Desktop retains earlier
 observations until enumeration succeeds. `lf graph list --processes` and `lf process show` reads
 Graphs from their Graph process and step processes. `lf session history show` and `lf session history replay` are the command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session

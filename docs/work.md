@@ -70,8 +70,8 @@ lf session bind SESSION --task LOO-12           # select this Task’s conversat
 Promotion preserves the branch, dirty and untracked files, and the Session's
 provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
-Pass `--session` explicitly to keep a conversation. An agent uses its own
-`LF_AGENT_CALLER.session_id` or looks it up with `lf session list --json`.
+Pass `--session` explicitly to keep a conversation. An agent reads its own
+Session ID from its lf context block.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries
@@ -100,7 +100,7 @@ Already-running clients may keep their original directory; subsequent connection
 use the selected one. Files remain in their original checkout. If an open Task has no checkout, binding adopts the Session’s unowned
 linked checkout. Done Tasks can still select an unfinished conversation without
 reopening work. With no Task checkout, the conversation stays in place and no
-checkout is adopted. Closed Sessions and headless Runs cannot become primary.
+checkout is adopted. Closed or headless Sessions cannot become primary.
 
 ## Steer it while it runs
 
@@ -112,9 +112,9 @@ lf task unassign LOO-12                           # nobody owns it: ship and CI 
 ```
 
 A steer saves locally first, then reaches every Session working on the Task at
-its next supported boundary: before a Graph step or after an agent turn. Idle
-Sessions stay idle; nothing is replayed into them. Direction from teammates, in
-Loopflow or as comments in your tracker, arrives the same way.
+its next supported boundary: before a Graph step or after an agent turn. An
+idle Task conversation is woken with it. Direction from teammates, in Loopflow
+or as comments in your tracker, arrives the same way.
 
 `lf task claim LOO-12` takes it back without starting anything; `lf task run`
 claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).

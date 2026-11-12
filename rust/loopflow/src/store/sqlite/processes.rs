@@ -21,6 +21,11 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
+fn agent_process_query() -> String {
+    format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
+        PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e"))
+}
+
 /// A finished `lf` Process nothing needs any more, over alias `p`: no agent
 /// issued it, no running parent may still read its result, and no row
 /// references it. Exit and prune both forget exactly these rows. Agent-side
@@ -1061,8 +1066,7 @@ impl SqliteStore {
     /// All unfinished agent rows, including detached and replaced processes.
     pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
-            PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e")))?;
+        let mut query = conn.prepare(&agent_process_query())?;
         let rows = query
             .query_map([], |row| {
                 Ok(crate::process::AgentProcessState {
@@ -2701,6 +2705,84 @@ mod attachment_tests {
             assert!(!columns.iter().any(|column| column == "provider_generation"));
         }
     }
+    #[test]
+    fn live_agent_inventory_upgrade_skips_other_processes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use rusqlite::{types::Value, StatementStatus};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
+             INSERT INTO processes(id,trace_id,started_at,kind,completed_at)
+             SELECT printf('00000000-0000-4000-8000-%012x',i),
+                    printf('00000000-0000-4000-8000-%012x',i),1,
+                    CASE WHEN i>4000 THEN 'agent' ELSE 'lf' END,
+                    CASE WHEN i>2000 THEN 2 END FROM n;
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('inventory','Inventory','human',1,0,'/repo');
+             UPDATE processes SET completed_at=NULL,agent_session_id='inventory',
+                spawn_state='reserved',agent_provider='codex',agent_interactive=1
+                WHERE id IN ('00000000-0000-4000-8000-000000001001',
+                             '00000000-0000-4000-8000-000000001002');
+             UPDATE processes SET pid=4242,os_started_at=1,spawn_state='spawn_requested'
+                WHERE id='00000000-0000-4000-8000-000000001001';
+             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-000000001002'
+                WHERE id='inventory';",
+        )
+        .unwrap();
+        let sql = super::agent_process_query();
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let width = query.column_count();
+            let rows = query
+                .query_map([], |row| {
+                    (0..width)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                query.get_status(StatementStatus::VmStep),
+                query.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        let (before, before_steps, _) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps, scans) = read();
+        assert_eq!(after, before);
+        assert_eq!(after.len(), 2); // Detached previous agent and reserved replacement.
+        assert_eq!(
+            after[0][0],
+            Value::Text("00000000-0000-4000-8000-000000001001".into())
+        );
+        assert_eq!(
+            after[1][0],
+            Value::Text("00000000-0000-4000-8000-000000001002".into())
+        );
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        assert!(scans <= 2, "fullscan steps: {scans}");
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map([], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("agent_process_unfinished")),
+            "{plans:?}"
+        );
+    }
+
     #[test]
     fn detached_and_replaced_agents_remain_in_the_process_inventory() {
         let home = tempfile::tempdir().unwrap();

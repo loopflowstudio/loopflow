@@ -143,7 +143,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
-    let _observations = crate::observe::Cache::shared();
+    let observations = crate::observe::Cache::shared();
+    let _transcripts = crate::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -173,6 +174,7 @@ pub(super) async fn run() -> Result<()> {
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    super::wake::start();
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),

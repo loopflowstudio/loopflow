@@ -299,6 +299,42 @@ establish authenticated replies or typed `/new`, `/fork` and `/fast` behavior.
 Use different names for a headless Graph and its skill so Graph resolution does
 not treat the step as a recursive Graph call.
 
+## Raw conversations and transcript readings
+
+A plain `claude` lists as raw only with no `lf` or provider ancestor, and a
+shell this step starts has one. Run it under a PTY driver that double-forks and
+calls `setsid`, so launchd is its parent; keep the real `HOME`, since raw
+discovery reads the account's own `~/.claude/projects`, and give lf a private
+`LF_HOME`. Strip `LF_*` and `CLAUDE_CODE*` from its environment. Claude's
+folder-trust dialog in a fresh directory defaults to "No, exit": send Down,
+then Enter. It writes no transcript until the first message, so the
+conversation lists only after one.
+
+`lf <read> --subscribe` from the CLI reads in its own process, not through the
+server (`lf server status` shows no client). To check what Desktop sees,
+subscribe over the server socket with a `desktop` hello and timestamp each
+`reading`; compare its frame times with the transcript rows' timestamps.
+
+A bare `lf -a claude : "<prompt>"` in that private `LF_HOME` with no accounts
+and the real `HOME` runs on the ambient Claude login, so its Stop-hook and
+exit rows can be read from the private store. Unset `REX_*` too, or the run
+records the agent's own Rex pane. Read the store with
+`sqlite3 'file:<db>?immutable=1'` once no writer is open; `-readonly` fails
+when the WAL files are gone. `~/.claude/sessions/<pid>.json` names each live
+Claude process's conversation. Run a second `claude` and an lf run in the same
+directory to check pairing. Codex's first-run trust prompt writes into the real
+`~/.codex/config.toml`; quit it unless that write is acceptable.
+
+Plain `pi` and `opencode` need no trust answer and list the same way. A
+headless `lf -b -a pi : '<prompt>'` (or `opencode`) in the raw process's
+directory checks pairing against an lf-written conversation and writes
+`usage` rows with `cost_usd`. OpenCode's default headless model may fail
+upstream; name one that answered interactively, `-a opencode:opencode/<model>`.
+`pi --session <file>` resumes a recorded Pi conversation raw. To learn
+which filesystem events a provider home really sends, a throwaway ignored
+test holding a `notify` watcher on it shows them; FSEvents sent none for
+OpenCode's `opencode.db-wal` writes.
+
 ## Turn and tool hooks
 
 A Session launched in a Task's checkout is Task work. Headless (`-b`) there
@@ -344,7 +380,16 @@ Logging each request body shows whether steers and the context block reached
 the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
 runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
 the scripted tool a few thousand lines of output first, and type the command
-and Enter separately or its autocomplete picks another command.
+and Enter separately or its autocomplete picks another command. Pi truncates
+tool output, so even `seq 1 60000` can leave a real-model session "too small".
+Write each typed line to Pi's PTY in one write, not
+per character, and drain output between writes of more than a few KB.
+
+Real providers on their existing logins: keep the real `HOME` with a private
+`LF_HOME`. Plain `lf -b` and `lf -i` launch there, as does `lf -i --task <id>`
+in a Task checkout; only `-b` in a Task checkout asks for a managed login. In a
+private home with no Linear, `lf task update` needs the full `task_…` ID; the
+short identifier resolves through Linear.
 
 To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
 that appends its argv to a file and execs the branch binary; plugins run
@@ -374,6 +419,26 @@ missing migration SQL to the copy with `sqlite3`. Never open the copy with
 from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
+
+## Waking idle conversations
+
+Real turns need real logins: keep the account's `HOME` (Claude's Keychain login
+and `~/.codex`) and isolate only `LF_HOME`, with the branch `lf` first on `PATH`.
+Interactive `-i` launches need no lf account. `lf checkout <task>` itself starts
+the Task's primary Claude conversation, which runs one `task-session` turn and
+goes idle: that alone is a managed idle conversation. Start Codex with
+`lf --task <task> -i -a codex : "Reply only with QA_OK"` in a PTY; its first turn
+needs no typing. A conversation is a wake candidate once
+`session_activity.yielded` is 1 and `processes.inbox` (Claude) or
+`processes.endpoint` (Codex) is set. Then `lf comment <task> 'Reply only with X'`
+and read the reply: Claude's in
+`~/.claude/projects/<cwd with / as ->/<thread>.jsonl` (a `queue-operation`
+then a `user` cross-session message), Codex's through its app-server
+(`thread/turns/list` with `itemsView: full`). A Codex client may sit on an
+update dialog; its app-server still runs the turn. Kill the private server's
+PID (find it by `LF_HOME` in `ps -E`) to check news recorded while it was down.
+`ps` matches `__context-block` in Codex app-server argv: those are hook
+declarations, not processes.
 
 ## Native conversation opening
 

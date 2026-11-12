@@ -19,21 +19,82 @@
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
 use super::wire::Event;
 use crate::config::DetachedLimit;
+use crate::harness::native_exit::{NativeExit, Settled};
 use crate::id::LfProcessId;
 use crate::ops::task::retirement::owner_retiring;
+use crate::process::SessionAttachment;
 use crate::store::sqlite::sessions::OwnerRetention;
-use crate::store::sqlite::ViewerHold;
+use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 
 /// How often an owner looks at the clock.
 pub(super) const POLL: Duration = Duration::from_secs(2);
+
+/// The exec'd native client whose attachment the existing lifecycle worker
+/// checks. Store reads never run in the terminal's descriptor loop.
+#[derive(Debug, Default)]
+pub(super) struct Client(Mutex<ClientState>);
+
+#[derive(Debug, Default)]
+struct ClientState {
+    attached: Option<(String, SessionAttachment)>,
+    departure: Option<Settled>,
+}
+
+impl Client {
+    pub fn set(&self, record: Option<&NativeExit>) {
+        let mut state = self.0.lock().expect("client attachment lock poisoned");
+        state.attached = record
+            .filter(|record| record.client)
+            .map(|record| (record.session.clone(), record.attachment.clone()));
+        state.departure = None;
+    }
+
+    pub fn take_departure(&self) -> Option<Settled> {
+        self.0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .departure
+            .take()
+    }
+
+    fn check(&self, store: &SqliteStore) -> Result<bool> {
+        let attached = self
+            .0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .attached
+            .clone();
+        let Some((session, expected)) = &attached else {
+            return Ok(false);
+        };
+        if store.session_attachment(session)?.as_ref() == Some(expected) {
+            return Ok(false);
+        }
+        let notice = store
+            .attachment_departure(session, expected)?
+            .map(|departure| crate::lf::commands::util::departure_notice(store, session, departure))
+            .transpose()?;
+        let mut state = self.0.lock().expect("client attachment lock poisoned");
+        if state.attached != attached {
+            return Ok(false);
+        }
+        state.attached = None;
+        // Keep the known move even if recording the exit later takes too long.
+        state.departure = Some(Settled {
+            code: 0,
+            lines: notice.into_iter().collect(),
+        });
+        Ok(true)
+    }
+}
 
 /// Activity accepted by the serving owner. Revisions include changes whose
 /// notification is still queued or throttled on its way to the policy.
@@ -129,6 +190,7 @@ pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
     waker: UnixStream,
+    client: Arc<Client>,
 ) -> (mpsc::Sender<Activity>, mpsc::Receiver<Ending>) {
     #[cfg(test)]
     if let Some(channels) = super::lifetime_tests::channels() {
@@ -137,7 +199,7 @@ pub(super) fn spawn(
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
-        watch(&owner, terminal, &changes, &end, &waker);
+        watch(&owner, terminal, &changes, &end, &waker, &client);
     });
     (activity, ending)
 }
@@ -176,9 +238,11 @@ fn watch(
     changes: &mpsc::Receiver<Activity>,
     end: &mpsc::Sender<Ending>,
     mut waker: &UnixStream,
+    client: &Client,
 ) {
     let mut store = None;
     let mut store_failure = RecordingGap::default();
+    let mut client_failure = RecordingGap::default();
     // None means no observation has been committed, including initial absence.
     let mut recorded_hold = None;
     let mut hold_failure = RecordingGap::default();
@@ -215,6 +279,14 @@ fn watch(
         let Some(store) = store.as_ref() else {
             continue;
         };
+        if report_result(
+            &mut client_failure,
+            "native client attachment",
+            client.check(store),
+        ) == Some(true)
+        {
+            let _ = waker.write_all(&[1]);
+        }
         let hold = grace.activity.hold;
         if recorded_hold != Some(hold)
             && report_result(
@@ -331,7 +403,54 @@ fn limit(repo: Option<&str>) -> DetachedLimit {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{Activity, DetachedLimit, Ending, Grace};
+    use super::{Activity, Client, ClientState, DetachedLimit, Ending, Grace};
+
+    #[test]
+    fn client_retirement_waits_for_a_readable_store_and_keeps_its_move_notice() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
+            .unwrap();
+        let client = Client(std::sync::Mutex::new(ClientState {
+            attached: Some((session.id.to_string(), attachment.clone())),
+            departure: None,
+        }));
+        assert!(!client.check(&store).unwrap());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions RENAME TO agent_sessions_unavailable")
+            .unwrap();
+        assert!(client.check(&store).is_err());
+        assert!(client.take_departure().is_none());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE agent_sessions_unavailable RENAME TO agent_sessions")
+            .unwrap();
+        store
+            .finish_session_attachment(
+                &session.id,
+                &attachment,
+                "completed",
+                Some(&crate::process::Departure::Terminal {
+                    to: Some("tmux %9".into()),
+                }),
+                || Ok(true),
+            )
+            .unwrap();
+        assert!(client.check(&store).unwrap());
+        let moved = client.take_departure().unwrap();
+        assert_eq!(moved.code, 0);
+        assert!(moved.lines[0].contains("moved to tmux %9"));
+        assert!(!client.check(&store).unwrap());
+        assert!(client.take_departure().is_none());
+    }
 
     #[test]
     fn abandonment_ends_background_output_but_keeps_viewed_or_queued_input() {
@@ -509,7 +628,14 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, false, &changes, &end, &waker);
+                super::watch(
+                    &watched,
+                    false,
+                    &changes,
+                    &end,
+                    &waker,
+                    &super::Client::default(),
+                );
             });
         });
         activity
@@ -646,7 +772,14 @@ mod tests {
         let watched = owner.clone();
         let policy = std::thread::spawn(move || {
             crate::journal::with_test_ledger(db, || {
-                super::watch(&watched, true, &changes, &end, &waker);
+                super::watch(
+                    &watched,
+                    true,
+                    &changes,
+                    &end,
+                    &waker,
+                    &super::Client::default(),
+                );
             });
         });
         assert!(matches!(

@@ -68,9 +68,9 @@ starts from that log and current instructions, and the old thread stays in
 ## Open conversations and history
 
 ```bash
-lf session list                      # conversations you can still act on
-lf session list --interactive all    # with the headless runs still working
-lf session history --since 1d        # what Task and Wave work did, headless runs included
+lf session list                    # conversations you can still act on
+lf session list --headless         # with the headless runs still working
+lf history --since 1d              # what Task and Wave work did, headless runs included
 ```
 
 A headless conversation (`-b`, a Graph step, a review) moves to history when
@@ -83,8 +83,30 @@ Finished conversations can continue: `lf resume <session>` reopens an interactiv
 one, and a Graph correcting its own step reopens that step's run until the turn
 ends.
 
-`lf session list --all` covers every repository on this machine; `--history`
-adds finished conversations, and `--search` narrows the list.
+```bash
+lf session list --wave craft       # the Wave's conversations, ad hoc runs and Task checkouts
+lf session list --primary task     # current Task primaries, excluding former primaries
+lf session list --primary wave     # current Wave primaries
+lf session list --primary          # Task, Wave and repository primaries
+lf session list --orphan           # outside the work model: no Task association and no Wave
+lf session list --all --headless   # every repository, including headless Sessions
+```
+
+`--wave` includes Sessions attributed to that Wave and conversations inside
+any of its Tasks' checkouts, including bare lf runs and raw provider conversations.
+`--primary repository` selects repository primaries. `--primary` combines with
+`--wave` and `--all`; former Task primaries still appear without `--primary`.
+`--orphan` includes raw conversations outside every Task checkout. `--no-raw`
+independently leaves raw conversations out.
+
+`--all` covers every repository on this machine; `--search` narrows the list.
+Lists show unfinished interactive conversations; `--headless` adds unfinished
+headless Sessions. Finished conversations belong in `lf history`; an exact
+`lf session card <session>` remains readable after completion.
+`--page --json` returns a stable-ID page; pass its `next` value to `--after`
+with the same filters for the following page. Raw conversations appear only
+in unpaged lists and have no primary scope. They also stay out of selections
+by `--search`, `--blocked` or `--on`.
 
 ## When Desktop loses its connection
 
@@ -137,8 +159,9 @@ Other conversations stay stopped until opened.
 | steers and reports | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
-`lf resume` takes Sessions. A Run (`-b`, a Graph step), running or finished, is
-refused with a pointer to `lf resume --task <task>`; the Task's Session reads its log.
+`lf resume` takes interactive Sessions. A headless Session (`-b`, a Graph step),
+running or finished, is refused with a pointer to `lf resume --task <task>`; the
+Task's Session reads its log.
 
 ## Bring in one you started elsewhere
 
@@ -151,8 +174,74 @@ One the provider started on its own is found in its home and becomes a Session
 the first time you resume it: from then on it lists, renames, binds and resumes
 like any other.
 
-A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
-`--fork` to leave it running.
+A raw `claude`, `codex`, `pi` or `opencode` still open on it isn't one lf can
+stop; close it, or `--fork` to leave it running.
+
+From its first message until it closes, it shows up in `lf session list` for
+its checkout under its provider ID, marked `raw`, with its current turn
+(below). Listing it creates no Session. A conversation a Session recorded,
+picked up again with plain `claude --resume` or `codex resume` after that
+Session ended, lists the same way under the Session's title.
+
+```bash
+lf session list --no-raw           # only conversations lf started
+```
+
+## See what each one is doing
+
+```bash
+lf session list                    # open interactive conversations in this repository, with their current turn
+lf session card <session>          # one conversation: its turn, when the last one ended, its usage
+```
+
+```text
+$ lf session list
+session_21fe…   active    Repository  Agent platform craft   turn running 2m14s
+0199a213-81c0…  active    raw claude  ~/src/app              turn running 41s
+session_675c…   detached  LOO-472     CI under five          last turn ended 3m ago · 41.2k in (38.0k cached) · 1.1k out
+```
+
+This works for every conversation on the Machine: a Task's, one a bare
+`lf implement` started, and a plain `claude`, `codex`, `pi` or `opencode` lf
+never launched. lf reads the end of the provider's own transcript at the
+moment you ask: Claude's under `~/.claude/projects`, Codex's rollout files
+under `~/.codex/sessions`, Pi's session files under `~/.pi/agent/sessions`,
+and OpenCode's store, `~/.local/share/opencode/opencode.db`, opened read-only.
+Nothing runs between questions, and lf never writes into those directories. The turn is the transcript's last one for a conversation lf
+launched too; when the transcript leaves that turn open and lf recorded its
+end, lf's record closes it.
+
+The Machine server (`lf server run`, or Desktop) watches each provider's home
+once for all conversations and refreshes these readings as transcripts grow,
+so Desktop updates within a second while a turn runs.
+`lf session list --subscribe` keeps the same watch while it runs. A missed
+filesystem event is caught by a periodic reread.
+
+| The transcript shows | It can't show |
+|---|---|
+| a turn running, and since when | whether that turn is waiting on a permission prompt or a question to you |
+| when the last turn ended, or that it was interrupted | a turn you stopped with Esc before Claude replied, until your next message |
+| the last turn's input, cached and output tokens, and its model | a turn cut off by a crash, until the provider process is gone |
+
+A conversation whose agent reports no status to lf is available for you when
+its turn ended or was interrupted; `lf session list --available` lists it. A
+turn stopped on a permission prompt or a question still reads as
+`turn running`: Claude Code writes a question to its transcript only once you
+answer it, and Codex never does. lf doesn't guess otherwise. When a Session's
+agent does report its status, that report decides.
+
+A raw conversation open in a Task's checkout lists under that Task:
+`lf session list --task <task>` includes it.
+A transcript caught halfway through writing a line is read up to its last
+complete line.
+
+For managed launches and interactive conversations lf starts, turn-end hooks
+ask the Machine server to record finished turns' usage from the transcript.
+The hooks open no store; if the server cannot answer, the conversation continues.
+Bare headless runs have no turn-end hook. The launching process reads the
+transcript at exit to record usage and missing completions, without needing
+the server. Raw conversations are displayed without recording those rows.
+See [Telemetry](telemetry.md#what-it-cost) for the recorded totals.
 
 ## Switch agents mid-conversation
 
@@ -174,27 +263,43 @@ lf --wave billing session steer "invoices before refunds"    # every Session on 
 lf session steers <session>                                  # was it delivered?
 ```
 
-A steer starts no turn. Each Session receives it at its next supported provider
-boundary; idle ones stay idle until they next run. For a Task, `lf task steer`
-does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
+Each Session receives a steer at its next supported provider boundary. An idle
+managed conversation is woken with it now
+([below](#keep-several-conversations-open)); an idle bare one waits until it
+next runs. For a Task, `lf task steer` does the same for every Session on it
+([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.
 
 ## Keep several conversations open
 
-Leave Task conversations open while their Graphs run. LF watches for new
-comments and progress; once work settles, idle update checks read revision
-counters instead of rebuilding unchanged Task history on every clock tick.
-This is automatic and needs no setting.
-Transcript, usage and ordinary tool activity in other conversations do not
-trigger those history rebuilds. A comment or workflow change on another Task
-can still do so because observers share the workflow revision counter.
+```bash
+lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake and report it
+lf process list       # no Task-update watcher per conversation
+```
 
-Locally saved comments can reach a conversation even when planning connection
-settings are unavailable. Sync badges remain in the Task thread. A busy provider
-leaves an update pending for retry. A failed store read is retried even if nothing else changes;
-lf records the gap in `logs/lf.log` while the provider conversation continues.
-Live Graphs still get periodic checks so an unrecorded process exit can be noticed.
+Leave Task conversations open while their Graphs run. When a Graph step
+settles, the Graph moves, a comment arrives on its Task or a steer is saved for
+it, this Machine's lf server wakes each managed Claude or Codex conversation on
+it that is waiting for you, one opened through a Task or Wave command or from Desktop,
+even if the server restarted since its last turn. Claude takes the news as a
+message from `loopflow`, Codex as a turn of its own. A comment with direction
+arrives as a steer; other comments arrive as Task updates. A
+conversation in the middle of a turn hears updates at its next boundary.
+Pi and OpenCode hear updates at their next boundary too. Idle update delivery
+needs no watcher or timer per conversation.
+
+A conversation you start with a bare `lf <skill>` in a terminal is never woken.
+In a Task's checkout it hears the Task's progress at its next turn; a headless
+bare run hears none.
+
+Locally saved comments reach a conversation even when planning connection
+settings are unavailable; sync badges stay in the Task thread. An update that
+lands while the server is down reaches the idle conversation when the server
+comes back. Failed wake attempts are logged in `logs/lf.log`. Steers remain
+pending until sent; Task progress is marked delivered before sending, so a
+failed send can lose that progress update. Progress delivery confirmation is
+tracked in [LOO-841](https://linear.app/loopflow/issue/LOO-841).
 
 ## One more headless turn
 
@@ -231,7 +336,7 @@ An open Task without a worktree adopts the Session's unowned linked checkout;
 main and Wave checkouts stay shared. Done Tasks can still select an unfinished
 conversation. If the Task has no checkout, the conversation stays in place and
 no checkout is adopted. Binding starts no Graph, and leaves done or landed Tasks
-closed. Closed Sessions and headless Runs cannot become primary.
+closed. Closed or headless Sessions cannot become primary.
 `--dry-run` shows the exact target first.
 
 ## Which login it runs on

@@ -9,6 +9,7 @@ pub mod schema;
 mod service;
 mod subscriptions;
 mod ticket;
+mod wake;
 pub mod wire;
 
 use std::path::PathBuf;

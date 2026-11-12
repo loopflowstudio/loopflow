@@ -3,7 +3,6 @@ pub mod claude;
 mod claude_decode;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
-pub(crate) mod claude_updates;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
@@ -292,7 +291,7 @@ pub trait Harness: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HarnessKind {
     Codex,
     Claude,
@@ -317,6 +316,15 @@ impl HarnessKind {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
+        }
+    }
+
+    /// The provider whose home keeps this harness's transcripts and accounts.
+    pub(crate) fn provider(self) -> Option<crate::provider_auth::Provider> {
+        match self {
+            Self::Claude => Some(crate::provider_auth::Provider::Claude),
+            Self::Codex => Some(crate::provider_auth::Provider::Codex),
+            Self::OpenCode | Self::Pi => None,
         }
     }
 

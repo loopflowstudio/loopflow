@@ -24,9 +24,9 @@ The Graph launcher and primary Session selection remain their existing owners.
 non-interactive runs; `commands/open.rs` resolves its primary and host.
 The foreground timing assumption remains in `scratch/questions.md`.
 
-Re-fetched `origin/main` during realign on 2026-11-11: its tip remains
-`4dc15b7302`, already merged
-at `b7bed56e4b`. The newer live-Session change affects `open::available`'s
+Re-fetched `origin/main` during realign on 2026-11-11: its tip is
+`649f11db4b` (#1885, Session and Task identity in context), already merged
+at `48e65c170d`; it doesn't touch `task run` or `lf open`. The newer live-Session change affects `open::available`'s
 listing query, not Task selection or launch timing. The earlier idle-conversation
 wake change (`baa09168df`) leaves primary selection with the existing
 conversation machinery. No Wave is selected.

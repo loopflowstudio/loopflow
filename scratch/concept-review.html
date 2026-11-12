@@ -70,8 +70,13 @@ lf session rename session_example 'LOO-828 identity review' --suggest</pre>
     records a gap. A later successful managed start or compaction refreshes it.
     Bare runs keep their launch snapshot. Multiple Task associations omit the
     Task line; large files cannot consume identity's reserved context space.</p>
-  <p>Remaining gate and fresh-provider QA are still pending. Earlier provider
-    results predate integration; fixture passes do not replace those checks.</p>
+  <p>Integrated checks passed: 319 affected Rust tests, website checks, formatting,
+    Clippy and source-package compilation. Fresh bare Sessions named themselves
+    on all four providers; managed Claude, Codex and OpenCode refreshed the Task
+    title after compaction. Pi refused compaction as too small but refreshed on
+    its next turn. <a href="qa.html">QA results and remaining limits</a> record
+    the provider checks; <a href="loo-828.md">verification notes</a> record the
+    runner's resource-preflight failure and direct checks.</p>
 
   <h2>Review questions, resolved for this scope</h2>
   <ol>

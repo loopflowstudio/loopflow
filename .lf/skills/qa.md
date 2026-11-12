@@ -326,9 +326,9 @@ Logging each request body shows whether steers and the context block reached
 the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
 runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
 the scripted tool a few thousand lines of output first, and type the command
-and Enter separately or its autocomplete picks another command. A real model
-does not get there: Pi truncates its tool output, so even `seq 1 60000` leaves
-the session "too small". Write each typed line to Pi's PTY in one write, not
+and Enter separately or its autocomplete picks another command. Pi truncates
+tool output, so even `seq 1 60000` can leave a real-model session "too small".
+Write each typed line to Pi's PTY in one write, not
 per character, and drain output between writes of more than a few KB.
 
 Real providers on their existing logins: keep the real `HOME` with a private

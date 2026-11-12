@@ -1,1 +1,0 @@
-2026-11-11: `cargo test -p loopflow --lib server::schema::tests::` (LF_* unset, stdin closed) — 7 passed after sync at 48bd007c1; macOS linker warned that __eh_frame exceeds compact-unwind offsets. Full checks remain with gate/CI.

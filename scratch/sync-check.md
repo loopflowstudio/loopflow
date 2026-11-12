@@ -1,0 +1,2 @@
+- `cargo test -p loopflow --test session_launch_contract a_running_claude_named_onto_another_login_keeps_its_client_and_says_where_it_runs -- --exact` (LF_* unset, stdin closed): passed after the fixture consumed prompt-file stdin and read the resumed viewer's distinct input from its controlling terminal. Before the fix it recorded two client PIDs instead of one because the initial prompt satisfied the resume acknowledgment.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`: passed. New-head CI runs after publishing.

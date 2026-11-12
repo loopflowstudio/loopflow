@@ -905,9 +905,11 @@ import os, select, sys
 if '--version' in sys.argv:
     print('fixture'); sys.exit(0)
 home = os.environ['LF_HOME']
+sys.stdin.read()
+terminal = open('/dev/tty')
 open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
 while not os.path.exists(home+'/quit'):
-    if select.select([sys.stdin], [], [], 0.05)[0] and sys.stdin.readline():
+    if select.select([terminal], [], [], 0.05)[0] and terminal.readline().strip() == 'resumed':
         open(home+'/resumed-input', 'w').write(str(os.getpid()))
 "#,
     )
@@ -934,6 +936,8 @@ while not os.path.exists(home+'/quit'):
     let mut first = fixture
         .command()
         .env("USER", "fixture")
+        // Give Claude a controlling terminal after it consumes prompt-file stdin.
+        .env("LF_VIEWER_STREAM", "1")
         .args([
             "-i",
             "--account",
@@ -941,6 +945,8 @@ while not os.path.exists(home+'/quit'):
             ":",
             "hello",
         ])
+        // Keep the first viewer's input open while the second viewer attaches.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -987,7 +993,11 @@ while not os.path.exists(home+'/quit'):
     );
     first.wait().unwrap();
     // The same client carried on: a resume that relaunched would add a pid.
-    assert_eq!(fs::read_to_string(&pids).unwrap().lines().count(), 1);
+    assert_eq!(
+        fs::read_to_string(&pids).unwrap().lines().count(),
+        1,
+        "{printed}"
+    );
     // `--account` names one resume; nothing is held.
     assert!(!machine.join("accounts/claude/held").exists());
 }

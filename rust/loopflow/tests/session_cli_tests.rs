@@ -2086,15 +2086,21 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
 }
 
 #[test]
-fn retired_title_hooks_never_block_their_provider() {
+fn retired_hooks_never_block_their_provider() {
     let home = tempfile::tempdir().unwrap();
-    let output = command(home.path(), &["__session-title", "claude"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
-    // Claude treats exit 2 at Stop as "keep working", so a removed callback exits 0.
-    assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    // A removed callback, and a removed value of one that remains.
+    for args in [
+        &["__session-title", "claude"][..],
+        &["__context-block", "--moment", "task-updates"],
+    ] {
+        let output = command(home.path(), args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        // Claude treats exit 2 at Stop as "keep working", so each exits 0.
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+    }
 }
 
 /// Starts `lf` as a terminal's foreground job, as a login shell would, and

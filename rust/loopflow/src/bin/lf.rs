@@ -1703,6 +1703,15 @@ fn run() -> anyhow::Result<()> {
 
     let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
+        // A hook an earlier lf installed may name a value this build removed;
+        // it must not fail its turn (Claude reads exit 2 at Stop as "keep working").
+        Err(_) if args.get(1).is_some_and(|arg| arg.starts_with("__")) => {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                args[1]
+            );
+            return Ok(());
+        }
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();

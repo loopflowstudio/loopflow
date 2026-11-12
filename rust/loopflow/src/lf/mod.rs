@@ -531,7 +531,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran, rollover and pruning
+    /// Live Loopflow processes: call trees, Graphs that ran and pruning
     Process {
         #[command(subcommand)]
         cmd: commands::process::ProcessCommand,

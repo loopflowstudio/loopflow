@@ -136,7 +136,7 @@ fn write(
     Ok(())
 }
 
-/// Start `lf <args>` in `directory` under its own execution owner and return
+/// Start `lf <args>` in `directory` as a plain detached process and return
 /// the result it reports. Wait while the owner is live, but bound the wait when
 /// its liveness cannot be determined. Giving up never stops or retries the work.
 pub(crate) fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> Result<T> {

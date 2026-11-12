@@ -1,6 +1,7 @@
 # Desktop shell execution
 
-New Shell creates execution on the Task's recorded Machine and checkout.
+New Shell creates execution on the Task's recorded Machine and checkout, in a
+terminal that Machine's [holder](../transport/README.md#held-terminals) keeps.
 Reconnect reuses that execution; hiding the tab, leaving the workspace and
 quitting Desktop detach its view. Close ends the shell and its ordinary jobs.
 Undo restores identity and history; it never restarts a command.
@@ -19,10 +20,10 @@ The destination caches resources by payload digest under `shell-resources`.
 After literal initial argv finishes, the script sees `LF_SHELL_RESOURCES`,
 `SHELL` and terminal identity. Reattachment ignores all creation inputs.
 
-Task cleanup owns completion, absence and Git cleanup policy. It signals verified
-owners directly after checking viewing and requested work. Renewed Session viewing
+Task cleanup owns completion, absence and Git cleanup policy. It ends verified
+shells directly after checking viewing and requested work. Renewed Session viewing
 resets checkout cleanup before the next pass. Explicit Close stays on the shell
-receipt; its owner polls that request and waits for requested work to settle.
+receipt; the server polls that request and waits for requested work to settle.
 Shell tabs add no checkout hold, and Rex shells never enter Desktop's execution
 receipts.
 

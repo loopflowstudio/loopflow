@@ -29,11 +29,6 @@ pub enum ContextMoment {
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
     Stop,
-    /// Retired: Task updates ride the boundary answer. Hooks installed in
-    /// conversations that started before then still name it; it does nothing.
-    /// TODO(LOO-838): delete it once no
-    /// conversation started before this build is live.
-    TaskUpdates,
     /// A native turn ended on a usage limit: start `RecordLimit` and return.
     Limit,
     /// Started by a limit hook: record the limit and move the shared login to

@@ -82,9 +82,9 @@ an unmanaged Session) start no owner: the provider runs as the terminal's
 foreground process-group leader with only the context hooks, and closing the
 terminal ends it. `os_process::foreground` hands the terminal over before exec
 and takes it back after; a provider stopped with Ctrl+Z stops lf too, and `fg`
-continues both. Commands naming Work and reopens of managed Sessions keep the
-holder. Headless runs, bare Graphs, and Desktop surfaces waiting for a relay
-keep their host.
+continues both. Commands naming Work, reopens of managed Sessions and Desktop panes and
+shells run in a [held terminal](#held-terminals). Headless work runs as a
+[plain process](#headless-work). Nothing else hosts execution.
 
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
@@ -99,24 +99,22 @@ unfinished native turn. Headless Runs never end for want of viewers.
 During initial attachment, cooked input waits until the owner grants control.
 Input then goes straight to the provider. The owner queues only bytes not yet written
 to its terminal; no store read or write delays forwarding. Returning does not
-resubmit input. Unsent input is lost when an explicit rollover or takeover
-replaces its provider, just as on quit.
+resubmit input. Unsent input is lost when a takeover replaces its provider,
+just as on quit.
 
 A quit returns the provider's own exit within a second; exit records still
 waiting on a locked or refused store finish in the background or are lost, logged.
 
-Nothing else ends an owner on its own. Removing, rebuilding or superseding its
-lf executable leaves it serving on the build it started with; the only endings
-are the person quitting, `lf resume` taking the conversation over, `lf process
-rollover`, Task closure, or an explicit end. Owners record viewing changes and
+Nothing else ends a conversation on its own. Removing, rebuilding or
+superseding its lf executable leaves it running on the build it started with;
+the only endings are the person quitting, Task closure, or an explicit end. Owners record viewing changes and
 retry failed writes every two seconds. Once recorded, a conversation waits for
 the next change; only shell owners keep polling their explicit Close receipt.
 Task cleanup decides automatic closure on its scheduled pass. Repeated unchanged
 store errors produce one warning until the condition changes; viewing launches
 no helper process.
 Cleanup sends a best-effort notice and saves the screen, then signals the verified
-owner through the same path as rollover. Old owners that cannot receive the notice
-still end by signal.
+owner. Old owners that cannot receive the notice still end by signal.
 `lf resume` reopens provider history without starting a turn. Other ended
 Sessions stay stopped.
 
@@ -129,12 +127,6 @@ owner stays on its own and an answering one is attached, but `lf resume` ends a
 superseded one that does not answer. Once protected work settles, another resume
 moves it.
 
-`lf process rollover --dry-run` lists the same takeover choices across owners;
-omit `--dry-run` to move them. Protected owners stay, answering or not. The sweep
-ends idle owners directly; existing viewers may close and need `lf resume` again.
-Rollover names the same retention reasons. Resume, rollover and Task retirement
-share this judgment; work holds independent of reachability. Only resume asks
-whether the owner answers, and only for no open Session.
 Graph runners keep running and launch each next step through the entry.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
@@ -253,22 +245,13 @@ known theme. Who may type is separate: the `token`
 of a controlling attach, `busy` when control is held and `replace` is false,
 and a `control` event to the connection that lost it.
 
-An execution command delegates to a detached owner, which holds its PTY or pipes
-and records an ordinary Process. Loopflow launches that owner itself; it has no
-public command. The owner leaves the launcher's session and drops every
-descriptor the launcher inherited (a terminal host's pipes to its other
-children), since it outlives that host. Session rows name that Process; viewer
-tokens and unwritten input remain in memory. A Claude conversation keeps one lf owner
-and one relay per terminal showing it. For an existing owner, `lf resume`
-resolves the Session, then execs into `lf session attach OWNER`, which
-opens no store while relaying and parses no commands. It carries the original
-command's receipt through exec and records its result when relaying ends.
-When starting an owner, the caller relays immediately in its current process.
-A short-lived worker keeps concurrent starts behind the shared startup lock
-until Session registration, without delaying launcher output or errors. Background
-starts wait for that confirmation. A non-replacing prepared Start lets its child
-recheck the opening intent instead of silently attaching to a later owner.
-A Claude launcher under an owner hands
+Owners from builds before held terminals (`lf session serve`) keep running
+until their agents quit; no current build starts one. `lf resume` of such a
+Session execs into `lf session attach OWNER`, which speaks this protocol to
+the owner's socket, opens no store while relaying and parses no commands. The
+rest of this section describes held terminals and those remaining owners
+alike.
+A Claude launcher under a held terminal hands
 the owner what it would record at exit, then execs into the provider, so Claude
 is the owner's direct child and no `lf -i` waits beside it; the owner records
 the provider's exit, settles its capture and reports where the conversation
@@ -299,8 +282,7 @@ Ordinary CLI attachments keep their direct socket path. The owner strips `LF_SER
 from the program it runs, so an agent in a Desktop pane attaches like any CLI. See
 [current server protocol](../server/README.md) for admission and framing.
 The [server boundary](../../../../docs/dev/server.md) separates
-client access from Machine routing. `lf session serve` remains the execution-owner
-entry, distinct from the server serving entry.
+client access from Machine routing.
 
 Terminal hosts inherit a split's directory from a report (OSC 7) or the foreground
 process's cwd. The owner publishes one directory, the connected provider's, then
@@ -346,19 +328,19 @@ one libghostty-vt terminal per held terminal, viewers, viewing records, queued
 input, the child's control requests and exit settlement. Everything above
 about viewers, control, ownership, lifetime and repainting holds for a held
 terminal with "the server" in place of "the owner", except where this section
-says otherwise. Owners remain for bare launches, piped and `-b` executions
-and Desktop Task shells.
+says otherwise.
 
-`transport::managed` is the one place that decides:
+`transport::delegate` is the one place a launch's host is chosen, and there
+are three:
 
-| Launch | Managed |
+| Launch | Runs |
 |---|---|
-| `lf task run`, an interactive `lf ship` step, `lf resume --task`, a Task's primary conversation, Wave session commands | yes |
-| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | yes |
-| `lf resume SESSION` of a Session bound to a Task or Wave | yes |
-| A repository conversation recorded before it was managed (no `work_source`) | no |
-| `lf <skill>`, `lf graph …`, `lf -i`, any `-b` or piped execution | no |
-| Desktop Task shells | no: they run without a server on headless Linux |
+| `lf task run` or an interactive `lf ship` step at a terminal, `lf resume --task`, a Task's primary conversation, Wave session commands | held |
+| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | held |
+| `lf resume SESSION` of a Session bound to a Task or Wave | held |
+| Desktop Task shells | held |
+| `lf <skill>`, `lf graph …`, `lf -i` at a terminal; a repository conversation recorded before it was managed (no `work_source`) | here, as the terminal's foreground program |
+| Any `-b`, piped or `--json` execution; Graph launches, landing watchers, `lf ship` | a [plain process](#headless-work) |
 
 A managed launch calls `session.start` and becomes a view of the returned
 terminal. With the server unreachable it fails with `Loopflow server is not
@@ -535,7 +517,36 @@ terminal mode set before the ring's start is known only if the agent sets it
 again when resized. Replayed output answers none of its queries: they were
 answered when it was printed, or went unanswered while no server ran.
 
-### Exit and settlement
+### Headless work
+
+```sh
+lf task run LOO-12 --json < /dev/null
+# {"state":"running","graph_process":"…","log":"~/.lf/logs/graph-….log"}
+ps -axo ppid,command | grep 'graph run'
+# 1 lf --agent claude --task task_… graph run
+```
+
+Nothing hosts headless work (`os_process::detached`). A bare `-b` or piped
+execution, and every headless Graph step, runs in the caller's process and its
+agent is that process's child, so it ends with its caller and its stdout and
+stderr are the caller's. Work that must outlive its caller (Graph launches,
+landing watchers, `lf ship`, a `-b` or piped Work command) is spawned with
+`setsid`, stdin from `/dev/null` and every inherited descriptor closed except
+release locks and worktree leases. It gets one more pipe, named by
+`LF_LAUNCHER_FD`: the child writes its LfProcess ID there once admitted, and
+`released` when it lets its launcher go. Server launches, landing watchers and
+ship restarts read the ID and append the child's output to
+`logs/detached.log`; a pipe that closes without an ID leaves delivery unknown,
+and nothing is launched again. A `-b` or piped Work command prints the child's
+stdout and stderr as they grow and exits with its status, or with success
+once a Task run or ship lets it go after naming its Graph log. Killing that
+caller leaves the work running.
+
+No PTY, viewer protocol or screen is involved. Hooks, turn recording and
+steers work as they do for any headless run; the child's own process records
+its exit.
+
+## Exit and settlement
 
 When a terminal's `exit` arrives the server records it (`native_exit::settle`
 with a record the launcher handed over, and the terminal's end in
@@ -550,11 +561,12 @@ terminal takes up its kept record too.
 
 ## Task shells and completed workspaces
 
-Desktop creates a shell once, on the Task's recorded Machine. Its private
-runtime in `desktop::shells` owns execution receipts, startup, reconnect and
-Close. It runs on headless Linux too, without an app server. Machine routing
-carries the same viewer protocol across SSH; the transport owns the PTY.
-There is no Task shell command or external-host shell registry.
+Desktop creates a shell once, on the Task's recorded Machine, in a terminal
+that Machine's holder keeps. Its private runtime in `desktop::shells` owns
+execution receipts, startup, reconnect and Close. A Linux Machine runs the
+same server and holder under systemd; no Desktop app is needed there. Machine
+routing carries the same viewer protocol across SSH. There is no Task shell
+command or external-host shell registry.
 
 Attachment, Hide and Desktop exit leave execution running. Creation consumes
 initial argv and Desktop's supplied integration once; reconnect never replays
@@ -572,7 +584,7 @@ without restarting that clock. An ordinary shell does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in Rex.
 Task and conversation history remain after cleanup.
 
-The serving owner dates its own viewer evidence on its Process (`viewer_hold`,
+Viewer evidence is dated on the Process that hosts the Session (`viewer_hold`,
 `viewer_hold_at`). Only Task Session viewers retain a checkout; Desktop shells
 already accompany those Sessions and add no hold. Losing the last connection
 starts the absence clock immediately, independently of the sixty-second stream

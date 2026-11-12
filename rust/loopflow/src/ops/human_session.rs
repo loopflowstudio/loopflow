@@ -31,7 +31,6 @@ pub(crate) mod conversation_log;
 pub(crate) mod moves;
 pub(crate) mod moves_bulk;
 pub(crate) mod primary;
-pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 

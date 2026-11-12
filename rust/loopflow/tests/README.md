@@ -109,8 +109,6 @@ owners while resuming their Sessions. Pending requests, turns, Graph
 ancestry/steps and Runs retain the same provider, attachment and capture; no new
 provider launches. A completed Session is unknown, not work: its unanswering owner
 ends and resume continues on one new provider, while an answering one is attached.
-The matching rollover unit test preserves the named retention reasons and permits
-movement after protected work settles.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume

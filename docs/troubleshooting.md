@@ -132,8 +132,10 @@ lf server status
 ```
 
 Agents started by a Task or Wave command (`lf task run`, `--task`, `--wave`,
-a Task or Wave conversation) start only once the Machine server answers,
-including headless runs, because their turns and steers go through it. A launch that finds none runs
+a Task or Wave conversation) and Desktop shells start only once the Machine
+server answers, including headless runs, because their turns and steers go
+through it. The server does not host a headless run: once started, it keeps
+going if the server stops. A launch that finds none runs
 `lf install server` itself; the message appears when that did not bring one
 up, and carries what the install said. On another Machine, run the two
 commands there: `lf --machine <machine> install server`. Plain `lf`,
@@ -147,11 +149,10 @@ away, and their views reconnect when it returns.
 One per installed build that still has an open Task or Wave conversation.
 Each exits a minute after its last conversation ends; ending those
 conversations, not killing the holder, is how to retire one. Killing a holder
-ends every agent it holds. `lf session serve` processes belong to
-conversations opened before holders, to Desktop Task shells and to an
-`lf <skill>` typed in a Desktop shell, and end with their conversation. An
-`lf <skill>` typed at a terminal has none: its agent is a child of your
-terminal.
+ends every agent and Desktop shell it holds. An `lf <skill>` typed at a
+terminal or in a Desktop shell has no holder: its agent is a child of that
+terminal. An `lf session serve` process is a conversation an earlier build
+opened; it ends when its agent quits, and no current build starts one.
 
 ## A creation has no confirmed answer
 
@@ -361,17 +362,19 @@ The release is kept as a Session fact in `lf session history show <session>`.
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
 lf session list --all --interactive all      # the conversations they serve
 lf process list                              # live call trees lf recorded
-lf process rollover --dry-run                # why each owner is still running
 ```
 
-Most resident processes belong to one conversation each. `lf process list`
-and `lf process rollover --dry-run` name a `session serve` owner by its PID.
+A Machine runs one `lf server run`, one `lf holder run` per build with open
+conversations, and one `lf` per running Graph or headless command. Everything
+else belongs to a single conversation or view.
 
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
-| `lf session serve <ID>` | Holds one conversation's agent on its terminal | The running agent and any turn in flight; `lf resume <ID>` continues from history |
-| `lf session serve --terminal -- /bin/sh -c …` | A Desktop shell tab, shown or hidden | The shell's jobs and environment; its saved screen stays |
+| `lf holder run` | Holds the terminals of every Task, Wave and repository conversation and Desktop shell opened on its build | Every agent and shell it holds; `lf resume` continues each conversation from history |
+| `lf … task run`, `lf … graph run`, `lf … ship` | A Graph, landing watcher or ship running detached | The step in flight; `lf task status`, then `lf task run` what remains |
+| `lf -b <skill>` | A headless run, a child of whatever started it | That run; its caller sees it fail |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
+| `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` continues from history |
 | `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
 | `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
@@ -381,8 +384,6 @@ Conversations remain running while their scope is open. Done Tasks end their
 conversations during cleanup, about fifteen minutes after you stop viewing them,
 once live turns, pending requests and Graphs settle. Abandoning a Task ends its
 unviewed conversation. Typed input does not hold either cleanup.
-`lf process rollover --dry-run` shows which owners can move to the selected lf;
-rollover discards unsent input when it replaces a provider.
 
 A Desktop shell runs until you close its tab or its Task is cleaned up; hiding
 it or quitting Desktop leaves it running.
@@ -391,7 +392,7 @@ A process started from a build other than the installed `lf`, such as
 `target/debug/lf`, `/tmp/lf-*/bin/lf` or `Loopflow Dev.app`, is left over from
 development. Tests end every process they start before they exit; one that
 remains is a bug worth filing with its command line. Quitting a demo app leaves
-its conversation owners running. Use the demo's saved Machine environment to
+its conversations running in the demo's holder. Use the demo's saved Machine environment to
 `lf resume` each conversation and quit its agent before stopping anything by PID.
 
 Stop processes one at a time by PID, after reading what each serves. Never stop

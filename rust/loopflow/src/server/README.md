@@ -19,11 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Managed Sessions run in a holder the service starts with
+stop the service. Managed Sessions and Desktop shells run in a holder the service starts with
 `setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
 stopping or replacing the service leaves holders and their agents running.
-Session owners retain their existing lifetime policy. This service holds no
-PTY itself and starts no Graphs. Logout/reboot do not
+This service holds no PTY itself and hosts no Graphs: those run as
+[plain detached processes](../transport/README.md#headless-work). Logout/reboot do not
 preserve live processes. Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
@@ -352,8 +352,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
   {directory, issue}` outlive the request, so the server starts their
   command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
-  detached under its own execution owner and answers what that process
-  reports once it knows: `{state: running, ships, graph_process, log}` when the
+  as a detached process and answers what that process reports once it
+  knows: `{state: running, ships, graph_process, log}` when the
   Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
   {process, log}`, or the refusal it printed. The connection never waits on
   the run. `approve` is `-b`: every step headless to `end`, approving
@@ -407,8 +407,10 @@ the phone's `view.select` Task list and its creation destinations all read it.
   agent keeps running, and the same request attaches once the holder answers.
   A ticket presented after its terminal ended, or while its holder is not
   answering, gets the same two errors with a null `id` in place of `bridged`.
-  The owner form below serves owners only, with `terminal_id` null in its
-  ticket and its `bridged`; an owner ID is never a terminal ID.
+  The owner form below reaches owners an earlier build started
+  (`lf session serve`), with `terminal_id` null in its ticket and its
+  `bridged`; an owner ID is never a terminal ID. No current build starts an
+  owner.
 - `session.attach {session, owner_lf_process_id}` resolves the Session's current
   owner and answers `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`. Resolution
   never starts a provider. A non-null owner ID requires that exact owner;

@@ -492,7 +492,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             (None, _) => (
                 None,
                 Some(format!(
-                    "ci-fix run {owner} exited before opening a Session; inspect transport.log"
+                    "ci-fix run {owner} exited before opening a Session; inspect logs/detached.log"
                 )),
             ),
             (Some(session), None) => (

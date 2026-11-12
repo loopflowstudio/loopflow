@@ -116,8 +116,8 @@ pub fn run_ps(json: bool) -> Result<()> {
     let snapshot = load_snapshot()?;
     print_snapshot(&snapshot, json)?;
     if !json {
-        match super::rollover::inventory() {
-            Ok(inventory) => print!("{}", super::rollover::render_binaries(&inventory)),
+        match super::binaries::inventory() {
+            Ok(inventory) => print!("{}", super::binaries::render_binaries(&inventory)),
             Err(error) => tracing::warn!(%error, "lf binary inventory unavailable"),
         }
     }

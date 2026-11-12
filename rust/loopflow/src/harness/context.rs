@@ -672,13 +672,8 @@ assert.deepEqual(steers, {steers});
     #[test]
     fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
         let native = pi_turn(true, Holder::Server, false);
-        // One render at start, beside the conversation's Task-update watcher;
-        // no lf per event, tool, steer check or bash command.
-        let calls: Vec<_> = native
-            .calls
-            .lines()
-            .filter(|call| !call.ends_with("task-updates"))
-            .collect();
+        // One render at start; no lf per event, tool, steer check or bash command.
+        let calls: Vec<_> = native.calls.lines().collect();
         assert_eq!(
             calls,
             ["__context-block --moment start"],

@@ -252,12 +252,6 @@ pub fn emit_block(
         return Ok(());
     }
     let (path, delivery) = load_delivery(delivery, &input)?;
-    // Hooks installed before Task updates rode the boundary answer still
-    // name this moment in live conversations; it has nothing left to do.
-    // Deleted with `ContextMoment::TaskUpdates` (LOO-838).
-    if moment == ContextMoment::TaskUpdates {
-        return Ok(());
-    }
     // lf asks only a bare Codex launch for its thread, by creating the file
     // beside its delivery. Writing it opens no store; a failed write only
     // leaves the conversation unresumable.

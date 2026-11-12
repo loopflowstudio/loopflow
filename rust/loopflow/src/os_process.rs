@@ -6,7 +6,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 
@@ -221,6 +221,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
     ))
 }
 
+pub(crate) mod detached;
 pub(crate) mod foreground;
 #[cfg(test)]
 mod installation_tests;
@@ -353,6 +354,9 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+/// Start `lf` with `argv` in `cwd` as a plain detached process that outlives
+/// this one, and return its Process once it acknowledges. Its output is
+/// appended to `logs/detached.log`.
 pub(crate) fn start_lf_session(
     cwd: &Path,
     argv: &[String],
@@ -366,7 +370,25 @@ pub(crate) fn start_lf_session(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect::<Vec<_>>();
     let shell = lf_session_shell_command(cwd, argv, &environment);
-    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)
+    let logs = crate::store::lf_home_dir().join("logs");
+    std::fs::create_dir_all(&logs)
+        .with_context(|| format!("Cannot open the detached log in {}", logs.display()))?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logs.join("detached.log"))
+        .with_context(|| format!("Cannot open the detached log in {}", logs.display()))?;
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", &shell])
+        .current_dir(cwd)
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .env_remove("LF_SERVER_STATUS")
+        .env_remove(crate::transport::STREAM_ENV)
+        // It names a descriptor the child does not inherit.
+        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+    detached::spawn(command, inherit)?.acknowledged()
 }
 
 fn session_environment(

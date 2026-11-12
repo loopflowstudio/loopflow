@@ -98,8 +98,8 @@ defines persistence, receipt lookup, admission budgets and recovery by error sco
 
 `task.create` shares its creation function and receipt with the CLI, covering
 both new Tasks and Session adoption; `run` requests the Task's Graph launch.
-`task.run` and `task.ship` start the same command a terminal would, detached
-under its own execution owner, and answer the typed value that process reports
+`task.run` and `task.ship` start the same command a terminal would as a plain
+detached process, and answer the typed value that process reports
 (`engine/launch.rs`); the request never carries the run. Desktop's Work operations
 use the shared protocol; execution stays with existing Session/Graph owners.
 Ghostty rendering and app-owned automation retain

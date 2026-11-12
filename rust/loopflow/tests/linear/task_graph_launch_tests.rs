@@ -852,7 +852,17 @@ fn task_run_returns_while_its_graph_keeps_running() {
         )
         .unwrap();
     assert!(steps >= 2, "the second step never ran: {steps}");
-    // The owner writes the arrival after its Graph exits.
+    // The run carried on as a plain detached process, under no owner.
+    let hosted: i64 = db
+        .query_row(
+            r#"SELECT count(*) FROM processes c JOIN processes p ON p.id=c.parent_lf_process_id
+               WHERE c.command LIKE '%"task","run"%' AND p.command LIKE '%"session","serve"%'"#,
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(hosted, 0);
+    // The carrier writes the arrival after its Graph exits.
     let deadline = Instant::now() + Duration::from_secs(30);
     while task.graph()["position"] != at("review") {
         assert!(Instant::now() < deadline, "{}", task.graph());

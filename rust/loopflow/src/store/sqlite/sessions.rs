@@ -49,14 +49,6 @@ macro_rules! session_step {
     };
 }
 pub(super) const SESSION_GRAPH: &str = session_graph!();
-/// Session `s`'s current AgentProcess last reported work in progress rather
-/// than waiting for a person.
-const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
-    WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
-    AND NOT CASE WHEN act.program_status IS NOT NULL THEN
-        EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
-            WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
-    ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
 /// Current provider work or a viewed terminal's working status holds Session `s`.
 /// Terminal idle cannot settle owned work; unviewed status is only history.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
@@ -696,19 +688,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Whether the Session's current AgentProcess last reported work in progress,
-    /// rather than waiting for a person, when it stopped.
-    pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND {TURN_RUNNING})"
-            ),
-            [session],
-            |row| row.get(0),
-        )?)
-    }
-
     /// What keeps execution owner `owner` running. None means its standalone
     /// interactive Sessions hold no work; finished Graphs hold nothing.
     pub(crate) fn owner_retention<'a>(
@@ -771,24 +750,6 @@ impl SqliteStore {
                 })
             },
         )?)
-    }
-
-    /// The unfinished Sessions execution owner `owner` holds, by id.
-    pub(crate) fn owner_sessions<'a>(
-        &self,
-        owner: impl Into<Transport<'a>>,
-    ) -> StoreResult<Vec<String>> {
-        let owner = owner.into();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT id FROM agent_sessions
-             WHERE {}=?1 AND completed_at IS NULL ORDER BY id",
-            owner.session_column()
-        ))?;
-        let rows = query
-            .query_map([owner.as_str()], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<String>>>()?;
-        Ok(rows)
     }
 
     /// A Task's unfinished interactive conversations, each with its last opening.

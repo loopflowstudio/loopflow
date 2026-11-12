@@ -382,9 +382,9 @@ use the stable installed entry. Each new execution selects the current installed
 CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
 Machine selection and Session attribution stay intact. Installation quits and
 reopens a running Desktop. It does not restart other processes or wait for their
-exit; they may continue or fail naturally. A Session owner on a superseded lf
-keeps serving: `lf resume` moves one Session onto the installed lf, and `lf
-process rollover` moves every eligible owner at once. Clients and hooks launched before this
+exit; they may continue or fail naturally. A holder on a superseded lf keeps
+its conversations until their agents quit; quitting one and running `lf resume`
+continues it on the installed lf. Clients and hooks launched before this
 behavior may retain their old executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store

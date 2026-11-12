@@ -451,15 +451,6 @@ read -r answer < /dev/tty
             std::thread::sleep(Duration::from_millis(50));
         }
     }
-    fn owner_of(&self, session: &str) -> String {
-        self.sql()
-            .query_row(
-                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .unwrap()
-    }
     /// Record a turn in progress for `session`.
     fn mark_working(&self, session: &str) {
         self.sql()
@@ -2116,35 +2107,6 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
     }
 }
 
-/// A terminal host's pipe reaches the lf it starts. The detached owner outlives
-/// that terminal and must not keep the pipe, or the host's other reader (Desktop's
-/// status observer) never sees end of input and runs for as long as the owner.
-#[test]
-fn detached_owner_keeps_no_descriptor_its_terminal_inherited() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let (mut reader, writer) = std::io::pipe().unwrap();
-    let inherited = writer.as_raw_fd();
-    let mut command = fixture.command(&["-i", "-a", "claude", ":", "inherited"]);
-    command.env("PATH", path);
-    // SAFETY: fcntl is async-signal-safe; only this child inherits the writer.
-    unsafe {
-        std::os::unix::process::CommandExt::pre_exec(&mut command, move || {
-            libc::fcntl(inherited, libc::F_SETFD, 0);
-            Ok(())
-        });
-    }
-    let terminal = Terminal::spawn(command);
-    let launch = fixture.launches(1).pop().unwrap();
-    let owner = fixture.owner_of(&session_of(&fixture.sql(), &launch));
-    drop(writer);
-    terminal.stop();
-    let (done, closed) = std::sync::mpsc::channel();
-    std::thread::spawn(move || done.send(reader.read(&mut [0; 1]).unwrap()));
-    assert_eq!(closed.recv_timeout(Duration::from_secs(10)), Ok(0));
-    assert!(fixture.running(&owner), "the owner outlives its terminal");
-}
-
 /// Bare `lf` behaves as its provider would started from the shell: the
 /// provider leads the terminal's foreground group, no owner holds it, and
 /// closing the terminal ends it.
@@ -2927,7 +2889,7 @@ fn returned_session(output: &Output) -> Value {
 }
 
 #[test]
-fn resume_json_returns_once_when_it_starts_the_owner() {
+fn piped_resume_json_runs_here_and_returns_once() {
     let fixture = Fixture::new();
     let path = parented_provider(&fixture);
     let provider = fixture.home.path().join("bin/claude");
@@ -2959,15 +2921,6 @@ fn resume_json_returns_once_when_it_starts_the_owner() {
     let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(returned["id"], session);
     assert_eq!(fixture.launches(1).len(), 1);
-    let owner: String = fixture
-        .sql()
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    fixture.ends(&owner);
 }
 
 #[test]
@@ -3091,11 +3044,11 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let id = returned["id"].as_str().unwrap();
     assert_eq!(id != source_id, fork);
     assert_eq!(returned["provider"], "claude");
-    let (next_input, request, owner): (String, String, String) = sql
+    let (next_input, request): (String, String) = sql
         .query_row(
-            "SELECT c.receipt_key,s.request,s.transport_lf_process_id FROM agent_sessions s JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
+            "SELECT c.receipt_key,s.request FROM agent_sessions s JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
     assert_ne!(next_input, input);
@@ -3123,7 +3076,6 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
             .unwrap();
         assert_eq!(retained, input);
     }
-    fixture.ends(&owner);
 }
 
 #[test]
@@ -3958,7 +3910,7 @@ while True:
 
 /// A conversation whose lf executable is deleted, rebuilt or superseded keeps
 /// serving on the build it started with: nothing but a person quitting, `lf
-/// resume`, rollover, Task closure or an explicit end stops an owner, and
+/// resume`, Task closure or an explicit end stops an owner, and
 /// its viewers are never told to move. `lf resume` through the installed entry
 /// is the person's own decision: it ends the superseded idle owner and reopens
 /// the conversation with its history on the installed lf.
@@ -4247,13 +4199,8 @@ fn resume_takes_over_an_owner_from_another_build() {
         "reopened without history: {line}"
     );
     fixture.ends(&previous);
-    let current = fixture.owner_of(&session);
-    assert_ne!(current, previous);
-    assert!(
-        viewer.try_wait().unwrap().is_none(),
-        "viewer left the conversation"
-    );
-    viewer.kill().unwrap();
+    // Piped, the reopened provider has no terminal to wait on and may end first.
+    let _ = viewer.kill();
     let output = viewer.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4416,10 +4363,8 @@ fn resume_ends_an_unanswering_superseded_owner_of_a_completed_session() {
     drop(paused);
     let launches = fixture.launches(2);
     fixture.ends(&previous);
-    let current = fixture.owner_of(&session);
     viewer.kill().unwrap();
     let output = viewer.wait_with_output().unwrap();
-    assert_ne!(current, previous);
     assert_eq!(launches.len(), 2, "resume launched a second replacement");
     assert!(launches[1].contains(" --resume "), "{launches:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -4593,15 +4538,6 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
         assert!(Instant::now() < deadline, "the old provider kept running");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let current: String = fixture
-        .sql()
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_ne!(current, owner);
     drop(wait_for_viewer(reopened, Duration::from_secs(10)));
 }
 
@@ -4680,7 +4616,7 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
 }
 
 #[test]
-fn headless_graph_settles_its_original_step_after_creator_teardown() {
+fn headless_graph_settles_its_original_step() {
     headless_run(&["graph", "proof"], false);
 }
 
@@ -4690,7 +4626,7 @@ fn resume_refuses_a_graph_step_and_leaves_it_running() {
 }
 
 #[test]
-fn a_headless_run_survives_without_viewers() {
+fn a_headless_run_settles_its_step() {
     headless_run(&["skill", "probe", "--message", "go"], false);
 }
 
@@ -4727,8 +4663,6 @@ fn headless_run(command: &[&str], resume: bool) {
         .spawn()
         .unwrap();
     let launched = fixture.wait_file("launched");
-    creator.kill().unwrap();
-    creator.wait().unwrap();
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let (session, step): (String,String) = sql.query_row("SELECT session_id,lf_process_id FROM session_events WHERE kind='captured' AND receipt_key=?1", [launched.trim()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     let outcome = |id: &str| -> Option<String> {
@@ -4748,7 +4682,6 @@ fn headless_run(command: &[&str], resume: bool) {
             std::thread::sleep(Duration::from_millis(20));
         }
     };
-    assert_eq!(outcome(&step), None, "viewer death settled the execution");
     if resume {
         // A Run is never resumed or taken over: the step keeps its turn.
         let output = fixture.command(&["resume", &session]).output().unwrap();
@@ -4759,14 +4692,13 @@ fn headless_run(command: &[&str], resume: bool) {
             "{error}"
         );
     }
-    // Several lifetime polls without viewers still leave the Run's turn alive.
-    std::thread::sleep(Duration::from_secs(4));
     assert_eq!(
         outcome(&step),
         None,
-        "an unviewed Run ended before its work settled"
+        "the step settled before its turn ended"
     );
     std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
+    assert!(creator.wait().unwrap().success());
     settles(&step, "step");
     let graph: Option<String> = sql
         .query_row(

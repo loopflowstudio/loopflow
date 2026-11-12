@@ -261,6 +261,7 @@ impl Handoff {
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
 /// not inherit the right to run inside this execution's owner.
 pub fn initialize() {
+    crate::os_process::detached::initialize();
     if let Some(handoff) = Handoff::take() {
         let _ = HANDOFF.set(handoff);
     }
@@ -280,16 +281,9 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
     }
 }
 
-/// Whether a bare conversation runs as this terminal's foreground program, as
-/// `claude` or `codex` would: no owner holds it, so closing the terminal ends
-/// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
-/// launches without a terminal on stdin, which need the owner's PTY, and a
-/// Desktop surface waiting for a relay to acknowledge it.
-fn runs_in_terminal(batch: bool) -> bool {
-    !batch
-        && io::stdin().is_terminal()
-        && std::env::var_os("LF_SERVER_STATUS").is_none()
-        && std::env::var_os(STREAM_ENV).is_none()
+/// Whether a Desktop surface waits for a relay to acknowledge this launch.
+fn desktop_relay() -> bool {
+    std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some()
 }
 
 /// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
@@ -305,8 +299,8 @@ fn works(named_work: bool, session: Option<&str>) -> bool {
 
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again. Returns
-/// false when this process runs the launch itself: inside its owner, or as a
-/// bare launch in its own terminal.
+/// false when this process runs the launch itself: inside its host or
+/// launcher, or as a bare launch in its own terminal or headless.
 ///
 /// `named_work` says the command names its Task or Wave or starts a Task's
 /// Graph; its conversation is held for the Machine server when a terminal
@@ -354,9 +348,10 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
 
 /// The one place a launch's host is chosen. A Work launch a terminal views
 /// runs in a terminal the Machine server's holder keeps, so it outlives every
-/// lf process that views it. A bare launch at a terminal runs here, as the
-/// terminal's foreground program. Piped, `-b` and Desktop shell launches keep
-/// their own owner.
+/// lf process that views it. Other Work runs as a plain detached process that
+/// this one prints until it exits or lets go. A bare launch runs here: as the
+/// terminal's foreground program, or headless as its caller's child. Only a
+/// Desktop surface waiting for a relay still gets its own owner.
 fn delegate(
     batch: bool,
     json_session: Option<&str>,
@@ -366,11 +361,19 @@ fn delegate(
     named_work: bool,
 ) -> Result<bool> {
     // Library tests do not execute the CLI entry point.
-    if cfg!(test) || current().is_some() {
+    if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
         return Ok(false);
     }
     let work = works(named_work, preview_session.or(json_session));
-    if !work && runs_in_terminal(batch) {
+    let desktop = desktop_relay();
+    // `lf -b … > file` typed at a terminal writes only the answer, never a
+    // relayed screen; an interactive run keeps the terminal it reads from.
+    let terminal = std::env::var_os(STREAM_ENV).is_some()
+        || io::stdout().is_terminal()
+        || (!batch && io::stdin().is_terminal());
+    let held = terminal && !batch && work;
+    // A Graph waits on its step; the step has no caller to outlive.
+    if !desktop && (!work || (!held && crate::journal::graph_step())) {
         return Ok(false);
     }
     crate::journal::admit_process(
@@ -381,11 +384,21 @@ fn delegate(
         "Execution requires an admitted invocation; check the process ledger and caller provenance",
     )?;
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-    // `lf -b … > file` typed at a terminal writes only the answer, never a
-    // relayed screen; an interactive run keeps the terminal it reads from.
-    let terminal = std::env::var_os(STREAM_ENV).is_some()
-        || io::stdout().is_terminal()
-        || (!batch && io::stdin().is_terminal());
+    if !held && !desktop {
+        let cwd = std::env::current_dir()?;
+        let code = crate::os_process::detached::run(&argv, &cwd, &|command| {
+            // No terminal shows detached work; it claims none.
+            command
+                .env_remove(STREAM_ENV)
+                .env_remove("LF_TERMINAL_ID")
+                .env_remove("LF_TERMINAL_TTY")
+                .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+        })?;
+        if code != 0 {
+            return Err(crate::process::CommandExit(code).into());
+        }
+        return Ok(true);
+    }
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -396,7 +409,7 @@ fn delegate(
     };
     let session = preview_session.map(LfSessionId::from);
     let cwd = std::env::current_dir()?;
-    let owner = if terminal && !batch && work {
+    let owner = if held {
         Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
     } else {
         Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
@@ -490,7 +503,7 @@ pub(crate) fn start(
     if let Some(terminal) = crate::session_record::current_terminal_id() {
         command.env(TERMINAL_ENV, terminal);
     }
-    let descriptors = open_descriptors();
+    let descriptors = crate::os_process::detached::inherited_descriptors();
     // SAFETY: only async-signal-safe syscalls are used between fork and exec.
     unsafe {
         command.pre_exec(move || {
@@ -516,27 +529,6 @@ pub(crate) fn start(
         .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
     LfProcessId::parse(line.trim())
         .context("Owner exited before acknowledging execution; inspect transport.log")
-}
-
-/// Descriptors above stderr, such as a terminal host's pipes to its other
-/// children that this process inherited. A detached owner outlives that host, so
-/// it must not hold them: a reader waiting for the host's end to close would
-/// wait for as long as the owner runs. Release locks and worktree leases this
-/// process inherited stay: a release's surviving child keeps its target and
-/// checkout exclusive after the release controller dies. Marking an already
-/// close-on-exec or closed number (the listing's own) again is harmless.
-fn open_descriptors() -> Vec<RawFd> {
-    let Ok(entries) = std::fs::read_dir("/dev/fd") else {
-        return Vec::new();
-    };
-    let held: Vec<RawFd> = ["LF_RELEASE_LOCK_FD", "LF_WORKTREE_LEASE_FD"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok()?.parse().ok())
-        .collect();
-    entries
-        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
-        .filter(|fd| *fd > libc::STDERR_FILENO && !held.contains(fd))
-        .collect()
 }
 
 pub(crate) fn directory(home: &Path) -> Result<PathBuf> {

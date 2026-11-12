@@ -183,8 +183,7 @@ pub fn run_task_graph_for(
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
     let work = WorkRef::Task(task.id.clone());
     let cursor = store.latest_interrupt_id(&work)?;
-    let letting_go =
-        release && !cli.batch && !cli.interactive && crate::transport::current().is_some();
+    let letting_go = release && lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
     // The error every failed attempt so far shared, if they all shared one.
@@ -445,15 +444,26 @@ fn registration(
     }
 }
 
-/// Hand the launcher its last lines, end its view, and keep this run's own
-/// output in the log from here on.
+/// Whether this run lets whoever started it go once it is under way: it runs
+/// in a held terminal or detached, and is neither `-b` nor interactive.
+pub(crate) fn lets_launcher_go(cli: &Cli) -> bool {
+    !cli.batch
+        && !cli.interactive
+        && (crate::transport::current().is_some() || crate::os_process::detached::launched())
+}
+
+/// Hand the launcher its last lines, keep this run's own output in the log
+/// from here on, and let the launcher go.
 pub(crate) fn release_launcher(log: &std::fs::File) -> Result<()> {
     use std::io::Write;
     std::io::stdout().flush()?;
     std::io::stderr().flush()?;
-    crate::transport::detach_viewers()?;
+    if crate::transport::current().is_some() {
+        crate::transport::detach_viewers()?;
+    }
     crate::terminal_output::redirect(log, 1)?;
     crate::terminal_output::redirect(log, 2)?;
+    crate::os_process::detached::release();
     Ok(())
 }
 

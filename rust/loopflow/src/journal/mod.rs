@@ -130,12 +130,18 @@ static READ: AtomicBool = AtomicBool::new(false);
 
 /// Set by a Graph on the step it starts, and only on that child.
 pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
+static GRAPH_STEP: AtomicBool = AtomicBool::new(false);
 /// Whether a Graph started this process as its step. Clears the mark, so the
 /// step's own children are not steps.
 pub fn take_graph_step() -> bool {
-    let step = std::env::var_os(GRAPH_STEP_ENV);
+    let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
     std::env::remove_var(GRAPH_STEP_ENV);
-    step.is_some()
+    GRAPH_STEP.fetch_or(step, Ordering::Relaxed) || step
+}
+
+/// Whether a Graph started this process as its step, once taken.
+pub(crate) fn graph_step() -> bool {
+    GRAPH_STEP.load(Ordering::Relaxed)
 }
 
 /// A command that changes no Work records no Process. Admission still
@@ -481,8 +487,11 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
             ..LfEventFields::default()
         },
     );
-    if current_context().is_none() {
-        eprintln!("Process history unavailable: no compatible process ledger for this process");
+    match current_context() {
+        Some(context) => crate::os_process::detached::acknowledge(&context.lf_process_id),
+        None => {
+            eprintln!("Process history unavailable: no compatible process ledger for this process")
+        }
     }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),

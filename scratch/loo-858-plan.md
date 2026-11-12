@@ -158,3 +158,13 @@ os_process:: engine::launch::` 114 passed; `transport_tests` 42 passed, 5
 ignored; `server::schema::tests::` 7 passed. Gate owns the rest.
 Compress: clippy `--all-targets` clean; `--lib transport::` 70 passed;
 `transport_tests` 42 passed, 5 ignored.
+
+## Concept review, second pass (2026-11-12): nothing to change
+
+Every remaining `lf session serve` mention in code and docs names an
+earlier build's process: Session owners restart on `lf resume`, an earlier
+Desktop shell reads "Shell ended. Create a new shell" (a plain shell has no
+history to continue, the same restart rule). `transport::Place` is
+`{Held, Detached}` plus run-here; no second launch path is left. The
+`questions.md` entries follow from the steers (shells → holder implies the
+Machine server). No open product choice.

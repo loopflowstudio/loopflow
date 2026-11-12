@@ -581,9 +581,11 @@ fn run_native_session(
         }
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
-    if let Some(context) = &command.context {
-        context.configure_hooks(&mut process)?;
-    }
+    let delivery = command
+        .context
+        .as_ref()
+        .map(|context| context.configure_hooks(&mut process))
+        .transpose()?;
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
@@ -668,15 +670,9 @@ fn run_native_session(
         }
     }
     // A bare Codex names its thread only to its start hook.
-    let reported_thread = (command.program == "codex" && agent_session.is_none())
-        .then(|| {
-            process
-                .get_envs()
-                .find(|(name, _)| *name == crate::context_block::CONTEXT_DELIVERY_ENV)
-                .and_then(|(_, delivery)| delivery)
-                .map(|delivery| crate::context_block::reported_thread_path(Path::new(delivery)))
-        })
-        .flatten()
+    let reported_thread = delivery
+        .filter(|_| command.program == "codex" && agent_session.is_none())
+        .map(|delivery| crate::context_block::reported_thread_path(&delivery))
         .filter(|path| std::fs::write(path, "").is_ok());
     let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {

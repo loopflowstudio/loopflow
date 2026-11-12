@@ -218,11 +218,12 @@ impl ContextDelivery {
     }
 
     /// Each provider process receives its own saved launch context separately
-    /// from the declarations the provider asks a person to trust.
+    /// from the declarations the provider asks a person to trust. Returns the
+    /// delivery file the provider's hooks read.
     pub(crate) fn configure_hooks(
         &self,
         command: &mut std::process::Command,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<PathBuf> {
         // Provider environments outlive directory moves. Keep their launch
         // description in the Machine, where the hook's address stays valid.
         let directory = self.home.join("context-deliveries");
@@ -231,8 +232,8 @@ impl ContextDelivery {
         let file = tempfile::NamedTempFile::new_in(&directory)?;
         serde_json::to_writer(file.as_file(), self)?;
         file.persist(&path)?;
-        command.env(CONTEXT_DELIVERY_ENV, path);
-        Ok(())
+        command.env(CONTEXT_DELIVERY_ENV, &path);
+        Ok(path)
     }
 
     /// App-server hooks inherit the server environment, not thread shell policy,

@@ -138,16 +138,18 @@ pub(crate) fn add_opencode_context(
     Ok(())
 }
 
-/// A native terminal launch is a conversation an owner holds: it gets every
-/// hook, whatever named its Work. Only a managed one accepts wakes.
+/// A native terminal launch an owner holds gets every hook, whatever named its
+/// Work: they say when it can take a reply. A bare one in the terminal's
+/// foreground gets only the context hooks. Only a managed one accepts wakes.
 pub(crate) fn native_args(
     harness: &str,
     context: Option<&ContextDelivery>,
     managed: bool,
 ) -> Result<Vec<String>> {
+    let held = crate::transport::current().is_some();
     match (harness, context) {
-        ("claude", Some(context)) => claude_args(context, true, managed),
-        ("pi", context) => pi_args(context, true, true),
+        ("claude", Some(context)) => claude_args(context, held, managed),
+        ("pi", context) => pi_args(context, true, held),
         _ => Ok(Vec::new()),
     }
 }
@@ -314,11 +316,10 @@ mod tests {
             assert_eq!(args[0], "--settings");
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
+        // No owner holds this launch, so it gets only the context hooks.
         let bare = settings(false);
-        assert!(
-            bare["hooks"]["Stop"].is_array(),
-            "bare keeps its turn hooks"
-        );
+        assert!(bare["hooks"]["SessionStart"].is_array());
+        assert!(bare["hooks"].get("Stop").is_none());
         assert!(bare.get("crossSessionInbound").is_none());
         assert_eq!(settings(true)["crossSessionInbound"], "accept");
     }

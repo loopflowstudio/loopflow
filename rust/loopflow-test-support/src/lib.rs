@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
@@ -57,6 +58,83 @@ impl RunningParent {
         command
             .env("LF_PROCESS_ID", &self.id)
             .env("LF_TRACE_ID", &self.trace)
+    }
+}
+
+/// End running fixture Processes and wait for completed ones to finish exiting.
+/// A completion receipt can precede the owner's final screen write. Detached
+/// owners leave the test's process group and must settle before removing `home`.
+#[cfg(unix)]
+pub fn end_recorded_processes(home: &Path, lf: &Path) {
+    let Ok(sql) = rusqlite::Connection::open_with_flags(
+        home.join("loopflow.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        return;
+    };
+    let Ok(mut rows) =
+        sql.prepare("SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL")
+    else {
+        return;
+    };
+    let pids: Vec<(libc::pid_t, bool)> = rows
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default();
+    let home = home.to_string_lossy().into_owned();
+    let lf = lf.to_string_lossy().into_owned();
+    let ours = |pid: libc::pid_t| {
+        Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .map(|out| {
+                let command = String::from_utf8_lossy(&out.stdout);
+                command.contains(&home) || command.starts_with(&lf)
+            })
+            .unwrap_or(false)
+    };
+    let mut running: Vec<_> = pids.into_iter().filter(|(pid, _)| ours(*pid)).collect();
+    for signals in [&[libc::SIGCONT, libc::SIGTERM][..], &[libc::SIGKILL][..]] {
+        for &(pid, unfinished) in &running {
+            // Completed records need only a wait; do not signal historical PIDs.
+            if unfinished {
+                for &signal in signals {
+                    // SAFETY: a live PID this fixture recorded, checked above.
+                    unsafe { libc::kill(pid, signal) };
+                }
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !running.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            running.retain(|(pid, _)| ours(*pid));
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod cleanup_tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    #[test]
+    fn completed_process_finishes_writing_before_fixture_cleanup_returns() {
+        let home = tempfile::tempdir().unwrap();
+        let screen = home.path().join("screen");
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 0.2; printf finished > \"$1\"", "fixture"])
+            .arg(&screen)
+            .spawn()
+            .unwrap();
+        let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        sql.execute_batch("CREATE TABLE processes(pid INTEGER,completed_at INTEGER)")
+            .unwrap();
+        sql.execute("INSERT INTO processes VALUES(?1,1)", [child.id()])
+            .unwrap();
+        super::end_recorded_processes(home.path(), Path::new("/unused/lf"));
+        let written = std::fs::read_to_string(screen);
+        assert!(child.wait().unwrap().success());
+        assert_eq!(written.unwrap(), "finished");
     }
 }
 

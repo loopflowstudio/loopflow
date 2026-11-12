@@ -585,6 +585,21 @@ fn members(
 }
 
 impl SqliteStore {
+    /// Owners of unfinished member Sessions, without loading retained history.
+    pub(crate) fn task_session_owners(&self, task: &TaskId) -> StoreResult<Vec<LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT s.transport_lf_process_id FROM agent_sessions s
+             WHERE s.id IN ({}) AND s.completed_at IS NULL
+                 AND s.transport_lf_process_id IS NOT NULL",
+            session_ids("?1")
+        ))?;
+        let owners = query
+            .query_map([task.as_str()], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(owners)
+    }
+
     pub(crate) fn task_ids_in_wave(
         &self,
         wave: &crate::id::WaveId,

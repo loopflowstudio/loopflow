@@ -145,6 +145,10 @@ pub(super) enum Request {
         cols: u16,
     },
     EndInput,
+    /// Cleanup is ending this owner; deliver the reason and retain its final screen.
+    CloseNotice {
+        text: String,
+    },
     Own {
         mode: Own,
     },

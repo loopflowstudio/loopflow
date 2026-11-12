@@ -149,8 +149,10 @@ pub enum PrSurface {
 
 /// The world's `claude`. `--resume <id>` prints `resumed <id>: <n> lines`
 /// after reading the world transcript (exit 1 when there is none), then answers
-/// each input line with `reply <id>: <line>` until `quit` or EOF. A new
-/// conversation (`--session-id <id>`) echoes the same way. Transcripts are
+/// each input line with `reply <id>: <line>` until `quit` or EOF. When stdin
+/// is not the terminal it holds the opening turn, as for Claude: after it the
+/// stand-in reads its terminal. A new conversation (`--session-id <id>`)
+/// echoes the same way. Transcripts are
 /// never written. It needs only `sh` and `grep`, which the Desktop benchmark's
 /// exec policy allows.
 pub const STUB_CLAUDE: &str = r#"#!/bin/sh
@@ -177,10 +179,15 @@ if [ -z "$new" ]; then
 else
   echo "started $id"
 fi
-while IFS= read -r input; do
-  [ "$input" = quit ] && exit 0
-  echo "reply $id: $input"
-done
+answer() {
+  while IFS= read -r input; do
+    [ "$input" = quit ] && exit 0
+    echo "reply $id: $input"
+  done
+}
+answer
+# Like Claude: an opening turn arrives on stdin, then keys come from the terminal.
+if [ -t 1 ] && [ ! -t 0 ]; then exec < /dev/tty; answer; fi
 "#;
 
 /// How a recorded Graph ended: every step succeeded, or the step at this

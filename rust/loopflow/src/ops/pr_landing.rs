@@ -469,12 +469,8 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         {
             continue;
         }
-        // The run's Session names the owner that served it.
-        let session = match store
-            .sqlite
-            .transport_session(&owner)
-            .map_err(repair_error)?
-        {
+        // The Session the run's agent ran in.
+        let session = match store.sqlite.process_session(&owner).map_err(repair_error)? {
             Some(id) => store.sqlite.session(&id).map_err(repair_error)?,
             None => None,
         };

@@ -1,24 +1,20 @@
 //! Desktop shell identity survives the viewer; its held terminal owns execution.
-//! A shell an earlier build started names its `lf session serve` owner instead,
-//! and that owner keeps its own lifetime until it ends.
+//! A shell an earlier build started names its `lf session serve` owner instead;
+//! that owner ends itself on Close and is never viewed again.
 use rusqlite::{params, OptionalExtension};
 
 use crate::durable::TaskId;
 use crate::id::{LfProcessId, TerminalId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
-use crate::transport::Host;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopShell {
     pub checkout: String,
-    /// What runs the shell; none until its start is acknowledged.
-    pub host: Option<Host>,
-}
-
-/// The shell's host, from its terminal or an earlier build's owner.
-fn host(terminal: Option<TerminalId>, owner: Option<LfProcessId>) -> Option<Host> {
-    terminal.map(Host::Terminal).or(owner.map(Host::Owner))
+    /// The terminal that runs the shell; none until its start is acknowledged.
+    pub terminal: Option<TerminalId>,
+    /// Its start was acknowledged, by a terminal or an earlier build's owner.
+    pub started: bool,
 }
 
 impl SqliteStore {
@@ -26,12 +22,14 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT checkout,terminal_id,owner FROM desktop_shells WHERE id=?1",
+                "SELECT checkout,terminal_id,terminal_id IS NOT NULL OR owner IS NOT NULL
+                 FROM desktop_shells WHERE id=?1",
                 [id],
                 |row| {
                     Ok(DesktopShell {
                         checkout: row.get(0)?,
-                        host: host(row.get(1)?, row.get(2)?),
+                        terminal: row.get(1)?,
+                        started: row.get(2)?,
                     })
                 },
             )
@@ -79,18 +77,6 @@ impl SqliteStore {
         )?)
     }
 
-    /// Whether `host` runs a Desktop shell.
-    pub(crate) fn is_shell(&self, host: &Host) -> StoreResult<bool> {
-        match host {
-            Host::Terminal(terminal) => self.is_shell_terminal(terminal),
-            Host::Owner(owner) => Ok(self.conn.lock().expect("store mutex poisoned").query_row(
-                "SELECT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=?1)",
-                [owner],
-                |r| r.get(0),
-            )?),
-        }
-    }
-
     /// The shell's terminal ended and nothing it started is left running.
     pub(crate) fn settle_shell_jobs(&self, terminal: &TerminalId) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
@@ -130,23 +116,19 @@ pub(crate) fn jobs_settled(store: &SqliteStore, task: &TaskId) -> StoreResult<bo
     )?)
 }
 
-/// What runs each of the Task's started shells, with the `lf` that created it.
+/// The terminal of each of the Task's started shells, with the `lf` that
+/// created it.
 pub(crate) fn hosts(
     store: &SqliteStore,
     task: &TaskId,
-) -> StoreResult<Vec<(Host, Option<LfProcessId>)>> {
+) -> StoreResult<Vec<(TerminalId, Option<LfProcessId>)>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
     let mut query = conn.prepare(
-        "SELECT terminal_id,owner,launcher_lf_process_id FROM desktop_shells
-         WHERE task_id=?1 AND (terminal_id IS NOT NULL OR owner IS NOT NULL)",
+        "SELECT terminal_id,launcher_lf_process_id FROM desktop_shells
+         WHERE task_id=?1 AND terminal_id IS NOT NULL",
     )?;
     let rows = query
-        .query_map([task.as_str()], |r| {
-            Ok((
-                host(r.get(0)?, r.get(1)?).expect("the query selects started shells"),
-                r.get(2)?,
-            ))
-        })?
+        .query_map([task.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
 }
@@ -156,7 +138,6 @@ mod tests {
     use crate::durable::TaskId;
     use crate::id::TerminalId;
     use crate::store::sqlite::SqliteStore;
-    use crate::transport::Host;
 
     #[test]
     fn desktop_shell_creation_is_once_even_after_lost_acknowledgement_or_exit() {
@@ -174,21 +155,16 @@ mod tests {
         assert!(!store
             .create_desktop_shell("shell", &task, "/repo.task", None)
             .unwrap());
-        assert!(store
-            .desktop_shell("shell")
-            .unwrap()
-            .unwrap()
-            .host
-            .is_none());
+        assert!(!store.desktop_shell("shell").unwrap().unwrap().started);
         let terminal = TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         store.bind_desktop_shell("shell", &terminal).unwrap();
         assert!(store.bind_desktop_shell("shell", &terminal).is_err());
-        assert!(store.is_shell(&Host::Terminal(terminal.clone())).unwrap());
+        assert!(store.is_shell_terminal(&terminal).unwrap());
         store.close_desktop_shell("shell").unwrap();
         assert_eq!(
-            store.desktop_shell("shell").unwrap().unwrap().host,
-            Some(Host::Terminal(terminal.clone()))
+            store.desktop_shell("shell").unwrap().unwrap().terminal,
+            Some(terminal.clone())
         );
         // Closing a running shell settles nothing until its terminal ends.
         assert!(!crate::desktop::shells::jobs_settled(&store, &task).unwrap());

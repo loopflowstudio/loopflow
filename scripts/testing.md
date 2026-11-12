@@ -60,7 +60,7 @@ Session completion or attachment changes also run
 Session while retaining the saved provider thread and completes again on exit.
 
 Store-wide schema or trigger changes also run `binary(two_people)` and
-`binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
+`binary(transport_tests)`: shared planning exchanges and held-terminal lifetimes
 exercise writers beyond the changed store module.
 
 Configuration file loading or filtering changes also run `binary(two_people)`:
@@ -131,7 +131,7 @@ Phone, shared Swift models and server protocol changes also select `ios`.
 `-only-testing:LoopflowiOSTests/SessionTerminalTests` for a focused check. It creates
 and removes its own Simulator, using an installed iOS runtime and ad-hoc signing.
 The suite covers pairing, Task creation and the terminal; the shared protocol
-decoders, owner stream included, run with the macOS Swift tests. Whether a
+decoders, view stream included, run with the macOS Swift tests. Whether a
 Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or

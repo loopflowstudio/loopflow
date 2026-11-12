@@ -29,9 +29,9 @@ fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[
     command
 }
 
-/// Live agent Processes once a quit owner has finished its exit records. The
-/// terminal gets the provider's exit after a short wait; the owner lingers to
-/// settle its provider, so a reader waits for it.
+/// Live agent Processes once their exit records are written. The terminal
+/// gets the provider's exit after a short wait; its host lingers to settle the
+/// provider, so a reader waits for it.
 fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
@@ -154,132 +154,6 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             run(&["unset", "--global", "codex.service_tier"]);
         }
     }
-}
-
-#[test]
-fn codex_service_tier_survives_live_reattachment() {
-    use std::process::Stdio;
-    use std::time::{Duration, Instant};
-
-    let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
-    );
-    let home = tempfile::tempdir().unwrap();
-    support::install_native_codex(&home.path().join("bin"));
-    fs::write(home.path().join("reattach-service-tier"), "").unwrap();
-    let command = |args: &[&str]| native_codex_command(repo.path(), home.path(), args);
-    let mut first = command(&[
-        "session",
-        "serve",
-        "--terminal",
-        "--",
-        env!("CARGO_BIN_EXE_lf"),
-        "-i",
-        "-a",
-        "codex",
-        "--setting",
-        "codex.service_tier=default",
-        ":",
-        "Change the conversation tier",
-    ])
-    .stdin(Stdio::piped())
-    .stdout(Stdio::null())
-    .stderr(Stdio::inherit())
-    .spawn()
-    .unwrap();
-    let mut resumed = None;
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let read = |name: &str| -> serde_json::Value {
-            let path = home.path().join(name);
-            let deadline = Instant::now() + Duration::from_secs(20);
-            loop {
-                if let Ok(bytes) = fs::read(&path) {
-                    if let Ok(value) = serde_json::from_slice(&bytes) {
-                        return value;
-                    }
-                }
-                assert!(Instant::now() < deadline, "missing {name}");
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        };
-        let before = read("native-tier-before.json");
-        assert_eq!(before["serviceTier"], "default");
-        assert_eq!(read("native-tier.json"), "priority");
-        let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let identity = || {
-            database
-                .query_row(
-                    "SELECT s.id,p.id,p.pid,p.os_started_at,p.endpoint,s.provider_thread
-                     FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-                     WHERE p.completed_at IS NULL",
-                    [],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, u32>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, String>(5)?,
-                        ))
-                    },
-                )
-                .unwrap()
-        };
-        let original = identity();
-        // The new viewer must reach the still-running terminal before it can
-        // ask the server for the tier. Restarting from saved history cannot pass.
-        resumed = Some(
-            command(&[
-                "-i",
-                "--setting",
-                "codex.service_tier=default",
-                "resume",
-                &original.0,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap(),
-        );
-        resumed
-            .as_mut()
-            .unwrap()
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(b"inspect tier\n")
-            .unwrap();
-        let after = read("native-tier-after.json");
-        assert_eq!(after["serviceTier"], "priority");
-        assert_eq!(after["thread"], before["thread"]);
-        assert_eq!(identity(), original, "same live server and conversation");
-        let launches = fs::read_to_string(home.path().join("native-argv.jsonl")).unwrap();
-        let servers = launches
-            .lines()
-            .map(|line| serde_json::from_str::<Vec<String>>(line).unwrap())
-            .filter(|args| args.iter().any(|arg| arg == "--listen"))
-            .count();
-        assert_eq!(servers, 1, "reattachment must not launch another server");
-    }));
-    // Release and reap the fixture even if an assertion failed.
-    fs::write(home.path().join("release"), "").unwrap();
-    let statuses: Vec<_> = std::iter::once(&mut first)
-        .chain(resumed.iter_mut())
-        .map(|child| child.wait().unwrap())
-        .collect();
-    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    assert_eq!(settled_live_agents(&database), 0);
-    if let Err(panic) = result {
-        std::panic::resume_unwind(panic);
-    }
-    assert!(
-        statuses.iter().all(|status| status.success()),
-        "{statuses:?}"
-    );
 }
 
 #[test]
@@ -1079,11 +953,9 @@ fn open_task_conversations(db: &Path, task: &str) -> i64 {
         .unwrap()
         .query_row(
             "SELECT count(*) FROM agent_sessions s
-             LEFT JOIN processes o ON o.id=s.transport_lf_process_id
-             LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
+             JOIN held_terminals t ON t.id=s.held_terminal_id
              WHERE s.task_id=?1 AND s.interactive=1 AND s.completed_at IS NULL
-                 AND ((o.id IS NOT NULL AND o.completed_at IS NULL)
-                     OR (t.id IS NOT NULL AND t.ended_at IS NULL))",
+                 AND t.ended_at IS NULL",
             [task],
             |row| row.get(0),
         )
@@ -1142,7 +1014,7 @@ fn assert_background_conversation(run_graph: bool) {
     let conn = rusqlite::Connection::open(&db).unwrap();
     for _ in 0..16 {
         let task = loopflow::durable::TaskId::new();
-        let owner = loopflow::id::LfProcessId::new();
+        let terminal = loopflow::id::TerminalId::new();
         let session = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
@@ -1151,13 +1023,12 @@ fn assert_background_conversation(run_graph: bool) {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,command,cwd,started_at)
-            VALUES(?1,?1,'[\"lf\"]','/older',1)",
-            [&owner],
+            "INSERT INTO held_terminals(id,holder_build,created_at) VALUES(?1,'fixture',1)",
+            [&terminal],
         )
         .unwrap();
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,interactive,transport_lf_process_id)
-            VALUES(?1,'Older conversation','generated',1,1,'/older',?2,1,?3)", rusqlite::params![session,task.as_str(),owner]).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,interactive,held_terminal_id)
+            VALUES(?1,'Older conversation','generated',1,1,'/older',?2,1,?3)", rusqlite::params![session,task.as_str(),terminal]).unwrap();
     }
     drop(conn);
 

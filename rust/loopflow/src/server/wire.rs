@@ -96,22 +96,17 @@ pub enum Operation {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
-    /// A ticket for the Session's terminal: the server resolves the Session's
-    /// held terminal, else its current owner LfProcess, and answers `{ticket,
-    /// owner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A
-    /// new connection presents the ticket as its first message (`attach`) and
-    /// becomes the bridge; this connection stays a client. When the terminal
-    /// or owner ends, the bridge closes; attaching again by the same Session
-    /// reaches its next one. With `owner_lf_process_id`, the
-    /// Session must still be owned by exactly that LfProcess, for a client that
-    /// reconnects only to the owner it had.
+    /// A ticket for the Session's held terminal, answered `{ticket,
+    /// terminal_id, expires_in_ms}`. A new connection presents the ticket as
+    /// its first message (`attach`) and becomes the bridge; this connection
+    /// stays a client. When the terminal ends, the bridge closes; attaching
+    /// again by the same Session reaches its next one. A Session no terminal
+    /// runs is `not_found`; attaching never starts a provider.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
         session: crate::id::LfSessionId,
-        owner_lf_process_id: Option<LfProcessId>,
-        /// Attach only to this held terminal. Without either ID, a Session's
-        /// held terminal is preferred to an owner.
+        /// Attach only to this held terminal.
         terminal_id: Option<crate::id::TerminalId>,
     },
     /// Start the Session's agent in this build's holder and answer
@@ -263,12 +258,8 @@ pub struct SessionStarted {
 pub struct SessionAttached {
     /// Opaque random ticket; single use.
     pub ticket: String,
-    /// The owner the bridge reaches; null for a held terminal.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub owner_lf_process_id: Option<LfProcessId>,
-    /// The held terminal the bridge reaches; null for an owner.
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub terminal_id: Option<crate::id::TerminalId>,
+    /// The held terminal the bridge reaches.
+    pub terminal_id: crate::id::TerminalId,
     /// How long the ticket opens a bridge, from when it was issued.
     pub expires_in_ms: u64,
 }
@@ -320,13 +311,9 @@ pub enum ServerMessage {
         result: serde_json::Value,
     },
     /// The answer to `attach`: the connection now speaks the viewer protocol
-    /// with this owner LfProcess or this held terminal, whichever is not null,
-    /// and nothing more arrives from the server.
+    /// with this held terminal, and nothing more arrives from the server.
     Bridged {
-        #[serde(deserialize_with = "Option::deserialize")]
-        owner_lf_process_id: Option<LfProcessId>,
-        #[serde(deserialize_with = "Option::deserialize")]
-        terminal_id: Option<crate::id::TerminalId>,
+        terminal_id: crate::id::TerminalId,
     },
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -518,7 +505,6 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/response.json"),
             include_str!("../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../tests/fixtures/dto/server/bridged.json"),
-            include_str!("../../tests/fixtures/dto/server/bridged_terminal.json"),
             include_str!("../../tests/fixtures/dto/server/session_started.json"),
             include_str!("../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../tests/fixtures/dto/server/event_shipped.json"),

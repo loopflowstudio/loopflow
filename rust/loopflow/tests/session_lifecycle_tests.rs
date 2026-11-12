@@ -2635,8 +2635,8 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
             for task in &tasks {
                 loop {
                     let running: i64 = fixture.db().query_row(
-                        "SELECT count(*) FROM agent_sessions s JOIN processes p ON p.id=s.transport_lf_process_id
-                         WHERE s.task_id=?1 AND p.completed_at IS NULL", [task], |row| row.get(0)).unwrap();
+                        "SELECT count(*) FROM agent_sessions s JOIN held_terminals t ON t.id=s.held_terminal_id
+                         WHERE s.task_id=?1 AND t.ended_at IS NULL", [task], |row| row.get(0)).unwrap();
                     if running == 0 { break; }
                     assert!(Instant::now() < deadline, "Task conversation did not stop");
                     std::thread::sleep(Duration::from_millis(20));

@@ -85,6 +85,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "serve-graph"],
         &["session", "ensure"],
         &["session", "connect", "missing-session"],
+        &["session", "serve", "--", "/bin/cat"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
@@ -94,7 +95,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     let output = run(home.path(), &["session", "attach", "missing-session"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`"));
+        .contains("lf session attach names `--terminal TERMINAL_ID`"));
     let output = run(
         home.path(),
         &[

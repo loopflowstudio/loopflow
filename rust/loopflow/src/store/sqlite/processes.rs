@@ -366,7 +366,7 @@ pub(super) fn attach_in(
         // A best-effort start receipt can lose to a held write lock; the
         // attaching lf's row lands here instead, never a self-rooted agent.
         if let Some(start) = crate::journal::current_start_record(process) {
-            super::record_process_in(tx, &start, crate::transport::held_terminal())?;
+            super::record_process_in(tx, &start, crate::transport::current())?;
         }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
@@ -1132,7 +1132,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
-            super::record_process_in(&tx, &start, crate::transport::held_terminal())?;
+            super::record_process_in(&tx, &start, crate::transport::current())?;
         }
         let released = tx.execute(
             &format!(
@@ -1278,7 +1278,7 @@ impl SqliteStore {
     }
 
     /// Whether this interactive Session runs as the foreground program of the
-    /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
+    /// terminal that started it (`lf <skill>`): no holder keeps it,
     /// so nothing else may stop it, and another launch on its thread runs
     /// beside it.
     pub(crate) fn runs_in_its_terminal(&self, session: &str) -> StoreResult<bool> {
@@ -1287,7 +1287,7 @@ impl SqliteStore {
         };
         Ok(record.interactive
             && self.is_bare(&record)?
-            && self.session_transport(session)?.is_none())
+            && self.session_terminal(session)?.is_none())
     }
 
     /// Resume excludes takeover from observation through settlement and claim.

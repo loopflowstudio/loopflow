@@ -144,7 +144,7 @@ exits, `lf` reads its transcript, records usage and completion in
 
 | | |
 |---|---|
-| Processes | the agent and the `lf` waiting for it; no server, holder or `lf session serve` |
+| Processes | the agent and the `lf` waiting for it; no server or holder |
 | Closing the terminal | ends the agent, as it would plain `claude` |
 | Coming back | `lf resume <session>` continues its thread from history |
 | `lf install` meanwhile | leaves it running; the next launch uses the new build |
@@ -169,7 +169,7 @@ Headless work is a plain process. `lf -b <skill>` runs its agent as a child
 and waits for it. Work commands (a Graph, `lf -b task run`, a landing watcher,
 `lf ship`) run detached in their own process group, writing the log the
 command names; `lf -b task run` prints that log as it grows and exits with the
-Graph. Nothing hosts either: no server, no holder, no `lf session serve`.
+Graph. Nothing hosts either: no server, no holder.
 
 | | |
 |---|---|
@@ -245,9 +245,12 @@ nothing.
 No private process is started in its place. A Graph already running keeps
 going without it.
 
-A conversation opened by an earlier build under `lf session serve` keeps that
-process until its agent quits; `lf resume` still reattaches to it. Nothing
-starts a new one.
+A conversation an earlier build opened under its own `lf session serve`
+process keeps running until its agent quits. `lf resume` of it, or opening its
+Desktop pane, restarts it: lf ends that process, waits for it to exit, and
+continues the thread in the holder from provider history. If lf cannot verify
+the process, or it does not exit, nothing starts and the message names its
+pid.
 
 ## When Desktop loses its connection
 

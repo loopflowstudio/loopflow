@@ -179,15 +179,16 @@ A launch runs in exactly one of three places, chosen once in
 
 | | Here | Held | Detached |
 | --- | --- | --- | --- |
-| What | `lf <skill>`, `lf graph …`, any bare `-b` or piped run, every headless Graph step | Task, Wave and repository conversations; Desktop shells | Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command |
+| What | `lf <skill>`, `lf graph …`, any bare `-b` or piped run, every headless Graph step | Task, Wave and repository conversations; Desktop shells; a bare Session a Desktop pane or framed `lf --machine` view opens | Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command |
 | Parent of the agent | The launching `lf`, in its caller's terminal or pipe | The holder, on a PTY | A step `lf` under the Graph process |
 | Ends with | Its caller | Its agent quitting, or its Task closing | Its Graph |
 | Seen through | The terminal it runs in | Any number of views, all live | Its log, `lf task status`, the Session's history |
 | Needs the server | No | Yes; it fails rather than fall back | To start, no |
 
-Work decides between Here and the other two: a command that names a Task or
-Wave, or reopens a Session bound to one, is Work, and a plain `lf` typed in a
-Task's checkout is not. A terminal decides between Held and Detached: Work
+Work decides between Here and the other two, except that a Desktop pane or
+framed `lf --machine` view holds a bare Session too: a command that names a
+Task or Wave, or reopens a Session bound to one, is Work, and a plain `lf`
+typed in a Task's checkout is not. A terminal decides between Held and Detached: Work
 someone views is held, Work nobody views is detached. Nothing wraps a headless
 run in a terminal, and nothing hosts a conversation in a process of its own.
 
@@ -220,7 +221,11 @@ and the server. The holder never opens it.
 
 Conversations started by a build from before held terminals run under an
 `lf session serve` process of their own until their agent quits. Nothing
-starts one now.
+starts one now, and nothing sweeps them. `lf resume` of one, or opening its
+Desktop pane, restarts it: lf ends that process by its verified pid and birth,
+waits for it to exit and resumes the thread held from provider history. One it
+cannot verify, or that does not exit, keeps running and the message names its
+pid.
 
 The [transport README](../../rust/loopflow/src/transport/README.md) owns the
 holder and view protocols; the

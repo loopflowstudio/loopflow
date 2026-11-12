@@ -1254,8 +1254,7 @@ impl SessionCommand {
             Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Steers { retry, .. } => retry.is_some(),
             Self::Bind { dry_run, .. } => !dry_run,
-            Self::Serve { .. }
-            | Self::Resume { .. }
+            Self::Resume { .. }
             | Self::New { .. }
             | Self::Steer { .. }
             | Self::Rename { .. }
@@ -1776,15 +1775,6 @@ pub enum SessionCommand {
         all: bool,
         #[arg(long)]
         json: bool,
-    },
-    /// Run the process a Session lives in while terminals come and go
-    Serve {
-        /// Relay the execution to an attached terminal
-        #[arg(long)]
-        terminal: bool,
-        /// The command this process executes
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
     },
     /// Save a steer for this Session, or without one for the current Wave's or
     /// repository's Sessions, without starting a turn

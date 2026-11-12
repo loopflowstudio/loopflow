@@ -120,6 +120,12 @@ history as one `store-gap` entry, read as unknown rather than still running.
 Nothing needs relaunching. If `lf server status` reports no server or a
 mismatched build, run `lf install`.
 
+A conversation started before an upgrade keeps the hooks its build wrote. One
+that names a command or value this lf no longer has (`--moment task-updates`,
+say) prints `lf: ignoring …, a hook from an earlier lf; restart the Session to
+refresh its hooks` and lets the turn go on. Quit the agent and `lf resume` it
+to get current hooks.
+
 A headless run started with plain `lf -b <skill>` or `lf graph`, by you or
 by an agent, takes no steers, even inside a Task's checkout: steer the Task's
 own conversation, or the agent that started the run.
@@ -153,6 +159,10 @@ ends every agent and Desktop shell it holds. An `lf <skill>` typed at a
 terminal or in a Desktop shell has no holder: its agent is a child of that
 terminal. An `lf session serve` process is a conversation an earlier build
 opened; it ends when its agent quits, and no current build starts one.
+`lf resume <ID>` restarts it in a holder: lf ends the old process, waits for
+it to exit and continues from provider history. If lf cannot verify that
+process or it does not exit, nothing starts and the message names its pid;
+quit the agent there, or end that pid, and resume again.
 
 ## A creation has no confirmed answer
 
@@ -374,10 +384,9 @@ else belongs to a single conversation or view.
 | `lf … task run`, `lf … graph run`, `lf … ship` | A Graph, landing watcher or ship running detached | The step in flight; `lf task status`, then `lf task run` what remains |
 | `lf -b <skill>` | A headless run, a child of whatever started it | That run; its caller sees it fail |
 | `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
-| `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` continues from history |
+| `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` ends it and continues from history |
 | `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |
-| `lf __context-block --moment task-updates` | A Claude hook that delivers Task updates | Task updates in that conversation until it next starts or resumes |
 | `lf server run` | The Machine server | Desktop's connection until the server is started again |
 
 Conversations remain running while their scope is open. Done Tasks end their

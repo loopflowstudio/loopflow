@@ -334,11 +334,10 @@ fn two_people_share_one_repository() {
                     // A Task conversation is held: its process is the holder.
                     "SELECT DISTINCT p.pid FROM processes p
                  WHERE p.completed_at IS NULL AND p.pid IS NOT NULL
-                     AND (p.id IN (SELECT transport_lf_process_id FROM agent_sessions)
-                         OR (p.command='[\"lf\",\"holder\",\"run\"]'
-                             AND EXISTS (SELECT 1 FROM agent_sessions s
-                                 JOIN held_terminals t ON t.id=s.held_terminal_id
-                                 WHERE t.ended_at IS NULL)))",
+                     AND p.command='[\"lf\",\"holder\",\"run\"]'
+                     AND EXISTS (SELECT 1 FROM agent_sessions s
+                         JOIN held_terminals t ON t.id=s.held_terminal_id
+                         WHERE t.ended_at IS NULL)",
                 )
                 .unwrap();
             let owners = query

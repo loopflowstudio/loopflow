@@ -173,10 +173,9 @@ fn flush(output: &mut impl Write, pending: &mut VecDeque<u8>) -> io::Result<()> 
     }
 }
 
-pub(super) fn bridge(id: &super::Host) -> Result<()> {
-    let mut socket = id
-        .connect()
-        .context("Execution is unavailable; nothing was restarted")?;
+pub(super) fn bridge(id: &crate::id::TerminalId) -> Result<()> {
+    let mut socket =
+        super::connect(id).context("Execution is unavailable; nothing was restarted")?;
     socket.set_nonblocking(true)?;
     let _input_flags = BorrowedFlags::new(0)?;
     let _output_flags = BorrowedFlags::new(1)?;
@@ -208,7 +207,7 @@ pub(super) fn bridge(id: &super::Host) -> Result<()> {
         }
         anyhow::ensure!(
             drain_until.is_none_or(|deadline| Instant::now() < deadline),
-            "Viewer stopped reading after its execution owner disconnected"
+            "Viewer stopped reading after its held terminal disconnected"
         );
         // Full queues returned above; poll only for open endpoints and pending writes.
         poll(&mut [

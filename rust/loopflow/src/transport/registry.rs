@@ -26,11 +26,8 @@ use crate::server::holder::wire::{self, Held};
 use crate::server::holder::Place;
 
 use super::held::Source;
-use super::hosted::{Child, Hosted, Pass, Watchers};
-use super::{
-    dimensions, drain, wait_for_activity, Host, CONTROL_ENV, HELD_ENV, OWNER_ENV, PARENT_ENV,
-    STREAM_ENV, TERMINAL_ENV,
-};
+use super::hosted::{Hosted, Pass, Watchers};
+use super::{dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV};
 
 /// How long a connection has to name its terminal.
 const ARRIVAL: Duration = Duration::from_secs(5);
@@ -231,7 +228,7 @@ struct Named {
 
 struct Entry {
     hosted: Hosted,
-    child: Child,
+    child: Source,
     place: Place,
     /// A screen rebuilt from the ring asks its program to repaint once the
     /// replay reaches this position.
@@ -459,16 +456,14 @@ impl Registry {
         let mut env: Vec<(String, String)> = start
             .env
             .into_iter()
-            // A pane's relay variables describe that pane's viewer, and an
-            // owner's handoff the owner; neither is this child's.
+            // A pane's relay variables describe that pane's viewer, and a
+            // held handoff its own terminal; neither is this child's.
             .filter(|(name, _)| {
                 ![
-                    OWNER_ENV,
                     HELD_ENV,
                     PARENT_ENV,
                     CONTROL_ENV,
                     STREAM_ENV,
-                    TERMINAL_ENV,
                     "LF_TERMINAL_ID",
                     "LF_TERMINAL_TTY",
                     "LF_SERVER",
@@ -914,10 +909,7 @@ fn run(
                     if let Some(settling) = settling {
                         std::thread::spawn(move || settling.linger());
                     }
-                    let code = match &entry.child {
-                        Child::Held(source) if source.outcome_unknown() => None,
-                        _ => Some(code),
-                    };
+                    let code = (!entry.child.outcome_unknown()).then_some(code);
                     ended.push((terminal.clone(), code));
                 }
                 Ok(Err(error)) => {
@@ -936,8 +928,7 @@ fn run(
             live.lock()
                 .expect("registry lock poisoned")
                 .remove(&terminal);
-            let running = matches!(&entry.child, Child::Held(source) if !source.drained());
-            if running {
+            if !entry.child.drained() {
                 // The host is gone, not the child; a later server takes it up.
                 continue;
             }
@@ -1000,17 +991,11 @@ impl Entry {
         waker: &UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
-        let mut hosted = Hosted::new(
-            Host::Terminal(terminal.clone()),
-            true,
-            control_key,
-            waker.try_clone()?,
-            watchers,
-        )?;
+        let mut hosted = Hosted::new(terminal.clone(), control_key, waker.try_clone()?, watchers)?;
         hosted.keep_in(place.terminal(terminal.as_str()));
         Ok(Self {
             hosted,
-            child: Child::Held(Source::new(place.clone(), terminal.clone(), pid, at)),
+            child: Source::new(place.clone(), terminal.clone(), pid, at),
             place: place.clone(),
             nudge: None,
             reported: None,
@@ -1034,9 +1019,7 @@ impl Entry {
     /// Ask a program whose screen was rebuilt from the ring to repaint: one
     /// column narrower, then back.
     fn nudge(&mut self) {
-        let Child::Held(source) = &mut self.child else {
-            return;
-        };
+        let source = &mut self.child;
         // Output the ring dropped before it was read is missing from the
         // screen; the program is asked to draw it again.
         if source.take_gap().is_some() && self.nudge.is_none() {

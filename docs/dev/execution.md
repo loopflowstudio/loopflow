@@ -223,7 +223,7 @@ launcher starts or resumes the thread, names a new thread so it has a rollout to
 resume (Codex 0.166.0 has none until a first turn or a name), then execs into
 `codex --remote <endpoint> resume <thread>`. The app-server's
 lifeline writer crosses the exec, so the client holds the provider alive and no lf
-process has to. The execution owner settles the client's exit from a `NativeExit`
+process has to. The Machine server settles the client's exit from a `NativeExit`
 marked as a client, which leaves the AgentProcess's own exit to attachment close.
 
 Nothing of lf's subscribes beside the client. lf sends the launch's first turn
@@ -240,8 +240,8 @@ the Session's AgentSession.
 
 Attachment alone does not revoke the old client's writes, and with lf out of the
 path no dispatch can check them. A client lf waits on checks its attachment every
-two seconds and stops once a mover replaces it; an execution owner performs the
-same check for its exec'd client. Native launch carries the frozen attachment
+two seconds and stops once a mover replaces it; the server performs the same
+check for a held terminal's exec'd client. Native launch carries the frozen attachment
 in memory, separately from stable tool provenance. Admission validates that token;
 it never reconstructs authority from the current record. Both initial validation
 and the launch reject a replaced attachment, including A → B → A.
@@ -276,12 +276,14 @@ Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
 including captured input, native identity and historical outcomes.
 
-`lf resume` attaches to a live owner. A live turn or pending request keeps
-its provider: a failed attachment reports the failure, discards no work and replays
-no input. Only a safely replaceable owner has its exact owned clients stopped and
-the same provider thread resumed, preserving sibling conversations. Replacing
-an idle provider discards unsent editor input.
-`--fork` leaves the holder running and starts a new Session from its log.
+`lf resume` of a live held Session becomes a view of its terminal: a failed
+attachment reports the failure, discards no work and replays no input. A
+Session an earlier build left under its own owner process is restarted: the
+owner is ended by verified pid and birth and the same provider thread resumes
+held, discarding unsent editor input; an owner that cannot be verified or does
+not exit starts nothing ([What runs on a Machine](index.md#what-runs-on-a-machine)).
+`--fork` leaves the running conversation alone and starts a new Session from
+its log.
 There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
 authority, and recovery never authorizes killing a shared AgentProcess for one thread.

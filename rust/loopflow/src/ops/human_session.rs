@@ -22,7 +22,6 @@ use crate::lf::commands::write::SessionOpenIntent;
 use crate::provider_account::LaunchCapacity;
 use crate::session::{LfSession, WorkSource};
 use crate::session_record::SessionTitleSource;
-use crate::store::sqlite::sessions::OwnerRetention;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -356,7 +355,7 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
 }
 
 /// A held terminal takes any number of views, so opening one takes no other
-/// terminal's input; Take back belongs to an execution owner.
+/// terminal's input.
 fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
     vec![SessionAction {
         kind: SessionActionKind::Open,
@@ -1050,6 +1049,9 @@ pub(crate) async fn open(
         drop(progress);
         return self::fork(store, session, resume, json).await;
     }
+    if resume {
+        end_earlier_owner(&store.sqlite, &session.id)?;
+    }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
         None => None,
@@ -1130,10 +1132,10 @@ pub(crate) async fn open(
     }
     if resume {
         if session.interactive && moving.is_none() {
-            if let Some(owner) = store.sqlite.session_transport(&session.id)? {
-                if crate::transport::current() != Some(&owner)
-                    && attaches(&store.sqlite, session, &owner)?
-                {
+            // A held terminal is attached while its child runs, answering or
+            // not: a stopped server never means a second agent for the Session.
+            if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
+                if crate::transport::current() != Some(&terminal) {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
                     if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {
@@ -1151,7 +1153,7 @@ pub(crate) async fn open(
                         departure_here(),
                     )?;
                     crate::transport::attach(
-                        &owner,
+                        &terminal,
                         Some(&session.id),
                         Some(moved),
                         json.then_some(session.id.as_str()),
@@ -1232,11 +1234,19 @@ pub(crate) async fn open_without_replacing(
     if let Some(reason) = run_refusal(&store.sqlite, &session)? {
         bail!(reason);
     }
+    // Opening restarts what an earlier build's owner still runs; reading what
+    // opening would do does not, and counts that owner as no client.
+    let earlier_owner = if launch {
+        end_earlier_owner(&store.sqlite, id)?;
+        false
+    } else {
+        store.sqlite.session_owner(id)?.is_some()
+    };
     let mut record = surface(store, &session).await?;
-    let owner = store.sqlite.session_transport(id)?;
-    let attachable = owner
-        .as_ref()
-        .filter(|owner| crate::transport::current() != Some(*owner) && answering(owner));
+    let attachable = store
+        .sqlite
+        .session_terminal(id)?
+        .filter(|terminal| crate::transport::current() != Some(terminal) && answering(terminal));
     let native = session
         .artifact_key
         .as_deref()
@@ -1244,10 +1254,11 @@ pub(crate) async fn open_without_replacing(
         .transpose()?
         .flatten();
     let attachment = store.sqlite.session_attachment(id)?;
-    let occupied = attachment.as_ref().is_some_and(|attachment| {
-        crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
-            != crate::journal::ProcessIdentityEvidence::Dead
-    });
+    let occupied = !earlier_owner
+        && attachment.as_ref().is_some_and(|attachment| {
+            crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        });
     let first_thread = attachable.is_none() && native.is_none();
     let reason = if record.state == SessionState::Active || (occupied && attachable.is_none()) {
         Some(CONTROLLED_ELSEWHERE.to_string())
@@ -1282,9 +1293,9 @@ pub(crate) async fn open_without_replacing(
     if let Some(reason) = reason {
         bail!(reason);
     }
-    if let Some(owner) = attachable {
+    if let Some(terminal) = attachable {
         drop(lock);
-        crate::transport::attach_existing(owner, id, json)?;
+        crate::transport::attach_existing(&terminal, id, json)?;
         return Ok(record);
     }
     // A held terminal re-executes this same intent and acquires the lock
@@ -1669,9 +1680,12 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
     }
 }
 
-/// An execution owner runs until it records its exit or the OS shows it gone,
-/// as after a restart. Unknown evidence is not exit.
-pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
+/// How long an earlier build's owner has to exit once signalled.
+const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// An earlier build's `lf session serve` owner runs until it records its exit
+/// or the OS shows it gone, as after a restart. Unknown evidence is not exit.
+fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
     Ok(store
         .lf_process(owner)?
         .is_some_and(|process| process.completed_at.is_none())
@@ -1679,113 +1693,60 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
-/// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct an active turn or pending request. An idle owner that is
-/// superseded or does not answer gives way to native continuation. So does an
-/// unanswering superseded owner with no open Session: no work is known there, while
-/// an answering one may hold a turn or draft nothing records, so a viewer attaches.
-/// Compare builds against the launch entry so a development viewer in the main Home
-/// still selects the installed lf.
-pub(crate) fn attaches(
-    store: &SqliteStore,
-    session: &LfSession,
-    host: &crate::transport::Host,
-) -> Result<bool> {
-    let owner = match host {
-        crate::transport::Host::Owner(owner) => owner,
-        // A held terminal is attached while its child runs, answering or
-        // not: a stopped server never means a second agent for the Session.
-        crate::transport::Host::Terminal(terminal) => return Ok(store.terminal_running(terminal)?),
+/// End the `lf session serve` owner an earlier build left running `session`,
+/// so the conversation restarts held from provider history. The owner is
+/// signalled only by its verified pid and birth, and this returns once it has
+/// exited. One whose identity cannot be verified, or that outlives
+/// `STOP_TIMEOUT`, is left running and nothing starts beside it. Nothing ends
+/// these owners but a resume.
+pub(crate) fn end_earlier_owner(store: &SqliteStore, session: &str) -> Result<()> {
+    let Some(owner) = store.session_owner(session)? else {
+        return Ok(());
     };
-    if !owner_running(store, owner)? {
-        return Ok(false);
-    }
-    // A quit owner finishing its exit records holds nothing to attach to; its
-    // records land before the conversation continues here.
-    if crate::transport::leaving(owner) {
-        let deadline = std::time::Instant::now() + crate::transport::SETTLE_LINGER;
-        while owner_running(store, owner)? && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        return Ok(false);
-    }
-    let unknown = match store.owner_retention(owner)? {
-        Some(OwnerRetention::NoOpenSession) => true,
-        Some(_) => return Ok(true),
-        None => false,
-    };
-    let superseded = crate::journal::live_process_pid(store, owner)
-        .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
-        .filter(|(_, executable)| crate::installation::superseded(executable));
-    let Some((pid, executable)) = superseded else {
-        return Ok(answering(host));
-    };
-    if unknown && answering(host) {
-        return Ok(true);
-    }
-    end_owner(store, owner, pid).with_context(|| {
-        format!(
-            "end the owner on {} so the conversation can move here",
-            executable.display()
-        )
-    })?;
-    crate::journal::request::diagnostic(format_args!(
-        "Moved {} off {}; continuing on the installed lf.",
-        if session.title.is_empty() {
-            session.id.as_str()
-        } else {
-            session.title.as_str()
-        },
-        executable.display(),
-    ));
-    Ok(false)
-}
-
-/// End the execution owner running as `pid`: its signal handler stops the
-/// agent and records the exit. Returns once the owner is gone.
-pub(crate) fn end_owner(
-    store: &SqliteStore,
-    owner: &crate::id::LfProcessId,
-    pid: u32,
-) -> Result<()> {
-    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-    if !owner_running(store, owner)? {
+    if !owner_running(store, &owner)? {
         return Ok(());
     }
-    anyhow::ensure!(
-        crate::journal::live_process_pid(store, owner) == Some(pid),
-        "owner {owner} no longer has verified pid {pid}"
-    );
+    let still_running = |pid: Option<u32>| {
+        let pid = pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string());
+        anyhow!(
+            "This conversation is still running under an earlier lf (pid {pid}); quit it there, then resume"
+        )
+    };
+    let Some(pid) = crate::journal::live_process_pid(store, &owner) else {
+        let recorded = store.lf_process(&owner)?.and_then(|process| process.pid);
+        return Err(still_running(recorded));
+    };
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
-    while owner_running(store, owner)? {
-        anyhow::ensure!(
-            std::time::Instant::now() < deadline,
-            "pid {pid} did not stop within {}s",
-            STOP_TIMEOUT.as_secs()
-        );
+    while owner_running(store, &owner)? {
+        if std::time::Instant::now() >= deadline {
+            return Err(still_running(Some(pid)));
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
+    crate::journal::request::diagnostic(format_args!(
+        "Ended the earlier lf (pid {pid}) that ran this conversation; resuming it here."
+    ));
     Ok(())
 }
 
-/// Whether a running owner answers its socket. This observes reachability,
+/// Whether a held terminal answers the server. This observes reachability,
 /// not whether its provider can safely be replaced.
-fn answering(owner: &crate::transport::Host) -> bool {
-    match crate::transport::controlled(owner) {
+fn answering(terminal: &crate::id::TerminalId) -> bool {
+    match crate::transport::controlled(terminal) {
         Ok(_) => true,
         Err(error) => {
-            tracing::warn!(%error, %owner, "Session owner does not answer");
+            tracing::warn!(%error, %terminal, "Session terminal does not answer");
             false
         }
     }
 }
 
-/// One Session's summary, with its viewers confirmed by its execution owner.
-/// The owner records its own viewers, but an owner from an earlier lf cannot
-/// write a store a newer lf has advanced: after an upgrade and a Desktop
-/// restart its record still says viewed. Its controlling viewer is the truth,
-/// and an owner that does not answer has no viewer anyone can reach.
+/// One Session's summary, with its viewers confirmed by its held terminal.
+/// The server records the terminal's viewers, but a server from an earlier lf
+/// cannot write a store a newer lf has advanced: after an upgrade and a
+/// Desktop restart its record still says viewed. Its controlling viewer is the
+/// truth, and a terminal that does not answer has no viewer anyone can reach.
 pub(crate) fn viewed_summary(
     store: &SqliteStore,
     id: &str,
@@ -1797,8 +1758,8 @@ pub(crate) fn viewed_summary(
     let released = !summary.unviewed
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
         && store
-            .session_transport(id)?
-            .is_some_and(|owner| !matches!(crate::transport::controlled(&owner), Ok(true)));
+            .session_terminal(id)?
+            .is_some_and(|terminal| !matches!(crate::transport::controlled(&terminal), Ok(true)));
     if released {
         summary.unviewed = true;
         summary.terminal_id = None;

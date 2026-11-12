@@ -63,8 +63,8 @@ failed placement, failed shipping and a Graph held at landing.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
-without one is a terminal's status observation, which an unviewed owner does
-not read as a turn (`transport_tests::silent_native_turns_survive_until_settlement`).
+without one is a terminal's status observation, which an unviewed held terminal
+does not read as a turn (`transport_tests::silent_native_turns_survive_until_settlement`).
 `transport_tests::silent_native_turns_survive_until_settlement` runs native
 prompt/stop callbacks from the generated hook settings, preserves silent work
 past completed-Task retirement and executable removal, then proves ending after stop.
@@ -93,7 +93,7 @@ Local and SSH shell creation carry Desktop's bundled bootstrap bytes through the
 private Desktop runtime, then reattach without replay. The generic local case has no Ghostty
 resources or environment.
 `session_viewers_retain_until_the_last_leaves_and_disconnect_starts_absence`
-records a real owner's hold through leave, reconnect grace and connection loss.
+records a held terminal's hold through leave, reconnect grace and connection loss.
 `viewer_stream_` tests the shared viewer over pipes and heartbeat expiry under
 continuous output, with a healthy passive viewer and resumed stream. The SSH
 prepared-viewer case exercises the returned production launch command, healthy
@@ -104,31 +104,19 @@ its process inventory rejects an additional remote PTY.
 holds a SQLite writer while typing and returning to the viewer. Input and control
 keep flowing while the store is locked; returning does not replay input.
 
-`transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
-owners while resuming their Sessions. Pending requests, turns, Graph
-ancestry/steps and Runs retain the same provider, attachment and capture; no new
-provider launches. A completed Session is unknown, not work: its unanswering owner
-ends and resume continues on one new provider, while an answering one is attached.
+One `transport_tests` case records a Session with an owner transport from an
+earlier build and a live stand-in owner; `lf resume` ends the stand-in by
+verified pid and birth and the Session resumes held.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
 must retain live turns, pending requests, history and Session/Task/capture identity
-through build replacement and viewer return. Once work settles, explicit resume
-may replace an idle provider, discarding unsent input and changing its fence.
-An unanswering protected owner survives failed attachment and completes continued
-turns after transport returns.
+through server replacement and view return.
 `process::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
 natural helper exit permits continuation, persistent helpers refuse it without
 signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
 installed-provider recovery still need separate proof.
-Use published 0.15.1 for the released boundary: its owner speaks newline JSON
-and predates native-input tracking. Prove attachment retains an unsent draft;
-explicit replacement discards it while continuing recorded history. Pending
-requests still retain their provider across the older protocol.
-Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
-a shallow checkout orders all slugs as drafts and can reject the released store
-before reaching the interaction under test.
 
 Hook command spelling or Clap declaration changes also run
 `cargo test -p loopflow --test integration cli_discovery::`. Its alias contract
@@ -776,16 +764,16 @@ Launch proofs use provider-written evidence and terminal receipts.
 
 ### Leaving nothing running
 
-A detached owner calls `setsid`, so it outlives the test's process group. A
-fixture that starts owners calls `loopflow_test_support::end_recorded_processes`
-from its `Drop`, as `transport_tests`' `Fixture` does; it ends what the
-fixture's store still records as running and waits for exit, including owners
-whose completion receipt preceded their final screen write. The provider
-stand-in on the owner's terminal ends on hangup.
+A holder and detached Work call `setsid`, so they outlive the test's process
+group. A fixture that starts them calls
+`loopflow_test_support::end_recorded_processes` from its `Drop`, as
+`transport_tests`' `Fixture` does; it ends what the fixture's store still
+records as running and waits for exit. The provider stand-in on a held
+terminal ends on hangup.
 
-A detached owner drops every descriptor it inherited above stderr, so a test
-that hands `lf` a pipe can wait for end of input once the viewer exits
-(`detached_owner_keeps_no_descriptor_its_terminal_inherited`).
+Detached Work drops every descriptor it inherited except release locks and
+worktree leases, so a test that hands `lf` a pipe can wait for end of input
+once its caller exits.
 
 Check a suite by its binary path, never by name:
 
@@ -955,8 +943,8 @@ Retained terminal changes also run Linux Clippy, `transport_tests`,
 the disposable installation proof `declared_agent_can_start_another_tasks_graph`.
 Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
-Process ancestry assertions follow the recorded chain through transport owners
-rather than assuming a fixed number of launch processes.
+Process ancestry assertions follow the recorded chain through launchers and
+the holder rather than assuming a fixed number of launch processes.
 Terminal-status isolation assertions match the escaped OSC sequence, not its
 numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
 fixtures include that text in their Home paths to expose false positives.
@@ -968,7 +956,7 @@ fixtures must declare opposite launch modes, independent of Session defaults.
 
 The [server boundary](../../../docs/dev/server.md) assigns socket behavior
 to client access; OS registration/replacement belongs to installation. Their
-composed test must continue to prove both with existing execution owners live.
+composed test must continue to prove both with holders and Graph processes live.
 Draft-preservation fixtures observe terminal echo or provider acknowledgement
 before disconnecting a viewer. A socket write alone does not establish delivery;
 reconnection must never replay uncertain input to make such a test pass.
@@ -988,7 +976,7 @@ cargo test -p loopflow --test transport_tests installed_server_preserves_owner_a
 
 The development registration proof uses two isolated launchd labels: disabled
 legacy setup refuses; enabling it lets concurrent readiness requests retire the
-old job and obtain one server while preserving a live owner. The installed socket
+old job and obtain one server while preserving a live holder. The installed socket
 address/lock remain stable so old relays can reconnect while an obsolete server
 executable cannot open a competing listener.
 The bundled registrar harness separately proves SMAppService label migration.
@@ -999,26 +987,26 @@ changes and authoritative primary-Session selection.
 Separate lifecycle proofs keep the real relay connected through server restart,
 installed replacement and explicit takeover with an editable draft and live Graph.
 Recovery tests cover byte-position continuation, fresh terminal screens, newer
-viewers retaining input/geometry, expired output and owner exit without relaunch.
+viewers retaining input/geometry, expired output and child exit without relaunch.
 Failed-start recovery consumes readiness once, preserves its diagnostic across
 Retry, and observes independent installation repair without replacing newer claims.
 `ServerClientTests` covers the same registration boundary for Work read refresh
 and reopened watches, including failed subprocess and unready status responses.
-Move-here proofs retain the draft/provider/Graph, intercept a real owner's takeover
+Move-here proofs retain the draft/provider/Graph, intercept the server's takeover
 acknowledgement before a newer claim, reject stale actions and cancel a queued
 action on pane closure. Native mailbox tests cover presentation until acknowledgement;
 rendered copy/Find/scroll and the visible action remain interactive demo evidence.
-The opt-in macOS variant creates an isolated signed app bundle, starts the owner
-and Graph from its installed helper, replaces that executable inode with identically
+The opt-in macOS variant creates an isolated signed app bundle, starts a held
+conversation and Graph from its installed helper, replaces that executable inode with identically
 signed bytes, verifies the bundle seal and invokes the production SMAppService
 replacement registrar while
 the draft remains held. A fresh relay acknowledgement must precede submission;
-the exact owner/provider survives and the Graph advances. Cleanup unregisters the
+the holder and provider survive and the Graph advances. Cleanup unregisters the
 unique job and LaunchServices registration. The updater runs as the signed app
 through LaunchServices; no UI or App Management permission changes are needed.
 Run outside the network sandbox. The underlying registrar harness is
 `scripts/test_server_registration.py`; its default mode separately checks
 idempotent registration without Work. Native rendered continuity remains demo.
 Linux supervisor replacement remains a Linux installation check; this service
-starts no Session owners itself, and its unit uses `KillMode=process` so restarting
-it leaves the owners its detached launches started, as `AbandonProcessGroup` does on macOS.
+holds no PTY itself, and its unit uses `KillMode=process` so restarting it leaves
+holders and detached Work running, as `AbandonProcessGroup` does on macOS.

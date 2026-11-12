@@ -14,9 +14,6 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
-    if let SessionCommand::Serve { terminal, argv } = command {
-        return crate::transport::serve(argv, *terminal);
-    }
     if let SessionCommand::Card { id, .. } = command {
         return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
     }
@@ -54,9 +51,6 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Serve { .. } => {
-            unreachable!("serve owns its process before any runtime")
-        }
         SessionCommand::Steer { id, message, json } => {
             use crate::engine::session::SteerScope;
             let store = open_shared_store().await?;

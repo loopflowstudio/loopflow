@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use super::Host;
 use crate::harness::native_exit::{NativeExit, Settled};
+use crate::id::TerminalId;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
@@ -91,9 +91,8 @@ impl Client {
     }
 }
 
-/// One thread recording viewing for every execution a host serves: the
-/// Machine server's held terminals share one, a Session owner process has its
-/// own. It ends once its handle and every watched execution are gone.
+/// One thread recording viewing for every held terminal the Machine server
+/// hosts. It ends once its handle and every watched execution are gone.
 #[derive(Debug)]
 pub(super) struct Watcher {
     messages: mpsc::Sender<Message>,
@@ -141,10 +140,10 @@ impl Watcher {
         }
     }
 
-    /// Record `host`'s viewing sent through the returned handle. A host whose
-    /// `client` moved to another attachment learns of it through `client`
-    /// itself, after `waker` wakes its wait.
-    pub fn watch(&self, host: Host, waker: UnixStream, client: Arc<Client>) -> Viewing {
+    /// Record `terminal`'s viewing sent through the returned handle. A host
+    /// whose `client` moved to another attachment learns of it through
+    /// `client` itself, after `waker` wakes its wait.
+    pub fn watch(&self, terminal: TerminalId, waker: UnixStream, client: Arc<Client>) -> Viewing {
         let key = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         client
             .0
@@ -152,7 +151,7 @@ impl Watcher {
             .expect("client attachment lock poisoned")
             .wake = Some(self.messages.clone());
         let watch = Watch {
-            host,
+            terminal,
             waker,
             client,
             hold: None,
@@ -170,7 +169,7 @@ impl Watcher {
 
 #[derive(Debug)]
 struct Watch {
-    host: Host,
+    terminal: TerminalId,
     waker: UnixStream,
     client: Arc<Client>,
     hold: Option<ViewerHold>,
@@ -193,7 +192,7 @@ impl Watch {
             && report_result(
                 &mut self.hold_failure,
                 "Session viewer hold",
-                store.record_owner_viewer_hold(self.host.transport(), self.hold),
+                store.record_viewer_hold(&self.terminal, self.hold),
             )
             .is_some()
         {
@@ -274,7 +273,7 @@ fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::Host;
+    use crate::id::TerminalId;
     use crate::store::sqlite::ViewerHold;
     use std::time::{Duration, Instant};
 
@@ -282,11 +281,12 @@ mod tests {
     fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
         let guard = crate::journal::TestLedgerGuard::new();
         let store = crate::journal::process_ledger().unwrap();
-        let owner = store.test_lf_process();
+        let terminal = TerminalId::new();
+        store.create_terminal(&terminal, "build").unwrap();
         let db = guard.home().join("loopflow.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute_batch(
-            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON processes
+            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON held_terminals
             BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
         )
         .unwrap();
@@ -299,13 +299,13 @@ mod tests {
             crate::journal::with_test_ledger(db, || super::record(&received))
         });
         let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-        let viewing = watcher.watch(Host::Owner(owner.clone()), waker, std::sync::Arc::default());
+        let viewing = watcher.watch(terminal.clone(), waker, std::sync::Arc::default());
         viewing.send(Some(ViewerHold::Viewed(123)));
         std::thread::sleep(super::POLL * 2);
         let read = || {
             conn.query_row(
-                "SELECT viewer_hold_at FROM processes WHERE id=?1",
-                [&owner],
+                "SELECT viewer_hold_at FROM held_terminals WHERE id=?1",
+                [&terminal],
                 |r| r.get::<_, Option<i64>>(0),
             )
             .unwrap()

@@ -10,9 +10,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Reply, Request, Tag};
-use super::{attach_with_terminal, endpoint, terminal_pair, ViewerTerminal};
+use super::{attach_with_terminal, registry, terminal_pair, ViewerTerminal};
 use crate::ghostty_vt::{Terminal, REVISION};
-use crate::id::LfProcessId;
+use crate::id::TerminalId;
 
 const SESSION: &str = "session_5e55105e000040008000000000000001";
 const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";
@@ -40,14 +40,30 @@ fn snapshot_preview_fixture() {
     }
     let preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
     assert!(preview.is_some());
-    let owner = LfProcessId::new();
-    let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
+    // This thread stands in for the server's held-terminal entrance.
+    let terminal = TerminalId::new();
+    let listener = UnixListener::bind(registry::entrance().unwrap()).unwrap();
     let execution = home.join("execution");
     std::fs::create_dir(&execution).unwrap();
     let reports_directory = case == "directory";
     let viewer_cwd = home.join("viewer-cwd");
     let peer = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
+        let mut named = Vec::new();
+        while !named.ends_with(b"\n") {
+            let mut byte = [0];
+            assert_eq!(socket.read(&mut byte).unwrap(), 1);
+            named.push(byte[0]);
+        }
+        socket
+            .write_all(
+                format!(
+                    "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
+                    registry::REVISION
+                )
+                .as_bytes(),
+            )
+            .unwrap();
         let mut decoder = Decoder::default();
         loop {
             let mut bytes = [0; 4096];
@@ -91,7 +107,7 @@ fn snapshot_preview_fixture() {
                 nonce: "nonce".into(),
                 token: Some("claim".into()),
                 terminal: true,
-                grace_ms: 60000,
+                grace_ms: 0,
                 owner: Some("viewer".into()),
             },
         };
@@ -105,7 +121,7 @@ fn snapshot_preview_fixture() {
             .write_all(&wire::frame(Tag::Snapshot, &bytes))
             .unwrap();
         if case == "completed" {
-            // The owner finished before the viewer could acknowledge readiness.
+            // The agent finished before the viewer could acknowledge readiness.
             // Its final output and exit status are still waiting to be read.
             socket.shutdown(Shutdown::Read).unwrap();
             let mut output = wire::event(
@@ -163,7 +179,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&super::Host::Owner(owner), None, None, preview, true).unwrap();
+    attach_with_terminal(&terminal, None, None, preview, true).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -205,18 +221,7 @@ printf '%s\n' "$*" >> "$HOME/launches"
         command
     };
     let initial = command()
-        .args([
-            "session",
-            "serve",
-            "--terminal",
-            "--",
-            &binary,
-            "-i",
-            "--agent",
-            "claude",
-            ":",
-            "original input",
-        ])
+        .args(["-i", "--agent", "claude", ":", "original input"])
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -226,7 +231,7 @@ printf '%s\n' "$*" >> "$HOME/launches"
         .query_row("SELECT id FROM agent_sessions", [], |r| r.get(0))
         .unwrap();
     // Only a scope's conversation, which stays open across exits, resumes
-    // under an owner behind the preview; any other runs bare in the terminal.
+    // held behind the preview; any other runs bare in the terminal.
     sql.execute(
         "UPDATE agent_sessions SET primary_scope='repository', completed_at=NULL WHERE id=?1",
         [&session],
@@ -451,7 +456,7 @@ fn snapshot_preview_hands_off_to_mode_only_live_state() {
 }
 
 #[test]
-fn readiness_after_owner_exit_keeps_final_output_and_status() {
+fn readiness_after_agent_exit_keeps_final_output_and_status() {
     let (_, output) = preview_case("completed");
     assert!(String::from_utf8_lossy(&output).contains("provider finished"));
 }

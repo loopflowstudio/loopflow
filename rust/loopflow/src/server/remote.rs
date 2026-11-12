@@ -707,7 +707,6 @@ mod tests {
                 id: "terminal".into(),
                 operation: Operation::Server(ServerOperation::SessionAttach {
                     session: crate::id::LfSessionId::from("session_missing"),
-                    owner_lf_process_id: None,
                     terminal_id: None,
                 }),
             }))

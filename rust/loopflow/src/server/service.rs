@@ -29,7 +29,6 @@ use super::wire::{
 use crate::engine::{Error, ErrorCode};
 use crate::lf::commands::read::Read;
 use crate::transport::registry::Registry;
-use crate::transport::Host;
 
 /// How long a connection has to send its first message.
 pub(super) const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -724,7 +723,6 @@ pub(super) async fn session<C: Carrier>(
             Start::Request(
                 Operation::Server(ServerOperation::SessionAttach {
                     session,
-                    owner_lf_process_id: exact,
                     terminal_id,
                 }),
                 None,
@@ -736,67 +734,31 @@ pub(super) async fn session<C: Carrier>(
                 let pending = terminals.as_ref().and_then(|terminals| {
                     terminals.pending_terminal(&session, terminal_id.as_ref())
                 });
-                if exact.is_none() && (terminal_id.is_some() || held.is_some() || pending.is_some())
-                {
-                    let message = match (terminal_id, held, pending) {
-                        (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
-                            let ticket = tickets.issue(admission.clone(), Purpose::Terminal(Host::Terminal(held.clone())));
-                            ServerMessage::Response {
-                                id,
-                                trace_id: crate::id::TraceId::default(),
-                                result: serde_json::to_value(SessionAttached {
-                                    ticket,
-                                    owner_lf_process_id: None,
-                                    terminal_id: Some(held),
-                                    expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
-                                })
-                                .expect("a ticket serializes"),
-                            }
+                let message = match (terminal_id, held, pending) {
+                    (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
+                        let ticket = tickets.issue(admission.clone(), Purpose::Terminal(held.clone()));
+                        ServerMessage::Response {
+                            id,
+                            trace_id: crate::id::TraceId::default(),
+                            result: serde_json::to_value(SessionAttached {
+                                ticket,
+                                terminal_id: held,
+                                expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                            })
+                            .expect("a ticket serializes"),
                         }
-                        // Nothing ended; asking again later attaches.
-                        (_, _, Some(pending)) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
-                        (wanted, current, None) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
-                            "terminal has ended; nothing was started and no input replayed",
-                        ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
-                    };
-                    send(lines, &message).await?;
-                    continue;
-                }
-                let owner = match attached_owner(session, exact).await {
-                    Ok(owner) => owner,
-                    Err(refusal) => {
-                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
-                        continue;
                     }
+                    // Nothing ended; asking again later attaches.
+                    (_, _, Some(pending)) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
+                    (None, None, None) => ServerMessage::error(Some(id), Error::new(
+                        ErrorCode::NotFound,
+                        format!("Session {} has no running terminal; nothing was started", session.as_str()),
+                    ).with(serde_json::json!({ "session": session }))),
+                    (wanted, current, None) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                        "terminal has ended; nothing was started and no input replayed",
+                    ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
                 };
-                // An owner whose endpoint is gone has ended; the bridge
-                // itself connects when the ticket is presented.
-                if !crate::transport::endpoint(&owner)?.exists() {
-                    send(lines, &ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
-                        "Session owner is not running; no provider restarted and no input replayed",
-                    ).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
-                    continue;
-                }
-                let ticket = tickets.issue(
-                    admission.clone(),
-                    Purpose::Terminal(Host::Owner(owner.clone())),
-                );
-                let result = serde_json::to_value(SessionAttached {
-                    ticket,
-                    owner_lf_process_id: Some(owner),
-                    terminal_id: None,
-                    expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
-                })
-                .expect("a ticket serializes");
-                send(
-                    lines,
-                    &ServerMessage::Response {
-                        id,
-                        trace_id: crate::id::TraceId::default(),
-                        result,
-                    },
-                )
-                .await?;
+                send(lines, &message).await?;
                 continue;
             }
             Start::Request(Operation::Server(ServerOperation::RequestUpload { bytes }), None) => {
@@ -1031,7 +993,7 @@ pub(super) async fn ticketed<C: Carrier>(
         return Ok(None);
     };
     match purpose {
-        Purpose::Terminal(Host::Terminal(terminal)) => {
+        Purpose::Terminal(terminal) => {
             let mut destination =
                 UnixStream::connect(crate::transport::registry::entrance()?).await?;
             destination
@@ -1058,29 +1020,7 @@ pub(super) async fn ticketed<C: Carrier>(
             send(
                 carrier,
                 &ServerMessage::Bridged {
-                    owner_lf_process_id: None,
-                    terminal_id: Some(terminal),
-                },
-            )
-            .await?;
-            Ok(Some(destination))
-        }
-        Purpose::Terminal(Host::Owner(owner)) => {
-            let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
-                Ok(destination) => destination,
-                Err(failure) => {
-                    // A missing owner endpoint means the owner ended.
-                    send(carrier, &ServerMessage::error(None, Error::new(ErrorCode::NotFound, format!(
-                        "Session owner is not running; no provider restarted and no input replayed: {failure}"
-                    )).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
-                    return Ok(None);
-                }
-            };
-            send(
-                carrier,
-                &ServerMessage::Bridged {
-                    owner_lf_process_id: Some(owner),
-                    terminal_id: None,
+                    terminal_id: terminal,
                 },
             )
             .await?;
@@ -1168,54 +1108,6 @@ async fn deliver_or_spill<C: Carrier>(
         },
     )
     .await
-}
-
-/// The owner `session.attach` reaches: the Session's current owner Process,
-/// which must be `exact` when the client names one. Resolution never starts a
-/// provider.
-async fn attached_owner(
-    session: crate::id::LfSessionId,
-    exact: Option<crate::id::LfProcessId>,
-) -> Result<crate::id::LfProcessId, Error> {
-    let current = tokio::task::spawn_blocking({
-        let session = session.clone();
-        move || -> Result<_> {
-            let registry = crate::store::read_existing_registry()?.ok_or_else(|| {
-                Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
-                    .with(serde_json::json!({ "resource": "machine_registry" }))
-            })?;
-            Ok(registry
-                .sqlite
-                .session_transport(session.as_str())?
-                .and_then(|host| host.owner().cloned()))
-        }
-    })
-    .await
-    .map_err(unavailable)?
-    .map_err(unavailable)?;
-    let Some(current) = current else {
-        return Err(Error::new(
-            ErrorCode::NotFound,
-            format!(
-                "Session {} has no running owner; nothing was started",
-                session.as_str()
-            ),
-        )
-        .with(serde_json::json!({ "session": session })));
-    };
-    match exact {
-        Some(exact) if exact != current => Err(Error::new(
-            ErrorCode::NotFound,
-            format!(
-                "owner {exact} no longer holds Session {}; its owner is now {current}",
-                session.as_str()
-            ),
-        )
-        .with(
-            serde_json::json!({ "owner_lf_process_id": exact, "current_lf_process_id": current }),
-        )),
-        _ => Ok(current),
-    }
 }
 
 /// A `request` or `subscription` whose envelope parses but whose operation this
@@ -1571,7 +1463,6 @@ mod tests {
 
     use super::{connection, deliver_or_spill, Clients};
     use crate::engine::ErrorCode;
-    use crate::id::LfProcessId;
     use crate::lf::commands::read::Read;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
@@ -1580,7 +1471,6 @@ mod tests {
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
         MAX_MESSAGE, REVISION,
     };
-    use crate::transport::Host;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::sync::Semaphore;
@@ -1823,37 +1713,62 @@ mod tests {
         });
     }
 
+    /// Stand in for the held-terminal entrance: take one named connection
+    /// and answer it `answer`.
+    async fn entrance_answers(
+        listener: &tokio::net::UnixListener,
+        answer: &str,
+    ) -> tokio::net::UnixStream {
+        let (mut held, _) = listener.accept().await.unwrap();
+        let mut named = Vec::new();
+        while !named.ends_with(b"\n") {
+            named.push(held.read_u8().await.unwrap());
+        }
+        held.write_all(
+            format!(
+                "{{\"answer\":\"{answer}\",\"revision\":{}}}\n",
+                crate::transport::registry::REVISION
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        held
+    }
+
     #[test]
-    fn attach_ticket_bridges_a_second_connection_to_the_owner() {
+    fn attach_ticket_bridges_a_second_connection_to_the_held_terminal() {
         with_empty_home(async {
             let tickets = Arc::new(Tickets::default());
             let clients = Clients::default();
-            let owner = LfProcessId::new();
-            let listener =
-                tokio::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
-                    .unwrap();
+            let terminal = crate::id::TerminalId::new();
+            let listener = Arc::new(
+                tokio::net::UnixListener::bind(crate::transport::registry::entrance().unwrap())
+                    .unwrap(),
+            );
             let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
-            let ticket = tickets.issue(
-                Admission::Local,
-                Purpose::Terminal(Host::Owner(owner.clone())),
-            );
-            let terminal = Client::redeem(tickets.clone(), &ticket).await;
-            let (mut owned, _) = listener.accept().await.unwrap();
+            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(terminal.clone()));
+            let entrance = tokio::spawn({
+                let listener = listener.clone();
+                async move { entrance_answers(&listener, "hosted").await }
+            });
+            let held_terminal = Client::redeem(tickets.clone(), &ticket).await;
+            let mut held = entrance.await.unwrap();
             let Client {
                 mut reader,
                 mut writer,
                 server,
-            } = terminal;
+            } = held_terminal;
             writer.write_all(b"\x12\x00\x00\x00\x02hi").await.unwrap();
             let mut input = [0u8; 7];
-            owned.read_exact(&mut input).await.unwrap();
+            held.read_exact(&mut input).await.unwrap();
             assert_eq!(&input, b"\x12\x00\x00\x00\x02hi");
-            owned.write_all(b"screen").await.unwrap();
+            held.write_all(b"screen").await.unwrap();
             let mut screen = [0u8; 6];
             reader.read_exact(&mut screen).await.unwrap();
             assert_eq!(&screen, b"screen");
-            drop(owned);
+            drop(held);
             drop(writer);
             let mut rest = Vec::new();
             reader.read_to_end(&mut rest).await.unwrap();
@@ -1871,10 +1786,13 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, .. } if id == "a"
             ));
-            // An owner that ended between ticket and redemption fails by name.
-            drop(listener);
-            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(Host::Owner(owner)));
+            // A terminal that ended between ticket and redemption fails by name.
+            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(terminal));
             let mut late = Client::connect_with(&clients, tickets.clone());
+            let entrance = tokio::spawn({
+                let listener = listener.clone();
+                async move { entrance_answers(&listener, "ended").await }
+            });
             late.send(&ClientMessage::Attach { ticket }).await;
             let ServerMessage::Error {
                 id: None,
@@ -1883,9 +1801,10 @@ mod tests {
                 ..
             } = late.receive().await.unwrap()
             else {
-                panic!("expected the owner to be missing")
+                panic!("expected the terminal to have ended")
             };
-            assert!(data.unwrap()["owner_lf_process_id"].is_string());
+            assert!(data.unwrap()["terminal_id"].is_string());
+            drop(entrance.await.unwrap());
             late.ended().await;
             drop(client.writer);
             client.server.await.unwrap().unwrap();

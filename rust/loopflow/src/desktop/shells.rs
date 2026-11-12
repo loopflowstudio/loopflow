@@ -88,33 +88,34 @@ pub fn run(args: &ShellArgs) -> Result<()> {
     if *close {
         store.close_desktop_shell(id)?;
         // An earlier build's owner ends itself on the recorded Close.
-        if let Some(host @ crate::transport::Host::Terminal(terminal)) = &receipt.host {
+        if let Some(terminal) = &receipt.terminal {
             if store.terminal_running(terminal)? {
-                crate::transport::close_notice(host, "Shell closed")?;
+                crate::transport::close_notice(terminal, "Shell closed")?;
             }
         }
         return Ok(());
     }
 
-    let host = receipt.host.ok_or_else(|| {
-        anyhow!(
-            "Shell startup was not acknowledged; execution is unknown. No replacement was started"
-        )
-    })?;
-    let ended = match &host {
-        crate::transport::Host::Terminal(terminal) => !store.terminal_running(terminal)?,
-        crate::transport::Host::Owner(owner) => {
-            crate::journal::lf_evidence(&store, owner)
-                == crate::journal::ProcessIdentityEvidence::Dead
-        }
+    ensure!(
+        receipt.started,
+        "Shell startup was not acknowledged; execution is unknown. No replacement was started"
+    );
+    // A shell an earlier build's owner ran is not viewed again.
+    let running = match &receipt.terminal {
+        Some(terminal) => store.terminal_running(terminal)?,
+        None => false,
     };
-    if ended {
-        crate::transport::shell_history(&host)?;
-        anyhow::bail!(
-            "Shell ended. Create a new shell explicitly; its commands will not be replayed"
-        );
+    match receipt.terminal {
+        Some(terminal) if running => crate::transport::attach(&terminal, None, None, None),
+        terminal => {
+            if let Some(terminal) = &terminal {
+                crate::transport::shell_history(terminal)?;
+            }
+            anyhow::bail!(
+                "Shell ended. Create a new shell explicitly; its commands will not be replayed"
+            )
+        }
     }
-    crate::transport::attach(&host, None, None, None)
 }
 
 /// Desktop-supplied startup code and its relative UTF-8 resources. Carried as JSON

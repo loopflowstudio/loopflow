@@ -1,60 +1,10 @@
-//! What hosts a Session's execution. An owned execution is its owner's
-//! LfProcess; a held terminal is a row of its own, because the holder that
-//! keeps it is one process however many terminals it holds.
+//! Held terminals: a row of their own, because the holder that keeps them is
+//! one process however many terminals it holds.
 use rusqlite::{params, OptionalExtension};
 
 use super::SqliteStore;
-use crate::id::{LfProcessId, TerminalId};
+use crate::id::TerminalId;
 use crate::store::StoreResult;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Transport<'a> {
-    Owner(&'a LfProcessId),
-    Terminal(&'a TerminalId),
-}
-
-impl<'a> From<&'a LfProcessId> for Transport<'a> {
-    fn from(owner: &'a LfProcessId) -> Self {
-        Self::Owner(owner)
-    }
-}
-
-impl<'a> From<&'a TerminalId> for Transport<'a> {
-    fn from(terminal: &'a TerminalId) -> Self {
-        Self::Terminal(terminal)
-    }
-}
-
-impl std::fmt::Display for Transport<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Transport<'_> {
-    pub(crate) fn as_str(&self) -> &str {
-        match self {
-            Self::Owner(owner) => owner.as_str(),
-            Self::Terminal(terminal) => terminal.as_str(),
-        }
-    }
-
-    /// The `agent_sessions` column naming this kind of host.
-    pub(super) fn session_column(&self) -> &'static str {
-        match self {
-            Self::Owner(_) => "transport_lf_process_id",
-            Self::Terminal(_) => "held_terminal_id",
-        }
-    }
-
-    /// The table whose row carries this host's viewer hold.
-    pub(super) fn table(&self) -> &'static str {
-        match self {
-            Self::Owner(_) => "processes",
-            Self::Terminal(_) => "held_terminals",
-        }
-    }
-}
 
 impl SqliteStore {
     /// Record a terminal before its holder is asked to start it.

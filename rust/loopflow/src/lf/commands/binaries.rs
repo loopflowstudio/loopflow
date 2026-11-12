@@ -3,9 +3,9 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones a launch through the entry no longer runs
-//! (`installation::superseded`, the judgement `lf resume` shares). A superseded
-//! process keeps running on its own; quitting a conversation's agent and
-//! `lf resume` continues it on the installed lf.
+//! (`installation::superseded`). A superseded process keeps running on its
+//! own; `lf resume` of a conversation an earlier build's owner runs ends that
+//! owner and continues the conversation on the installed lf.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -344,7 +344,7 @@ pub fn report_after_promote(replaced_app: bool, store: &Path) {
                     );
                 }
                 println!(
-                    "each ends when its agent quits; a conversation on one comes back through `lf resume` once its client is stopped (Ctrl-C) and that lf has exited"
+                    "each ends when its agent quits; `lf resume` of a conversation an `lf session serve` among them runs restarts it on the installed lf"
                 );
             }
             "kept while they run"

@@ -1783,7 +1783,10 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
         </header>
 <p>Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
-and the step processes it starts.</p>
+and the step processes it starts. An agent runs in one of three places: in the
+command that launched it, in a terminal the Machine server's holder keeps, or
+under a detached Graph process. <a href="#what-runs-on-a-machine">What runs on a Machine</a>
+is the whole process model.</p>
 <p>This guide specifies the accepted model. The reference owns
 <a href="https://loopflow.studio/architecture/reference-cutover#cutover-status">cutover status</a>, the remaining work
 map and the checked current-source inventory.</p>
@@ -1910,6 +1913,11 @@ operations available to helpers without becoming standing Work identities.</p>
 <td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>
+<td>Terminals</td>
+<td>Where an agent runs, held terminals, views, headless work</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/transport/README.md">Transport</a></td>
+</tr>
+<tr>
 <td>Client access and installation</td>
 <td>Server admission, registration/update and continuity across replacement</td>
 <td><a href="https://loopflow.studio/architecture/server">Client API server</a></td>
@@ -1959,6 +1967,138 @@ is created only after the exact commit and artifact hashes are proven; retries
 after that point publish the same bytes under the same tag.</p>
 <p>Each area page starts with a real command or artifact, follows its request or
 data flow, and ends with the contracts that neighboring areas may rely on.</p>
+<h2 id="what-runs-on-a-machine">What runs on a Machine<a class="anchor-link" href="#what-runs-on-a-machine" title="Link to this section">#</a></h2>
+<pre tabindex="0"><code class="language-bash">lf implement                 # the agent is this command's child
+lf resume --task LOO-12      # a view of a terminal the holder keeps
+lf task run LOO-12           # starts a Graph process and returns
+ps -axo command | grep '^lf '
+# lf server run
+# lf holder run
+# lf --task task_… graph run
+</code></pre>
+<p>Three processes stay up: one Machine server, a holder for each build that
+still has agents, and a Graph process for each running Graph. Every other <code>lf</code>
+is a command that ends.</p>
+<pre tabindex="0"><code class="language-text">your terminal            lf &lt;skill&gt; ──────────────────────────► agent        here
+
+your terminal ─ view ─┐
+Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   held
+phone         ─ view ─┘         │
+                                └─ store, hooks, steers, Work reads and writes
+
+lf task run / lf ship / landing ─► Graph process ─► step lf ─► agent          detached
+        │                                │
+        └─ one startup line, then gone   └─ logs/graph-&lt;id&gt;.log
+</code></pre>
+<p>A launch runs in exactly one of three places, chosen once in
+<code>transport::delegate</code>:</p>
+<table tabindex="0">
+<thead>
+<tr>
+<th></th>
+<th>Here</th>
+<th>Held</th>
+<th>Detached</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What</td>
+<td><code>lf &lt;skill&gt;</code>, <code>lf graph …</code>, any bare <code>-b</code> or piped run, every headless Graph step</td>
+<td>Task, Wave and repository conversations; Desktop shells; a bare Session a Desktop pane or framed <code>lf --machine</code> view opens</td>
+<td>Graph launches, landing watchers, <code>lf ship</code>, a <code>-b</code> or piped Work command</td>
+</tr>
+<tr>
+<td>Parent of the agent</td>
+<td>The launching <code>lf</code>, in its caller's terminal or pipe</td>
+<td>The holder, on a PTY</td>
+<td>A step <code>lf</code> under the Graph process</td>
+</tr>
+<tr>
+<td>Ends with</td>
+<td>Its caller</td>
+<td>Its agent quitting, or its Task closing</td>
+<td>Its Graph</td>
+</tr>
+<tr>
+<td>Seen through</td>
+<td>The terminal it runs in</td>
+<td>Any number of views, all live</td>
+<td>Its log, <code>lf task status</code>, the Session's history</td>
+</tr>
+<tr>
+<td>Needs the server</td>
+<td>No</td>
+<td>Yes; it fails rather than fall back</td>
+<td>To start, no</td>
+</tr>
+</tbody>
+</table>
+<p>Work decides between Here and the other two, except that a Desktop pane or
+framed <code>lf --machine</code> view holds a bare Session too: a command that names a
+Task or Wave, or reopens a Session bound to one, is Work, and a plain <code>lf</code>
+typed in a Task's checkout is not. A terminal decides between Held and Detached: Work
+someone views is held, Work nobody views is detached. Nothing wraps a headless
+run in a terminal, and nothing hosts a conversation in a process of its own.</p>
+<p>Hooks follow Work, not the place. A bare agent gets two, which print the
+context block at start and after compaction from files in the checkout. An
+agent launched for a Task or Wave (a held conversation, or a Graph step, which
+<code>lf task run</code> starts with <code>--task</code>) also reports turn and tool boundaries to
+the server and takes steers from it, so its launch starts the server first.</p>
+<table tabindex="0">
+<thead>
+<tr>
+<th>Process</th>
+<th>One per</th>
+<th>Holds</th>
+<th>Restarts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Machine server (<code>lf server run</code>)</td>
+<td>Machine</td>
+<td>Client connections, hook boundaries, the registry of held terminals with one terminal emulator each, views, exit settlement</td>
+<td>On every install; the OS supervisor keeps it up</td>
+</tr>
+<tr>
+<td>Holder (<code>lf holder run</code>)</td>
+<td>Build with live terminals</td>
+<td>PTYs, their children, a ring of recent output per PTY. No store, no Sessions</td>
+<td>Never; it exits when its last terminal ends</td>
+</tr>
+<tr>
+<td>Graph process (<code>lf … graph run</code>)</td>
+<td>Running Graph</td>
+<td>The graph, its cursor and its step children</td>
+<td>Never; a stopped Graph is history and <code>lf task run</code> starts a fresh one</td>
+</tr>
+</tbody>
+</table>
+<p>What survives what follows from that table. Closing a view ends nothing.
+Restarting or upgrading the server ends nothing: it greets the holders it
+finds, rebuilds each screen from the holder's ring and carries on, and views
+reconnect at the PTY byte they had reached. An install replaces the server and
+leaves holders on the build that started them, so a conversation keeps its
+build until it is quit and resumed. Killing the <code>lf task run</code> that started a
+Graph leaves the Graph running. Logout and reboot end every process; Sessions
+and Graph history remain, and <code>lf resume</code> or <code>lf task run</code> starts new ones.</p>
+<p>The server is in no agent's byte path except as the relay between a held PTY
+and its views. A hook that cannot reach it logs a gap and the turn continues;
+a holder that loses it keeps its agents and says nothing about them. The
+store is opened by whichever process is writing: commands, Graph processes
+and the server. The holder never opens it.</p>
+<p>Conversations started by a build from before held terminals run under an
+<code>lf session serve</code> process of their own until their agent quits. Nothing
+starts one now, and nothing sweeps them. <code>lf resume</code> of one, or opening its
+Desktop pane, restarts it: lf ends that process by its verified pid and birth,
+waits for it to exit and resumes the thread held from provider history. One it
+cannot verify, or that does not exit, keeps running and the message names its
+pid.</p>
+<p>The <a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/transport/README.md">transport README</a> owns the
+holder and view protocols; the
+<a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/server/README.md">server README</a> owns client
+operations and hook boundaries.</p>
 <h2 id="the-whole-system">The whole system<a class="anchor-link" href="#the-whole-system" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">                                      shared truth
                               planning   GitHub     providers
@@ -1990,9 +2130,9 @@ user / agent --&gt; lf CLI --------+----------+-----------+
 
 another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
-<p>Each host can expose a <a href="https://loopflow.studio/architecture/server">client API server</a> to Desktop and
-future mobile clients; remote admission is separate work. It does not centralize
-execution across Machines. Machine routing selects
+<p>Each Machine's server also admits clients: Desktop over a private socket, and
+a paired phone over an authenticated connection (<a href="https://loopflow.studio/architecture/server">client API server</a>).
+It does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -2190,6 +2330,14 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>
+<td>where an agent runs, held terminals, views, headless launches</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/transport/README.md">Transport</a></td>
+</tr>
+<tr>
+<td>client operations, hook boundaries, subscriptions</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/server/README.md">Server</a></td>
+</tr>
+<tr>
 <td>schema, files, projections, DTOs, or consistency</td>
 <td><a href="https://loopflow.studio/architecture/data">Data and persistence</a></td>
 </tr>
@@ -2216,6 +2364,8 @@ It records source observations from November 2026, not a live product benchmark.
 <a href="#run-one-skill">Run one Skill</a>          </li>
           <li>
 <a href="#add-one-capability-at-a-time">Add one capability at a time</a>          </li>
+          <li>
+<a href="#what-runs-on-a-machine">What runs on a Machine</a>          </li>
           <li>
 <a href="#the-whole-system">The whole system</a>          </li>
           <li>

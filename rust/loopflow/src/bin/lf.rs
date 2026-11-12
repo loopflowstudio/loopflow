@@ -1474,7 +1474,7 @@ fn run() -> anyhow::Result<()> {
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow::transport::relay(&relay.owner, relay.session.as_ref(), relay.moved)?;
+        loopflow::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
@@ -1487,7 +1487,7 @@ fn run() -> anyhow::Result<()> {
         .is_some_and(|args| args == ["session", "attach"])
     {
         anyhow::bail!(
-            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            "lf session attach names `--terminal TERMINAL_ID`; got {:?}",
             &raw_args[3..]
         );
     }
@@ -1822,10 +1822,7 @@ fn run() -> anyhow::Result<()> {
                     }
             )
         )
-        || matches!(
-            &cli.command,
-            Some(Commands::Session { cmd }) if !matches!(cmd, loopflow::lf::SessionCommand::Serve { .. })
-        );
+        || matches!(&cli.command, Some(Commands::Session { .. }));
     if reads_work
         && !cli.context
         && !cli.explain

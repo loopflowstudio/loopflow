@@ -1,6 +1,6 @@
-//! The last screen a Session's owner had, kept after it ends.
+//! The last screen a Session's held terminal had, kept after it ends.
 //!
-//! An ending owner writes `<Machine home>/screens/<session>.ghostsnp`: one
+//! An ending terminal's host writes `<Machine home>/screens/<session>.ghostsnp`: one
 //! header line naming the Ghostty revision, then Ghostty's own snapshot stream
 //! (`GHOSTSNP`, format v1), which carries both screens, their scrollback, styles,
 //! hyperlinks, modes and unfinished input. The format promises no compatibility
@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use crate::ghostty_vt::{self, Terminal};
 
 use super::output::Output;
-use super::Host;
+use crate::id::TerminalId;
 
 const HEADER: &str = "lf-terminal-snapshot/1 ghostty=";
 
@@ -25,17 +25,17 @@ fn path(session: &str) -> PathBuf {
     ))
 }
 
-/// Write the owner's terminal for whoever reopens its Session before the
-/// provider is back. Pipe owners and ownerless commands leave nothing.
-pub(super) fn leave(owner: &Host, output: &Output) {
+/// Write the terminal for whoever reopens its Session before the provider is
+/// back. A terminal with no Session or shell leaves nothing.
+pub(super) fn leave(owner: &TerminalId, output: &Output) {
     let Some(terminal) = output.terminal() else {
         return;
     };
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
-        let session = if store.is_shell(owner)? {
+        let session = if store.is_shell_terminal(owner)? {
             owner.to_string()
-        } else if let Some(session) = store.transport_session(owner.transport())? {
+        } else if let Some(session) = store.terminal_session(owner)? {
             session
         } else {
             return Ok(None);

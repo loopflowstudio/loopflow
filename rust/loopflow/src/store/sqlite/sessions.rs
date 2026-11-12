@@ -10,27 +10,27 @@ use crate::durable::TaskId;
 use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
 
-use super::transport::Transport;
 use super::SqliteStore;
+use crate::id::{LfProcessId, TerminalId};
 
-/// Why a Session owner cannot retire without losing work.
+/// Why a held terminal cannot retire without losing work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OwnerRetention {
+pub(crate) enum TerminalRetention {
     RunningGraph,
-    /// No open Session names the owner. This is unknown, not work: the row may
-    /// be complete or absent, so it cannot show the owner is safe to end.
+    /// No open Session names the terminal. This is unknown, not work: the row
+    /// may be complete or absent, so it cannot show the terminal is safe to end.
     NoOpenSession,
     HeadlessRun,
     LiveTurn,
 }
 
-impl std::fmt::Display for OwnerRetention {
+impl std::fmt::Display for TerminalRetention {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            OwnerRetention::RunningGraph => "a running Graph",
-            OwnerRetention::NoOpenSession => "no open Session",
-            OwnerRetention::HeadlessRun => "a headless Run",
-            OwnerRetention::LiveTurn => "a live turn",
+            TerminalRetention::RunningGraph => "a running Graph",
+            TerminalRetention::NoOpenSession => "no open Session",
+            TerminalRetention::HeadlessRun => "a headless Run",
+            TerminalRetention::LiveTurn => "a live turn",
         })
     }
 }
@@ -58,7 +58,7 @@ const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
     AND ((act.attachment_token IS p.attachment_token
             AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
         OR (act.program_status IS NOT NULL
-            AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1)
+            AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.viewed=1)
             AND NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                 WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
@@ -268,8 +268,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
-        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),
-            (SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
+        COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         EXISTS(
             SELECT 1 FROM session_events history
@@ -615,101 +614,96 @@ pub(super) fn choose_task_primary_in(
 }
 
 impl SqliteStore {
-    pub(crate) fn bind_session_transport<'a>(
+    /// Record that `terminal` hosts the Session's agent. A host reopens a
+    /// retired conversation; its next exit retires it again.
+    pub(crate) fn bind_session_terminal(
         &self,
         session: &str,
         attachment: &crate::process::SessionAttachment,
-        host: impl Into<Transport<'a>>,
+        terminal: &TerminalId,
     ) -> StoreResult<()> {
-        let host = host.into();
         let canonical = crate::id::canonical_session(session);
         let session = canonical.as_str();
-        let (owner, terminal) = match host {
-            Transport::Owner(owner) => (Some(owner.as_str()), None),
-            Transport::Terminal(terminal) => (None, Some(terminal.as_str())),
-        };
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                // A host reopens a retired conversation; its next exit retires it again.
-                "UPDATE agent_sessions SET transport_lf_process_id=?2,held_terminal_id=?3,completed_at=NULL WHERE id=?1",
-                params![session, owner, terminal],
+                "UPDATE agent_sessions SET transport_lf_process_id=NULL,held_terminal_id=?2,completed_at=NULL WHERE id=?1",
+                params![session, terminal],
             )?;
             Ok(())
         })
     }
 
-    /// What hosts the Session's running agent: its owner process, or the
-    /// terminal a holder keeps for it.
-    pub(crate) fn session_transport(
-        &self,
-        session: &str,
-    ) -> StoreResult<Option<crate::transport::Host>> {
-        use crate::transport::Host;
+    /// The running held terminal that hosts the Session's running agent.
+    pub(crate) fn session_terminal(&self, session: &str) -> StoreResult<Option<TerminalId>> {
         let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let ids: Option<(Option<String>, Option<String>)> = conn
-            .query_row(
-                "SELECT s.transport_lf_process_id,
-                        (SELECT t.id FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.ended_at IS NULL)
-                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.completed_at IS NULL",
-                [session],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        Ok(match ids {
-            Some((_, Some(terminal))) => Some(Host::Terminal(
-                crate::id::TerminalId::parse(&terminal).map_err(invalid)?,
-            )),
-            Some((Some(owner), None)) => Some(Host::Owner(
-                crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
-            )),
-            _ => None,
-        })
-    }
-
-    /// The Session an execution host runs, for its viewers.
-    pub(crate) fn transport_session<'a>(
-        &self,
-        owner: impl Into<Transport<'a>>,
-    ) -> StoreResult<Option<String>> {
-        let owner = owner.into();
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &format!(
-                    "SELECT id FROM agent_sessions WHERE {}=?1",
-                    owner.session_column()
-                ),
-                [owner.as_str()],
+                "SELECT t.id FROM agent_sessions s
+                 JOIN processes p ON p.id=s.agent_process_id
+                 JOIN held_terminals t ON t.id=s.held_terminal_id
+                 WHERE s.id=?1 AND p.completed_at IS NULL AND t.ended_at IS NULL",
+                [canonical.as_str()],
                 |row| row.get(0),
             )
             .optional()?)
     }
 
-    /// What keeps execution owner `owner` running. None means its standalone
-    /// interactive Sessions hold no work; finished Graphs hold nothing.
-    pub(crate) fn owner_retention<'a>(
-        &self,
-        owner: impl Into<Transport<'a>>,
-    ) -> StoreResult<Option<OwnerRetention>> {
-        let owner = owner.into();
-        let column = owner.session_column();
-        // An owner is an ancestor of every lf process it runs. A terminal is
-        // not a process: the lf processes running in it name it instead.
-        let inside = match owner {
-            Transport::Owner(_) => "?1 IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)",
-            Transport::Terminal(_) => {
-                "EXISTS(SELECT 1 FROM processes a WHERE a.held_terminal_id=?1 AND (
-                     a.id IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                     OR (a.completed_at IS NULL
-                         AND a.id IN (SELECT lf_process_id FROM graph_processes))))"
-            }
-        };
+    /// The `lf session serve` owner an earlier build recorded as hosting the
+    /// Session, while that owner's row says it runs. Only `lf resume` reads
+    /// it, to end the owner before resuming the conversation held.
+    pub(crate) fn session_owner(&self, session: &str) -> StoreResult<Option<LfProcessId>> {
+        let canonical = crate::id::canonical_session(session);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A running Graph started inside an owner, as from a terminal, holds
-        // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
+        Ok(conn
+            .query_row(
+                "SELECT o.id FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
+                 WHERE s.id=?1 AND s.held_terminal_id IS NULL AND o.completed_at IS NULL",
+                [canonical.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The Session a held terminal runs, for its viewers.
+    pub(crate) fn terminal_session(&self, terminal: &TerminalId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE held_terminal_id=?1",
+                [terminal],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The Session lf process `process` ran an agent for.
+    pub(crate) fn process_session(&self, process: &LfProcessId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT agent_session_id FROM processes
+                     WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
+                 UNION ALL SELECT session_id FROM session_events INDEXED BY session_process_membership
+                     WHERE lf_process_id=?1
+                 LIMIT 1",
+                [process],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// What keeps held terminal `terminal` running. None means its standalone
+    /// interactive Sessions hold no work; finished Graphs hold nothing.
+    pub(crate) fn terminal_retention(
+        &self,
+        terminal: &TerminalId,
+    ) -> StoreResult<Option<TerminalRetention>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // A terminal is not a process: the lf processes running in it name it.
+        // A running Graph started inside one, as from a terminal, holds its
+        // steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.
         Ok(conn.query_row(
             &format!(
@@ -719,32 +713,35 @@ impl SqliteStore {
                          WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT {inside}
+                 SELECT EXISTS(SELECT 1 FROM processes a WHERE a.held_terminal_id=?1 AND (
+                         a.id IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
+                         OR (a.completed_at IS NULL
+                             AND a.id IN (SELECT lf_process_id FROM graph_processes))))
                      OR EXISTS(SELECT 1 FROM agent_sessions s
                          JOIN processes g ON g.id={SESSION_GRAPH}
-                         WHERE s.{column}=?1 AND g.completed_at IS NULL)
+                         WHERE s.held_terminal_id=?1 AND g.completed_at IS NULL)
                      AS running_graph,
                  NOT EXISTS(SELECT 1 FROM agent_sessions s
-                     WHERE s.{column}=?1 AND s.completed_at IS NULL)
+                     WHERE s.held_terminal_id=?1 AND s.completed_at IS NULL)
                      AS no_open_session,
                  EXISTS(SELECT 1 FROM agent_sessions s
-                     WHERE s.{column}=?1 AND s.interactive=0)
+                     WHERE s.held_terminal_id=?1 AND s.interactive=0)
                      AS headless_run,
                  EXISTS(SELECT 1 FROM agent_sessions s
-                     WHERE s.{column}=?1
+                     WHERE s.held_terminal_id=?1
                          AND s.completed_at IS NULL AND {TURN_LIVE})
                      AS live_turn"
             ),
-            [owner.as_str()],
+            [terminal],
             |row| {
                 Ok(if row.get("running_graph")? {
-                    Some(OwnerRetention::RunningGraph)
+                    Some(TerminalRetention::RunningGraph)
                 } else if row.get("no_open_session")? {
-                    Some(OwnerRetention::NoOpenSession)
+                    Some(TerminalRetention::NoOpenSession)
                 } else if row.get("headless_run")? {
-                    Some(OwnerRetention::HeadlessRun)
+                    Some(TerminalRetention::HeadlessRun)
                 } else if row.get("live_turn")? {
-                    Some(OwnerRetention::LiveTurn)
+                    Some(TerminalRetention::LiveTurn)
                 } else {
                     None
                 })

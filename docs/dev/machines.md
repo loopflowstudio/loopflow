@@ -318,8 +318,10 @@ shell / automation / Loopflow.app
           Graph process --> step Process --> LfSession <--> AgentProcess
 ```
 
-Wave operations are finite attributed conversations. Each Task Graph
-runs through the common Graph runner. Cron invokes commands on schedule;
+[What runs on a Machine](index.md#what-runs-on-a-machine) is the process
+model: a launch runs here, held by the Machine server's holder, or detached
+under a Graph process. Wave operations are finite attributed conversations.
+Each Task Graph runs through the common Graph runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process

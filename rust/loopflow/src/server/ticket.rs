@@ -11,7 +11,7 @@ use base64::Engine as _;
 use tokio::sync::mpsc;
 
 use super::wire::ClientMessage;
-use crate::transport::Host;
+use crate::id::TerminalId;
 
 /// How long an unused ticket stays redeemable.
 pub use super::wire::TICKET_LIFETIME as TICKET_TTL;
@@ -28,8 +28,8 @@ pub(super) enum Admission {
 /// What a ticketed connection carries once admitted.
 #[derive(Debug)]
 pub(super) enum Purpose {
-    /// The viewer protocol of an owner or a held terminal, copied byte for byte.
-    Terminal(Host),
+    /// The viewer protocol of a held terminal, copied byte for byte.
+    Terminal(TerminalId),
     /// One server message too large for the control connection.
     Download {
         message: String,

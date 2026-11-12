@@ -135,8 +135,8 @@ other services on the target explicitly. No Doppler master credential is sent.
 ## Keep client access separate from Machine logins
 
 The local Loopflow server accepts the same OS user through a private Unix socket.
-It exposes existing Work operations and bridges Session owners; those owners
-still grant input control. A connection or reconnect does not give a viewer the
+It exposes existing Work operations and bridges views of held terminals; the
+server still grants input control. A connection or reconnect does not give a viewer the
 right to replace another viewer's claim.
 
 Do not expose this socket through a network proxy: the proxy's local identity

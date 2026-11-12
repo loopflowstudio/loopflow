@@ -87,17 +87,10 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 
 ## Remaining
 
-- Sync onto main, after LOO-823 (#1877) and LOO-824 (#1887) sync (both open,
-  November 11). Main gained #1880 (LOO-822's transcript reader: launcher exit
-  reads record usage and completions without the server; raw provider
-  conversations listed), #1885, #1890, #1893, #1894. `git merge-tree HEAD
-  origin/main` at `d8db655b0e` conflicts in 15 files, among them
-  `agent/mod.rs`, `agent/session.rs`, `lf/commands/util.rs`, `transport.rs`,
-  `transport/lifetime.rs`, `harness/claude.rs`, `harness/context.rs`,
-  `session.rs`, `docs/dev/server-first.md`. After sync, check: a bare launch's
-  usage and completion rows come from #1880's exit read; Pi's
-  `*_<id>.jsonl` resolution is one resolver with #1880's Pi reader; whether
-  #1880's raw pairing covers bare Codex with no hooks (item below).
+- Synced onto main at `45a0eecc94` (#1887). Pi has one resolver
+  (`transcript::locate` calls `pi::conversation_file`). Not checked: that a
+  bare launch's usage and completion rows come from #1880's exit read, and
+  whether #1880's raw pairing covers bare Codex with no hooks (item below).
 
 - Bare Codex has no end-to-end fixture of the hook → thread → `lf resume`
   path; unit tests cover the argv and Pi resolution only. Codex 0.167.1's
@@ -209,3 +202,4 @@ compaction), which loses nothing.
 
 Jack Heart ran the branch build (`scripts/dev-lf`) in Rex after syncing onto
 main: "swee, the rex icon worked".
+- gate (Nov 12): `scripts/test.py` stopped twice at resource preflight ("cannot measure ~/.cache/uv: 15-second inventory deadline exceeded", 85 GiB free), so its plan ran by hand. The first nextest pass leaked `LF_*` (zsh `env $U`); with them cleared, three real failures, all from the sync: `a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume` (the merge dropped main's recorded-Work server check; `run_native_agent` now asks `is_work` of the recorded Session), `public_context_capability_…` (fixture still wrote hook spec `managed`, now `turns`), `prepared_start_and_take_back_…` (deleted again; #1887's edit revived it). After fixes: architecture, test inventory, fmt, build pass; nextest over `transport_tests`, `session_launch_contract`, `session_lifecycle_tests`, `session_cli_tests::`, `session_steers::`, `lf::commands::`, `harness::` — 717 passed; earlier run covered `binary(lf)`, `lf::tests::`, `agent::`, `ops::human_session::`, `session_record::capture_tests::`, `context_block::`, `os_process::`, `transcript::`, `documented_commands::`; clippy clean; website pass; Swift 808 tests pass, multiplatform boundaries pass.

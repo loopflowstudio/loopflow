@@ -650,9 +650,14 @@ fn run_native_session(
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = command.remote.is_none().then_some(&attachment);
     // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran.
-    if owned.is_some() && command.holder == crate::session::Holder::Server {
-        crate::harness::agent_process::require_server()?;
+    // starts it fresh instead of resuming one that never ran. A Session's
+    // first launch (`lf resume` starting a repository conversation) names no
+    // Work on its command line; its recorded Session does.
+    if let Some((store, session, _)) = owned {
+        let named_work = command.holder == crate::session::Holder::Server;
+        if store.is_work(named_work, store.session(session)?.as_ref())? {
+            crate::harness::agent_process::require_server()?;
+        }
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;

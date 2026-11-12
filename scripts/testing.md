@@ -151,7 +151,12 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 - The runner stops at sustained `syspolicyd` pressure, which can last as long
   as other checkouts keep compiling. Run its printed Rust plan by hand (build,
   the `nextest` line with the same `-E` filter, clippy), then each suite's
-  command, and record that the runner's pressure stop was bypassed.
+  command, and record that the runner's pressure stop was bypassed. The same
+  applies when its resource preflight fails with "cannot measure
+  ~/.cache/uv: 15-second inventory deadline exceeded" while disk is ample: a
+  cold `du` of a large uv cache outlasts the deadline. In zsh, clear `LF_*`
+  inline with `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /')`; a
+  variable holding those flags is passed as one word and clears nothing.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.

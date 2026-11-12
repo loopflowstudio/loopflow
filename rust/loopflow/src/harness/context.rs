@@ -91,7 +91,7 @@ pub(crate) fn add_opencode_context(
     instructions: &str,
     holder: Holder,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "managed":holder.reports_turns(),
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":holder.reports_turns(),
         "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
@@ -147,7 +147,7 @@ pub(crate) fn pi_args(
         .unwrap_or_else(crate::store::lf_home_dir);
     let source = format!(
         "const spec = {};\n{}\n{}",
-        json!({"native":native, "managed":holder.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
+        json!({"native":native, "turns":holder.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
             "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
@@ -412,7 +412,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
     /// JavaScript predicate over a request's operation.
     fn run_probe(
         directory: &std::path::Path,
-        managed: bool,
+        turns: bool,
         frozen: bool,
         answer_steers: &str,
         source: &str,
@@ -430,7 +430,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         node.arg(&probe)
             .env("LF_CONTEXT_DELIVERY", directory.join("delivery.json"))
             .env_remove(crate::steer::PROVIDER_CONTEXT_ENV);
-        if managed {
+        if turns {
             node.env(
                 crate::steer::PROVIDER_CONTEXT_ENV,
                 r#"{"session":"session","agent_process_id":"process","capability":"capability"}"#,
@@ -463,7 +463,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
     /// One conversation through the OpenCode plugin: a prompt, three model
     /// requests with a compaction before the third, then the turn's end.
     fn opencode_turn(holder: Holder) -> Probe {
-        let managed = holder.reports_turns();
+        let turns = holder.reports_turns();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
@@ -484,7 +484,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
-            managed,
+            turns,
             false,
             "(operation) => operation.moment === 'tool'",
             &format!(
@@ -516,7 +516,7 @@ await new Promise((resolve) => setTimeout(resolve, 200));
 await close();
 "#,
                 plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap(),
-                steered = managed,
+                steered = turns,
             ),
         )
     }
@@ -556,7 +556,7 @@ await close();
     /// One headless Pi turn with two tool calls through the extension, with
     /// Pi's package stood in.
     fn pi_turn(native: bool, holder: Holder, frozen: bool) -> Probe {
-        let managed = holder.reports_turns();
+        let turns = holder.reports_turns();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
@@ -587,7 +587,7 @@ export const createLocalBashOperations = () => ({
         .unwrap();
         run_probe(
             home.path(),
-            managed,
+            turns,
             frozen,
             "(operation) => operation.moment !== 'start' && operation.callback.type === 'tool_execution_start'
   || operation.callback.hook_event_name === 'PiSteer'",
@@ -627,7 +627,7 @@ await fire('session_shutdown', {{}});
 assert.deepEqual(steers, {steers});
 "#,
                 extension = serde_json::to_string(&args[1]).unwrap(),
-                steers = if managed && !frozen { r#"[["STEER ", "steer"]]"# } else { "[]" },
+                steers = if turns && !frozen { r#"[["STEER ", "steer"]]"# } else { "[]" },
                 ran = serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
             ),
         )

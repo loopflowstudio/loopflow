@@ -111,27 +111,16 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
   (asserts no owner), `sessions_keep_serving_when_their_lf_executable_goes`
   (resume reopens in the terminal, no new owner).
 
-## Next implement (concept review, November 11)
+## Concept review leftovers, built
 
-The model holds: a launch is bare or Work, and a Holder says who listens
-for its turns. Two leftovers name the old `managed` flag instead:
-
-- One question, asked in three places. "Is this launch Work?" is
-  `transport::works` (flag or `!is_bare(row)`), `resume_session_with_env`
-  (`managed || !store.is_bare(&session)?`) and `run.rs`
-  (`work.source.is_managed()`). Make it one function beside `is_bare`
-  that transport and resume both call. Rename the `managed: bool` threaded
-  through `human_session::{open, open_without_replacing, open_waiting,
-  open_waiting_locked, resume_native_session}`, `commands::session` and
-  `util::resume_session*` (34 mentions) to `named_work`: it is only "the
-  command said `--task`/`--wave`", and the row decides the rest.
-- The hook spec's `"managed": holder.reports_turns()`
-  (`harness/context.rs`, read by `context_opencode.js` and
-  `context_pi.mjs`) is true for `Holder::Owner`, which is bare. Name the
-  key `turns`.
-
-No behavior change; the focused `harness::context::`, `ops::human_session::`
-and resume tests cover it.
+- `SqliteStore::is_work(named_work, session)` beside `is_bare`; `transport::works`
+  and `resume_session_with_env` call it. `run.rs` keeps
+  `work.source.is_managed()`: a fresh launch has no row, so its command's
+  WorkSource is the whole answer and opening a store would only return it.
+- The threaded `managed: bool` is `named_work` through `human_session`,
+  `commands::session`, `util::resume_session*`, `run::resume` and `transport`.
+- The hook spec key is `turns` (`harness/context.rs`, `context_opencode.js`,
+  `context_pi.mjs`).
 
 ## Open
 
@@ -162,3 +151,4 @@ compaction), which loses nothing.
 - compress 3: `configure_hooks` returns its delivery path (no env lookup for the Codex `.thread` file; the hook's `launched` test dropped, the file's existence is the request); `delegate` returns early on `cfg!(test)`, no `#[cfg(test)]` arm or `dead_code` allows. clippy clean; `--lib` `harness::context::` 11, `lf::commands::context::` 3, `agent::session::` 9, `bare_pi_` 1, `ops::human_session::` 43, `context_block::` 12 — pass.
 - realign 3: no tests; grep confirms `bare_conversation`, `opens_bare`, `names_work`, `resumes_work`, `task_run_step` are gone and `runs_in_terminal` is private to transport; `simplification-opportunities.md` trimmed to what remains (Opportunity 1 → LOO-824, Server-only observers).
 - concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).
+- implement 4 (those three): `cargo build --bin lf` clean; `--lib` `harness::context::` + `ops::human_session::` + `session_record::capture_tests::resume` + `bare_pi_` — 58 passed; clippy, fmt clean.

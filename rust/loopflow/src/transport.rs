@@ -284,23 +284,14 @@ fn runs_in_terminal(batch: bool) -> bool {
         && std::env::var_os(STREAM_ENV).is_none()
 }
 
-/// Whether a launch is managed: the command names its Task or Wave
-/// (`managed`), or the Session it opens is not bare (`SqliteStore::is_bare`).
-/// An unreadable store keeps the launch managed.
-fn works(managed: bool, session: Option<&str>) -> bool {
-    if managed {
-        return true;
-    }
+/// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
+/// keeps the launch Work.
+fn works(named_work: bool, session: Option<&str>) -> bool {
     let Some(session) = session else {
-        return false;
+        return named_work;
     };
     crate::journal::process_ledger()
-        .and_then(|store| {
-            let Some(record) = store.session(session)? else {
-                return Ok(false);
-            };
-            Ok(!store.is_bare(&record)?)
-        })
+        .and_then(|store| store.is_work(named_work, store.session(session)?.as_ref()))
         .unwrap_or(true)
 }
 
@@ -309,28 +300,35 @@ fn works(managed: bool, session: Option<&str>) -> bool {
 /// false when this process runs the launch itself: inside its owner, or as a
 /// bare launch in its own terminal.
 ///
-/// `managed` says the command names its Task or Wave or starts a Task's
+/// `named_work` says the command names its Task or Wave or starts a Task's
 /// Graph; its conversation is held for the Machine server when a terminal
 /// views it.
-pub fn delegate_current(batch: bool, managed: bool) -> Result<bool> {
+pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
     let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, managed)
+    delegate(batch, None, None, argv, true, named_work)
 }
 
-/// Delegate the reopening of a recorded Session; `managed` as for
+/// Delegate the reopening of a recorded Session; `named_work` as for
 /// `delegate_current`.
 pub(crate) fn delegate_session(
     json_session: Option<&str>,
     preview_session: Option<&str>,
     replace: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<bool> {
     let mut argv: Vec<String> = std::env::args().collect();
     if json_session.is_some() {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(false, json_session, preview_session, argv, replace, managed)
+    delegate(
+        false,
+        json_session,
+        preview_session,
+        argv,
+        replace,
+        named_work,
+    )
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
@@ -346,7 +344,7 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
     )
 }
 
-/// The one place a launch's host is chosen. A managed launch a terminal views
+/// The one place a launch's host is chosen. A Work launch a terminal views
 /// runs in a terminal the Machine server's holder keeps, so it outlives every
 /// lf process that views it. A bare launch at a terminal runs here, as the
 /// terminal's foreground program. Piped, `-b` and Desktop shell launches keep
@@ -357,14 +355,14 @@ fn delegate(
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<bool> {
     // Library tests do not execute the CLI entry point.
     if cfg!(test) || current().is_some() {
         return Ok(false);
     }
-    let managed = works(managed, preview_session.or(json_session));
-    if !managed && runs_in_terminal(batch) {
+    let work = works(named_work, preview_session.or(json_session));
+    if !work && runs_in_terminal(batch) {
         return Ok(false);
     }
     crate::journal::admit_process(
@@ -390,7 +388,7 @@ fn delegate(
     };
     let session = preview_session.map(LfSessionId::from);
     let cwd = std::env::current_dir()?;
-    let owner = if terminal && !batch && managed {
+    let owner = if terminal && !batch && work {
         Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
     } else {
         Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)

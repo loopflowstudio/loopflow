@@ -105,9 +105,9 @@ pub(crate) fn preview_prompt(
 
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
-/// `managed` when the resume command named a Task or Wave.
-pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
-    if crate::transport::delegate_current(true, managed)? {
+/// `named_work` when the resume command named a Task or Wave.
+pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
+    if crate::transport::delegate_current(true, named_work)? {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -184,7 +184,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        holder: crate::session::Holder::of(managed, false),
+        holder: crate::session::Holder::of(named_work, false),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);

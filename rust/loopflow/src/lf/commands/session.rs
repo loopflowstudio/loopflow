@@ -667,7 +667,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let managed = connection.work_flag(cli).is_some();
+    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -682,7 +682,7 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            crate::lf::commands::run::resume(&id, message, cli, managed)
+            crate::lf::commands::run::resume(&id, message, cli, named_work)
         });
     }
     let session = reopen(
@@ -692,7 +692,7 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
-        managed,
+        named_work,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
@@ -728,7 +728,7 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
-    managed: bool,
+    named_work: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -741,7 +741,7 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
-            managed,
+            named_work,
         )
         .await;
     }
@@ -753,7 +753,7 @@ async fn reopen(
         fork,
         !connection.prepare,
         json,
-        managed,
+        named_work,
     )
     .await
 }
@@ -774,9 +774,11 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let managed = connection.work_flag(cli).is_some();
-                let mut record =
-                    reopen(&store, directory, target, connection, *fork, false, managed).await?;
+                let named_work = connection.work_flag(cli).is_some();
+                let mut record = reopen(
+                    &store, directory, target, connection, *fork, false, named_work,
+                )
+                .await?;
                 // The opening terminal resumes this Session by id, managed
                 // when the prepare named its Work.
                 if let Some(flag) = connection.work_flag(cli) {

@@ -979,7 +979,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -1112,14 +1112,14 @@ pub(crate) async fn open(
             json.then_some(session.id.as_str()),
             session.interactive.then_some(session.id.as_str()),
             true,
-            managed,
+            named_work,
         )? {
             return surface(store, session).await;
         }
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id, managed).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return surface(store, session).await;
     }
@@ -1130,7 +1130,7 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id, managed).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return Ok(surface);
     };
@@ -1152,7 +1152,7 @@ pub(crate) async fn open(
         crate::lf::commands::util::resume_session(
             session.input_key()?,
             &provider_session,
-            managed,
+            named_work,
         )?;
     }
     Ok(result)
@@ -1168,7 +1168,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1239,7 +1239,7 @@ pub(crate) async fn open_without_replacing(
     // again; a bare conversation opens here, in this terminal.
     let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(json.then_some(id), Some(id), false, managed)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
             return Ok(record);
         }
         let lock_id = id.to_owned();
@@ -1249,7 +1249,7 @@ pub(crate) async fn open_without_replacing(
     };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock, managed)
+        return open_waiting_locked(store, session, lock, named_work)
             .await
             .map(|()| record);
     };
@@ -1274,7 +1274,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
-        managed,
+        named_work,
     )?;
     Ok(record)
 }
@@ -1388,7 +1388,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, named_work: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1400,14 +1400,14 @@ async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock, managed).await
+    open_waiting_locked(store, session, launch_lock, named_work).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1423,7 +1423,7 @@ async fn open_waiting_locked(
         session.input_key()?,
         &token,
         &mut launch_lock,
-        managed,
+        named_work,
     )? {
         return Ok(());
     }
@@ -1966,7 +1966,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
-    managed: bool,
+    named_work: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -2002,7 +2002,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
-        managed,
+        named_work,
     )?;
     Ok(true)
 }

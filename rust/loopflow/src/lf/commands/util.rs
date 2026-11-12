@@ -74,25 +74,25 @@ pub(crate) fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
         None,
-        managed,
+        named_work,
     )
 }
 
-/// Continue a recorded conversation. `managed` is the resume command's: a
+/// Continue a recorded conversation. `named_work` is the resume command's: a
 /// Task or Wave resume starts only beside the Machine server.
 pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -100,8 +100,8 @@ pub(crate) fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     // Reopening a conversation recorded as Task, Wave or repository work is
-    // managed whatever command reopened it.
-    let work = managed || !store.is_bare(&session)?;
+    // Work whatever command reopened it.
+    let work = store.is_work(named_work, Some(&session))?;
     config.holder = crate::session::Holder::of(work, true);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),

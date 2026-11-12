@@ -1240,6 +1240,19 @@ impl SqliteStore {
             && self.primary_scope(&session.id)?.is_none())
     }
 
+    /// Whether a launch is Work: its command names a Task or Wave
+    /// (`named_work`), or the recorded Session it opens is not bare.
+    pub(crate) fn is_work(
+        &self,
+        named_work: bool,
+        session: Option<&crate::session::LfSession>,
+    ) -> StoreResult<bool> {
+        match session {
+            Some(session) if !named_work => Ok(!self.is_bare(session)?),
+            _ => Ok(named_work),
+        }
+    }
+
     /// Whether this interactive Session runs as the foreground program of the
     /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
     /// so nothing else may stop it, and another launch on its thread runs

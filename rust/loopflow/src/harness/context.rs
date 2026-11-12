@@ -252,6 +252,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, repo)| ContextDelivery {
+                identity: None,
                 repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),
@@ -299,6 +300,7 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: home.path().to_owned(),
             home: home.path().to_owned(),
@@ -329,6 +331,7 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: home.path().to_owned(),
             home: home.path().to_owned(),
@@ -499,6 +502,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
         std::env::set_var("LF_HOME", repo.path().join("machine"));
         std::env::set_var("LF_BIN", recording_lf(repo.path()));
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),
@@ -833,6 +837,7 @@ assert.deepEqual(steers, {steers});
         std::env::set_var("LF_HOME", repo.path().join("machine"));
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),

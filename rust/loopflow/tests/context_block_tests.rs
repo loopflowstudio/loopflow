@@ -1,12 +1,10 @@
 //! The real hook entry reads current owned sources without launching a provider.
-use crate::support;
-
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::context_block::ContextDelivery;
-use loopflow_test_support::TestRepo;
+use loopflow::context_block::{ContextDelivery, SessionIdentity};
+use loopflow_test_support::{env_lock, TestRepo};
 use serde_json::Value;
 
 fn hook(repo: &Path, home: &Path, moment: &str) -> String {
@@ -41,7 +39,7 @@ fn hook(repo: &Path, home: &Path, moment: &str) -> String {
 
 #[test]
 fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request() {
-    let _env = support::EnvGuard::new(&[]);
+    let _lock = env_lock().lock().unwrap();
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join("machine")).unwrap();
@@ -61,6 +59,10 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     fs::write(repo.path().join("scratch/plan.md"), "CURRENT_SCRATCH").unwrap();
     fs::write(repo.path().join("active.md"), "Saved active skill\n").unwrap();
     let delivery = ContextDelivery {
+        identity: Some(SessionIdentity {
+            session: "session_bare".into(),
+            task: Some(("LOO-828".into(), "Tell agents who they are".into())),
+        }),
         repository: None,
         repo: repo_path,
         wave: Some("parent/child".into()),
@@ -75,6 +77,9 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     )
     .unwrap();
     let start = hook(repo.path(), home.path(), "start");
+    let identity =
+        "This Session: session_bare\nThis Session's Task: LOO-828 \"Tell agents who they are\"\n";
+    assert!(start.starts_with(identity), "{start}");
     assert!(start.contains("Inherited checkout direction"));
     assert!(start.contains("Current checkout memory"));
     assert!(start.contains("CURRENT_SCRATCH"));
@@ -92,6 +97,9 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     .unwrap();
     fs::write(repo.path().join("scratch/plan.md"), "FRESH_SCRATCH").unwrap();
     let compact = hook(repo.path(), home.path(), "compact");
+    assert!(compact.starts_with(identity), "{compact}");
+    assert_eq!(hook(repo.path(), home.path(), "tool"), "");
+    assert!(!home.path().join("machine/loopflow.db").exists());
     for fresh in [
         "Fresh inherited direction",
         "Fresh child memory",

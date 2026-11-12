@@ -20,15 +20,14 @@ outside this Task.
 Implemented Nov 12:
 
 - `ticket.rs`: `SystemTime` expiry; any attempt spends a terminal ticket; bulk
-  tickets survive another device's attempt. `issue_at`/`redeem_at` take `now`.
+  tickets survive another device's attempt.
 - Store tests: one bridge per ticket, foreign node/user/local↔remote spend,
-  60 s with a sleep-sized clock jump, sweep, bulk foreign attempt, abandoned
-  download release.
+  expiry and sweep, bulk foreign attempt, abandoned download release.
 - Remote `/v1/ticket`: bridges one owner, refuses and spends replay, another
   node and a local ticket; unadmitted peers refused before upgrade on both paths.
 - Local service: replay and a phone's ticket refused and spent.
 - README contract and `docs/server.md` phone access no longer marked planned.
 
 Checks Nov 12: `cargo test -p loopflow --lib` (server::ticket::, server::remote::tests::,
-two service ticket tests) 13 passed; `documented_commands::` passed; clippy clean.
+service tests) passed after compress: ticket 5, remote 4, service 24; `documented_commands::` passed; clippy clean.
 Gate runs the affected suites.

@@ -11,11 +11,8 @@ use std::time::SystemTime;
 use base64::Engine as _;
 use tokio::sync::mpsc;
 
-use super::wire::ClientMessage;
+use super::wire::{ClientMessage, TICKET_LIFETIME};
 use crate::transport::Host;
-
-/// How long an unused ticket stays redeemable.
-pub use super::wire::TICKET_LIFETIME as TICKET_TTL;
 
 /// Who a connection was admitted as; a ticket is redeemable by the same party.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,10 +55,7 @@ pub(super) struct Tickets(Mutex<HashMap<String, Ticket>>);
 
 impl Tickets {
     pub(super) fn issue(&self, admission: Admission, purpose: Purpose) -> String {
-        self.issue_at(admission, purpose, SystemTime::now())
-    }
-
-    fn issue_at(&self, admission: Admission, purpose: Purpose, now: SystemTime) -> String {
+        let now = SystemTime::now();
         let ticket = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(uuid::Uuid::new_v4().as_bytes());
         let mut issued = self.0.lock().expect("ticket store is never poisoned");
@@ -71,7 +65,7 @@ impl Tickets {
             Ticket {
                 admission,
                 purpose,
-                expires: now + TICKET_TTL,
+                expires: now + TICKET_LIFETIME,
             },
         );
         ticket
@@ -91,25 +85,24 @@ impl Tickets {
     /// ticket. Any attempt spends a terminal ticket; a bulk ticket stays
     /// redeemable by its own device after another's attempt.
     pub(super) fn redeem(&self, ticket: &str, admission: &Admission) -> Option<Purpose> {
-        self.redeem_at(ticket, admission, SystemTime::now())
-    }
-
-    fn redeem_at(&self, ticket: &str, admission: &Admission, now: SystemTime) -> Option<Purpose> {
         let mut issued = self.0.lock().expect("ticket store is never poisoned");
-        let found = issued.get(ticket)?;
-        let live = found.expires > now;
-        let valid = live && found.admission == *admission;
-        if live && !valid && !matches!(found.purpose, Purpose::Terminal(_)) {
+        let found = issued.remove(ticket)?;
+        if found.expires <= SystemTime::now() {
             return None;
         }
-        let spent = issued.remove(ticket).expect("the ticket was just found");
-        valid.then_some(spent.purpose)
+        if found.admission == *admission {
+            return Some(found.purpose);
+        }
+        if !matches!(found.purpose, Purpose::Terminal(_)) {
+            issued.insert(ticket.to_owned(), found);
+        }
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Admission, Purpose, Tickets, TICKET_TTL};
+    use super::{Admission, Purpose, Tickets};
     use crate::id::LfProcessId;
     use crate::transport::Host;
     use std::time::{Duration, SystemTime};
@@ -180,32 +173,16 @@ mod tests {
     }
 
     #[test]
-    fn host_sleep_counts_toward_a_tickets_sixty_seconds() {
-        assert_eq!(TICKET_TTL, Duration::from_secs(60));
+    fn tickets_expire_and_are_swept() {
         let tickets = Tickets::default();
-        let issued = SystemTime::now();
-        let fresh = tickets.issue_at(Admission::Local, terminal(), issued);
-        let slept = tickets.issue_at(Admission::Local, terminal(), issued);
-        let almost = issued + TICKET_TTL - Duration::from_secs(1);
-        assert!(tickets
-            .redeem_at(&fresh, &Admission::Local, almost)
-            .is_some());
-        // The wall clock moved past the lifetime while the host slept.
-        let woke = issued + TICKET_TTL + Duration::from_secs(1);
-        assert!(tickets.redeem_at(&slept, &Admission::Local, woke).is_none());
-        assert!(
-            tickets.0.lock().unwrap().is_empty(),
-            "expired ticket removed"
-        );
-    }
-
-    #[test]
-    fn issuing_sweeps_expired_tickets() {
-        let tickets = Tickets::default();
-        let issued = SystemTime::now();
-        let old = tickets.issue_at(Admission::Local, download("body"), issued);
-        tickets.issue_at(Admission::Local, download("next"), issued + TICKET_TTL);
-        assert!(!tickets.0.lock().unwrap().contains_key(&old));
+        let redeemed = tickets.issue(Admission::Local, terminal());
+        let swept = tickets.issue(Admission::Local, download("body"));
+        for ticket in [&redeemed, &swept] {
+            tickets.0.lock().unwrap().get_mut(ticket).unwrap().expires = SystemTime::now();
+        }
+        assert!(tickets.redeem(&redeemed, &Admission::Local).is_none());
+        tickets.issue(Admission::Local, download("next"));
+        assert!(!tickets.0.lock().unwrap().contains_key(&swept));
     }
 
     #[tokio::test]

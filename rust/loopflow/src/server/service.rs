@@ -998,7 +998,7 @@ fn continuing(
 }
 
 /// `{ticket}`: single use, bound to this connection's admission, expiring in
-/// [`TICKET_TTL`](super::ticket::TICKET_TTL).
+/// [`TICKET_LIFETIME`].
 fn ticket_response(id: String, ticket: String) -> ServerMessage {
     ServerMessage::Response {
         id,

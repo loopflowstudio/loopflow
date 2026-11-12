@@ -353,3 +353,21 @@ Next implement pass, after demo: resident-limit suspension (questions.md).
 Its two open points have no stated preference: the default count ("6a",
 default unnamed) and reading an unsent draft first ("no opinion on 5").
 Implement takes the reversible call and notes it in questions.md.
+
+## Gate — November 11, 2026
+
+The runner stopped twice at its resource preflight (`du -sk ~/.cache/uv` over
+its 15 s inventory deadline), so its printed plan ran by hand from an `LF_*`-free
+shell. Fixed: `docs/dev/reference.md` gained the held-terminal row; `lf holder`
+is no longer hidden, like `lf server run` and `lf session serve`; a duplicated
+Swift test from #1879 (`hookBoundarySharesTheRustServerContract`) broke the
+Swift build; four tests still expected owner Processes or a fixed code 1. The
+exec-failure fixture never reached a failed exec on the stack parent either
+(no `--version` call arms it), so it is now
+`failed_native_provider_settles_once_with_its_own_code`.
+
+- architecture, inventory, `cargo fmt --check`, clippy `--all-targets`: pass
+- nextest, gate filter (holder, transport, server, human_session, retirement, sessions, migrations, native_exit, agent_process, desktop::shells, `lf::tests`, rollover, documented_commands, session_cli, context_launch, runtime, `binary(transport_tests|two_people|lf)`): 641 run, 9 failed; after fixes the 6 branch failures pass (86-test rerun)
+- `transport::viewer_tests::snapshot_preview_*` (3): fail identically on the stack parent `ed74fefaa` (`/dev/tty: Device not configured` without a controlling terminal); left to CI
+- website `dev.py test`: pass; Swift `test_desktop.sh`: 807 tests pass; multiplatform boundaries: pass
+- Not synced: LOO-823's tip (`dd1cc5d98`) and main (`649f11db4`) are ahead of this branch; the sync before publishing takes them

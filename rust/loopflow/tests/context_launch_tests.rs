@@ -1044,9 +1044,12 @@ fn open_task_conversations(db: &Path, task: &str) -> i64 {
     rusqlite::Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
+            "SELECT count(*) FROM agent_sessions s
+             LEFT JOIN processes o ON o.id=s.transport_lf_process_id
+             LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
              WHERE s.task_id=?1 AND s.interactive=1 AND s.completed_at IS NULL
-                 AND o.completed_at IS NULL",
+                 AND ((o.id IS NOT NULL AND o.completed_at IS NULL)
+                     OR (t.id IS NOT NULL AND t.ended_at IS NULL))",
             [task],
             |row| row.get(0),
         )
@@ -1187,38 +1190,20 @@ fn assert_background_conversation(run_graph: bool) {
     let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
     assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
 
-    let conn = rusqlite::Connection::open(&db).unwrap();
-    let owner: String = conn
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE task_id=?1 AND interactive=1",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
     succeed(
         claude_launch(home.path(), &script)
             .current_dir(repo.path())
             .args(["task", "abandon", id]),
     );
+    // A Task conversation is held; abandoning ends its unviewed terminal.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        let ended: bool = conn
-            .query_row(
-                "SELECT completed_at IS NOT NULL FROM processes WHERE id=?1",
-                [&owner],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if ended {
-            break;
-        }
+    while open_task_conversations(&db, id) > 0 {
         assert!(
             std::time::Instant::now() < deadline,
             "abandon left the conversation running"
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    assert_eq!(open_task_conversations(&db, id), 0);
 }
 
 #[test]

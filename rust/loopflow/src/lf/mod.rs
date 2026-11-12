@@ -583,7 +583,6 @@ pub enum Commands {
         cmd: ServerCommand,
     },
     /// Keep this build's Task and Wave terminals; started only by the server
-    #[command(hide = true)]
     Holder {
         #[command(subcommand)]
         cmd: HolderCommand,

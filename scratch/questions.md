@@ -77,3 +77,7 @@ Jack Heart: "i dont need to demo", then "2c, then maybe 2b" (walk through `scrat
 ## Ship (November 11)
 
 After the holder moved to `server/holder/` (`386bb540d5`), Jack Heart: "sounds godo ship it".
+
+## Gate (November 11)
+
+- `lf holder` is visible in `lf help` (one line, "started only by the server"), matching `lf server run`; hiding it would add a second exception to the hidden-command rule.

@@ -7,9 +7,9 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 11:56 UTC, GitHub's PR metadata reported #1812 open and
+At November 12 11:59 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `14044268c29d003add3899ced792183bfb2ae798`, which does not
-contain `origin/main` `d978de77c5`; this checkout has merged `45a0eecc94` (#1887).
+contain `origin/main` `d978de77c5`; this checkout has merged `d978de77c5` (#1896).
 Since `28e2321c`, `ticket.rs` changed only `Purpose::Terminal(LfProcessId)` to
 `Purpose::Terminal(transport::Host)` (owner or held terminal). `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
@@ -23,7 +23,7 @@ Inspection of #1812 found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 11:25 UTC `lf task status LOO-718 --json` read reported
+The November 12 11:59 UTC `lf task status LOO-718 --json` read reported
 `active`: "PR is published but settlement is not armed with `lf pr land -c`".
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.

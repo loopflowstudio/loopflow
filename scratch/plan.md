@@ -9,8 +9,8 @@ Built:
   by `(revision, observed_at)`, so at one revision the later read wins.
   Pending `task_changes` are untouched, so local edits stay queued.
 - Messages name real remedies: Task errors `lf task sync <issue>`
-  (`ops/linear.rs`); the remaining Project error (missing from its
-  Initiative) says "add it back, then run `lf wave sync`".
+  (`ops/linear.rs`); the two remaining Project errors (missing from or
+  moved off its Initiative) end "then run `lf wave sync`".
 - `docs/work.md` (Linear sync section): the equal-`updatedAt` behavior and
   which command each error names.
 - Deleted unused `StoreError::ProviderObservationConflict`.
@@ -45,5 +45,5 @@ Built:
   "foreign" covers a move that persists).
 
 Checks:
-- `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests:: project_field_delivery_requires_revision_accepted_into_work` — pass (implement, compress).
+- `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests:: project_field_delivery_requires_revision_accepted_into_work` — pass (implement; compress made no code edits).
 - `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::` — pass (implement). Gate runs affected suites.

@@ -62,7 +62,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-Remote contract example updated to the held-terminal `session.attach` shape
-(`terminal_id` in request, ticket and `bridged`), matching `wire.rs` here and on #1812.
-
-`git diff --check` — passed after Nov 12 11:56 docs edit (prose only; no build or test rerun).
+`git diff --check` — passed Nov 12 after compress (prose only; no build or test run).

@@ -440,8 +440,10 @@ terminal registry. A terminal that has ended answers `not_found` with
 A terminal whose holder has not answered this server since it started
 answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
 agent keeps running, and the same request attaches once the holder answers.
-A ticket presented after its terminal ended, or while its holder is not
-answering, gets the same two errors with a null `id` in place of `bridged`.
+A ticket presented while its holder is not answering gets the same
+`unavailable` with a null `id` in place of `bridged`. One presented after its
+terminal ended gets `not_found {terminal_id, exit_code, provider}`, with
+`exit_code` and `provider` null when no exit was recorded.
 
 `session.attach {session, owner_lf_process_id}` serves owners only and answers
 `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`; its bridge

@@ -40,8 +40,7 @@
    for it. A column would need this Task's migration.
 8. The old `default_agent: claude,codex` warns on every read of the file, like
    other file warnings, and `lf set default_agent claude,codex` still saves it.
-   Task a4b75c (pending Linear sync) removes the comma reading once `agents`
-   ships.
+   LOO-875 removes the comma reading once `agents` ships.
 
 ## Checks
 

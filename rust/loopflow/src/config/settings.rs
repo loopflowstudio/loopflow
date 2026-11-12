@@ -182,7 +182,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
         // The retired `default_agent: claude,codex` spelling still reads
-        // until Task a4b75c removes it.
+        // until LOO-875 removes it.
         if path[0] == "default_agent" {
             for entry in super::agent_list(agent) {
                 validate_agent_policy(entry)?;
@@ -595,7 +595,7 @@ fn _filter_file_settings(
 
 /// Read the retired `default_agent: claude,codex` as `agents: [claude, codex]`
 /// with `default_agent: claude`, and say where to write the replacement.
-/// Task a4b75c deletes this once `agents` has shipped.
+/// LOO-875 deletes this once `agents` has shipped.
 fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     let Some(list) = values
         .get("default_agent")

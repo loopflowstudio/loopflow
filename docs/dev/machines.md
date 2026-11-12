@@ -254,7 +254,8 @@ that command opens it again from mini.
 **A running step starts over from the checkpoint.** The Task's primary Session
 travels with its transcript. A headless step that was mid-run, such as
 `implement`, is stopped, and mini runs that step again from the commit the move
-pushed: the step's edits arrive, its conversation does not. Programs the agent
+pushed: the step's edits arrive, its conversation does not. Steps the run had
+already finished are not repeated. Programs the agent
 had started, such as a training job or a dev server, end on the laptop and are
 not restarted.
 
@@ -289,9 +290,10 @@ branch out again.
 can't take the Task, or the worktree is mid-merge or mid-rebase; nothing changes.
 If the Task was sent but did not arrive, the error prints one retry command that
 delivers what was sent. A retried delivery does not restart the Graph; run
-`lf --machine mini task run MTG-321` after it arrives. If the Graph does not
-start on mini, the move still stands and the last line prints
-`lf task run MTG-321`, which starts it on the Task's owner.
+`lf --machine mini task run MTG-321 --from implement` after it arrives. If the
+Graph does not start on mini, the move still stands and the last line prints
+`lf task run MTG-321 --from 'implement'`, which starts it at that step on the
+Task's owner.
 
 Auto-Ship approval does not travel: the continued run is a plain `lf task run`,
 which approves Auto-Ship only when no interactive step is left ahead.

@@ -53,9 +53,17 @@ pub(crate) struct MovedTask {
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
-    /// Its Graph was running when the move stopped it, so it continues where
+    /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
-    pub running: bool,
+    pub stopped: Option<StoppedGraph>,
+}
+
+/// A Graph the move stopped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoppedGraph {
+    /// The step it was running, which runs again from the checkpoint; absent
+    /// when no step was running, so the run starts again where it began.
+    pub step: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,7 +159,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
     }
-    let running = stop_graphs(store, &task).await?;
+    let stopped = stop_graphs(store, &task).await?;
     let checkout = worktree
         .as_deref()
         .map(|root| checkpoint(&store.sqlite, root, name, to))
@@ -194,7 +202,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             identifier: task.identifier.clone(),
             ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
             graph: store.sqlite.task_graph_record(&task.id)?,
-            running,
+            stopped,
         }),
     })
 }
@@ -272,26 +280,35 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
 /// running and the recorded step Processes it started. Each is signalled
-/// only once its pid is proven to be that recorded Process. Returns whether a
-/// Graph was running.
-async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<bool> {
+/// only once its pid is proven to be that recorded Process. Returns the
+/// stopped Graph, if one was running.
+async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedGraph>> {
     let live = |process: &crate::process::LfProcess| {
         process.completed_at.is_none()
             && crate::journal::lf_evidence(&store.sqlite, &process.id)
                 == ProcessIdentityEvidence::Live
     };
-    let processes: Vec<crate::process::LfProcess> = store
+    let graphs: Vec<_> = store
         .sqlite
         .task_graphs(&task.id)?
         .into_iter()
         .filter(|graph| live(&graph.process))
+        .collect();
+    let step = graphs.iter().find_map(|graph| {
+        graph
+            .latest()
+            .filter(|step| live(&step.process))
+            .map(|step| graph.label(step))
+    });
+    let processes: Vec<crate::process::LfProcess> = graphs
+        .into_iter()
         .flat_map(|graph| {
             std::iter::once(graph.process).chain(graph.steps.into_iter().map(|step| step.process))
         })
         .filter(|process| live(process))
         .collect();
     if processes.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     store
         .append_interrupt(&WorkRef::Task(task.id.clone()))
@@ -319,7 +336,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<bool> {
             .map(|process| process.id.to_string())
             .collect();
         if running.is_empty() {
-            return Ok(true);
+            return Ok(Some(StoppedGraph { step }));
         }
         if std::time::Instant::now() >= deadline {
             bail!(
@@ -775,7 +792,9 @@ mod tests {
             serde_json::from_str::<Move>(&serde_json::to_string(&moved).unwrap()).unwrap(),
             moved
         );
-        assert_eq!(moved.task.unwrap().graph.unwrap().step, "explore");
+        let task = moved.task.unwrap();
+        assert_eq!(task.graph.unwrap().step, "explore");
+        assert_eq!(task.stopped.unwrap().step.as_deref(), Some("implement"));
         let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
         missing.as_object_mut().unwrap().remove("from_machine_id");
         assert!(serde_json::from_value::<Move>(missing).is_err());

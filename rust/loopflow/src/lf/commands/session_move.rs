@@ -71,6 +71,8 @@ pub fn move_task(issue: &str, target: &str) -> Result<TaskOwnership> {
 /// A Task whose running Graph a move stopped, now owned where it arrived.
 struct StoppedRun {
     identifier: String,
+    /// The step it was running, which runs again on arrival.
+    from: Option<String>,
     task: crate::durable::TaskId,
     /// Where it arrived, as the stage lines name it.
     place: String,
@@ -85,10 +87,15 @@ impl StoppedRun {
     fn resume(&self) {
         let name = &self.identifier;
         let started = match &self.repository {
-            Some(repository) => {
-                crate::engine::task::run(repository, self.task.as_str(), None, None, None, false)
-                    .map_err(|error| error.message)
-            }
+            Some(repository) => crate::engine::task::run(
+                repository,
+                self.task.as_str(),
+                self.from.as_deref(),
+                None,
+                None,
+                false,
+            )
+            .map_err(|error| error.message),
             None => Err("this Machine has no checkout of its repository".to_string()),
         };
         match started {
@@ -108,9 +115,16 @@ impl StoppedRun {
                     eprintln!("{text}");
                 }
             }
-            Err(error) => eprintln!(
-                "{name} moved, but its Graph did not continue: {error}\n  lf task run {name}"
-            ),
+            Err(error) => {
+                let from = self
+                    .from
+                    .as_ref()
+                    .map(|step| format!(" --from '{step}'"))
+                    .unwrap_or_default();
+                eprintln!(
+                    "{name} moved, but its Graph did not continue: {error}\n  lf task run {name}{from}"
+                )
+            }
         }
     }
 }
@@ -171,9 +185,17 @@ async fn relay_task(
         .task
         .as_ref()
         .ok_or_else(|| anyhow!("{name} was sent as a Session, not a Task"))?;
-    let step = moved_task.graph.as_ref().map(|graph| graph.step.clone());
-    if moved_task.running {
-        match &step {
+    // A stopped Graph continues at the step it was running; one that was
+    // resting stays at its step.
+    let from = moved_task
+        .stopped
+        .as_ref()
+        .and_then(|stopped| stopped.step.clone());
+    let step = from
+        .clone()
+        .or_else(|| moved_task.graph.as_ref().map(|graph| graph.step.clone()));
+    if moved_task.stopped.is_some() {
+        match &from {
             Some(step) => eprintln!("Stopped {name} at `{step}`"),
             None => eprintln!("Stopped {name}'s Graph"),
         }
@@ -199,8 +221,9 @@ async fn relay_task(
         ""
     };
     eprintln!("Arrived on {place}{at}{conversation}");
-    let stopped = moved_task.running.then(|| StoppedRun {
+    let stopped = moved_task.stopped.is_some().then(|| StoppedRun {
         identifier: name.clone(),
+        from,
         task: task.id.clone(),
         place: place.clone(),
         repository: crate::ops::task::repository_for_task(store, &task).ok(),

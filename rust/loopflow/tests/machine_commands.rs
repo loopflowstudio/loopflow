@@ -2607,7 +2607,9 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
     fs::write(
         worktree.join(".lf/graphs/hold.yaml"),
-        format!("- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        // A first step that finishes, so restarting at the stopped step differs
+        // from restarting the route.
+        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
     )
     .unwrap();
     let mut run = fixture
@@ -2682,6 +2684,18 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
             .ok()
     };
     let running = live_graph();
+    let mini_status = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "status",
+            task.as_str(),
+            "--json",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
     let interrupted = fixture
         .command(&["--machine", "mini", "task", "interrupt", task.as_str()])
         .current_dir(&plan.local_path)
@@ -2715,6 +2729,16 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         std::thread::sleep(std::time::Duration::from_millis(100));
         live_graph().is_none()
     });
+    // Every step mini's Graph recorded, now that it has ended.
+    let mini_first_steps: i64 = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id
+             WHERE s.graph_lf_process_id=?1 AND p.command LIKE '%\"status\"%'",
+            [running.as_deref().unwrap_or_default()],
+            |row| row.get(0),
+        )
+        .unwrap();
 
     assert_success(&moved);
     assert!(stopped, "the Task run outlived its stopped Graph");
@@ -2735,6 +2759,20 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         ),
         "halfway"
     );
+    // Mini's Graph stands at the step the laptop stopped, not the route's start.
+    let stopped_at = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("Stopped ")?.split_once(" at `"))
+        .and_then(|(_, step)| step.strip_suffix('`'))
+        .unwrap_or_else(|| panic!("no stopped step in:\n{stderr}"));
+    assert_eq!(stopped_at, format!("task wait {task} --timeout 120s"));
+    assert_success(&mini_status);
+    let mini_status: Value = serde_json::from_slice(&mini_status.stdout).unwrap();
+    assert_eq!(
+        mini_status["graph_processes"][0]["step"], stopped_at,
+        "{mini_status}"
+    );
+    assert_eq!(mini_first_steps, 0, "mini ran the route's first step again");
     // The Graph was running on mini when the move returned.
     assert!(
         running.is_some(),
@@ -2941,4 +2979,203 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     assert_eq!(plan.local.task_ownership(&task).unwrap(), local);
     assert!(plan.remote.task_ownership(&task).unwrap().owner.is_some());
     drop(server);
+}
+
+/// The held terminal of `owner` under `home`, as the owner names its socket.
+fn owner_socket(home: &Path, owner: &str) -> std::path::PathBuf {
+    use sha2::Digest;
+    let digest = hex::encode(sha2::Sha256::digest(
+        home.canonicalize().unwrap().as_os_str().as_encoded_bytes(),
+    ));
+    // SAFETY: geteuid has no preconditions.
+    std::path::PathBuf::from(format!(
+        "/tmp/lf-{}-{}/{owner}.sock",
+        unsafe { libc::geteuid() },
+        &digest[..16]
+    ))
+}
+
+/// Watch `owner`'s terminal as a viewer without input control until its
+/// stream shows `line`, returning everything it showed.
+fn watch_for(socket: &Path, line: String) -> std::thread::JoinHandle<String> {
+    use std::io::Read;
+    let mut socket = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    let request = serde_json::json!({"id":1,"kind":"attach","control":false,"replace":true,"rows":24,"cols":80})
+        .to_string();
+    let mut frame = vec![0x11];
+    frame.extend((request.len() as u32).to_be_bytes());
+    frame.extend(request.as_bytes());
+    socket.write_all(&frame).unwrap();
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+        .unwrap();
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut shown = Vec::new();
+        let mut buffer = Vec::new();
+        let mut chunk = [0; 8192];
+        while std::time::Instant::now() < deadline
+            && !String::from_utf8_lossy(&shown).contains(&line)
+        {
+            match socket.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(error) => panic!("viewer read failed: {error}"),
+            }
+            // Frames: a tag, a big-endian length, the payload. 0x02 and 0x03
+            // carry terminal bytes.
+            while buffer.len() >= 5 {
+                let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
+                if buffer.len() < 5 + length {
+                    break;
+                }
+                if matches!(buffer[0], 0x02 | 0x03) {
+                    shown.extend_from_slice(&buffer[5..5 + length]);
+                }
+                buffer.drain(..5 + length);
+            }
+        }
+        String::from_utf8_lossy(&shown).into_owned()
+    })
+}
+
+/// Ends what the fixture's homes recorded, also when an assertion fails.
+struct EndRecorded(Vec<std::path::PathBuf>);
+
+impl Drop for EndRecorded {
+    fn drop(&mut self) {
+        for home in &self.0 {
+            loopflow_test_support::end_recorded_processes(
+                home,
+                Path::new(env!("CARGO_BIN_EXE_lf")),
+            );
+        }
+    }
+}
+
+/// The laptop terminal showing the Task's conversation is told where it went
+/// and how to open it there.
+#[test]
+fn the_terminal_showing_a_moved_task_says_how_to_open_it_on_mini() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home]);
+    let (task, worktree) = placed_task(&plan, "viewed-task");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    // A stand-in Claude that waits on its terminal; it never asks about trust.
+    fs::write(
+        local_home.join(".claude.json"),
+        serde_json::json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+    )
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/claude"),
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s\n' "$*" > "$HOME/claude-args"
+stty -echo < /dev/tty
+printf 'ready\r\n'
+read -r answer < /dev/tty
+"#,
+    );
+    let mut owner = fixture
+        .command(&[
+            "session",
+            "serve",
+            "--terminal",
+            "--",
+            lf,
+            "-i",
+            "-a",
+            "claude",
+            ":",
+            "keep going",
+        ])
+        .current_dir(&worktree)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(
+            fs::File::create(fixture.root.path().join("owner.log")).unwrap(),
+        ))
+        .spawn()
+        .unwrap();
+    let mut acknowledged = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(owner.stdout.take().unwrap()),
+        &mut acknowledged,
+    )
+    .unwrap();
+    let owner_id = acknowledged.trim().to_string();
+    assert!(
+        !owner_id.is_empty(),
+        "owner ended before acknowledging: {}",
+        fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+    );
+    let args = local_home.join("claude-args");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while fs::read_to_string(&args).map_or(true, |text| text.is_empty()) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Claude never started: {}",
+            fs::read_to_string(fixture.root.path().join("owner.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let local_db = rusqlite::Connection::open(local_home.join("loopflow.db")).unwrap();
+    let (session, task_of): (String, Option<String>) = local_db
+        .query_row(
+            "SELECT id,task_id FROM agent_sessions WHERE transport_lf_process_id=?1",
+            [&owner_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    if task_of.as_deref() != Some(task.as_str()) {
+        assert_success(
+            &fixture
+                .command(&["session", "bind", &session, "--task", task.as_str()])
+                .current_dir(&worktree)
+                .output()
+                .unwrap(),
+        );
+    }
+    // The transcript Claude would have written for the conversation lf named.
+    let args = fs::read_to_string(&args).unwrap();
+    let words: Vec<&str> = args.split_whitespace().collect();
+    let thread = words
+        .windows(2)
+        .find(|pair| matches!(pair[0], "--session-id" | "--resume"))
+        .map(|pair| pair[1])
+        .unwrap_or_else(|| panic!("no conversation id in Claude's arguments: {args}"));
+    let project = local_home
+        .join(".claude/projects")
+        .join(claude_project(&worktree));
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join(format!("{thread}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"sessionId\":\"{thread}\",\"cwd\":\"{}\",\"message\":{{\"role\":\"user\",\"content\":\"keep going\"}}}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+    let notice = format!("This conversation moved to mini: lf resume --task {identifier}");
+    let viewer = watch_for(&owner_socket(&local_home, &owner_id), notice.clone());
+
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let shown = viewer.join().unwrap();
+    let _ = owner.kill();
+    let _ = owner.wait();
+
+    assert_success(&moved);
+    assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");
 }

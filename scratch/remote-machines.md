@@ -100,7 +100,7 @@ Each step is something to run and see.
 |---|---|---|---|
 | 0 | `lf task move X --machine mini` on a Task mini has never seen | It moves | This branch, installed on laptop and mini. Not yet run for real |
 | 1 | The same | The Graph is running on mini when the command returns, one line per stage; this terminal prints `lf resume --task X` (see Decided against) | Receive ends in `lf task run` there; stage lines |
-| 2 | Move mid-`implement` | The step restarts on mini from the checkpoint commit (see Decided against) | A step continuation in `run_skill`, its own Task |
+| 2 | Move mid-`implement` | The step restarts on mini from the checkpoint commit; earlier steps of the run don't repeat (its conversation doesn't travel, see Decided against) | Built; keeping the step's conversation needs a step continuation in `run_skill`, its own Task |
 | 3 | `lf task status X`, `lf task list`, `lf machine list` on the laptop | Where X runs and since when; no leftover worktree | Sending retires local live rows |
 | 4 | Close the lid; open the phone | The mini's Session, live | Mini as hub: Machines dial it, Desktop shows mini Tasks as ordinary rows |
 | 5 | `lf task run X --rent …`, then `lf machine end` | The conversation comes home with the Task | Rental placement and give-back become moves |
@@ -144,17 +144,32 @@ Built (committed on this branch, e2d2246fdb and 3559e8838b):
   changes or a process holds it. Test:
   `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
 
+Step 2 fix: a stopped run's restart point was where the run *began*
+(`select_task_run`: the Task's resting step, `start` in the fixture), so mini
+re-ran every step the run had finished. The first acceptance run showed
+`Stopped X at \`start\`` for a run interrupted at its second step. Now
+`stop_graphs` names the live Graph's running step (`GraphProcess::label` of its
+latest live step), `MovedTask.stopped: Option<StoppedGraph { step }>` carries
+it (replacing `running: bool`; `move.json` updated), the stage lines print it,
+and `StoppedRun::resume` runs `--from` it. No step running (between steps or
+before the first) leaves `step` absent and the run restarts where it began.
+Same-Machine `lf task interrupt` + `lf task run` still restarts where the run
+began; not changed here.
+
 Acceptance tests in `rust/loopflow/tests/machine_commands.rs`:
 - Item 1 (lands running, stage lines): `task_move_leaves_a_live_graph_running_on_mini`.
-- Item 2 (printed reopen command): not there. The text is checked by the unit
-  test `a_machine_move_names_the_task_that_went_with_it` (`lf/commands/util.rs`);
-  `departure_notice` only fires for a Session with a live attachment, which no
-  machine_commands fixture starts. Remaining: a fixture that holds an
-  interactive Session on the laptop, moves its Task, and reads the line the
-  holder delivers.
-- Item 3 (restart from checkpoint): `task_move_leaves_a_live_graph_running_on_mini`
-  shows the step's half-written file on the pushed branch and a live Graph on
-  mini; it doesn't assert which step mini's Graph stands at.
+- Item 2 (reopen command in the terminal):
+  `the_terminal_showing_a_moved_task_says_how_to_open_it_on_mini`. A stand-in
+  Claude runs under a `session serve --terminal` owner in the Task's checkout;
+  a socket viewer reads the owner's stream and sees
+  `This conversation moved to mini: lf resume --task X` after the move.
+- Item 3 (restart from checkpoint at the stopped step):
+  `task_move_leaves_a_live_graph_running_on_mini`. Its route is
+  `task status` → `task wait` → `demo`; the move interrupts `task wait`. The
+  test checks the half-written file on the pushed branch, that the printed
+  stopped step is `task wait …`, that `lf --machine mini task status --json`
+  shows mini's Graph process at that step, and that mini's Graph recorded no
+  `task status` step.
 - Item 4 (sending Machine's views, prune):
   `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
 
@@ -169,8 +184,9 @@ Decided against, with the reason:
   itself. A laptop terminal nobody is watching would also attach to mini's
   Session, where step 4 (LOO-861) expects the phone to be the viewer. So the
   terminal keeps printing `This conversation moved to mini: lf resume --task X`.
-- **A mid-run headless step restarts from the checkpoint (step 2).** No Graph
-  re-run continues an interrupted step's conversation, even on one Machine:
+- **A mid-run headless step restarts from the checkpoint (step 2), at that
+  step, without its conversation.** No Graph re-run continues an interrupted
+  step's conversation, even on one Machine:
   `RunningGraph::run_skill` (`lf/commands/graph.rs`) spawns a fresh
   `lf skill` every time, and capture creates a new Session row for it.
   Carrying the step's Session would give mini nothing to resume it with.
@@ -207,7 +223,8 @@ lf install                                   # on the laptop, from this branch
 lf machine status mini                       # same version on both
 lf task create 'Throwaway move check' --json  # note its identifier, X
 lf task run X                                # let a headless step start
-lf task move X --machine mini                # expect the five stage lines
+lf task move X --machine mini                # expect the five stage lines;
+                                             # "Stopped X at `<step>`" names the running step
 lf task status X                             # "X  Runs on mini since …"
 lf task list && lf machine list              # X under mini
 lf --machine mini task status X              # Graph running there
@@ -218,6 +235,9 @@ lf task interrupt X && lf task abandon X     # clean up
 
 ## Checks
 
+- 2026-11-12, after items 2 and 3: `machine_commands::` 44 passed;
+  `--lib ops::human_session::moves::` 1 passed; clippy clean; no launchd job or
+  process from this checkout left afterwards.
 - `cargo test -p loopflow --test integration machine_commands::`: 43 passed.
   `documented_commands::` 4 passed; `--lib server::schema::tests:: lf::tests::
   ops::task_ownership::` 52 passed; `git::worktrees::` 22 passed; clippy clean.

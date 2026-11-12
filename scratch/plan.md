@@ -18,9 +18,22 @@ Built:
   equal-revision cases in `acceptance.rs` and `planning_lookup_tests.rs`
   rewritten to the later-read rule.
 
-Left as is: Project equal-revision conflict in `put_project` (name-cutover
-design, `project_name_cutover_retains_both_histories_and_rejects_later_conflicts`).
-See questions.md.
+Next (concept review, 2026-11-12): one rule for every Linear read.
+Tasks and Projects are the same concept, a Linear observation, and the 5whys
+finding (we can't know ahead of time which fields Linear re-renders without a
+new `updatedAt`) applies to both. `put_project` still refuses an equal-revision
+read, so `lf wave sync` can wedge the way `lf task sync` did, and its remedy
+("edit it in Linear") asks a person to work around lf.
+- `put_project`: order reads by `(revision, observed_at)` like `put_item`
+  (a revision-less read still sorts below a revisioned one); drop the
+  equal-revision refusal and its message.
+- Delete the name-cutover gate it subsumes: the `pending_name_cutover` query
+  and the `converted_at` update. The table itself stays (dropping it is a
+  staged contract migration, not this Task).
+- Rewrite `project_name_cutover_retains_both_histories_and_rejects_later_conflicts`
+  to the later-read rule: both name histories accepted, a later equal-revision
+  conflict accepted, an earlier read ignored. Description COALESCE stays.
+- `docs/work.md`: say Tasks and Projects both keep the later read.
 
 Checks:
 - `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests::` — pass (implement, compress).

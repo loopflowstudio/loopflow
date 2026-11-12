@@ -23,9 +23,8 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
-    /// A Task or Wave command's launch (`AgentConfig::managed`): it starts
-    /// only beside the Machine server.
-    pub(crate) managed: bool,
+    /// Who holds the provider (`AgentConfig::holder`).
+    pub(crate) holder: crate::session::Holder,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -51,14 +50,16 @@ pub(crate) fn native_connection_command(
         "--".into(),
         session_id.to_string(),
     ];
+    // The client holds nothing: the app-server it joins passed its own
+    // launch's server check.
     SessionCommand {
         launch: None,
+        holder: crate::session::Holder::Caller,
         input: None,
         program: "codex".into(),
         args,
         cwd,
         context: None,
-        managed: false,
         remote: Some(remote),
         attachment,
     }
@@ -132,6 +133,17 @@ pub(crate) fn build_session_command(
                 input = prompt;
             }
         }
+        // A bare Codex runs as plain `codex`, its first turn in argv; the
+        // app-server and its observer belong to held Sessions.
+        "codex" if config.holder == crate::session::Holder::Caller => {
+            args.extend(super::codex_terminal_options(config)?);
+            if let ProviderInvocation::Resume { session_id } = invocation {
+                args.extend(["resume".into(), "--".into(), session_id.to_string()]);
+            } else {
+                args.push("--".into());
+            }
+            args.extend(prompt.filter(|prompt| !prompt.is_empty()));
+        }
         "codex" | "opencode" => {
             let mut launch = config.clone();
             launch.task_prompt = prompt.unwrap_or_default();
@@ -147,9 +159,14 @@ pub(crate) fn build_session_command(
         }
         "pi" => {
             args.extend(crate::harness::pi::options(config, context_file)?);
-            if let ProviderInvocation::Resume { session_id } = invocation {
-                crate::harness::pi::validate_resume(session_id)?;
-                args.extend(["--session".into(), session_id.to_string()]);
+            match invocation {
+                ProviderInvocation::Resume { session_id } => {
+                    args.extend(crate::harness::pi::resume_args(session_id)?);
+                }
+                ProviderInvocation::Terminal {
+                    session_id: Some(id),
+                } => args.extend(["--session-id".into(), id.to_string()]),
+                _ => {}
             }
             if let Some(prompt) = prompt.filter(|p| !p.is_empty()) {
                 super::validate_terminal_turn(&prompt)?;
@@ -160,7 +177,7 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
-        managed: config.managed,
+        holder: config.holder,
         input,
         program: harness,
         args,
@@ -175,7 +192,6 @@ pub(crate) fn build_session_command(
 pub(crate) fn session_environment(
     config: &AgentConfig,
     context_file: Option<&Path>,
-    native: bool,
 ) -> Result<BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     if crate::config::parse_agent(config.agent()?).0 == "opencode" {
@@ -220,7 +236,7 @@ pub(crate) fn session_environment(
                 &mut settings,
                 context,
                 &super::system_prompt_with_structured_replies(config),
-                native || config.managed,
+                config.holder,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
@@ -448,10 +464,14 @@ mod tests {
                         .any(|arg| arg.contains("failIfUnavailable")));
                 }
                 if provider == "codex" {
-                    let params =
-                        build_codex_thread_start_params(command.launch.as_ref().unwrap(), false);
-                    assert_eq!(params["sandbox"], "workspace-write");
-                    assert_eq!(params["approvalPolicy"], "never");
+                    assert!(command
+                        .args
+                        .windows(2)
+                        .any(|pair| pair == ["--sandbox", "workspace-write"]));
+                    assert!(command
+                        .args
+                        .windows(2)
+                        .any(|pair| pair == ["--ask-for-approval", "never"]));
                 }
             }
             if provider == "codex" {
@@ -473,7 +493,7 @@ mod tests {
                     .iter()
                     .any(|arg| arg.contains("failIfUnavailable")));
             } else {
-                let environment = session_environment(&config, None, true).unwrap();
+                let environment = session_environment(&config, None).unwrap();
                 let settings: serde_json::Value =
                     serde_json::from_str(&environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
                 assert_eq!(
@@ -566,7 +586,7 @@ mod tests {
             let launch = format!(
                 "{:?} {:?} {:?}",
                 command.args,
-                session_environment(&config, None, true).unwrap(),
+                session_environment(&config, None).unwrap(),
                 build_codex_thread_start_params(&config, false)
             );
             assert!(
@@ -606,6 +626,8 @@ mod tests {
             ("claude:opus", Some("opus")),
             ("pi", None),
             ("pi:openai/gpt-5", Some("openai/gpt-5")),
+            ("codex", None),
+            ("codex:o3", Some("o3")),
         ] {
             let config = AgentConfig {
                 agent: Some(agent.into()),
@@ -625,6 +647,61 @@ mod tests {
                 .map(|index| command.args[index + 1].as_str());
             assert_eq!(model, expected, "{agent}");
         }
+    }
+
+    /// A bare Codex is plain `codex` with its first turn in argv: no lf
+    /// app-server, no `--remote` client and no observer. A held one keeps them.
+    #[test]
+    fn bare_codex_runs_plain_codex_and_a_held_one_keeps_its_app_server() {
+        let cwd = tempfile::tempdir().unwrap();
+        let config = |holder| AgentConfig {
+            agent: Some("codex".into()),
+            cwd: Some(cwd.path().into()),
+            task_prompt: "fix the bug".into(),
+            system_prompt: "be brief".into(),
+            holder,
+            ..Default::default()
+        };
+        let bare = config(crate::session::Holder::Caller);
+        let start = build_session_command(
+            &bare,
+            ProviderInvocation::Terminal { session_id: None },
+            None,
+        )
+        .unwrap();
+        assert_eq!(start.program, "codex");
+        assert!(start.launch.is_none() && start.remote.is_none());
+        assert!(start.args.ends_with(&["--".into(), "fix the bug".into()]));
+        assert!(start
+            .args
+            .iter()
+            .any(|arg| arg.starts_with("developer_instructions=")));
+        assert!(!start
+            .args
+            .iter()
+            .any(|arg| arg == "app-server" || arg == "--remote"));
+        let resume = build_session_command(
+            &bare,
+            ProviderInvocation::Resume {
+                session_id: &"thread-1".into(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(resume.args.ends_with(&[
+            "resume".into(),
+            "--".into(),
+            "thread-1".into(),
+            "fix the bug".into()
+        ]));
+
+        let held = build_session_command(
+            &config(crate::session::Holder::Server),
+            ProviderInvocation::Terminal { session_id: None },
+            None,
+        )
+        .unwrap();
+        assert!(held.launch.is_some());
     }
 
     #[test]

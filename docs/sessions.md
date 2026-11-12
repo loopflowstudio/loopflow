@@ -42,6 +42,7 @@ resend input.
 | running with no terminal showing it (`detached`) | reattaches, or continues from history if its idle owner needs replacement |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
+| started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
 | ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
 
@@ -126,6 +127,37 @@ with the same filters for the following page. Raw conversations appear only
 in unpaged lists and have no primary scope. They also stay out of selections
 by `--search`, `--blocked` or `--on`.
 
+## Run one in your terminal
+
+```bash
+lf implement                       # the agent runs right here, as if you had typed `claude`
+lf -a codex debug -c               # the same for Codex, with the clipboard as context
+```
+
+`lf` builds the prompt and context, starts the agent as this terminal's
+foreground program and waits for it. Nothing sits between you and the agent:
+keys, paste, resize and Ctrl+C go straight to it, and a terminal that shows
+the running program (a tab title, Rex's icon) shows the agent. When the agent
+exits, `lf` reads its transcript, records usage and completion in
+`lf session history`, and exits with the agent's status.
+
+| | |
+|---|---|
+| Processes | the agent and the `lf` waiting for it; no server, holder or `lf session serve` |
+| Closing the terminal | ends the agent, as it would plain `claude` |
+| Coming back | `lf resume <session>` continues its thread from history |
+| `lf install` meanwhile | leaves it running; the next launch uses the new build |
+| Steers | arrive when it is next started or resumed, not mid-turn |
+| Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
+
+This covers bare interactive conversations typed at a terminal:
+`lf <skill>`, `lf -i`, bare `lf` and bare Graphs. The same commands typed in a
+Desktop shell still start an `lf session serve` owner under the agent, because
+the shell sets `LF_SERVER_STATUS` for Desktop's relay handshake; that ends when
+the handshake goes. A conversation that should outlive its terminal or be open
+in several places belongs to a Task, Wave or repository; those run in a
+[holder](#keep-working-through-an-update).
+
 ## Keep working through an update
 
 ```bash
@@ -152,7 +184,8 @@ holder once.
 | `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
-| `lf <skill>`, `lf graph …`, `lf -i`, anything with `-b` or a pipe, even in a Task's checkout | its own process, as before |
+| `lf <skill>`, `lf -i`, bare Graphs, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
+| anything with `-b`, a pipe or `--json`, including a bare Graph's `-b` steps | its own process, as before |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations

@@ -1032,7 +1032,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -1161,20 +1161,18 @@ pub(crate) async fn open(
                 }
             }
         }
-        if !opens_bare(&store.sqlite, &session.id, managed)
-            && crate::transport::delegate_session(
-                false,
-                json.then_some(session.id.as_str()),
-                session.interactive.then_some(session.id.as_str()),
-                true,
-            )?
-        {
+        if crate::transport::delegate_session(
+            json.then_some(session.id.as_str()),
+            session.interactive.then_some(session.id.as_str()),
+            true,
+            named_work,
+        )? {
             return surface(store, session).await;
         }
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id, managed).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return surface(store, session).await;
     }
@@ -1185,13 +1183,15 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id, managed).await?;
+            open_waiting(store, &session.id, named_work).await?;
         }
         return Ok(surface);
     };
     let result = surface(store, session).await?;
     if resume {
-        if running()? {
+        // A conversation started with `lf <skill>` belongs to its terminal;
+        // this one runs a second agent on the same thread beside it.
+        if running()? && !store.sqlite.runs_in_its_terminal(&session.id)? {
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,
@@ -1205,26 +1205,10 @@ pub(crate) async fn open(
         crate::lf::commands::util::resume_session(
             session.input_key()?,
             &provider_session,
-            managed,
+            named_work,
         )?;
     }
     Ok(result)
-}
-
-/// Managed commands and recorded managed Sessions keep their host on reopen.
-/// Other Sessions outside an ongoing conversation run in the terminal; failed
-/// reads keep the host.
-fn opens_bare(store: &SqliteStore, id: &str, managed: bool) -> bool {
-    !managed
-        && crate::transport::runs_in_terminal(false)
-        && store.session(id).is_ok_and(|session| {
-            session.is_some_and(|session| {
-                !session
-                    .work_source
-                    .is_some_and(crate::session::WorkSource::is_managed)
-            })
-        })
-        && store.primary_scope(id).is_ok_and(|scope| scope.is_none())
 }
 
 /// Open without replacing a client. Start may initialize a first thread, but
@@ -1237,7 +1221,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1304,17 +1288,21 @@ pub(crate) async fn open_without_replacing(
         crate::transport::attach_existing(owner, id, json)?;
         return Ok(record);
     }
-    // A new transport re-executes this same intent and acquires the lock again.
-    if crate::transport::current().is_none() && !opens_bare(&store.sqlite, id, managed) {
+    // A held terminal re-executes this same intent and acquires the lock
+    // again; a bare conversation opens here, in this terminal.
+    let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
             return Ok(record);
         }
-        bail!("Conversation transport could not be started");
-    }
+        let lock_id = id.to_owned();
+        tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??
+    } else {
+        lock
+    };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock, managed)
+        return open_waiting_locked(store, session, lock, named_work)
             .await
             .map(|()| record);
     };
@@ -1339,7 +1327,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
-        managed,
+        named_work,
     )?;
     Ok(record)
 }
@@ -1453,7 +1441,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, named_work: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1465,14 +1453,14 @@ async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock, managed).await
+    open_waiting_locked(store, session, launch_lock, named_work).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1488,7 +1476,7 @@ async fn open_waiting_locked(
         session.input_key()?,
         &token,
         &mut launch_lock,
-        managed,
+        named_work,
     )? {
         return Ok(());
     }
@@ -2034,7 +2022,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
-    managed: bool,
+    named_work: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -2070,7 +2058,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
-        managed,
+        named_work,
     )?;
     Ok(true)
 }

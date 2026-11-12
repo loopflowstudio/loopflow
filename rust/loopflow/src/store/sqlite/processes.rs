@@ -1255,13 +1255,51 @@ impl SqliteStore {
         Ok(attachment)
     }
 
+    /// Whether a recorded Session is bare: neither recorded as Task, Wave or
+    /// repository work nor a scope's ongoing conversation.
+    pub(crate) fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
+        Ok(!session
+            .work_source
+            .is_some_and(crate::session::WorkSource::is_managed)
+            && self.primary_scope(&session.id)?.is_none())
+    }
+
+    /// Whether a launch is Work: its command names a Task or Wave
+    /// (`named_work`), or the recorded Session it opens is not bare.
+    pub(crate) fn is_work(
+        &self,
+        named_work: bool,
+        session: Option<&crate::session::LfSession>,
+    ) -> StoreResult<bool> {
+        match session {
+            Some(session) if !named_work => Ok(!self.is_bare(session)?),
+            _ => Ok(named_work),
+        }
+    }
+
+    /// Whether this interactive Session runs as the foreground program of the
+    /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
+    /// so nothing else may stop it, and another launch on its thread runs
+    /// beside it.
+    pub(crate) fn runs_in_its_terminal(&self, session: &str) -> StoreResult<bool> {
+        let Some(record) = self.session(session)? else {
+            return Ok(false);
+        };
+        Ok(record.interactive
+            && self.is_bare(&record)?
+            && self.session_transport(session)?.is_none())
+    }
+
     /// Resume excludes takeover from observation through settlement and claim.
     /// The close callback runs without SQLite held; its positive death evidence
     /// commits with the caller's reservation, never as a successful agent outcome.
+    /// With `beside`, a previous agent that is still running keeps running,
+    /// detached from the Session, and its lf keeps waiting for it.
     pub(super) fn with_session_resume<T>(
         &self,
         session: &str,
         expected: Option<&SessionAttachment>,
+        beside: bool,
         close: impl FnOnce() -> StoreResult<bool>,
         claim: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
     ) -> StoreResult<T> {
@@ -1269,7 +1307,10 @@ impl SqliteStore {
         if self.session_attachment(session)?.as_ref() != expected {
             return Err(attachment_changed());
         }
-        if let Some(attached) = expected.and_then(|attachment| attachment.lf_process_id.as_ref()) {
+        if let Some(attached) = expected
+            .filter(|_| !beside)
+            .and_then(|attachment| attachment.lf_process_id.as_ref())
+        {
             if crate::journal::lf_evidence(self, attached)
                 != crate::journal::ProcessIdentityEvidence::Dead
             {
@@ -1279,6 +1320,7 @@ impl SqliteStore {
             }
         }
         let mut closed = false;
+        let mut running = false;
         if let Some(previous) = expected {
             let (ended, reserved) = {
                 let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1286,14 +1328,15 @@ impl SqliteStore {
             };
             if !ended && !reserved {
                 closed = close()?;
-                if !closed {
+                if !closed && !beside {
                     return Err(no_observed_exit());
                 }
+                running = !closed;
             }
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(previous) = expected {
+        if let Some(previous) = expected.filter(|_| !running) {
             // A never-launched reservation is retired without inventing OS exit.
             tx.execute(
                 "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
@@ -1320,7 +1363,8 @@ impl SqliteStore {
     ) -> StoreResult<SessionAttachment> {
         let canonical = crate::id::canonical_session(session);
         let session = canonical.as_str();
-        self.with_session_resume(session, expected, close, |tx| {
+        let beside = self.runs_in_its_terminal(session)?;
+        self.with_session_resume(session, expected, beside, close, |tx| {
             attach_in(tx, session, expected, process, true)
         })
     }

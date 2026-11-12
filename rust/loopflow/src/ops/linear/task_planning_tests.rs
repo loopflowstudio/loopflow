@@ -1647,6 +1647,13 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
         let launch = crate::agent::AgentConfig {
             agent: Some(agent.into()),
             cwd: Some(repo.to_path_buf()),
+            // A bare Codex runs as plain `codex` with no turn observer; the
+            // app-server and its turn boundaries belong to a held Session.
+            holder: if agent == "codex" {
+                crate::session::Holder::Owner
+            } else {
+                crate::session::Holder::Caller
+            },
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),

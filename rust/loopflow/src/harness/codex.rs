@@ -98,7 +98,7 @@ async fn read_inherited_config(
 }
 
 /// `-c key=value` pairs for dotted config keys; Codex parses each value as TOML.
-fn config_overrides(config: &Value) -> Result<Vec<String>> {
+pub(crate) fn config_overrides(config: &Value) -> Result<Vec<String>> {
     let Value::Object(entries) = config else {
         anyhow::bail!("Codex configuration is not a table");
     };
@@ -728,11 +728,7 @@ impl CodexHarness {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] = super::context::codex_hooks(
-                context,
-                session_hooks,
-                (native && crate::transport::current().is_some()) || launch.managed,
-            )?;
+            config["hooks"] = super::context::codex_hooks(context, session_hooks, launch.holder)?;
         }
         Ok(config)
     }
@@ -855,7 +851,7 @@ impl CodexHarness {
                 command,
                 Some(&lifeline),
                 &owner,
-                launch.managed,
+                launch.holder,
             )?)
         } else {
             None

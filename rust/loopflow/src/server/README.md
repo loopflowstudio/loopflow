@@ -425,13 +425,15 @@ task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
 repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
 with `lf session bind`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. The command decides
-(`Cli::names_work`) and sets `AgentConfig::managed` on the launch. Reopening
-a recorded conversation names no Work: there the Session row
-(`WorkSource::is_managed`) decides whether it is held and needs the server.
+checkout; that run still counts toward the Task. The launch's Work source
+decides (`WorkSource::is_managed`; `lf task run` names its Task to each agent
+step), and reopening a recorded conversation also reads the Session row
+(`SqliteStore::is_bare`). The launch carries the answer as
+`AgentConfig::holder`: `Server` for managed work, `Owner` for a bare
+conversation a per-Session owner holds, `Caller` for every other bare launch,
+which gets only the start and compaction hooks and no steer capability.
 
-For a managed launch, and for any conversation opened in a terminal, Claude
-and Codex hooks run `lf __context-block --moment <moment>` at session start,
+For a launch the server or an owner holds, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
 compaction, each prompt, each tool and each turn end. That process opens no
 store. It makes one `session.boundary` request on `machine.sock` and prints
 the provider's hook output. The OpenCode plugin and the Pi extension send the

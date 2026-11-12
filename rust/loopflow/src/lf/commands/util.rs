@@ -52,7 +52,7 @@ pub(crate) fn launch_session(
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
-) -> Result<()> {
+) -> Result<SessionCommandOutcome> {
     let command = build_session_command(
         config,
         ProviderInvocation::Terminal {
@@ -60,8 +60,8 @@ pub(crate) fn launch_session(
         },
         context_file,
     )?;
-    let environment = session_environment(config, context_file, true)?;
-    spawn_session_command_with_env(
+    let environment = session_environment(config, context_file)?;
+    run_session_command_with_env(
         &command,
         &environment,
         agent_session,
@@ -74,39 +74,46 @@ pub(crate) fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
         None,
-        managed,
+        named_work,
     )
 }
 
-/// Continue a recorded conversation. `managed` is the resume command's: a
+/// Continue a recorded conversation. `named_work` is the resume command's: a
 /// Task or Wave resume starts only beside the Machine server.
 pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    managed: bool,
+    named_work: bool,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
-    config.managed = managed;
+    // Reopening a conversation recorded as Task, Wave or repository work is
+    // Work whatever command reopened it.
+    let work = store.is_work(named_work, Some(&session))?;
+    config.holder = crate::session::Holder::of(work, true);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
         config.agent()?,
         config.agent()?,
     );
-    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+    // A held Codex sends its first turn only to a thread with none; any other
+    // resumed thread already has it.
+    let held_codex = session.provider.as_deref() == Some("codex")
+        && config.holder != crate::session::Holder::Caller;
+    if provider_session.is_some() && !held_codex {
         config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
@@ -129,7 +136,7 @@ pub(crate) fn resume_session_with_env(
         },
         context_file.as_deref(),
     )?;
-    let environment = session_environment(&config, context_file.as_deref(), true)?;
+    let environment = session_environment(&config, context_file.as_deref())?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -176,6 +183,25 @@ fn spawn_session_command_with_env(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<()> {
+    run_session_command_with_env(
+        command,
+        environment,
+        agent_session,
+        exact_account_id,
+        launch_lock,
+        capture,
+    )?
+    .result(&command.program, agent_session.is_some(), command.holder)
+}
+
+fn run_session_command_with_env(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
+    capture: Option<&LfProcessRuntime>,
+) -> Result<SessionCommandOutcome> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
@@ -189,7 +215,7 @@ fn spawn_session_command_with_env(
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
     }
-    outcome.result(&command.program, agent_session.is_some())
+    Ok(outcome)
 }
 
 pub(crate) fn departure_notice(
@@ -254,8 +280,30 @@ impl SessionCommandOutcome {
         self.moved.is_none() && !self.interrupted && !self.status.success()
     }
 
-    pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
-        if !self.failed() {
+    /// The status a bare launch exits with: the provider's own, as its shell
+    /// would see it alone. lf names a failure the person did not cause.
+    pub(crate) fn bare_exit_code(&self, program: &str) -> u8 {
+        if !self.status.success() && !self.interrupted {
+            eprintln!("{program} exited with {}", self.status);
+        }
+        crate::transport::provider_exit_code(self.status)
+    }
+
+    /// A bare launch ends as its provider would alone, with the provider's
+    /// own status, unless a mover took its conversation; only a held
+    /// conversation can have another client.
+    pub(crate) fn result(
+        &self,
+        program: &str,
+        resuming: bool,
+        holder: crate::session::Holder,
+    ) -> Result<()> {
+        if holder == crate::session::Holder::Caller && self.moved.is_none() {
+            match self.bare_exit_code(program) {
+                0 => Ok(()),
+                code => Err(crate::process::CommandExit(code).into()),
+            }
+        } else if !self.failed() {
             Ok(())
         } else if resuming {
             Err(anyhow!(
@@ -506,7 +554,7 @@ fn run_native_session(
             .or_else(super::open::host_placement)
             .as_deref(),
     )?;
-    if command.program == "codex" && command.remote.is_none() {
+    if command.program == "codex" && command.launch.is_some() {
         return run_codex_native(
             command,
             environment,
@@ -583,13 +631,15 @@ fn run_native_session(
         }
     }
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
-    if let Some(context) = &command.context {
-        context.configure_hooks(&mut process)?;
-    }
+    let delivery = command
+        .context
+        .as_ref()
+        .map(|context| context.configure_hooks(&mut process))
+        .transpose()?;
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
-        command.managed,
+        command.holder,
     )?);
     process.args(&command.args);
     if command.program == "claude" {
@@ -600,9 +650,14 @@ fn run_native_session(
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = command.remote.is_none().then_some(&attachment);
     // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran.
-    if let Some(owner) = owned {
-        crate::harness::agent_process::require_server_for(owner, command.managed)?;
+    // starts it fresh instead of resuming one that never ran. A Session's
+    // first launch (`lf resume` starting a repository conversation) names no
+    // Work on its command line; its recorded Session does.
+    if let Some((store, session, _)) = owned {
+        let named_work = command.holder == crate::session::Holder::Server;
+        if store.is_work(named_work, store.session(session)?.as_ref())? {
+            crate::harness::agent_process::require_server()?;
+        }
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
@@ -641,7 +696,7 @@ fn run_native_session(
                     Some(owner) => crate::harness::agent_process::exec_native(
                         process,
                         owner,
-                        command.managed,
+                        command.holder,
                         launch_lock,
                     ),
                     None => {
@@ -662,9 +717,14 @@ fn run_native_session(
             }
         }
     }
+    // A bare Codex names its thread only to its start hook.
+    let reported_thread = delivery
+        .filter(|_| command.program == "codex" && agent_session.is_none())
+        .map(|delivery| crate::context_block::reported_thread_path(&delivery))
+        .filter(|path| std::fs::write(path, "").is_ok());
     let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
-        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.managed),
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.holder),
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -686,6 +746,9 @@ fn run_native_session(
     drop(activation);
     if owned.is_none() {
         crate::transport::report_directory(&command.cwd);
+    }
+    if let Some(foreground) = &foreground {
+        foreground.lead(child.id());
     }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
@@ -726,11 +789,20 @@ fn run_native_session(
         }),
         None => false,
     };
+    let interrupted = interrupted
+        || foreground
+            .as_ref()
+            .is_some_and(|foreground| foreground.interrupted(&status));
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
         false
     });
+    if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
+        if let Err(error) = record_reported_thread(path, capture_dir, account.clone()) {
+            tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
+        }
+    }
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir), false) = (&account_route, capture_dir.as_deref(), lost)
     {
@@ -746,6 +818,23 @@ fn run_native_session(
         interrupted: interrupted || lost,
         moved,
     })
+}
+
+/// Record the thread a bare launch's start hook reported as the conversation
+/// `lf resume` reopens.
+fn record_reported_thread(
+    path: &Path,
+    capture_dir: &Path,
+    account: Option<crate::store::ProviderAccountId>,
+) -> Result<()> {
+    let thread = std::fs::read_to_string(path)?;
+    let _ = std::fs::remove_file(path);
+    crate::session_record::write_provider_session(
+        capture_dir,
+        &AgentSessionId::from(thread.trim()),
+        account,
+    )?;
+    Ok(())
 }
 
 /// How often a native client checks that its Session is still attached here.
@@ -783,7 +872,9 @@ pub(crate) fn run_native_agent(
             .transpose()?
             .flatten();
     Ok(crate::agent::AgentProcessResult {
-        exit_code: if outcome.interrupted {
+        exit_code: if launch.holder == crate::session::Holder::Caller {
+            outcome.bare_exit_code(&command.program).into()
+        } else if outcome.interrupted {
             0
         } else {
             outcome.status.code().unwrap_or(1)
@@ -1213,15 +1304,14 @@ mod tests {
         provider
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn provider_sigterm_without_stop_intent_remains_an_error() {
+    /// A bare launch's provider failure, without a terminal handing it signals.
+    fn bare_provider_error(body: &str) -> anyhow::Error {
         let ledger = crate::journal::TestLedgerGuard::new();
         let temp = tempfile::tempdir().unwrap();
         ledger.set_db_path(temp.path().join("loopflow.db"));
         let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        let provider = fake_provider(&temp, "kill -TERM $$");
+        let provider = fake_provider(&temp, body);
         let capture = crate::session_record::SessionRecorder::begin_at(
             temp.path(),
             crate::session_record::SessionCaptureSpec {
@@ -1241,27 +1331,41 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
-            managed: false,
             attachment: None,
             remote: None,
             program: provider.display().to_string(),
             args: Vec::new(),
             cwd: temp.path().to_path_buf(),
         };
+        spawn_session_command_with_env(&command, &capture.environment(), None, None, None, None)
+            .expect_err("a failed provider fails its launch")
+    }
 
-        let error = spawn_session_command_with_env(
-            &command,
-            &capture.environment(),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect_err("unexplained SIGTERM must remain an error");
+    fn exit_code(error: &anyhow::Error) -> u8 {
+        error
+            .downcast_ref::<crate::process::CommandExit>()
+            .unwrap_or_else(|| panic!("not the provider's own status: {error:?}"))
+            .0
+    }
 
-        assert!(error.to_string().contains("signal: 15"));
+    #[cfg(unix)]
+    #[test]
+    fn provider_sigterm_without_stop_intent_remains_an_error() {
+        assert_eq!(exit_code(&bare_provider_error("kill -TERM $$")), 143);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_launch_returns_its_providers_own_status() {
+        let error = bare_provider_error("exit 7");
+        assert_eq!(exit_code(&error), 7);
+        assert!(
+            !format!("{error:?}").contains("another client"),
+            "{error:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -1426,6 +1530,69 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn bare_codex_resume_does_not_resend_its_first_turn() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
+        let _restore = EnvRestore::capture(&["LF_HOME", "PATH"]);
+        std::env::set_var("LF_HOME", temp.path());
+        let provider = fake_provider(&temp, "printf '%s\\0' \"$@\" > received");
+        std::fs::rename(provider, temp.path().join("codex")).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(temp.path().to_path_buf()).chain(std::env::split_paths(&path)),
+            )
+            .unwrap(),
+        );
+        let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
+            agent: Some("codex".into()),
+            task_prompt: "the first turn".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let capture = crate::session_record::SessionRecorder::begin_at_with_request(
+            temp.path(),
+            crate::session_record::SessionCaptureSpec {
+                harness: "codex".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                graph: crate::session_record::SessionGraphMembership::Independent,
+                work: None,
+            },
+            request,
+        )
+        .unwrap();
+        let capture_dir = capture.artifact_dir();
+        crate::session_record::write_provider_session(&capture_dir, &"thread-1".into(), None)
+            .unwrap();
+        let session = crate::session_record::read_provider_session(&capture_dir)
+            .unwrap()
+            .unwrap();
+
+        resume_session_with_env(
+            &capture.artifact_key(),
+            Some(&session),
+            &BTreeMap::new(),
+            None,
+            false,
+        )
+        .unwrap();
+
+        let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+        let arguments = received.split_terminator('\0').collect::<Vec<_>>();
+        assert!(arguments.ends_with(&["resume", "--", "thread-1"]));
+        assert!(!received.contains("the first turn"));
+    }
+
     #[test]
     fn recorded_native_move_returns_cleanly_without_stop_receipts() {
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -1456,9 +1623,9 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
-            managed: false,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
             cwd: home.into(),
@@ -1479,12 +1646,12 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
+            holder: crate::session::Holder::Caller,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
             context: None,
-            managed: false,
             attachment: None,
             remote: None,
         };
@@ -1565,7 +1732,7 @@ mod tests {
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), original.clone()),
-                false,
+                crate::session::Holder::Caller,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1587,12 +1754,12 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
                 cwd: home.into(),
                 context: None,
-                managed: false,
                 attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(endpoint.clone()),
             };
@@ -1670,9 +1837,9 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 context: None,
-                managed: false,
                 attachment: capture.session_attachment(),
                 remote: None,
                 program: "/bin/sleep".into(),

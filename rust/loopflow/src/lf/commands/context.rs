@@ -258,6 +258,17 @@ pub fn emit_block(
     if moment == ContextMoment::TaskUpdates {
         return Ok(());
     }
+    // lf asks only a bare Codex launch for its thread, by creating the file
+    // beside its delivery. Writing it opens no store; a failed write only
+    // leaves the conversation unresumable.
+    if moment == ContextMoment::Start {
+        let reported = crate::context_block::reported_thread_path(&path);
+        if let (Some(thread), true) = (input["session_id"].as_str(), reported.exists()) {
+            if let Err(error) = std::fs::write(&reported, thread) {
+                tracing::warn!(%error, "cannot keep the provider's thread for resume");
+            }
+        }
+    }
     let boundary = match moment {
         ContextMoment::Start => BoundaryMoment::Start,
         ContextMoment::Compact => BoundaryMoment::Compact,

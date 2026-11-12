@@ -52,7 +52,20 @@
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
     "account": null,
-    "transition": null
+    "transition": null,
+    "turn": {
+      "id": "u1",
+      "state": "ended",
+      "started_at": "2026-11-10T16:25:37Z",
+      "ended_at": "2026-11-10T16:27:51Z",
+      "model": "claude-opus-5-5",
+      "usage": {
+        "input_tokens": 41200,
+        "cached_input_tokens": 38000,
+        "output_tokens": 1100
+      }
+    },
+    "raw": false
   },
   "liveness": "unknown",
   "control_holder": null,

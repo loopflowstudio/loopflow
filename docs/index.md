@@ -112,7 +112,7 @@ lf resume                                  # return to this scope’s conversati
 
 ```bash
 lf -b implement
-lf session list --interactive false --json
+lf session list --headless --json
 lf resume SESSION
 lf task run INF-123
 ```

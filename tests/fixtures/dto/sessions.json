@@ -26,6 +26,8 @@
       "task_00000000000000000000000000000001"
     ],
     "terminal_ids": [],
+    "turn": null,
+    "raw": false,
     "work_path": "product / LOO-291",
     "actions": [
       {

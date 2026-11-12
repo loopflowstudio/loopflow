@@ -103,6 +103,7 @@ pub(crate) struct PlanningState {
     lose_comment: bool,
     comment_moves_issue: bool,
     slow_team_check: bool,
+    team_filter: Option<serde_json::Value>,
     history_unavailable: bool,
     completion_writes: usize,
     current_project_id: Option<String>,
@@ -234,6 +235,9 @@ async fn planning_response(
         .project_fields
         .clone()
         .unwrap_or_else(|| planning_project(&project_id, &project_id));
+    if query.contains("query TeamChanges") {
+        state.team_filter = Some(vars["issues"].clone());
+    }
     let full_issue = |issue: &serde_json::Value| {
         let mut issue = issue.clone();
         if !issue["project"].is_null() {
@@ -5750,6 +5754,103 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
             });
         });
     }
+}
+
+#[test]
+fn linear_scope_reads_each_repository_once_and_refreshes_next_check() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let peers: Vec<_> = (0..3)
+                .map(|_| loopflow_test_support::TestRepo::new())
+                .collect();
+            let paths = [repo, peers[0].path(), peers[1].path(), peers[2].path()];
+            let configs = [
+                "planning:\n  provider: linear\n  team: team-1\n",
+                "planning:\n  provider: linear\n  team: team-1\n",
+                "planning:\n  provider: linear\n  team: other-team\n",
+                "planning: [invalid\n",
+            ];
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            for (index, path) in paths.iter().enumerate() {
+                std::fs::create_dir_all(path.join(".lf")).unwrap();
+                std::fs::write(path.join(".lf/config.yaml"), configs[index]).unwrap();
+                let repository_id = fixture
+                    .store
+                    .sqlite
+                    .ensure_repository(path.to_str().unwrap())
+                    .unwrap();
+                // Both loops encounter every repository more than once, including failures.
+                for row in 0..2 {
+                    let wave = crate::work::wave::Wave::new(
+                        crate::id::WaveId::new(),
+                        format!("scope-{row}"),
+                        path.display().to_string(),
+                    );
+                    fixture.store.create_wave(&wave).await.unwrap();
+                    let saved = fixture
+                        .store
+                        .sqlite
+                        .create_task(&crate::work::task::NewTask {
+                            id: crate::durable::TaskId::new(),
+                            repository_id: repository_id.clone(),
+                            project_id: None,
+                            title: format!("Scope {index}/{row}"),
+                            description: String::new(),
+                            due_date: None,
+                        })
+                        .unwrap();
+                    conn.execute(
+                        "UPDATE tasks SET external_issue_id=?2, planning_completed=?3 WHERE id=?1",
+                        rusqlite::params![
+                            saved.id.as_str(),
+                            format!("scope-{index}-{row}"),
+                            row == 1
+                        ],
+                    )
+                    .unwrap();
+                }
+            }
+            // An empty delta isolates selection from ingestion's separate reads.
+            state.lock().await.issues.clear();
+            for included in [2, 4] {
+                if included == 4 {
+                    for path in &paths[2..] {
+                        std::fs::write(path.join(".lf/config.yaml"), configs[0]).unwrap();
+                    }
+                }
+                conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+                crate::ops::planning_client::SCOPE_READS.with_borrow_mut(|reads| reads.clear());
+                assert!(!crate::ops::linear_observe::check_repository(
+                    &fixture.store,
+                    repo.to_str().unwrap()
+                )
+                .await
+                .unwrap());
+                let reads = crate::ops::planning_client::SCOPE_READS.with_borrow(Clone::clone);
+                assert_eq!(
+                    reads,
+                    paths.iter().map(|path| (path.to_path_buf(), 1)).collect()
+                );
+                let filter = state.lock().await.team_filter.clone().unwrap();
+                let mut live = vec![task.linear_id.as_ref().unwrap().as_str().to_owned()];
+                live.extend((0..included).map(|index| format!("scope-{index}-0")));
+                let mut finished: Vec<_> = (0..included)
+                    .map(|index| format!("scope-{index}-1"))
+                    .collect();
+                let mut actual_live: Vec<String> =
+                    serde_json::from_value(filter["or"][0]["id"]["in"].clone()).unwrap();
+                let mut actual_finished: Vec<String> =
+                    serde_json::from_value(filter["id"]["nin"].clone()).unwrap();
+                live.sort();
+                finished.sort();
+                actual_live.sort();
+                actual_finished.sort();
+                assert_eq!(filter["team"]["id"]["eq"], "team-1");
+                assert_eq!(actual_live, live);
+                assert_eq!(actual_finished, finished);
+            }
+        });
+    });
 }
 
 #[test]

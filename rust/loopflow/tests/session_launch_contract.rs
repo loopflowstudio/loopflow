@@ -905,9 +905,11 @@ import os, select, sys
 if '--version' in sys.argv:
     print('fixture'); sys.exit(0)
 home = os.environ['LF_HOME']
+sys.stdin.read()
+terminal = open('/dev/tty')
 open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
 while not os.path.exists(home+'/quit'):
-    if select.select([sys.stdin], [], [], 0.05)[0] and sys.stdin.readline():
+    if select.select([terminal], [], [], 0.05)[0] and terminal.readline().strip() == 'resumed':
         open(home+'/resumed-input', 'w').write(str(os.getpid()))
 "#,
     )
@@ -934,6 +936,8 @@ while not os.path.exists(home+'/quit'):
     let mut first = fixture
         .command()
         .env("USER", "fixture")
+        // Give Claude a controlling terminal after it consumes prompt-file stdin.
+        .env("LF_VIEWER_STREAM", "1")
         .args([
             "-i",
             "--account",
@@ -941,6 +945,8 @@ while not os.path.exists(home+'/quit'):
             ":",
             "hello",
         ])
+        // Keep the first viewer's input open while the second viewer attaches.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -987,7 +993,11 @@ while not os.path.exists(home+'/quit'):
     );
     first.wait().unwrap();
     // The same client carried on: a resume that relaunched would add a pid.
-    assert_eq!(fs::read_to_string(&pids).unwrap().lines().count(), 1);
+    assert_eq!(
+        fs::read_to_string(&pids).unwrap().lines().count(),
+        1,
+        "{printed}"
+    );
     // `--account` names one resume; nothing is held.
     assert!(!machine.join("accounts/claude/held").exists());
 }
@@ -1833,7 +1843,7 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 }
 
 #[test]
-fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
+fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     let output = fixture
         .command()
@@ -1844,12 +1854,19 @@ fn pi_native_crash_retains_partial_usage_without_completing_the_turn() {
     assert!(!output.status.success());
     let session = fixture.session();
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
-    let (count, tokens, final_receipt): (i64, i64, bool) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens'), json_extract(payload,'$.final') FROM session_events WHERE session_id=?1 AND kind='usage'",
-        [&session], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-    assert_eq!((count, tokens, final_receipt), (1, 13, false));
-    let completions: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(completions, 0);
+    let (count, tokens): (i64, i64) = db.query_row(
+        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    assert_eq!((count, tokens), (1, 13));
+    // The exit read closes the turn the transcript left open.
+    let statuses: Vec<String> = db
+        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .unwrap()
+        .query_map([&session], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(statuses, ["interrupted"]);
 }
 
 #[test]

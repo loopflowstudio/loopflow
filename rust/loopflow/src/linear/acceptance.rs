@@ -508,7 +508,7 @@ pub(crate) fn put_item(
     let previous = conn
         .query_row(
             "SELECT revision,observed_at,state IS NOT :state OR completed IS NOT :completed
-         FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
+             FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
             named_params! { ":repo": repo, ":provider": "linear", ":id": &item.id,
                 ":completed": &item.completed,
                 ":state": &item.state,
@@ -524,13 +524,9 @@ pub(crate) fn put_item(
         .optional()?;
     let mut status_changed = previous.is_none();
     if let Some((previous, acquired, changed)) = previous {
-        let previous_revision = revision_nanos(previous.as_deref())?;
-        if revision < previous_revision {
-            return Ok(false);
-        }
         // Linear changes some fields without moving `updatedAt`, so one revision
-        // can carry different facts. The later read is the current one.
-        if revision == previous_revision && observed_at < acquired {
+        // can carry different facts: reads order by revision, then by read time.
+        if (revision, observed_at) < (revision_nanos(previous.as_deref())?, acquired) {
             return Ok(false);
         }
         status_changed = changed;

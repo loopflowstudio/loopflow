@@ -5,8 +5,8 @@ Cause: `scratch/linear-same-revision-conflict-5whys.md` (Linear shortened
 `updatedAt`; `put_item` refused the equal-revision read forever).
 
 Built:
-- `put_item` (`linear/acceptance.rs`): no equal-revision refusal; at one
-  revision the later read (`observed_at`) wins, an earlier one is ignored.
+- `put_item` (`linear/acceptance.rs`): no equal-revision refusal; reads order
+  by `(revision, observed_at)`, so at one revision the later read wins.
   Pending `task_changes` are untouched, so local edits stay queued.
 - Messages name real remedies: Task errors `lf task sync <issue>`
   (`ops/linear.rs`), Project errors "edit it in Linear / add it back, then run
@@ -21,5 +21,5 @@ design, `project_name_cutover_retains_both_histories_and_rejects_later_conflicts
 See questions.md.
 
 Checks:
-- `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests::` — pass (implement).
+- `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests::` — pass (implement, compress).
 - `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::` — pass (implement). Gate runs affected suites.

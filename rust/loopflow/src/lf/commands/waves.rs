@@ -879,13 +879,28 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
         } else {
+            let local = match &store {
+                Some(store) => Some(store.sqlite.local_machine()?.id),
+                None => None,
+            };
             for task in tasks {
-                println!(
-                    "{} · {} · {}",
-                    task.task.identifier,
-                    owner_text(task.runtime.as_ref()),
-                    task.task.name
-                );
+                let owner = owner_text(task.runtime.as_ref());
+                let elsewhere = match (&store, &local) {
+                    (Some(store), Some(local)) => crate::ops::task_ownership::runs_elsewhere(
+                        &store
+                            .sqlite
+                            .task_ownership(&crate::durable::TaskId::from_raw(
+                                task.task.id.clone(),
+                            ))?,
+                        local,
+                    ),
+                    _ => None,
+                };
+                let owner = match elsewhere {
+                    Some(place) => format!("{owner} · {place}"),
+                    None => owner.to_string(),
+                };
+                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
             }
         }
         Ok(())

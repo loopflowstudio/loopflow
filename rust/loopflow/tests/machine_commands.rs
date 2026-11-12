@@ -450,6 +450,26 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
 }
 
 #[test]
+fn status_reads_the_same_build_as_the_same_version() {
+    let fixture = Machines::new();
+    // `lf --version` prints the build version with its label.
+    fixture.remote(
+        loopflow::build_info::VERSION_LINE,
+        "home_11111111111111111111111111111111",
+    );
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let output = fixture.run(&["machine", "status", "mini"]);
+    assert_success(&output);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("versions differ"), "{stderr}");
+    let statuses = fixture.json(&["machine", "status", "mini", "--json"]);
+    assert_eq!(
+        statuses[0]["remote_version"],
+        loopflow::build_info::BUILD_VERSION
+    );
+}
+
+#[test]
 fn status_reports_version_mismatch_and_unreachable_without_prompting() {
     let fixture = Machines::new();
     fixture.remote("0.0.1", "home_11111111111111111111111111111111");
@@ -2377,6 +2397,66 @@ fn task_move_carries_ownership_graph_and_session() {
 }
 
 #[test]
+fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "left-task");
+    let identifier = plan.local.task(&task).unwrap().unwrap().identifier;
+    let laptop = |args: &[&str]| {
+        // Prune reads open paths with /usr/sbin/lsof.
+        let output = fixture
+            .command(args)
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin:/usr/sbin",
+                    fixture.root.path().join("bin").display()
+                ),
+            )
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    // Before the move, the checkout is the unfinished Task's.
+    let kept = laptop(&["wt", "prune", "--dry-run"]);
+    assert!(
+        kept.contains(&format!("Task {identifier} is unfinished")),
+        "{kept}"
+    );
+
+    laptop(&["task", "move", task.as_str(), "--machine", "mini"]);
+
+    let status = laptop(&["task", "status", task.as_str()]);
+    assert!(
+        status.contains(&format!("{identifier}  Runs on mini since ")),
+        "{status}"
+    );
+    let list = laptop(&["task", "list"]);
+    let row = list
+        .lines()
+        .find(|line| line.starts_with(&identifier))
+        .unwrap_or_else(|| panic!("{identifier} missing from:\n{list}"));
+    assert!(row.contains("Runs on mini since "), "{row}");
+    let machines = laptop(&["machine", "list"]);
+    assert!(
+        machines.contains(&format!("  {identifier} since ")),
+        "{machines}"
+    );
+    let listed = fixture.json(&["machine", "list", "mini", "--json"]);
+    assert_eq!(listed[0]["tasks"][0]["id"], task.as_str());
+    // The branch is pushed and mini checked it out, so prune takes the checkout.
+    let pruned = laptop(&["wt", "prune", "--dry-run"]);
+    assert!(
+        pruned.contains(&format!("Task {identifier} runs on mini")),
+        "{pruned}"
+    );
+    laptop(&["wt", "prune"]);
+    assert!(!worktree.exists());
+}
+
+#[test]
 fn resume_task_on_another_machine_moves_the_task_there() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
@@ -2498,8 +2578,8 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
         assert!(stderr.contains(expected), "{stderr}");
     };
 
-    // Mini answers but has never synced the Task.
-    refused("unknown on this Machine");
+    // Mini answers, but its planning has never heard of the Task.
+    refused("not found in selected Git planning");
     unchanged();
 
     // Mini does not answer at all.
@@ -2511,10 +2591,17 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     unchanged();
 }
 
+/// A Task move that continues a run starts it for real on mini: each home
+/// gets its own server, so no launch installs one, and the test ends the run.
 #[test]
-fn task_move_stops_a_live_graph() {
+fn task_move_leaves_a_live_graph_running_on_mini() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let _laptop =
+        loopflow_test_support::MachineServer::start(lf, &fixture.root.path().join("local"));
+    let remote_home = fixture.root.path().join("remote/store");
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let (task, worktree) = placed_task(&plan, "graph-task");
     // A route whose step runs until something stops it.
     fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
@@ -2581,8 +2668,66 @@ fn task_move_stops_a_live_graph() {
     if !stopped {
         run.kill().unwrap();
     }
+    // Read mini's Graph before ending it, so a failed assertion still stops it.
+    let remote_db = remote_home.join("loopflow.db");
+    let live_graph = || -> Option<String> {
+        rusqlite::Connection::open(&remote_db)
+            .unwrap()
+            .query_row(
+                "SELECT p.id FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
+                 WHERE g.task_id=?1 AND p.completed_at IS NULL",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .ok()
+    };
+    let running = live_graph();
+    let interrupted = fixture
+        .command(&["--machine", "mini", "task", "interrupt", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    // Its step is an operation, which an interrupt lets finish: end the step
+    // mini recorded, once its pid is shown to run that `task wait`.
+    let step: Option<i64> = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT pid FROM processes WHERE command LIKE '%\"wait\"%'
+             AND completed_at IS NULL AND pid IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(pid) = step {
+        let command = Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let command = String::from_utf8_lossy(&command.stdout);
+        if command.contains(env!("CARGO_BIN_EXE_lf"))
+            && command.contains(&format!("task wait {task}"))
+        {
+            // SAFETY: signals the verified pid only.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        }
+    }
+    let ended = (0..300).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        live_graph().is_none()
+    });
+
     assert_success(&moved);
     assert!(stopped, "the Task run outlived its stopped Graph");
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    for stage in [
+        "Checked mini: it can take",
+        "at `",
+        "Committed and pushed",
+        "Arrived on mini",
+        "Running on mini as Graph process",
+    ] {
+        assert!(stderr.contains(stage), "{stage:?} missing from:\n{stderr}");
+    }
     assert_eq!(
         git(
             plan._repos[0].bare_path(),
@@ -2590,18 +2735,13 @@ fn task_move_stops_a_live_graph() {
         ),
         "halfway"
     );
-    // Mini holds the Task on the same run, which reads as stopped there.
-    let (run_start, carrier): (Option<String>, Option<String>) =
-        rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
-            .unwrap()
-            .query_row(
-                "SELECT run_start,lf_process_id FROM task_graphs WHERE task_id=?1",
-                [task.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-    assert!(run_start.is_some());
-    assert!(carrier.is_some());
+    // The Graph was running on mini when the move returned.
+    assert!(
+        running.is_some(),
+        "no live Graph on mini when the move returned"
+    );
+    assert_success(&interrupted);
+    assert!(ended, "mini's Graph outlived its interrupt");
 }
 
 #[test]

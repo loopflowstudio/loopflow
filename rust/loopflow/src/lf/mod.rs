@@ -1939,9 +1939,16 @@ pub enum SessionCommand {
         /// Read no move; exit non-zero unless this Machine can receive one
         #[arg(long)]
         check: bool,
-        /// With --check, also require that this Machine knows the Task
-        #[arg(long, requires = "check")]
+        /// With --check, also take in this Task from planning, when this
+        /// Machine has its repository and has not saved it yet
+        #[arg(long, requires_all = ["check", "issue", "repository"])]
         task: Option<String>,
+        /// The Task's identifier in planning, such as LOO-12
+        #[arg(long, requires = "task")]
+        issue: Option<String>,
+        /// The Task's repository; a Machine without one clones it on receive
+        #[arg(long, requires = "task")]
+        repository: Option<crate::durable::RepositoryId>,
         #[arg(long)]
         json: bool,
     },

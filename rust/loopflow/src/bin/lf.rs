@@ -1130,7 +1130,18 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if let Some(error) = &status.planning_error {
                     println!("Planning: {error}");
                 }
-                if let Some(execution) = &status.execution {
+                // A Task another Machine runs is read from its ownership; this
+                // Machine's records are what it left behind.
+                let elsewhere = match (&status.task, &status.ownership) {
+                    (Some(task), Some(ownership)) => {
+                        loopflow::ops::task_ownership::runs_elsewhere_here(ownership)?
+                            .map(|line| format!("{}  {line}", task.identifier))
+                    }
+                    _ => None,
+                };
+                if let Some(line) = elsewhere {
+                    println!("{line}");
+                } else if let Some(execution) = &status.execution {
                     print_task_snapshot(execution, false)?;
                 } else {
                     println!("No execution allocated.");

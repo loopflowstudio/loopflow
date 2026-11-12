@@ -897,6 +897,26 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
+/// Take a Task this Machine has not saved from the repository's planning.
+pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
+    match crate::config::load_config(Some(main))
+        .map_err(task_error)?
+        .unwrap_or_default()
+        .planning_transport()
+    {
+        crate::config::PlanningConfig::Linear { .. } => {
+            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+        }
+        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in selected Git planning"
+        ))),
+        remote => Err(task_error(format!(
+            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+            remote.remote_name().unwrap_or("provider")
+        ))),
+    }
+}
+
 /// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
@@ -916,27 +936,7 @@ fn prepare_task(
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => match crate::config::load_config(Some(&main))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::PlanningConfig::Linear { .. } => {
-                    super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
-                        .await?
-                }
-                crate::config::PlanningConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )));
-                }
-                remote => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                        remote.remote_name().unwrap_or("provider")
-                    )));
-                }
-            },
+            None => acquire_from_planning(&main, issue).await?,
         };
         let destination = store
             .task_execution_route(&task.id)

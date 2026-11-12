@@ -53,6 +53,9 @@ pub(crate) struct MovedTask {
     pub ownership_marker: String,
     /// Absent before the Task takes up a Graph.
     pub graph: Option<TaskGraphRecord>,
+    /// Its Graph was running when the move stopped it, so it continues where
+    /// the Task arrives.
+    pub running: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,7 +151,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
     }
-    stop_graphs(store, &task).await?;
+    let running = stop_graphs(store, &task).await?;
     let checkout = worktree
         .as_deref()
         .map(|root| checkpoint(&store.sqlite, root, name, to))
@@ -191,6 +194,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             identifier: task.identifier.clone(),
             ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
             graph: store.sqlite.task_graph_record(&task.id)?,
+            running,
         }),
     })
 }
@@ -268,8 +272,9 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
 /// running and the recorded step Processes it started. Each is signalled
-/// only once its pid is proven to be that recorded Process.
-async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
+/// only once its pid is proven to be that recorded Process. Returns whether a
+/// Graph was running.
+async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<bool> {
     let live = |process: &crate::process::LfProcess| {
         process.completed_at.is_none()
             && crate::journal::lf_evidence(&store.sqlite, &process.id)
@@ -286,7 +291,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
         .filter(|process| live(process))
         .collect();
     if processes.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     store
         .append_interrupt(&WorkRef::Task(task.id.clone()))
@@ -314,7 +319,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<()> {
             .map(|process| process.id.to_string())
             .collect();
         if running.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
         if std::time::Instant::now() >= deadline {
             bail!(
@@ -447,13 +452,30 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
     })
 }
 
-/// The Task a move carries, which this Machine must already know.
-pub(crate) async fn known_task(store: &SharedStore, task: &TaskId, name: &str) -> Result<Task> {
-    store.get_task(task).await?.ok_or_else(|| {
-        anyhow!(
-            "Task {name} is unknown on this Machine; sync its planning here, then move it again"
-        )
-    })
+/// The Task a move carries: saved here, else acquired from the planning of
+/// `main`, the repository it arrives in.
+pub(crate) async fn arriving_task(
+    store: &SharedStore,
+    main: &Path,
+    task: &TaskId,
+    identifier: &str,
+) -> Result<Task> {
+    if let Some(saved) = store.get_task(task).await? {
+        return Ok(saved);
+    }
+    let found =
+        crate::ops::planning_sync::find_task(store, &main.to_string_lossy(), identifier).await?;
+    let acquired = match found {
+        Some(task) => task,
+        None => crate::ops::task::acquire_from_planning(main, identifier).await?,
+    };
+    anyhow::ensure!(
+        acquired.id == *task,
+        "{identifier} in {} is Task {}, not the moving Task {task}",
+        main.display(),
+        acquired.id
+    );
+    Ok(acquired)
 }
 
 /// Check out the moved branch in a worktree of this repository, admit the
@@ -526,8 +548,15 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let repository = match (&moved.checkout, &moved.task) {
         (Some(checkout), _) => checkout.repository_id.clone(),
         (None, Some(task)) => {
-            known_task(store, &task.task_id, &task.identifier)
+            store
+                .get_task(&task.task_id)
                 .await?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Task {} moved without a checkout and is unknown here",
+                        task.identifier
+                    )
+                })?
                 .repository_id
         }
         (None, None) => bail!("the move names neither a checkout nor a Task"),
@@ -574,7 +603,7 @@ async fn take_in_task(
     checkout: Option<&MovedCheckout>,
 ) -> Result<Task> {
     let name = &moved.identifier;
-    known_task(store, &moved.task_id, name).await?;
+    arriving_task(store, main, &moved.task_id, name).await?;
     store
         .sqlite
         .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;

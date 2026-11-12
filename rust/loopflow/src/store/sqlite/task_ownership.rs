@@ -714,6 +714,24 @@ impl SqliteStore {
         Ok(entry)
     }
 
+    /// Unfinished Tasks `machine` owns, each with when its claim reached it.
+    pub fn tasks_owned_by(&self, machine: &MachineId) -> StoreResult<Vec<(TaskId, i64)>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        super::rentals::tasks_held_in(&snapshot, machine)?
+            .into_iter()
+            .map(|task| {
+                let since = ownership_in(&snapshot, &task)?
+                    .log
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.machine_id.as_ref() == Some(machine))
+                    .map_or(0, |entry| entry.at);
+                Ok((task, since))
+            })
+            .collect()
+    }
+
     /// Take in an entry another Machine wrote, before planning delivers its comment.
     pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

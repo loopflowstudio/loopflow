@@ -28,11 +28,9 @@ lf machine remove builder
 its saved repository; Work-addressed commands carry a repository plan ID instead.
 `--forward-agent` requires `--machine`; `machine add` sets the saved default.
 
-Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
-Without `--repo`, add uses the local checkout's path relative to the local home.
-Absolute paths are accepted too. SSH aliases, `user@host` and SSH URIs are passed
-to OpenSSH. Add reads the remote identity itself; `--label` overrides the host name.
-The repository must already exist on the remote.
+SSH aliases, `user@host` and SSH URIs are passed to OpenSSH. Add reads the remote
+identity itself; `--label` overrides the host name. The label is Loopflow's, not
+OpenSSH's: `ssh mini` resolves only if `~/.ssh/config` names it too.
 
 List reads saved connections. Status checks without prompting and shows remote
 and local versions. Different versions produce an explicit remote update command;
@@ -139,11 +137,8 @@ it must not be hidden in a generic file edit. CLI and Desktop expose the same
 placement resolution and movement operations.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
-moves no existing Task; `lf task move <task> --machine <machine>` moves one. It
-stops the Task's Graph and its step Processes, commits and pushes its worktree,
-hands it off, and carries its Workflow position, history and primary Session; the
-new Machine checks out the branch and `lf task run` there runs the stopped route
-again. A worktree mid-merge or mid-rebase refuses to move.
+moves no existing Task; `lf task move <task> --machine <machine>` moves one (see
+[Move a Task between your Machines](#move-a-task-between-your-machines)).
 
 Forwarding stays within one person's Machines. Claim, handoff, unclaim,
 `task run`, `task checkout` and global `--task` pick their writer and re-check
@@ -233,6 +228,73 @@ when ownership changes; no process or checkout is moved. Status, file access
 and checkout-based Session/Process membership use that location. Unknown historical
 Machines stay unknown, and file access cannot treat their paths as local. Explicit
 Session bindings retain membership independently of checkout location.
+
+## Move a Task between your Machines
+
+Start on the laptop, send the Task to the always-on mini when the laptop is busy
+or about to close, and bring it back when you sit down again:
+
+```console
+$ lf task move MTG-321 --machine mini
+Checked mini: it can take MTG-321
+Stopped MTG-321 at `implement`
+Committed and pushed MTG-321 on mtg-321
+Arrived on mini (Graph at `implement`); its Session moved with it
+Running on mini as Graph process 0199a213-81c0-7800-8aa1-bbab2a035a55
+  follow: lf task status MTG-321
+```
+
+The Graph is running on mini when the command returns, from the step it was on.
+Moving back is the same command with `--machine laptop`, run from either Machine.
+
+**Reopen the conversation there.** The terminal that was showing the Task's
+Session ends it with `This conversation moved to mini: lf resume --task MTG-321`;
+that command opens it again from mini.
+
+**A running step starts over from the checkpoint.** The Task's primary Session
+travels with its transcript. A headless step that was mid-run, such as
+`implement`, is stopped, and mini runs that step again from the commit the move
+pushed: the step's edits arrive, its conversation does not. Programs the agent
+had started, such as a training job or a dev server, end on the laptop and are
+not restarted.
+
+**Nothing to prepare on mini.** A Machine that has never seen the Task takes it
+in from planning, and clones the repository when it has no checkout. A provider
+login it lacks is asked for in the foreground, as account-selected launches do.
+Both Machines need an `lf` that knows how to take a Task in; an older one fails
+the check, and nothing moves.
+
+**The laptop afterwards.**
+
+```console
+$ lf task status MTG-321
+…
+MTG-321  Runs on mini since Nov 12 10:42
+$ lf task list
+MTG-321 · Jack · Runs on mini since Nov 12 10:42 · Resume a Session anywhere
+$ lf machine list
+mini  mini.local  home_7c0d…
+  MTG-321 since Nov 12 10:42
+$ lf wt prune
+removed mtg-321  /Users/jack/src/project.mtg-321  (Task MTG-321 runs on mini)
+```
+
+`lf task status`, `lf task list` and `lf machine list` read where the Task runs
+from its ownership, not from the laptop's stopped records. The laptop's worktree
+stays until `lf wt prune`, which removes it once the Task is owned elsewhere and
+it has no source changes beyond what the move pushed; moving back checks the
+branch out again.
+
+**Failures.** A move refuses before anything stops when mini can't be reached or
+can't take the Task, or the worktree is mid-merge or mid-rebase; nothing changes.
+If the Task was sent but did not arrive, the error prints one retry command that
+delivers what was sent. A retried delivery does not restart the Graph; run
+`lf --machine mini task run MTG-321` after it arrives. If the Graph does not
+start on mini, the move still stands and the last line prints
+`lf task run MTG-321`, which starts it on the Task's owner.
+
+Auto-Ship approval does not travel: the continued run is a plain `lf task run`,
+which approves Auto-Ship only when no interactive step is left ahead.
 
 ## Own and rent Machines
 

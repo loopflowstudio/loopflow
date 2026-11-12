@@ -102,6 +102,41 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     }
 }
 
+/// Where a Task that another Machine owns runs, and since its claim reached
+/// that Machine: `Runs on mini since Nov 12 10:42`. `None` when `local` owns
+/// it or nobody does.
+pub fn runs_elsewhere(ownership: &TaskOwnership, local: &MachineId) -> Option<String> {
+    let owner = ownership.owner.as_ref()?;
+    let machine = owner
+        .machine
+        .id
+        .as_ref()
+        .filter(|machine| *machine != local)?;
+    let since = ownership
+        .log
+        .iter()
+        .rev()
+        .find(|entry| entry.machine_id.as_ref() == Some(machine))?;
+    let label = owner
+        .machine
+        .label
+        .clone()
+        .unwrap_or_else(|| machine.to_string());
+    Some(format!(
+        "Runs on {label} since {}",
+        crate::lf::output::format_time(since.at)
+    ))
+}
+
+/// [`runs_elsewhere`], read against this Machine's registry.
+pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String>> {
+    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
+        return Ok(None);
+    };
+    let local = store.sqlite.local_machine().map_err(message)?.id;
+    Ok(runs_elsewhere(ownership, &local))
+}
+
 pub fn render(ownership: &TaskOwnership) -> String {
     let mut lines = vec![match &ownership.owner {
         Some(owner) => format!("Owner: {owner}"),

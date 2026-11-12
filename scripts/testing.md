@@ -22,9 +22,10 @@ Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
 to regenerate and review snapshots for intended prompt changes before gate.
 
-After syncing, rerun affected tests when main changed APIs they call, even if
-Git merged cleanly. A passing check from before the sync does not cover that
-combination; renamed enum variants can leave new branch tests uncompilable.
+After the final sync, rerun affected tests and `cargo clippy --all-targets -- -D warnings`
+when the Rust tree changed, even if Git merged cleanly. Main can add callers or
+fixtures for APIs this branch changes. A passing check from before the sync
+does not cover that combination; new fixtures can omit fields this branch adds.
 
 CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
@@ -54,6 +55,9 @@ Creation receipt changes also run `test(local_planning::)`,
 `test(harness::fact_writer::tests::)` and
 `test(store::sqlite::sessions::metadata_tests::)`: recovery owners, turn attribution
 and metadata reads over historical detail all depend on it.
+Session completion or attachment changes also run
+`test(session_record::capture_tests::)`: a headless continuation reopens its
+Session while retaining the saved provider thread and completes again on exit.
 
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes

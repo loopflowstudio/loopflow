@@ -7,6 +7,7 @@ mod outbox;
 pub mod schema;
 mod service;
 mod subscriptions;
+mod wake;
 pub mod wire;
 
 use std::path::PathBuf;

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -19,7 +19,8 @@ pub struct SessionWorkspace {
     pub unavailable: Option<String>,
 }
 
-struct WorkspaceResolver {
+#[derive(Debug)]
+pub(super) struct WorkspaceResolver {
     home: MachineId,
     checkouts: Vec<TaskCheckout>,
     roots: HashMap<PathBuf, Option<PathBuf>>,
@@ -47,6 +48,18 @@ impl WorkspaceResolver {
             }
         }
         resolver
+    }
+
+    pub(super) fn in_task_checkout(&mut self, cwd: &Path, tasks: &HashSet<TaskId>) -> bool {
+        let root = self.root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        self.tasks_by_root
+            .get(&root)
+            .is_some_and(|ids| ids.iter().any(|id| tasks.contains(id)))
+            || self.checkouts.iter().any(|checkout| {
+                checkout.machine_id.as_ref() == Some(&self.home)
+                    && checkout.worktree == root
+                    && tasks.contains(&checkout.task_id)
+            })
     }
 
     fn root(&mut self, path: &Path) -> Option<PathBuf> {
@@ -115,7 +128,10 @@ impl WorkspaceResolver {
     }
 }
 
-pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
+pub(super) async fn associate(
+    store: &SharedStore,
+    sessions: &mut [SessionRecord],
+) -> Result<WorkspaceResolver> {
     // Both callers supply local registry Sessions without workspace projections.
     // A failed snapshot propagates: callers must retain their last good inventory.
     let checkouts = store.task_checkouts().await?;
@@ -145,7 +161,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
             }
         }
     }
-    Ok(())
+    Ok(resolver)
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ mod resume_explanation;
 pub(crate) use resume_explanation::explain_resume;
 pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
+mod turns;
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -449,6 +450,12 @@ pub struct SessionRecord {
     pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
+    /// Its current or last turn while it is live; `null` when nothing says.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub turn: Option<crate::transcript::live::SessionTurn>,
+    /// A conversation open here that Loopflow never launched; `id` is the
+    /// provider's conversation ID and no Session records it.
+    pub raw: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -552,16 +559,19 @@ pub(crate) async fn list(
     // Checkout resolution must precede Task filtering and pagination: SQL path
     // prefixes cannot recognize symlink aliases or nested repositories. Neither
     // can they judge capacity.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.blocked || filter.on.is_some();
+    let association_filter = filter.orphan
+        || filter.task.is_some()
+        || filter.wave.is_some()
+        || filter.blocked
+        || filter.on.is_some();
     let mut selection = filter.clone();
     if association_filter {
         selection.task = None;
+        selection.wave = None;
         selection.orphan = false;
         selection.blocked = false;
         selection.on = None;
         selection.limit = 0;
-        selection.offset = 0;
     }
     let on = match &filter.on {
         Some(raw) => Some(SessionOn::resolve(store, raw).await?),
@@ -573,30 +583,41 @@ pub(crate) async fn list(
     for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session, &capacity));
     }
-    workspace::associate(store, &mut sessions).await?;
+    let mut workspaces = workspace::associate(store, &mut sessions).await?;
+    turns::read(&store.sqlite, &mut sessions)?;
+    let task = match &filter.task {
+        Some(selector) => store.sqlite.resolve_task_id(selector, None)?,
+        None => None,
+    };
+    let in_task = |session: &SessionRecord| {
+        filter.task.is_none()
+            || task
+                .as_ref()
+                .is_some_and(|task| session.task_ids.contains(task))
+    };
+    let wave_tasks = match &filter.wave {
+        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
+        None => Default::default(),
+    };
+    let mut in_work = |session: &SessionRecord| {
+        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
+            && in_task(session)
+            && (filter.wave.is_none()
+                || session.wave_id == filter.wave
+                || session
+                    .task_ids
+                    .iter()
+                    .any(|task| wave_tasks.contains(task))
+                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
+    };
     if association_filter {
-        let task = if let Some(selector) = &filter.task {
-            store.sqlite.resolve_task_id(selector, None)?
-        } else {
-            None
-        };
         sessions.retain(|session| {
-            (!filter.orphan || session.task_ids.is_empty())
-                && (filter.task.is_none()
-                    || task
-                        .as_ref()
-                        .is_some_and(|task| session.task_ids.contains(task)))
+            in_work(session)
                 && (!filter.blocked || session.blocked)
                 && on.as_ref().is_none_or(|on| on.selects(session, &capacity))
         });
-        let offset = if filter.after.is_some() {
-            0
-        } else {
-            filter.offset
-        };
         sessions = sessions
             .into_iter()
-            .skip(offset)
             .take(if filter.limit == 0 {
                 usize::MAX
             } else {
@@ -604,7 +625,26 @@ pub(crate) async fn list(
             })
             .collect();
     }
+    if lists_raw(filter) {
+        let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
+        sessions.extend(
+            raw.into_iter()
+                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
+        );
+    }
     Ok(sessions)
+}
+
+/// Raw conversations list unless `--no-raw` asks otherwise. They have no
+/// account or page position, so a selection by any of those leaves
+/// them out. One open in a Task's checkout lists under that Task.
+fn lists_raw(filter: &crate::session::SessionFilter) -> bool {
+    filter.raw
+        && filter.primary.is_none()
+        && !filter.blocked
+        && filter.on.is_none()
+        && filter.search.is_none()
+        && filter.after.is_none()
 }
 
 /// Where a Session's step stands in its Graph: the last one a still-open Graph
@@ -624,14 +664,25 @@ fn graph_occurrence(
     }
 }
 
-/// One Session as `list` reads it; `None` once it is gone.
-pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+/// One conversation as `list` reads it: the Session with this ID, else the
+/// open raw conversation whose provider ID it is. `None` once it is gone.
+pub(crate) fn listed(
+    store: &SharedStore,
+    id: &str,
+    capacity: &LaunchCapacity,
+) -> Result<Option<SessionRecord>> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let capacity = LaunchCapacity::read(&store.sqlite)?;
-    Ok(store
+    let Some(mut session) = store
         .sqlite
         .session_summary(id, now)?
-        .map(|session| summary_surface(&session, &capacity)))
+        .map(|session| summary_surface(&session, capacity))
+    else {
+        return Ok(turns::raw(&store.sqlite, None)?
+            .into_iter()
+            .find(|raw| raw.id.as_str() == id));
+    };
+    turns::read(&store.sqlite, std::slice::from_mut(&mut session))?;
+    Ok(Some(session))
 }
 
 /// What `--on <account|harness[:model]>` names, resolved once before filtering.
@@ -793,6 +844,8 @@ fn summary_surface(
         ready_summary: session.ready_summary.clone(),
         open_argv,
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
+        turn: None,
+        raw: false,
     }
 }
 
@@ -1835,8 +1888,11 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv,
+        turn: None,
+        raw: false,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
+    turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;
     Ok(reading)
 }
 

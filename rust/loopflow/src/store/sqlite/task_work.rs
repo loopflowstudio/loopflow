@@ -23,15 +23,18 @@ fn checkout(cwd: &str) -> String {
     format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
-fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
-    let current = checkout(&format!("{process}.cwd"));
+fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
     // Read-only clients also inspect released databases before promotion.
     // Those schemas cannot have relocation receipts; leave them untouched.
-    let relocations: bool = conn.query_row(
+    Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
         [], |row| row.get(0),
-    )?;
-    Ok(if relocations {
+    )?)
+}
+
+fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
+    let current = checkout(&format!("{process}.cwd"));
+    Ok(if has_relocations(conn)? {
         format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
     } else {
         current
@@ -56,27 +59,50 @@ pub(super) fn session_ids(selector: &str) -> String {
 
 /// The Tasks a Session belongs to. A checkout holding the Session's cwd has
 /// that cwd or one of its ancestors as its worktree, so candidates come from
-/// `idx_tasks_worktree` rather than every Task; membership then decides.
+/// `tasks_checkout_root` rather than every Task. Explicit binding also counts.
 pub(super) fn session_tasks(session: &str) -> String {
+    // Probe checkout roots from the cwd outward. Keep paths lexical: repeated
+    // slashes and relative paths have the same meaning as in `checkout`. CROSS
+    // JOIN keeps ancestors outside the index probe instead of scanning Tasks.
     format!(
-        "SELECT tw.id FROM tasks tw WHERE (tw.id={session}.task_id OR tw.worktree IN (
-         WITH RECURSIVE up(path) AS (SELECT rtrim({session}.cwd,'/')
-           UNION ALL SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
-         SELECT path FROM up UNION ALL SELECT path||'/' FROM up))
-         AND {} ORDER BY tw.id",
-        session_membership(session)
+        "WITH RECURSIVE up(path) AS (
+            SELECT rtrim({session}.cwd,'/') WHERE {session}.primary_scope IS NULL
+            UNION ALL
+            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT id FROM tasks WHERE id={session}.task_id AND {session}.primary_scope IS NULL
+         UNION
+         SELECT tw.id FROM up CROSS JOIN tasks tw
+            ON tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+            AND rtrim(tw.worktree,'/')=up.path AND tw.worktree!=''
+         WHERE up.path!='' OR substr({session}.cwd,1,1)='/' OR {session}.cwd=''
+         ORDER BY id"
     )
 }
 
 pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
+    let (unmoved, relocated) = if has_relocations(conn)? {
+        (
+            "AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)",
+            "UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id",
+        )
+    } else {
+        ("", "")
+    };
     // History and attachments share one query-local membership; the partial
-    // index skips retained events that name no Process.
-    Ok(format!("WITH members AS MATERIALIZED ({})
-        SELECT ae.id FROM processes ae JOIN ({}) tw ON ({})
+    // index skips retained events that name no Process. In BINARY path order,
+    // [root+'/', root+'0') is exactly the descendants of root. CROSS JOIN keeps
+    // the selected checkouts outside the cwd probes; '%' and '_' stay literal.
+    Ok(format!("WITH members AS MATERIALIZED ({}), tw AS MATERIALIZED ({})
+        SELECT ae.id FROM tw CROSS JOIN processes ae
+        WHERE tw.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND tw.worktree!=''
+            AND (ae.cwd=rtrim(tw.worktree,'/') OR
+                (ae.cwd>=rtrim(tw.worktree,'/')||'/' AND ae.cwd<rtrim(tw.worktree,'/')||'0'))
+            {unmoved}
+        {relocated}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
-        session_ids(selector), tasks(selector), process_membership(conn, "ae")?))
+        session_ids(selector), tasks(selector)))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -111,11 +137,7 @@ pub(super) fn task_of_process(
 /// joins the checkout that is its directory or one of its ancestors, the same
 /// containment `checkout` tests from the other side.
 fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
-    let relocations: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?;
-    let (unmoved, relocated) = if relocations {
+    let (unmoved, relocated) = if has_relocations(conn)? {
         (
             "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
             "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id
@@ -595,11 +617,28 @@ impl SqliteStore {
         .collect()
     }
 
+    pub(crate) fn task_ids_in_wave(
+        &self,
+        wave: &crate::id::WaveId,
+    ) -> StoreResult<std::collections::HashSet<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id=?1",
+        )?;
+        let rows = statement.query_map([wave], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM tasks tw JOIN agent_sessions a ON a.id=?1 WHERE {} ORDER BY tw.id",
-            session_membership("a")
+            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
+             WHERE a.id=?1 ORDER BY tw.id",
+            session_tasks("a")
         ))?;
         let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
         rows.map(|row| {
@@ -982,6 +1021,332 @@ mod tests {
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn process_membership_upgrade_probes_cwd_and_session_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        use rusqlite::{types::Value, StatementStatus};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
+                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('member','Member','human',1,0,'/elsewhere','task_11111111111111111111111111111111');
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
+             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,kind)
+             SELECT printf('00000000-0000-4000-8000-%012x',i),
+                    printf('00000000-0000-4000-8000-%012x',i),'/unrelated/'||i,1,2,
+                    CASE WHEN i>3000 THEN 'agent' ELSE 'lf' END FROM n;
+             UPDATE processes SET cwd='/repo/task' WHERE id='00000000-0000-4000-8000-000000000001';
+             UPDATE processes SET cwd='/repo/task/sub' WHERE id='00000000-0000-4000-8000-000000000002';
+             UPDATE processes SET cwd='/repo/task-other' WHERE id='00000000-0000-4000-8000-000000000003';
+             INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+             VALUES('member','started','history','00000000-0000-4000-8000-000000000004',1,'{}');
+             UPDATE processes SET agent_session_id='member',attached_lf_process_id='00000000-0000-4000-8000-000000000005'
+                WHERE id='00000000-0000-4000-8000-000000001001';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             VALUES('task_11111111111111111111111111111111','00000000-0000-4000-8000-000000000006');",
+        ).unwrap();
+        let sql = format!(
+            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+            super::super::processes::PROCESS_SELECT,
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let width = query.column_count();
+            let rows = query
+                .query_map(["FIX-1"], |row| {
+                    (0..width)
+                        .map(|i| row.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (
+                rows,
+                query.get_status(StatementStatus::VmStep),
+                query.get_status(StatementStatus::FullscanStep),
+            )
+        };
+        let (before, before_steps, _) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps, scans) = read();
+        assert_eq!(after, before);
+        let ids: Vec<_> = after.iter().map(|row| row[0].clone()).collect();
+        assert_eq!(
+            ids,
+            [1, 2, 4, 5, 6, 4097].map(|i| Value::Text(format!("00000000-0000-4000-8000-{i:012x}")))
+        );
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        assert!(scans < 100, "fullscan steps: {scans}");
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["FIX-1"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for index in [
+            "processes_cwd (cwd=?)",
+            "processes_cwd (cwd>? AND cwd<?)",
+            "agent_process_session",
+        ] {
+            assert!(
+                plans.iter().any(|line| line.contains(index)),
+                "missing {index}: {plans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_process_membership_keeps_lexical_paths_and_relocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
+             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
+                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1),
+                ('task_22222222222222222222222222222222','repo_11111111111111111111111111111111',
+                'FIX-2','/other',(SELECT id FROM machines WHERE is_local=1),1);",
+        ).unwrap();
+        for cwd in [
+            None,
+            Some(""),
+            Some("/"),
+            Some("//"),
+            Some("/repo/task"),
+            Some("/repo/task/"),
+            Some("/repo/task//sub"),
+            Some("/repo/task-other"),
+            Some("/repo/task0"),
+            Some("relative/sub"),
+            Some("relative"),
+            Some("relative-other"),
+            Some("/repo/%_"),
+            Some("/repo/%_/é"),
+            Some("/repo/AB/x"),
+            Some("/repo//task/sub"),
+        ] {
+            let id = LfProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
+                params![id, cwd],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_22222222222222222222222222222222',id FROM processes WHERE cwd='/repo/task';
+             INSERT INTO relocated_task_processes(task_id,process_id)
+             SELECT 'task_11111111111111111111111111111111',id FROM processes WHERE cwd='/repo/AB/x';",
+        ).unwrap();
+        let original = format!(
+            "SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) ORDER BY ae.id",
+            super::tasks("?1"),
+            super::process_membership(&conn, "ae").unwrap()
+        );
+        let indexed = format!(
+            "SELECT id FROM ({}) ORDER BY id",
+            super::lf_process_ids(&conn, "?1").unwrap()
+        );
+        for root in [
+            "/repo/task",
+            "/repo/task/",
+            "/repo//task//",
+            "/repo/%_",
+            "relative/",
+            "/",
+            "///",
+            "",
+        ] {
+            for local in [true, false] {
+                conn.execute("UPDATE tasks SET worktree=?1,checkout_machine_id=CASE WHEN ?2 THEN (SELECT id FROM machines WHERE is_local=1) END WHERE issue_identifier='FIX-1'", params![root,local]).unwrap();
+                let read = |sql: &str| {
+                    conn.prepare(sql)
+                        .unwrap()
+                        .query_map(["FIX-1"], |row| row.get::<_, String>(0))
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap()
+                };
+                assert_eq!(
+                    read(&indexed),
+                    read(&original),
+                    "root={root:?}, local={local}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_membership_upgrade_probes_task_indexes() {
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "session_list_indexes");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
+             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)
+             INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at)
+             SELECT printf('task_%032x',i),'repo_11111111111111111111111111111111','FIX-'||i,'Task','/repo/'||i,
+                (SELECT id FROM machines WHERE is_local=1),1 FROM n;
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('probe','Probe','human',1,0,'/repo/999/sub','task_00000000000000000000000000000001');
+             UPDATE tasks SET primary_session_id='probe' WHERE worktree='/repo/999';"
+        ).unwrap();
+        let sql = format!(
+            "SELECT (SELECT json_group_array(id) FROM ({})),
+                EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=a.id)
+             FROM agent_sessions a WHERE id=?1",
+            super::session_tasks("a")
+        );
+        let read = || {
+            let mut query = conn.prepare(&sql).unwrap();
+            let result: (String, bool) = query
+                .query_row(["probe"], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap();
+            (result, query.get_status(rusqlite::StatementStatus::VmStep))
+        };
+        let (before, before_steps) = read();
+        apply_pending_migrations(&conn);
+        let (after, after_steps) = read();
+        assert_eq!(after, before);
+        assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
+        assert!(
+            after_steps < before_steps / 4,
+            "VM steps: {before_steps} -> {after_steps}"
+        );
+        let plans: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(["probe"], |row| row.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("tasks_checkout_root") && line.contains("<expr>=?")),
+            "{plans:?}"
+        );
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("tasks_primary_session")),
+            "{plans:?}"
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn reverse_session_membership_keeps_lexical_checkout_and_binding_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let repository = store.ensure_repository("/repo").unwrap();
+        let remote = crate::durable::MachineId::new();
+        store.add_machine(&remote, "remote", "remote").unwrap();
+        let roots = [
+            Some("/"),
+            Some("/repo"),
+            Some("/repo/task///"),
+            Some("/repo/task/nested"),
+            Some("/repo//task"),
+            Some("relative"),
+            Some("relative//nested/"),
+            Some("/literal%_"),
+            Some(""),
+            None,
+            Some("/foreign"),
+        ];
+        let tasks: Vec<_> = roots.iter().map(|_| TaskId::new()).collect();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (index, (id, root)) in tasks.iter().zip(roots).enumerate() {
+                conn.execute(
+                    "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at)
+                     VALUES(?1,?2,?1,'Task',?3,CASE WHEN ?4 THEN ?5 ELSE (SELECT id FROM machines WHERE is_local=1) END,1)",
+                    params![id.as_str(), repository.as_str(), root, index == 10, remote.as_str()],
+                ).unwrap();
+            }
+        }
+        let mut case = 0;
+        for (cwd, expected) in [
+            ("/repo/task/nested/file", vec![0, 1, 2, 3]),
+            ("/repo/task///", vec![0, 1, 2]),
+            ("/repo/task//nested/file", vec![0, 1, 2]),
+            ("/repo//task/file", vec![0, 1, 4]),
+            ("/repo/task-other", vec![0, 1]),
+            ("/repository", vec![0]),
+            ("relative//nested/file", vec![5, 6]),
+            ("relative/", vec![5]),
+            ("elsewhere", vec![]),
+            ("", vec![0]),
+            ("///", vec![0]),
+            ("/literal%_/file", vec![0, 7]),
+            ("/literalAB/file", vec![0]),
+            ("/foreign/file", vec![0]),
+        ] {
+            for binding in [None, Some(2), Some(8), Some(9), Some(10)] {
+                for scope in [None, Some("repository"), Some("wave")] {
+                    let session = format!("lexical-{case}");
+                    case += 1;
+                    {
+                        let conn = store.conn.lock().unwrap();
+                        conn.execute(
+                            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,primary_scope,interactive)
+                             VALUES(?1,'Lexical','human',1,0,?2,?3,?4,1)",
+                            params![session, cwd, binding.map(|index| tasks[index].as_str()), scope],
+                        ).unwrap();
+                        super::super::sessions::test_capture(
+                            &conn,
+                            &session,
+                            &crate::session_record::new_artifact_key(),
+                        );
+                        conn.execute(
+                            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+                            params![tasks[2].as_str(), session],
+                        )
+                        .unwrap();
+                    }
+                    let mut ids: Vec<_> = if scope.is_none() {
+                        expected
+                            .iter()
+                            .copied()
+                            .chain(binding)
+                            .map(|index| tasks[index].clone())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+                    ids.dedup();
+                    assert_eq!(
+                        store.session_task_ids(&session).unwrap(),
+                        ids,
+                        "{cwd:?}, {binding:?}, {scope:?}"
+                    );
+                    let summary = store.session_summary(&session, 0).unwrap().unwrap();
+                    assert_eq!(summary.task_ids, ids);
+                    assert!(summary.task_primary);
+                }
+            }
+        }
+        assert!(store.session_task_ids("missing").unwrap().is_empty());
+    }
 
     #[test]
     fn request_stop_retains_its_person_without_an_os_process() {
@@ -1676,7 +2041,8 @@ mod tests {
             after: Some(String::new()),
             ..Default::default()
         };
-        for expected in ["b-repo", "c-wave", "d-orphan"] {
+        // A Wave conversation has a `wave_id`, so it is not an orphan.
+        for expected in ["b-repo", "d-orphan"] {
             let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
@@ -1836,14 +2202,19 @@ mod tests {
             .session_summaries(
                 &SessionFilter {
                     task: Some("PROOF-1".into()),
-                    interactive: None,
-                    history: true,
+                    headless: true,
                     ..Default::default()
                 },
                 0,
             )
             .unwrap();
-        assert_eq!(summaries.len(), work.sessions.len());
+        assert_eq!(
+            summaries.len(),
+            work.sessions
+                .iter()
+                .filter(|session| session.completed_at.is_none())
+                .count()
+        );
         assert!(summaries
             .iter()
             .all(|session| session.task_ids == std::slice::from_ref(&task)));

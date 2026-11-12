@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{OsProcess, ProcessIdentityEvidence};
-use crate::session_record::{late_usage_key, merge_native_usage, native_usage_key};
+use crate::session_record::{native_baseline, native_peak, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
 const PROCESS_BATCH: i64 = 10_000;
@@ -208,6 +208,44 @@ fn native_turn_merges(
     Ok(merges)
 }
 
+/// The key of native usage receipts that arrived after the thread's next turn
+/// began at `started`.
+fn late_usage_key(key: &str, started: i64) -> String {
+    format!("{key}:after:{started}")
+}
+
+/// Merge a later native usage receipt into the retained one. Codex reports
+/// thread-cumulative `total` and the latest request as `last`: the turn keeps
+/// its first receipt's baseline (`total - last`), the largest total of each
+/// counter, whether any counter ever went backwards, and its largest request.
+/// Other providers report the turn's or message's own cumulative counter.
+fn merge_native_usage(saved: &serde_json::Value, later: &serde_json::Value) -> serde_json::Value {
+    let mut merged = later.clone();
+    if later.get("total").is_some() {
+        merged["baseline"] = native_baseline(saved);
+        merged["peakInputTokens"] = native_peak(saved).max(native_peak(later)).into();
+        let mut regressed = saved["regressed"] == true;
+        if let Some(totals) = merged["total"].as_object_mut() {
+            for (key, total) in totals {
+                if let Some(saved) = saved["total"][key.as_str()].as_u64() {
+                    regressed |= total.as_u64().is_some_and(|later| later < saved);
+                    *total = total
+                        .as_u64()
+                        .map_or(saved, |later| later.max(saved))
+                        .into();
+                }
+            }
+        }
+        if regressed {
+            merged["regressed"] = true.into();
+        }
+    }
+    if saved["final"] == true {
+        merged["final"] = true.into();
+    }
+    merged
+}
+
 fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult<u64> {
     let columns = super::processes::PROCESS_SELECT
         .strip_suffix(" FROM processes e")
@@ -249,14 +287,20 @@ fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult
         let at = booted_at
             .filter(|booted_at| process.started_at() < *booted_at)
             .unwrap_or(now);
-        closed += conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        let closed_here = tx.execute(
             "UPDATE processes SET completed_at=?2,
                  spawn_state=CASE WHEN kind!='agent' THEN spawn_state
                      WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
                  endpoint=NULL
              WHERE id=?1 AND completed_at IS NULL AND pid IS ?3 AND os_started_at IS ?4",
             params![process.id(), at, process.pid(), process.os_started_at()],
-        )? as u64;
+        )?;
+        if closed_here > 0 {
+            super::processes::complete_dead_headless_run_in(&tx, process.id(), at)?;
+        }
+        tx.commit()?;
+        closed += closed_here as u64;
     }
     Ok(closed)
 }
@@ -488,6 +532,49 @@ mod tests {
                 (id(3), None, None),
                 (id(6), Some(now), Some("succeeded".into())),
             ]
+        );
+    }
+
+    #[test]
+    fn prune_moves_a_headless_run_with_a_dead_agent_process_to_history() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let exited = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut child| child.wait().map(|_| child.id()))
+            .unwrap();
+        for (session, process, interactive) in [
+            ("run", "00000000-0000-4000-8000-000000000001", false),
+            ("conversation", "00000000-0000-4000-8000-000000000002", true),
+        ] {
+            store.test_session(session, &crate::session_record::new_artifact_key());
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,pid,started_at,kind,agent_session_id)
+                 VALUES(?1,?1,?2,?3,'agent',?4)",
+                rusqlite::params![process, exited, now, session],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET agent_process_id=?2,interactive=?3 WHERE id=?1",
+                rusqlite::params![session, process, interactive],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(prune(&path, now).unwrap().closed_processes, 2);
+        let completed: Vec<(String, Option<i64>)> = conn
+            .prepare("SELECT id,completed_at FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            completed,
+            [("conversation".into(), None), ("run".into(), Some(now))]
         );
     }
 }

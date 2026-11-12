@@ -12,7 +12,7 @@ use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::harness::HarnessKind;
 use crate::session::LfSession;
 use crate::store::sqlite::SqliteStore;
-use crate::transcript::{self, RequestSource, Turn};
+use crate::transcript::{self, RequestSource, Turn, TurnItem};
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;
@@ -79,51 +79,48 @@ fn excerpt(log: &str) -> String {
 /// agent said, one line per tool call, and the tail of each failure.
 fn render(turns: &[Turn]) -> String {
     let mut markdown = String::new();
-    for turn in turns {
-        let request = turn
-            .request
-            .as_ref()
-            .and_then(|request| match request.from {
-                RequestSource::Person => Some(request.text.clone()),
-                RequestSource::Injected => {
-                    transcript::Launch::parse(&request.text).map(|launch| launch.text())
-                }
-            });
-        if let Some(text) = request {
-            markdown.push_str(&format!("## user\n\n{}\n\n", text.trim()));
-        }
-        for item in &turn.items {
-            match item {
-                ConversationItem::Message { text, .. } => {
-                    markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
-                }
-                ConversationItem::Tool {
-                    name,
-                    status,
-                    input,
-                    output,
-                    ..
-                } => {
-                    let input = match input {
-                        Some(Value::String(input)) => input.clone(),
-                        Some(input) => input.to_string(),
-                        None => String::new(),
-                    };
-                    let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
-                    markdown.push_str(&format!(
-                        "- tool: {name} {}\n",
-                        head(&input, TOOL_INPUT_CHARS)
-                    ));
-                    if *status == Lifecycle::Failed {
-                        markdown.push_str(&format!(
-                            "  failed: {}\n",
-                            failure(output.as_deref().unwrap_or_default())
-                        ));
+    for item in turns.iter().flat_map(|turn| &turn.items) {
+        match item {
+            TurnItem::Request(request) => {
+                let text = match request.from {
+                    RequestSource::Person => Some(request.text.clone()),
+                    RequestSource::Injected => {
+                        transcript::Launch::parse(&request.text).map(|launch| launch.text())
                     }
-                    markdown.push('\n');
+                };
+                if let Some(text) = text {
+                    markdown.push_str(&format!("## user\n\n{}\n\n", text.trim()));
                 }
-                _ => {}
             }
+            TurnItem::Agent(ConversationItem::Message { text, .. }) => {
+                markdown.push_str(&format!("## assistant\n\n{}\n\n", text.trim()))
+            }
+            TurnItem::Agent(ConversationItem::Tool {
+                name,
+                status,
+                input,
+                output,
+                ..
+            }) => {
+                let input = match input {
+                    Some(Value::String(input)) => input.clone(),
+                    Some(input) => input.to_string(),
+                    None => String::new(),
+                };
+                let input = input.split_whitespace().collect::<Vec<_>>().join(" ");
+                markdown.push_str(&format!(
+                    "- tool: {name} {}\n",
+                    head(&input, TOOL_INPUT_CHARS)
+                ));
+                if *status == Lifecycle::Failed {
+                    markdown.push_str(&format!(
+                        "  failed: {}\n",
+                        failure(output.as_deref().unwrap_or_default())
+                    ));
+                }
+                markdown.push('\n');
+            }
+            TurnItem::Agent(_) => {}
         }
     }
     markdown
@@ -236,7 +233,7 @@ mod tests {
 
     #[test]
     fn opencode_log_keeps_conversation_and_failures_only() {
-        let export = serde_json::json!({"messages":[
+        let messages = serde_json::json!([
             {"type":"user","text":"Fix the build\n\n<lf:loopflow>rules</lf:loopflow>"},
             {"type":"synthetic","text":"injected file"},
             {"type":"assistant","content":[
@@ -244,8 +241,8 @@ mod tests {
                 {"type":"text","text":"Checking status."},
                 {"type":"tool","id":"c1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"listing output"}]}},
                 {"type":"tool","id":"c2","name":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
-        ]});
-        let text = &render(&transcript::opencode::turns(&export));
+        ]);
+        let text = &render(&transcript::opencode::read(messages.as_array().unwrap()));
         assert!(text.contains("## user\n\nFix the build"));
         assert!(text.contains("## assistant\n\nChecking status."));
         assert!(text.contains(r#"- tool: bash {"command":"ls"}"#));

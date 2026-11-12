@@ -435,8 +435,8 @@ fn prepare_task_input(
         } else {
             crate::store::open_store(&crate::store::storage_config_from_env()?).await?
         });
-        // The launch reads local state; the Task updates observer syncs this
-        // Task with its tracker after the provider starts.
+        // The launch reads local state; each turn end's planning refresh
+        // syncs this Task with its tracker.
         let task = store
             .get_task_by_issue(id)
             .await?

@@ -273,7 +273,7 @@ mod tests {
         let filter = SessionFilter {
             available: true,
             limit: 1,
-            interactive: None,
+            headless: true,
             ..SessionFilter::default()
         };
         assert_eq!(store.session_summaries(&filter, 500).unwrap().len(), 1);

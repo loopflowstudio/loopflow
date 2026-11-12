@@ -557,6 +557,7 @@ for arg in "$@"; do
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
+printf '%s' "$LF_PROVIDER_CONTEXT" > "$HOME/provider-context"
 cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
@@ -603,6 +604,7 @@ exit 23
     assert!(!instructions.contains("CURRENT_SCRATCH"));
     assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
     assert!(!instructions.contains("Saved active skill."));
+    assert!(!instructions.contains("This Session:"));
     assert!(!raw.contains("model_instructions_file"));
     assert!(!raw.contains("dangerously-bypass-hook-trust"));
     let input = fs::read_to_string(home.path().join("input")).unwrap();
@@ -619,23 +621,41 @@ exit 23
             .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
             .collect()
     };
+    let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
+    let adapter: loopflow::steer::SteerAdapter = serde_json::from_str(&provider_context).unwrap();
+    let identity = format!("This Session: {}\n", adapter.session);
+    assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
         let callback = callbacks
             .iter()
             .find(|callback| callback.ends_with(&format!(" {moment}")))
             .unwrap();
-        let output = Command::new("/bin/sh")
+        let mut child = Command::new("/bin/sh")
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_PROVIDER_CONTEXT", &provider_context)
             .env(
                 "LF_CONTEXT_DELIVERY",
                 fs::read_to_string(home.path().join("delivery-path")).unwrap(),
             )
             .current_dir(repo.path())
             .args(["-c", callback])
-            .output()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                br#"{"session_id":"native-context-fixture","hook_event_name":"SessionStart"}"#,
+            )
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -648,6 +668,7 @@ exit 23
             .to_string()
     };
     let first = invoke("start");
+    assert!(first.starts_with(&identity), "{first}");
     assert!(first.contains("CURRENT_SCRATCH"));
     assert!(first.contains("CURRENT_WAVE_MEMORY"));
     assert!(!first.contains("Saved active skill.\n"));
@@ -657,6 +678,7 @@ exit 23
     repo.create_file("scratch/small.md", "FRESH_SCRATCH");
     repo.create_file(".lf/wave/fixture/MEMORY.md", "FRESH_WAVE_MEMORY");
     let compact = invoke("compact");
+    assert!(compact.starts_with(&identity), "{compact}");
     assert!(compact.contains("FRESH_WAVE_MEMORY"));
     assert!(!compact.contains("CURRENT_WAVE_MEMORY"));
     assert!(compact.contains("FRESH_SCRATCH"));
@@ -749,6 +771,13 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains(&content));
+    let database = rusqlite::Connection::open(home.path().join("machine/loopflow.db")).unwrap();
+    let session: String = database
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let instructions = thread["params"]["developerInstructions"].as_str().unwrap();
+    assert!(!instructions.contains(&session));
+    assert!(!instructions.contains("This Session:"));
     // The actual emitted hook runs with no launch-delivery environment. Codex's
     // app-server supplies native thread identity on stdin, including compaction.
     for (group, expected) in [(0, "start"), (1, "compact")] {
@@ -781,10 +810,15 @@ while read -r line; do :; done
             String::from_utf8_lossy(&output.stderr)
         );
         let context: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(context["hookSpecificOutput"]["additionalContext"]
+        let text = context["hookSpecificOutput"]["additionalContext"]
             .as_str()
-            .unwrap()
-            .contains("ONLY_THREAD_FIXTURE_CONTEXT"));
+            .unwrap();
+        assert!(
+            text.starts_with(&format!("This Session: {session}\n")),
+            "{text}"
+        );
+        assert!(!text.contains("This Session's Task:"));
+        assert!(text.contains("ONLY_THREAD_FIXTURE_CONTEXT"));
     }
     let turn: serde_json::Value =
         serde_json::from_slice(&fs::read(home.path().join("turn-request")).unwrap()).unwrap();

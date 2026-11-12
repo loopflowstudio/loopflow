@@ -19,8 +19,11 @@ printf '{"hookSpecificOutput":{"additionalContext":"%s"}}' "$(cat '${contextFile
   const source = readFileSync(new URL(
     "../../../rust/loopflow/src/harness/context_opencode.js", import.meta.url,
   ), "utf8");
+  const server = readFileSync(new URL(
+    "../../../rust/loopflow/src/harness/server_connection.js", import.meta.url,
+  ), "utf8");
   const path = join(root, "plugin.mjs");
-  writeFileSync(path, `const spec = ${JSON.stringify(spec)}; const delivery = 'fixture';\n${source}`);
+  writeFileSync(path, `const spec = ${JSON.stringify(spec)}; const delivery = 'fixture';\n${server}\n${source}`);
   const plugin = (await import(path)).default;
   const hooks = new Map();
   const dispose = await plugin.setup({

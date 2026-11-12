@@ -1214,6 +1214,158 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
 }
 
 #[test]
+fn task_run_open_resolves_remote_selectors_before_opening_locally() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let home = fixture.root.path().join("local");
+    let here = loopflow_test_support::TestRepo::new();
+    let selected = loopflow_test_support::TestRepo::new();
+    for repo in [&here, &selected] {
+        support::bind_task_planning(repo);
+        repo.create_branch("opening");
+    }
+    let local = support::register_task_without_pr(
+        &home,
+        &here.path().canonicalize().unwrap(),
+        "opening",
+        &here.head_sha(),
+    );
+    let target = support::register_task_without_pr(
+        &home,
+        &selected.path().canonicalize().unwrap(),
+        "opening",
+        &selected.head_sha(),
+    );
+    assert_ne!(local.task.id, target.task.id);
+    // Both repositories call their Task INF-123. The local cwd selects the
+    // other Task; the remote response must carry the exact identity back.
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    db.execute(
+        "INSERT INTO agent_sessions(
+            id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd,provider
+         ) VALUES('remote-selected-primary','Task conversation','generated',unixepoch(),1,1,?1,?2,?3,'claude')",
+        rusqlite::params![
+            target.task.id.as_str(),
+            target.task.wave_id.as_ref().unwrap().as_str(),
+            selected.path().to_str().unwrap(),
+        ],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id='remote-selected-primary' WHERE id=?1",
+        [target.task.id.as_str()],
+    )
+    .unwrap();
+    let resolution = fixture
+        .command(&["--task", target.task.id.as_str(), "--explain", "--json"])
+        .current_dir(selected.path())
+        .output()
+        .unwrap();
+    assert_success(&resolution);
+    let resolution: Value = serde_json::from_slice(&resolution.stdout).unwrap();
+    assert_eq!(resolution["task"]["value"], target.task.id.as_str());
+    let remote = fixture.root.path().join("remote");
+    fs::write(
+        remote.join("selection.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "resolution": resolution, "action": null, "impediments": [], "unavailable": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // Simulate the remote command at the SSH boundary. These paths and
+    // worktree names deliberately do not exist on the presentation Machine.
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            r#"#!/bin/sh
+case "$1 $2" in
+  '--version ') echo 'lf {version}'; exit 0;;
+  'machine id') echo 'home_11111111111111111111111111111111'; exit 0;;
+esac
+case " $* " in
+  *' --explain '*)
+    test -e "$HOME/launched" || exit 91
+    test ! -e "$HOME/read-fails" || exit 93
+    cat "$HOME/selection.json";;
+  *' task run '*)
+    touch "$HOME/launched"
+    echo 'Task INF-123 waits at review';;
+  *) exit 92;;
+esac
+"#,
+            version = loopflow::build_info::BUILD_VERSION
+        ),
+    );
+    let attach = home.join("lf-attach");
+    executable(
+        &attach,
+        &format!(
+            r#"#!/bin/sh
+if [ "$1 $2 $3" = 'session resume --start-if-free' ]; then
+  printf '%s\n' "$4" > "$LF_HOME/opened"
+  pwd -P > "$LF_HOME/opened-cwd"
+  exit 0
+fi
+exec '{}' "$@"
+"#,
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    );
+    for selection in [
+        vec!["task", "run", "INF-123", "--open"],
+        vec!["task", "run", "--open"],
+        vec!["task", "run", "--open", "--json"],
+        vec!["task", "run", "--open", "--", "INF-123"],
+        vec!["--cwd", "/remote-only/checkout", "task", "run", "--open"],
+        vec!["--wt", "remote-worktree", "task", "run", "--open"],
+    ] {
+        let mut args = vec!["--machine", "mini", "--repo", "/remote-only/repo"];
+        args.extend(selection);
+        let output = fixture
+            .command(&args)
+            .current_dir(here.path())
+            .env("LF_BIN", &attach)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+        assert_eq!(
+            fs::read_to_string(home.join("opened"))
+                .unwrap_or_else(|error| panic!("{args:?}: {error}; {output:?}"))
+                .trim(),
+            "remote-selected-primary"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("opened-cwd")).unwrap().trim(),
+            selected.path().canonicalize().unwrap().to_str().unwrap()
+        );
+        fs::remove_file(home.join("opened")).unwrap();
+        fs::remove_file(remote.join("launched")).unwrap();
+    }
+    fs::write(remote.join("read-fails"), "").unwrap();
+    let output = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "--repo",
+            "/remote-only/repo",
+            "task",
+            "run",
+            "--open",
+        ])
+        .current_dir(here.path())
+        .env("LF_BIN", &attach)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(remote.join("launched").exists());
+    assert!(!home.join("opened").exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("selection could not be read"));
+}
+
+#[test]
 fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() {
     let fixture = preview_machines();
     let remote = fixture.root.path().join("remote");

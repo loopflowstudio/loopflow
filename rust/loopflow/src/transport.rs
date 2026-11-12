@@ -77,18 +77,23 @@ pub(crate) fn provider_exit_code(status: std::process::ExitStatus) -> u8 {
 
 /// A handed-off exit being recorded off the serve loop. Its records wait on
 /// the store; the person's terminal waits only `SETTLE_WAIT` for them, then
-/// gets the provider's own exit back.
+/// gets the provider's own exit back, or a move already judged by the owner.
 struct Settling {
     settled: mpsc::Receiver<Settled>,
     since: Instant,
-    code: u8,
+    fallback: Settled,
     process: String,
     /// The terminal has its exit; only the records are still being written.
     delivered: bool,
 }
 
 impl Settling {
-    fn spawn(record: Box<NativeExit>, status: std::process::ExitStatus, waker: UnixStream) -> Self {
+    fn spawn(
+        record: Box<NativeExit>,
+        status: std::process::ExitStatus,
+        waker: UnixStream,
+        departure: Option<Settled>,
+    ) -> Self {
         let process = format!(
             "lf/{}",
             record
@@ -105,7 +110,10 @@ impl Settling {
         Self {
             settled,
             since: Instant::now(),
-            code: provider_exit_code(status),
+            fallback: departure.unwrap_or_else(|| Settled {
+                code: provider_exit_code(status),
+                lines: Vec::new(),
+            }),
             process,
             delivered: false,
         }
@@ -124,10 +132,10 @@ impl Settling {
             Ok(settled) => settled,
             Err(mpsc::TryRecvError::Empty) if Instant::now() < deadline => return None,
             Err(_) => {
-                tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with the provider's own exit");
+                tracing::warn!(process = self.process, "exit records are still being written; returning the terminal with its known outcome");
                 Settled {
-                    code: self.code,
-                    lines: Vec::new(),
+                    code: self.fallback.code,
+                    lines: std::mem::take(&mut self.fallback.lines),
                 }
             }
         };
@@ -3159,6 +3167,25 @@ mod tests {
         // Any line the relay prints leaves the screen at no PTY position.
         output.drew();
         assert_eq!(from(output.recover(true, true)), None);
+    }
+
+    #[test]
+    fn slow_exit_recording_keeps_an_already_observed_move() {
+        let (_sender, settled) = std::sync::mpsc::channel();
+        let mut settling = super::Settling {
+            settled,
+            since: std::time::Instant::now() - super::SETTLE_WAIT,
+            fallback: crate::harness::native_exit::Settled {
+                code: 0,
+                lines: vec!["This conversation moved to tmux %9".into()],
+            },
+            process: "test".into(),
+            delivered: false,
+        };
+        let outcome = settling.poll().unwrap();
+        assert_eq!(outcome.code, 0);
+        assert_eq!(outcome.lines, ["This conversation moved to tmux %9"]);
+        assert!(settling.poll().is_none());
     }
 
     #[test]

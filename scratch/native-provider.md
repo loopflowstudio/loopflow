@@ -87,6 +87,18 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 
 ## Remaining
 
+- Sync onto main, after LOO-823 (#1877) and LOO-824 (#1887) sync (both open,
+  November 11). Main gained #1880 (LOO-822's transcript reader: launcher exit
+  reads record usage and completions without the server; raw provider
+  conversations listed), #1885, #1890, #1893, #1894. `git merge-tree HEAD
+  origin/main` at `d8db655b0e` conflicts in 15 files, among them
+  `agent/mod.rs`, `agent/session.rs`, `lf/commands/util.rs`, `transport.rs`,
+  `transport/lifetime.rs`, `harness/claude.rs`, `harness/context.rs`,
+  `session.rs`, `docs/dev/server-first.md`. After sync, check: a bare launch's
+  usage and completion rows come from #1880's exit read; Pi's
+  `*_<id>.jsonl` resolution is one resolver with #1880's Pi reader; whether
+  #1880's raw pairing covers bare Codex with no hooks (item below).
+
 - Bare Codex has no end-to-end fixture of the hook → thread → `lf resume`
   path; unit tests cover the argv and Pi resolution only. Codex 0.167.1's
   hook input has `session_id` (strings in the binary), not run live.
@@ -189,3 +201,4 @@ compaction), which loses nothing.
 - realign 6: no tests; QA's three items are in `2d972e033d`/`79b456f453` (grep: the "another client" hint only on the held arm of `util.rs`, `end_leader`, both new tests). The parent's merge (holder moved under `server/`) changes nothing here.
 - concept review 4: no tests; design-only (one bare exit status, above). The steer question and pre-LOO-824 primaries stay as written in Open.
 - compress 6: production code already had one decider (`bare_exit_code`); the two PTY tests share `spawn_in_terminal` and `bare_claude` (79+/126−). `--test integration session_cli_tests::a_` 2 passed; clippy, fmt clean.
+- realign 7: no tests; `bare_exit_code` backs all three paths (`agent/mod.rs` `run_interactive`, `util.rs` `run_native_agent` and `result`, `run.rs` bare return), `a_hung_up_bare_provider_exits_lf_with_its_own_status` present. Main moved 5 PRs; sync recorded in Remaining.

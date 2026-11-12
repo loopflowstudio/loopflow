@@ -67,4 +67,5 @@ dominating after the lock fix, one repository refresh per tick is the next cut.
 - `cargo clippy --all-targets -- -D warnings` — clean
 - compress (doc comment fix, `has_unrouted_changes` helper): `cargo test -p loopflow --lib -- store::sqlite::planning_peers:: wave_sync_without_an_initiative` — 5 passed; clippy clean
 - planning revision triggers: `cargo test -p loopflow --lib store::sqlite::revisions::` — 9 passed; `-- store::sqlite:: linear::acceptance:: store::tests::` — 308 passed; clippy clean
+- compress (after triggers): no edits; frame `observed_at` stripping stays because rebuilds from other domains still carry restamped values; no rerun
 - gate: `documented_commands::`, `lf::tests::`, `wave_resolution_matrix::`, `local_planning::`, `binary(two_people)`, `binary(transport_tests)` (store trigger/schema)

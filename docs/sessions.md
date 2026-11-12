@@ -110,10 +110,12 @@ exits, `lf` reads its transcript, records usage and completion in
 | Steers | arrive when it is next started or resumed, not mid-turn |
 | Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
 
-This covers bare interactive conversations:
-`lf <skill>`, `lf -i`, bare `lf`, and the same commands typed in
-a Desktop shell. A conversation that should outlive its terminal or be open in
-several places belongs to a Task, Wave or repository; those run in a
+This covers bare interactive conversations typed at a terminal:
+`lf <skill>`, `lf -i`, bare `lf` and bare Graphs. The same commands typed in a
+Desktop shell still start an `lf session serve` owner under the agent, because
+the shell sets `LF_SERVER_STATUS` for Desktop's relay handshake; that ends when
+the handshake goes. A conversation that should outlive its terminal or be open
+in several places belongs to a Task, Wave or repository; those run in a
 [holder](#keep-working-through-an-update).
 
 ## Keep working through an update
@@ -142,8 +144,8 @@ holder once.
 | `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
-| `lf <skill>`, `lf -i`, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
-| bare Graphs, anything with `-b`, a pipe or `--json` | its own process, as before |
+| `lf <skill>`, `lf -i`, bare Graphs, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
+| anything with `-b`, a pipe or `--json`, including a bare Graph's `-b` steps | its own process, as before |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations

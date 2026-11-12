@@ -122,24 +122,6 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 - The hook spec key is `turns` (`harness/context.rs`, `context_opencode.js`,
   `context_pi.mjs`).
 
-## Next implement: docs match the decider (concept review 2)
-
-`docs/sessions.md` tells people two things `transport::delegate` does not do.
-
-- "Run one in your terminal" lists "the same commands typed in a Desktop
-  shell", and troubleshooting says "An `lf <skill>` run has none" (no
-  `lf session serve`). A Desktop pane sets `LF_SERVER_STATUS`, so
-  `runs_in_terminal` is false and the launch keeps an owner
-  (`Holder::Owner`). Say a Desktop shell keeps its owner until the "Every
-  view types" row removes the handshake; drop it from the direct list.
-- "Where a conversation runs" puts "bare Graphs" with `-b`/pipe/`--json` as
-  "its own process, as before". By item 5 a bare Graph typed at a terminal
-  runs there; only its headless `-b` steps keep owners. Move bare Graphs to
-  the "your terminal" row.
-
-No code change. `Holder::Owner` stays the one name for the Desktop-shell
-and framed-viewer exception; it disappears with that row, not here.
-
 ## Open
 
 Repository and Wave primaries record `WorkSource::Declared` since LOO-824's
@@ -167,6 +149,7 @@ compaction), which loses nothing.
 - Holder: `cargo test --lib` `harness::context::` 11, `context_block::` 12, `harness::agent_process::` 19 (fixture now a Task's Session: a bare one resumes beside its stale attachment), `session_record::capture_tests::` 26, `ops::human_session::` 43 — pass; `--test integration session_steers::` 9 pass; `--test session_launch_contract` 29/30 twice, a different fixture each time (server-start timeout, pid count) at load 25, each passes alone — gate reruns; clippy, fmt, `documented_commands::` clean.
 - implement 3 (one decider, Pi, Codex): `cargo test --lib` `ops::human_session::` + `harness::context::` + `lf::commands::graph::` + resume — 63 passed; `pi_` — 32 passed (new `bare_pi_names_its_thread_and_resumes_it_by_that_id`); `agent::` + `harness::context::` + `harness::codex` + `lf::commands::context::` + `lf::commands::util::` — 112 passed (new `bare_codex_runs_plain_codex_and_a_held_one_keeps_its_app_server`); `--test session_launch_contract` 29/30, the failing `a_running_claude_named_onto_another_login…` passes alone (pid-count flake seen before); `documented_commands::` 4 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.
 - compress 3: `configure_hooks` returns its delivery path (no env lookup for the Codex `.thread` file; the hook's `launched` test dropped, the file's existence is the request); `delegate` returns early on `cfg!(test)`, no `#[cfg(test)]` arm or `dead_code` allows. clippy clean; `--lib` `harness::context::` 11, `lf::commands::context::` 3, `agent::session::` 9, `bare_pi_` 1, `ops::human_session::` 43, `context_block::` 12 — pass.
+- implement 5: docs only (sessions.md direct list and table, troubleshooting `lf session serve`), no tests; `documented_commands::` 4 passed. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.
 - realign 3: no tests; grep confirms `bare_conversation`, `opens_bare`, `names_work`, `resumes_work`, `task_run_step` are gone and `runs_in_terminal` is private to transport; `simplification-opportunities.md` trimmed to what remains (Opportunity 1 → LOO-824, Server-only observers).
 - concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).
 - implement 4 (those three): `cargo build --bin lf` clean; `--lib` `harness::context::` + `ops::human_session::` + `session_record::capture_tests::resume` + `bare_pi_` — 58 passed; clippy, fmt clean.

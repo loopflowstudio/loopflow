@@ -18,6 +18,23 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+        ServerCommand::Mobile { off, status } => {
+            if *status {
+                println!(
+                    "{}",
+                    serde_json::to_string(&crate::server::mobile::status()?)?
+                );
+            } else if *off {
+                crate::server::mobile::disable()?;
+                println!("Mobile access is off");
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string(&crate::server::mobile::enable()?)?
+                );
+            }
+            Ok(())
+        }
         ServerCommand::Describe { json: true } => {
             println!(
                 "{}",

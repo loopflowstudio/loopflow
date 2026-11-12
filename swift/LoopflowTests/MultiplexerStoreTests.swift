@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import Loopflow
 import Testing
+@testable import LoopflowMac
 
 @Suite("Multiplexer store")
 @MainActor

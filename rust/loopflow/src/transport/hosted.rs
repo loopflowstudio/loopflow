@@ -296,6 +296,8 @@ pub(super) struct Hosted {
     execution_directory_reported: bool,
     planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: Option<crate::terminal_title::OutputTitle>,
+    /// The Program Status viewers were last sent.
+    reported_status: Option<crate::program_status::Records>,
     /// A taken-up terminal's output through this PTY position is replayed
     /// from the ring: its queries were answered when it was printed, or
     /// went unanswered while no server ran. Nothing answers them now.
@@ -367,6 +369,7 @@ impl Hosted {
             execution_directory_reported: false,
             planning: None,
             title: terminal.then(|| crate::terminal_title::OutputTitle::new(&id, &watchers.titles)),
+            reported_status: None,
             replayed_through: 0,
             id,
         })
@@ -790,6 +793,11 @@ impl Hosted {
                 viewer.event(event);
             }
             if fresh {
+                if let Some(status) = self.output.program_status() {
+                    viewer.event(Event::ProgramStatus {
+                        status: status.clone(),
+                    });
+                }
                 if let Some(client) = &self.client {
                     viewer.event(Event::Return {
                         detach: client.detach.clone(),
@@ -986,6 +994,18 @@ impl Hosted {
             );
             self.planning = None;
             self.exit = Some((settled.code, Instant::now()));
+        }
+        // Include held native output and exit reports before announcing the end.
+        if self.output.ready() && self.output.program_status() != self.reported_status.as_ref() {
+            self.reported_status = self.output.program_status().cloned();
+            if let Some(status) = &self.reported_status {
+                for viewer in self.viewers.iter_mut().filter(|viewer| viewer.attached) {
+                    viewer.event(Event::ProgramStatus {
+                        status: status.clone(),
+                    });
+                }
+                place_events(&self.output, &mut self.viewers, self.announced);
+            }
         }
         if let Some((code, at)) = self.exit {
             if !self.announced && child.drained() && at.elapsed() > Duration::from_millis(50) {

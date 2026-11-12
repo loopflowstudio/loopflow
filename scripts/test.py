@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import IO, Callable, Optional
 
 from cleanup_evidence import record_outcome
+from macos_inputs import IOS_INPUTS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 XCODE_LOCAL_SIGNING = [
@@ -96,6 +97,7 @@ PHASE_BUDGETS: dict[str, int] = {
     "website": 900,
     "swift": 1200,
     "swift-boundaries": 120,
+    "ios": 1200,
     "xcodegen": 180,
     "xcodebuild": 1200,
     "e2e-smoke": 600,
@@ -416,6 +418,10 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
+def _ios_commands(_changed: list[str]) -> list[Command]:
+    return [Command(["uv", "run", "python", "scripts/test_ios.py"], REPO_ROOT, "ios")]
+
+
 def _loopflow_commands(_changed: list[str]) -> list[Command]:
     swift_dir = REPO_ROOT / "swift"
     return [
@@ -699,6 +705,14 @@ SUITES: list[Suite] = [
         ),
         build=_swift_commands,
         proves="app builds; model and view/interaction tests run without a display session.",
+    ),
+    Suite(
+        name="ios",
+        slow=False,
+        trigger_desc="iOS client, shared models or server protocol",
+        match=lambda c: _touches(c, *IOS_INPUTS),
+        build=_ios_commands,
+        proves="iOS app, model and UI tests run on a disposable Simulator.",
     ),
     Suite(
         name="e2e",

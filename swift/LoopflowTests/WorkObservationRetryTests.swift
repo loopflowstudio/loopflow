@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Work observation retry")
 struct WorkObservationRetryTests {
-    private let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil)
+    private let scope = WorkScope(repo: "/src/loopflow", headless: false, task: nil, activity: nil, taskListWave: nil)
 
     @Test("Repeated failures back off to thirty seconds with or without successful frames", arguments: [false, true])
     func repeatedFailure(withReadings: Bool) {
@@ -70,7 +70,7 @@ struct WorkObservationRetryTests {
         let now = ContinuousClock.now
         _ = retry.failed(at: now)
         retry.receive(reading(.task(nil), unavailable: "read failed"),
-                      scope: WorkScope(repo: scope.repo, headless: false, task: "LOO-1", activity: nil), at: now)
+                      scope: WorkScope(repo: scope.repo, headless: false, task: "LOO-1", activity: nil, taskListWave: nil), at: now)
         retry.receive(reading(.selections([])), scope: scope, at: now + .seconds(10))
         #expect(retry.failed(at: now + .seconds(40)) == .seconds(1))
     }

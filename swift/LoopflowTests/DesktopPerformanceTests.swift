@@ -1143,7 +1143,7 @@ private final class PerformanceReader {
 
     /// One subscription line, as `lf … --json --subscribe` prints it for this scope.
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
-        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
         sequence += 1
         let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.

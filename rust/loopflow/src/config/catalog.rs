@@ -307,16 +307,24 @@ pub fn definition(key: &str) -> Option<&'static Definition> {
         .max_by_key(|definition| definition.key.len())
 }
 
+/// Every setting at its built-in default. Validation asks for this once per
+/// value it checks, so the tree is parsed from the catalogue once per process.
 pub fn defaults() -> Value {
-    let mut values = Value::Mapping(Default::default());
-    for definition in all_definitions() {
-        super::settings::insert(
-            &mut values,
-            &definition.key.split('.').collect::<Vec<_>>(),
-            serde_yaml_ng::from_str(definition.default).expect("catalogue default is valid YAML"),
-        );
-    }
-    values
+    static DEFAULTS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    DEFAULTS
+        .get_or_init(|| {
+            let mut values = Value::Mapping(Default::default());
+            for definition in all_definitions() {
+                super::settings::insert(
+                    &mut values,
+                    &definition.key.split('.').collect::<Vec<_>>(),
+                    serde_yaml_ng::from_str(definition.default)
+                        .expect("catalogue default is valid YAML"),
+                );
+            }
+            values
+        })
+        .clone()
 }
 
 /// Full paths and their own policies, grouped for CLI and Desktop browsing.

@@ -1,0 +1,591 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -518,6 +518,10 @@
+   const char* initial_input;
+   bool wait_after_command;
+   ghostty_surface_context_e context;
++  // Loopflow embedder bridge. When set, no command starts: feed terminal bytes
++  // with ghostty_surface_process_output and receive what the terminal writes
++  // here, on the IO thread, with the surface userdata. Copy before returning.
++  void (*io_write_cb)(void*, const char*, size_t);
+ } ghostty_surface_config_s;
+ 
+ typedef struct {
+@@ -1266,6 +1270,10 @@
+ GHOSTTY_API void ghostty_surface_deny_clipboard_request(ghostty_surface_t,
+                                                            void*);
+ GHOSTTY_API bool ghostty_surface_has_selection(ghostty_surface_t);
++// Bytes read for a surface created with io_write_cb. Any thread, one call at a time.
++GHOSTTY_API void ghostty_surface_process_output(ghostty_surface_t, const char*, uintptr_t);
++// Whether a terminal mode is set, by number (DEC private unless ansi).
++GHOSTTY_API bool ghostty_surface_mode(ghostty_surface_t, uint16_t, bool);
+ GHOSTTY_API void ghostty_surface_set_command_block_chrome(ghostty_surface_t, bool, int32_t);
+ GHOSTTY_API size_t ghostty_surface_command_blocks(ghostty_surface_t,
+                                                  ghostty_command_block_s*,
+diff --git a/pkg/translate-c/build.zig b/pkg/translate-c/build.zig
+--- a/pkg/translate-c/build.zig
++++ b/pkg/translate-c/build.zig
+@@ -181,7 +181,11 @@
+             } else null,
+             .direct => |libc_file| libc_file,
+         },
+-        .extra_args = options.extra_args,
++        // Aro only turns Blocks on for macOS; the iOS SDK headers use them too.
++        .extra_args = if (options.target.result.os.tag == .ios)
++            try std.mem.concat(b.allocator, []const u8, &.{ options.extra_args, &.{"-fblocks"} })
++        else
++            options.extra_args,
+     });
+ }
+ 
+diff --git a/src/Surface.zig b/src/Surface.zig
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -661,8 +661,17 @@
+             std.fmt.bufPrint(&buf, "0x{x:0>16}", .{self.id}) catch unreachable,
+         );
+ 
+-        // Initialize our IO backend
+-        var io_exec = try termio.Exec.init(alloc, .{
++        // Initialize our IO backend. An embedder that supplies the terminal
++        // bytes itself starts no command.
++        const external_io: ?termio.External.Config = if (@hasDecl(apprt.Surface, "externalIo"))
++            rt_surface.externalIo()
++        else
++            null;
++        var io_backend: termio.Backend = if (external_io) |external| external: {
++            env.deinit();
++            env = .init(alloc);
++            break :external .{ .external = .init(external) };
++        } else .{ .exec = try termio.Exec.init(alloc, .{
+             .command = command,
+             .macos_login_session = config.@"macos-login-session",
+             .env = env,
+@@ -675,8 +684,8 @@
+             .term = config.term,
+             .rt_pre_exec_info = .init(config),
+             .rt_post_fork_info = .init(config),
+-        });
+-        errdefer io_exec.deinit();
++        }) };
++        errdefer io_backend.deinit();
+ 
+         // Initialize our IO mailbox
+         var io_mailbox = try termio.Mailbox.initSPSC(alloc);
+@@ -686,7 +695,7 @@
+             .size = size,
+             .full_config = config,
+             .config = try termio.Termio.DerivedConfig.init(alloc, config),
+-            .backend = .{ .exec = io_exec },
++            .backend = io_backend,
+             .mailbox = io_mailbox,
+             .renderer_state = &self.renderer_state,
+             .renderer_wakeup = render_thread.wakeup,
+@@ -1367,6 +1376,7 @@
+     // Build up our command for the error message
+     const command = try std.mem.join(alloc, " ", switch (self.io.backend) {
+         .exec => |*exec| exec.subprocess.args,
++        .external => unreachable, // no child to exit
+     });
+     const runtime_str = try std.fmt.allocPrint(alloc, "{d} ms", .{info.runtime_ms});
+ 
+diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -16,6 +16,7 @@
+ const internal_os = @import("../os/main.zig");
+ const renderer = @import("../renderer.zig");
+ const terminal = @import("../terminal/main.zig");
++const termio = @import("../termio.zig");
+ const CoreApp = @import("../App.zig");
+ const CoreInspector = @import("../inspector/main.zig").Inspector;
+ const CoreSurface = @import("../Surface.zig");
+@@ -453,6 +454,7 @@
+     size: apprt.SurfaceSize,
+     cursor_pos: apprt.CursorPos,
+     inspector: ?*Inspector = null,
++    io_write_cb: ?termio.External.Write = null,
+ 
+     /// The current title of the surface. The embedded apprt saves this so
+     /// that getTitle works without the implementer needing to save it.
+@@ -499,6 +501,11 @@
+ 
+         /// Context for the new surface
+         context: apprt.surface.NewSurfaceContext = .window,
++
++        /// When set, no command starts. The embedder feeds terminal bytes with
++        /// ghostty_surface_process_output and receives what the terminal
++        /// writes here, on the IO thread, with the surface userdata.
++        io_write_cb: ?termio.External.Write = null,
+     };
+ 
+     pub fn init(self: *Surface, app: *App, opts: Options) !void {
+@@ -513,6 +520,7 @@
+             },
+             .size = .{ .width = 800, .height = 600 },
+             .cursor_pos = .{ .x = -1, .y = -1 },
++            .io_write_cb = opts.io_write_cb,
+         };
+ 
+         // Add ourselves to the list of surfaces on the app.
+@@ -1176,6 +1184,11 @@
+             .working_directory = working_directory,
+             .context = context,
+         };
++    }
++
++    pub fn externalIo(self: *const Surface) ?termio.External.Config {
++        const write = self.io_write_cb orelse return null;
++        return .{ .write = write, .userdata = self.userdata };
+     }
+ 
+     pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
+@@ -1861,6 +1874,26 @@
+         return surface.core_surface.child_exited;
+     }
+ 
++    /// Feed bytes read for a surface created with io_write_cb. Any thread,
++    /// one call at a time.
++    export fn ghostty_surface_process_output(
++        surface: *Surface,
++        ptr: [*]const u8,
++        len: usize,
++    ) void {
++        surface.core_surface.io.processOutput(ptr[0..len]);
++    }
++
++    /// Whether a terminal mode is set, by its number (DEC private unless ansi).
++    /// Unknown modes read false.
++    export fn ghostty_surface_mode(surface: *Surface, mode: u16, ansi: bool) bool {
++        const known = terminal.modes.modeFromInt(mode, ansi) orelse return false;
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lockUncancelable(global.io());
++        defer core_surface.renderer_state.mutex.unlock(global.io());
++        return core_surface.renderer_state.terminal.modes.get(known);
++    }
++
+     /// Returns true if the surface has a selection.
+     export fn ghostty_surface_has_selection(surface: *Surface) bool {
+         return surface.core_surface.hasSelection();
+diff --git a/src/build/Config.zig b/src/build/Config.zig
+--- a/src/build/Config.zig
++++ b/src/build/Config.zig
+@@ -127,17 +127,6 @@
+                 @intFromEnum(std.Target.wasm.Feature.simd128),
+             );
+             result = b.resolveTargetQuery(query);
+-        }
+-
+-        // The full Ghostty build no longer supports iOS; Fail early
+-        // with a clear message rather than partway through the build.
+-        if (result.result.os.tag == .ios and !emit_lib_vt) {
+-            std.log.err(
+-                "iOS is not a supported target for the full Ghostty build; " ++
+-                    "only libghostty-vt supports iOS (-Demit-lib-vt)",
+-                .{},
+-            );
+-            return error.UnsupportedTarget;
+         }
+ 
+         // If we have no minimum OS version, we set the default based on
+@@ -792,6 +781,13 @@
+         // of macOS by Apple. EOL versions are not supported.
+         .macos => .{ .semver = .{
+             .major = 13,
++            .minor = 0,
++            .patch = 0,
++        } },
++
++        // Loopflow's phone app; the embedder supplies the terminal bytes.
++        .ios => .{ .semver = .{
++            .major = 17,
+             .minor = 0,
+             .patch = 0,
+         } },
+diff --git a/src/build/GhosttyXCFramework.zig b/src/build/GhosttyXCFramework.zig
+--- a/src/build/GhosttyXCFramework.zig
++++ b/src/build/GhosttyXCFramework.zig
+@@ -24,6 +24,27 @@
+         Config.genericMacOSTarget(b, null),
+     ));
+ 
++    // iOS device and Simulator. The Simulator names an Apple CPU because
++    // the generic arm64 model lacks instructions the Simulator SDK assumes.
++    const ios = try GhosttyLib.initStatic(b, &try deps.retarget(
++        b,
++        b.resolveTargetQuery(.{
++            .cpu_arch = .aarch64,
++            .os_tag = .ios,
++            .os_version_min = Config.osVersionMin(.ios),
++        }),
++    ));
++    const ios_sim = try GhosttyLib.initStatic(b, &try deps.retarget(
++        b,
++        b.resolveTargetQuery(.{
++            .cpu_arch = .aarch64,
++            .os_tag = .ios,
++            .os_version_min = Config.osVersionMin(.ios),
++            .abi = .simulator,
++            .cpu_model = .{ .explicit = &std.Target.aarch64.cpu.apple_a17 },
++        }),
++    ));
++
+     // Generate a headers directory with only ghostty.h and the module
+     // map. We can't use include/ directly because it also contains the
+     // libghostty-vt headers under include/ghostty/, which would trigger
+@@ -46,6 +67,16 @@
+                     .headers = headers,
+                     .dsym = macos_universal.dsym,
+                 },
++                .{
++                    .library = ios.output,
++                    .headers = headers,
++                    .dsym = ios.dsym,
++                },
++                .{
++                    .library = ios_sim.output,
++                    .headers = headers,
++                    .dsym = ios_sim.dsym,
++                },
+             },
+ 
+             .native => &.{.{
+diff --git a/src/build/MetallibStep.zig b/src/build/MetallibStep.zig
+--- a/src/build/MetallibStep.zig
++++ b/src/build/MetallibStep.zig
+@@ -24,10 +24,18 @@
+ pub fn create(b: *std.Build, opts: Options) ?*MetallibStep {
+     const sdk = switch (opts.target.result.os.tag) {
+         .macos => "macosx",
++        .ios => switch (opts.target.result.abi) {
++            .simulator => "iphonesimulator",
++            else => "iphoneos",
++        },
+         else => return null,
+     };
+     const platform_version_arg = switch (opts.target.result.os.tag) {
+         .macos => "-mmacos-version-min",
++        .ios => switch (opts.target.result.abi) {
++            .simulator => "-mios-simulator-version-min",
++            else => "-mios-version-min",
++        },
+         else => null,
+     };
+ 
+@@ -37,6 +45,7 @@
+         b.fmt("{f}", .{v.semver})
+     else switch (opts.target.result.os.tag) {
+         .macos => "10.14",
++        .ios => "17.0",
+         else => unreachable,
+     };
+ 
+diff --git a/src/font/face.zig b/src/font/face.zig
+--- a/src/font/face.zig
++++ b/src/font/face.zig
+@@ -26,7 +26,8 @@
+ /// If a DPI can't be calculated, this DPI is used. This is probably
+ /// wrong on modern devices so it is highly recommended you get the DPI
+ /// using whatever platform method you can.
+-pub const default_dpi = if (builtin.os.tag == .macos) 72 else 96;
++// A UIKit point is 1/72 of this scale, as on macOS.
++pub const default_dpi = if (builtin.os.tag.isDarwin()) 72 else 96;
+ 
+ /// These are the flags to customize how freetype loads fonts. This is
+ /// only non-void if the freetype backend is enabled.
+diff --git a/src/input/keycodes.zig b/src/input/keycodes.zig
+--- a/src/input/keycodes.zig
++++ b/src/input/keycodes.zig
+@@ -9,7 +9,8 @@
+ /// The full list of entries for the current platform.
+ pub const entries: []const Entry = entries: {
+     const native_idx = switch (builtin.os.tag) {
+-        .ios, .macos => 4, // mac
++        .ios => 0, // usb: UIKit reports HID usages
++        .macos => 4, // mac
+         .windows => 3, // win
+         .freebsd, .linux => 2, // xkb
+         else => @compileError("unsupported platform"),
+diff --git a/src/termio.zig b/src/termio.zig
+--- a/src/termio.zig
++++ b/src/termio.zig
+@@ -23,6 +23,7 @@
+ pub const backend = @import("termio/backend.zig");
+ pub const mailbox = @import("termio/mailbox.zig");
+ pub const Exec = @import("termio/Exec.zig");
++pub const External = @import("termio/External.zig");
+ pub const Options = @import("termio/Options.zig");
+ pub const Termio = @import("termio/Termio.zig");
+ pub const Thread = @import("termio/Thread.zig");
+diff --git a/src/termio/backend.zig b/src/termio/backend.zig
+--- a/src/termio/backend.zig
++++ b/src/termio/backend.zig
+@@ -11,28 +11,34 @@
+ const WRITE_REQ_PREALLOC = std.math.pow(usize, 2, 5);
+ 
+ /// The kinds of backends.
+-pub const Kind = enum { exec };
++pub const Kind = enum { exec, external };
+ 
+ /// Configuration for the various backend types.
+ pub const Config = union(Kind) {
+     /// Exec uses posix exec to run a command with a pty.
+     exec: termio.Exec.Config,
++
++    /// External hands reads and writes to the embedder; no command starts.
++    external: termio.External.Config,
+ };
+ 
+ /// Backend implementations. A backend is responsible for owning the pty
+ /// behavior and providing read/write capabilities.
+ pub const Backend = union(Kind) {
+     exec: termio.Exec,
++    external: termio.External,
+ 
+     pub fn deinit(self: *Backend) void {
+         switch (self.*) {
+             .exec => |*exec| exec.deinit(),
++            .external => |*external| external.deinit(),
+         }
+     }
+ 
+     pub fn initTerminal(self: *Backend, t: *terminal.Terminal) void {
+         switch (self.*) {
+             .exec => |*exec| exec.initTerminal(t),
++            .external => |*external| external.initTerminal(t),
+         }
+     }
+ 
+@@ -44,12 +50,14 @@
+     ) !void {
+         switch (self.*) {
+             .exec => |*exec| try exec.threadEnter(alloc, io, td),
++            .external => |*external| try external.threadEnter(alloc, io, td),
+         }
+     }
+ 
+     pub fn threadExit(self: *Backend, td: *termio.Termio.ThreadData) void {
+         switch (self.*) {
+             .exec => |*exec| exec.threadExit(td),
++            .external => |*external| external.threadExit(td),
+         }
+     }
+ 
+@@ -60,6 +68,7 @@
+     ) !void {
+         switch (self.*) {
+             .exec => |*exec| try exec.focusGained(td, focused),
++            .external => |*external| try external.focusGained(td, focused),
+         }
+     }
+ 
+@@ -70,6 +79,7 @@
+     ) !void {
+         switch (self.*) {
+             .exec => |*exec| try exec.resize(grid_size, screen_size),
++            .external => |*external| try external.resize(grid_size, screen_size),
+         }
+     }
+ 
+@@ -82,6 +92,7 @@
+     ) !void {
+         switch (self.*) {
+             .exec => |*exec| try exec.queueWrite(alloc, td, data, linefeed),
++            .external => |*external| try external.queueWrite(alloc, td, data, linefeed),
+         }
+     }
+ 
+@@ -99,6 +110,7 @@
+                 exit_code,
+                 runtime_ms,
+             ),
++            .external => |*external| try external.childExitedAbnormally(gpa, t, exit_code, runtime_ms),
+         }
+     }
+ 
+@@ -108,6 +120,7 @@
+     pub fn getProcessInfo(self: *Backend, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
+         return switch (self.*) {
+             .exec => |*exec| exec.getProcessInfo(info),
++            .external => |*external| external.getProcessInfo(info),
+         };
+     }
+ };
+@@ -115,10 +128,12 @@
+ /// Termio thread data. See termio.ThreadData for docs.
+ pub const ThreadData = union(Kind) {
+     exec: termio.Exec.ThreadData,
++    external: termio.External.ThreadData,
+ 
+     pub fn deinit(self: *ThreadData, alloc: Allocator) void {
+         switch (self.*) {
+             .exec => |*exec| exec.deinit(alloc),
++            .external => |*external| external.deinit(alloc),
+         }
+     }
+ 
+diff --git a/src/termio/External.zig b/src/termio/External.zig
+--- /dev/null
++++ b/src/termio/External.zig
+@@ -0,0 +1,160 @@
++//! External leaves the pty to the embedder. No command starts: the embedder
++//! feeds the bytes it read with `Termio.processOutput` and receives every byte
++//! the terminal would write (keys, pastes, query replies) through `write`.
++const External = @This();
++
++const std = @import("std");
++const Allocator = std.mem.Allocator;
++const renderer = @import("../renderer.zig");
++const terminal = @import("../terminal/main.zig");
++const termio = @import("../termio.zig");
++const ProcessInfo = @import("../pty.zig").ProcessInfo;
++
++/// Called on the IO thread. The bytes are only valid for the call.
++pub const Write = *const fn (?*anyopaque, [*]const u8, usize) callconv(.c) void;
++
++pub const Config = struct {
++    write: Write,
++    userdata: ?*anyopaque,
++};
++
++config: Config,
++
++pub fn init(cfg: Config) External {
++    return .{ .config = cfg };
++}
++
++pub fn deinit(self: *External) void {
++    _ = self;
++}
++
++pub fn initTerminal(self: *External, term: *terminal.Terminal) void {
++    _ = self;
++    _ = term;
++}
++
++pub fn threadEnter(
++    self: *External,
++    alloc: Allocator,
++    io: *termio.Termio,
++    td: *termio.Termio.ThreadData,
++) !void {
++    _ = self;
++    _ = alloc;
++    _ = io;
++    td.backend = .{ .external = .{} };
++}
++
++pub fn threadExit(self: *External, td: *termio.Termio.ThreadData) void {
++    _ = self;
++    _ = td;
++}
++
++pub fn focusGained(
++    self: *External,
++    td: *termio.Termio.ThreadData,
++    focused: bool,
++) !void {
++    _ = self;
++    _ = td;
++    _ = focused;
++}
++
++/// The embedder set the size, so it already knows it.
++pub fn resize(
++    self: *External,
++    grid_size: renderer.GridSize,
++    screen_size: renderer.ScreenSize,
++) !void {
++    _ = self;
++    _ = grid_size;
++    _ = screen_size;
++}
++
++pub fn queueWrite(
++    self: *External,
++    alloc: Allocator,
++    td: *termio.Termio.ThreadData,
++    data: []const u8,
++    linefeed: bool,
++) !void {
++    _ = alloc;
++    _ = td;
++    if (!linefeed) {
++        if (data.len > 0) self.config.write(self.config.userdata, data.ptr, data.len);
++        return;
++    }
++
++    // Linefeed mode sends CR as CRLF.
++    var buf: [256]u8 = undefined;
++    var len: usize = 0;
++    for (data) |byte| {
++        if (len + 2 > buf.len) {
++            self.config.write(self.config.userdata, &buf, len);
++            len = 0;
++        }
++        buf[len] = byte;
++        len += 1;
++        if (byte == '\r') {
++            buf[len] = '\n';
++            len += 1;
++        }
++    }
++    if (len > 0) self.config.write(self.config.userdata, &buf, len);
++}
++
++pub fn childExitedAbnormally(
++    self: *External,
++    gpa: Allocator,
++    t: *terminal.Terminal,
++    exit_code: u32,
++    runtime_ms: u64,
++) !void {
++    _ = self;
++    _ = gpa;
++    _ = t;
++    _ = exit_code;
++    _ = runtime_ms;
++}
++
++pub fn getProcessInfo(self: *External, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
++    _ = self;
++    return null;
++}
++
++pub const ThreadData = struct {
++    pub fn deinit(self: *ThreadData, alloc: Allocator) void {
++        _ = self;
++        _ = alloc;
++    }
++};
++
++const TestSink = struct {
++    bytes: [1024]u8 = undefined,
++    len: usize = 0,
++    calls: usize = 0,
++
++    fn write(ud: ?*anyopaque, ptr: [*]const u8, len: usize) callconv(.c) void {
++        const self: *TestSink = @ptrCast(@alignCast(ud.?));
++        @memcpy(self.bytes[self.len..][0..len], ptr[0..len]);
++        self.len += len;
++        self.calls += 1;
++    }
++};
++
++test "external io: writes reach the embedder whole" {
++    var sink: TestSink = .{};
++    var io: External = .init(.{ .write = TestSink.write, .userdata = &sink });
++    try io.queueWrite(std.testing.allocator, undefined, "\x1b[200~two\nlines\x1b[201~", false);
++    try io.queueWrite(std.testing.allocator, undefined, "", false);
++    try std.testing.expectEqualStrings("\x1b[200~two\nlines\x1b[201~", sink.bytes[0..sink.len]);
++    try std.testing.expectEqual(1, sink.calls);
++}
++
++test "external io: linefeed mode sends CR as CRLF across chunks" {
++    var sink: TestSink = .{};
++    var io: External = .init(.{ .write = TestSink.write, .userdata = &sink });
++    try io.queueWrite(std.testing.allocator, undefined, "a\r" ** 200, true);
++    try std.testing.expectEqualStrings("a\r\n" ** 200, sink.bytes[0..sink.len]);
++    try std.testing.expect(sink.calls > 1);
++}

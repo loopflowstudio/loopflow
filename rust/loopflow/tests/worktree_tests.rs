@@ -1085,6 +1085,26 @@ fn placement_resolves_separate_git_directory_and_linked_subdirectory() {
 }
 
 #[test]
+fn linked_worktree_finds_its_main_checkout() {
+    let repo = TestRepo::new();
+    let directory = tempfile::tempdir().unwrap();
+    let checkout = directory.path().join("linked");
+    worktree_add(
+        repo.path(),
+        &checkout,
+        "linked",
+        WorktreeBranch::New {
+            start_point: "HEAD",
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        main_repo_root(&checkout).unwrap(),
+        repo.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn bare_repository_placement_uses_a_working_checkout_not_metadata_parent() {
     let repo = TestRepo::new();
     let directory = tempfile::tempdir().unwrap();

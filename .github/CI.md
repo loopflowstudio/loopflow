@@ -41,8 +41,8 @@ queue, and only where its changes reach them (`scripts/macos_inputs.py`):
 
 | Job | Runs for |
 |-----|----------|
-| `loopflow-ui-test` | `swift/` (app, `project.yml`, GhosttyKit patches), its build scripts, Rust `build.rs` and libghostty-vt pin/patches |
-| `swift-test` | the above, `tests/fixtures/dto/`, the scripts and Python check it runs |
+| `loopflow-ui-test` | `swift/` (Desktop and iOS), its build scripts, DTO fixtures, server protocol and Read/Write types, Rust `build.rs` and libghostty-vt pin/patches |
+| `swift-test` | Swift sources, shared DTO fixtures and server types, Desktop build inputs, the scripts and Python check it runs |
 | `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
 
 CI changes, the classifier, an unknown diff or a failed classifier run all
@@ -112,7 +112,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-26 | app build, headless model/view tests, launch-and-quit check, boundary check |
 | `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
-| `loopflow-ui-test` | macos-26 | xcodegen + app/test-runner compile |
+| `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model and UI tests on a disposable Simulator |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass; a
 macOS job may skip only when the classifier says it is unreached or outside

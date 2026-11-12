@@ -1,13 +1,15 @@
 {
   "inputs": {
-    "Cargo.lock": "a9285ac0b8c719c9577e2fa29ac431b4f17e0a7b6ff42a1e741c411f59474d11",
+    "Cargo.lock": "84e0acf26fef40143517e4ac23cf2a3c0abd8c913093e5f00699ec89fcfdb0f6",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
     "swift/GhosttyKitPatches/0004-bounded-text.patch": "87d5786bfbd915cce5da0b9b21f3e510d37373cb99874cc72359ec45a41cf975",
     "swift/GhosttyKitPatches/0005-terminal-color-readback.patch": "1dd584cdc4e336403ab21935c7ef1a81e1428217b251eb2735b21cc2892e82da",
     "swift/GhosttyKitPatches/0005-terminal-feedback.patch": "d3cd74828223982bb884157d3eafd3b837280771eba27f2ca974f4f0871ed43b",
-    "swift/GhosttyKitPatches/README.md": "597e5809e84de90d80b267d9919492989587ed507b7335f38e67411bb9de9178",
+    "swift/GhosttyKitPatches/0006-ios-external-io.patch": "631c27da22817ec159885c2e12669166d2360ae48ded352b61021c6b520835a9",
+    "swift/GhosttyKitPatches/0007-no-libintl-without-i18n.patch": "c3c0c273d01831441895728b00b9106baf64e4f86843b4dc60cffedb1703393b",
+    "swift/GhosttyKitPatches/README.md": "17c0d3a5f3889586991adc7b6a5db5fe4fc038475a3454f44eb11bf3d48e8c38",
     "swift/Loopflow/Fonts/CormorantGaramond-Medium.otf": "bc49bcebc38f68498956f47b9414d6907fe9192e8d3c38d077a095da2e8f2da5",
     "swift/Loopflow/Fonts/CormorantGaramond-Regular.otf": "d276dd20a536a36c03f0ab6e845cb39260cc6639c0b835b26d1c354c8cb3b2b3",
     "swift/Loopflow/Fonts/CormorantGaramond-SemiBold.otf": "62363e27dff8453a9577e0801cfde7573ac8af68f57b7d401b0d805b67a0cf11",
@@ -63,10 +65,9 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "3b4687150d10bfa159dd90dac1b81b1977f6b622d69ca5e214fdce206449251f",
-    "swift/Package.swift": "b720cee0d87cd4f175539d2360665983fde7c6c463667bc62336de618db57da5",
-    "third_party/README.md": "ab704e7eef1524c178bc75259b58c5a96406dc2160d59d0bce20e300458a4bcb",
-    "third_party/REBUILD.md": "7f16e0e02ff9eeba71f70a2fd7812f2b9f21121775ca258125cd0ca4f34eb374",
-    "third_party/manifest.json": "6eb513a714ada6d0bdb0326e44e014990c3a1df85e4e5ecf7d2f98bcfb0c87ba",
+    "swift/Package.swift": "57813179473251a2eeda35f34856691bde71a50d04be6156c0fda10e2654bcba",
+    "third_party/README.md": "9d2661253b7c6152672de67cab7f676399f71b43eaff8788aa540d4fa9e04f25",
+    "third_party/manifest.json": "e27a444e69d3cb278e09e1ab2bea1505dbf837145a214b3fe2482e87a8a699f0",
     "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
     "third_party/notices/breakpad-breakpad.txt": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7",
     "third_party/notices/crate-block2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
@@ -78,7 +79,6 @@
     "third_party/notices/dcimgui-bindings.txt": "b08fd9947ec127fd7785801cac8b1eea2ab4282008cdaae8e50331d870f30d0d",
     "third_party/notices/dcimgui-imgui.txt": "aa645d3da9be2dcf82c11580f389cf373803787f57c049b08d07c6de9e95c3c8",
     "third_party/notices/freetype-freetype.txt": "f211638c1d832c65868dd83a2b6397358cf95caec25e648d98f636912e60f43e",
-    "third_party/notices/gettext.txt": "41333c451fcbfa45bc2325c62b72037a0d007d778e462c3d4685b31ada73ca44",
     "third_party/notices/ghostty.txt": "38e20846dcf9a4c11b612e12916418a5288286608459f31d12113cd3e0b3d9ec",
     "third_party/notices/glslang-glslang.txt": "c86a2c03aec4c8dbbe557596858776433866a5c37aa5d307a88003f4a69c16ea",
     "third_party/notices/highway-highway.txt": "cd7021182524e0d8dbdabb509dbbae6bc21829cfcb31857dcc6d14889e5a6f94",
@@ -101,41 +101,9 @@
     "third_party/notices/zlib-zlib.txt": "97898cd24ff025482d7a03a34bde681008418e79e45ad1cb96c8ecd9af7b9d01"
   },
   "ghostty": {
-    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
-    "sha256": "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9",
-    "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0",
-    "libintl_members": [
-      "bindtextdom.o",
-      "dcgettext.o",
-      "dcigettext.o",
-      "dcngettext.o",
-      "dgettext.o",
-      "dngettext.o",
-      "explodename.o",
-      "finddomain.o",
-      "gettext.o",
-      "hash-string.o",
-      "intl-compat.o",
-      "l10nflist.o",
-      "langprefs.o",
-      "loadmsgcat.o",
-      "localealias.o",
-      "log.o",
-      "ngettext.o",
-      "plural-exp.o",
-      "plural.o",
-      "setlocale.o",
-      "textdomain.o",
-      "version.o",
-      "compat.o",
-      "getlocalename_l-unsafe.o",
-      "localename.o",
-      "localename-environ.o",
-      "localename-unsafe.o",
-      "setlocale-lock.o",
-      "setlocale_null.o",
-      "setlocale_null-unlocked.o"
-    ]
+    "url": "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
+    "sha256": "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99",
+    "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
   },
   "components": [
     {
@@ -255,14 +223,7 @@
       "scope": "GhosttyKit",
       "source": {
         "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9",
-        "packaged": {
-          "sha256": "3d78b0b701e98063cd974c1d5a2009f420474bfe7a6384d40593ca728f09db07",
-          "omit_binary_fixtures": [
-            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashduringload",
-            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashInMain"
-          ]
-        }
+        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
       },
       "notices": [
         {
@@ -381,7 +342,8 @@
           "path": "third_party/notices/z2d.txt",
           "sha256": "8425dcd8f4d11b43d8a755ffbba9e4fb478a759e8295e76a546138dce625ebfd"
         }
-      ]
+      ],
+      "license": "MPL-2.0"
     },
     {
       "id": "zig_objc",
@@ -450,20 +412,6 @@
         {
           "path": "third_party/notices/nerd_fonts_symbols_only.txt",
           "sha256": "1745777eb9ecea5a8828df8dcb2b1837860b3505fea58f2688408b324ef6da37"
-        }
-      ]
-    },
-    {
-      "id": "gettext",
-      "scope": "GhosttyKit",
-      "source": {
-        "url": "https://deps.files.ghostty.org/gettext-0.24.tar.gz",
-        "sha256": "c918503d593d70daf4844d175a13d816afacb667c06fba1ec9dcd5002c1518b7"
-      },
-      "notices": [
-        {
-          "path": "third_party/notices/gettext.txt",
-          "sha256": "41333c451fcbfa45bc2325c62b72037a0d007d778e462c3d4685b31ada73ca44"
         }
       ]
     },
@@ -2761,5 +2709,5 @@
       }
     }
   ],
-  "notices_sha256": "bfcc1d9ce13eee531f3e7dee178de1a8c17e0359ea753313212b918c565a14ae"
+  "notices_sha256": "2b962ac16cf053878143a62687f38f235dc6e3c16e4fd754605aa5efe6aa3d5e"
 }

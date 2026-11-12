@@ -1687,7 +1687,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 /// an answering one may hold a turn or draft nothing records, so a viewer attaches.
 /// Compare builds against the launch entry so a development viewer in the main Home
 /// still selects the installed lf.
-fn attaches(
+pub(crate) fn attaches(
     store: &SqliteStore,
     session: &LfSession,
     host: &crate::transport::Host,

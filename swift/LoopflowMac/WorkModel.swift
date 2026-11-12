@@ -125,6 +125,25 @@ final class WorkModel {
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
+    /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
+    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: WorkReading<WorkViewPlan>)] = [:]
+
+    func applyTaskList(_ plan: WorkViewPlan?, wave: String?, reason: String) {
+        let key = repositoryReadingKey(repoPath ?? "")
+        let previous = taskListReadings[key]
+        let next: WorkReading<WorkViewPlan> = plan.map { .available($0) }
+            ?? .unavailable(lastGood: previous?.wave == wave ? previous?.reading.value : nil, reason: reason)
+        guard previous?.wave != wave || previous?.reading != next else { return }
+        taskListReadings[key] = (wave, next)
+    }
+
+    /// The started list, once it answers for the sidebar's current scope.
+    private var taskList: WorkViewPlan? {
+        let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
+        guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == wave else { return nil }
+        return entry.reading.value
+    }
+
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
         guard let plans else {
             selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
@@ -1538,8 +1557,10 @@ final class WorkModel {
                     guard !Task.isCancelled else { break }
                     retry.receive(frame, scope: workScope, at: .now)
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
+                    let (waited, started) = (frame.received.elapsedMs, ContinuousClock.now)
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
+                    LaunchJournal.home.applied(frame.content.part, waited: waited, ms: started.elapsedMs)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch {
@@ -1556,11 +1577,13 @@ final class WorkModel {
 
     var workScope: WorkScope {
         let shown = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
+        let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
         return WorkScope(
             repo: repoPath,
             headless: false,
             task: shown?.task.task.identifier,
-            activity: activityScope(for: selection))
+            activity: activityScope(for: selection),
+            taskListWave: wave)
     }
 
     /// Tell the reader what this window shows now. Frames for the previous
@@ -1673,6 +1696,9 @@ final class WorkModel {
             guard answers >= max(planningFloor, scopeFloor) else { return }
             applySelectionPlans(body, reason: reason)
             if body != nil { await refreshSelectedView() }
+        case .taskList(let body):
+            guard answers >= max(planningFloor, scopeFloor) else { return }
+            applyTaskList(body, wave: sentScope?.taskListWave, reason: reason)
         case .peerPlanning(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -2064,19 +2090,37 @@ final class WorkModel {
             .filter { seen.insert($0).inserted }
     }
 
-    var sidebarTaskIDs: [String] {
-        taskIDs(in: sidebarMembers).filter { id in
-            if abandoningTaskIDs.contains(id) { return false }
-            switch navigation.sidebarFilter {
-            case .working: return true
-            case .available:
-                guard sessions.errorMessage == nil else { return false }
-                return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
-            case .busy:
-                if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
-                return false
-            }
+    /// A plan's Tasks in its order, as rows name them, with the states the server read.
+    private func taskRows(_ plan: WorkViewPlan?) -> [(id: String, states: [WorkSelectionState])] {
+        guard let plan else { return [] }
+        let states = Dictionary(plan.contents.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        return plan.resolution.members.filter { $0.work.kind == .task }.compactMap { member in
+            let id = task(id: member.work.id)?.task.id ?? member.work.id
+            guard seen.insert(id).inserted, !abandoningTaskIDs.contains(id) else { return nil }
+            return (id, states[member.work] ?? [])
         }
+    }
+
+    /// The repository or Wave's Working Tasks from the started list, or a
+    /// Dashboard's; the filter reads each Task's states as the phone does.
+    var sidebarTaskIDs: [String] {
+        let rows: [(id: String, states: [WorkSelectionState])]
+        switch navigation.sidebarScope {
+        case .repository, .wave: rows = taskRows(taskList).filter { $0.states.contains(.working) }
+        case .dashboard(let id): rows = taskRows(dashboard(id).map { plan in
+            var visible = plan
+            visible.resolution.members = plan.projection.visible
+            return visible
+        })
+        }
+        return rows.filter { row in
+            switch navigation.sidebarFilter {
+            case .working: true
+            case .available: row.states.contains(.available)
+            case .busy: row.states.contains(.busy)
+            }
+        }.map(\.id)
     }
 
     /// A Wave or repository row's count: its board's Working and Autonomous columns.
@@ -2084,18 +2128,12 @@ final class WorkModel {
         (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
     }
 
-    /// Below the Working Tasks: the scope's Autonomous Tasks, as the Wave board buckets
-    /// them (shipping, no one's turn). Dashboards and Available/Busy filters have none.
+    /// Below the Working Tasks: the started list's Autonomous Tasks (shipping, no
+    /// one's turn). Dashboards and Available/Busy filters have none.
     var sidebarAutonomousTaskIDs: [String] {
         guard navigation.sidebarFilter == .working else { return [] }
-        let board: WorkNavigation.Board
-        switch navigation.sidebarScope {
-        case .repository: board = .repository
-        case .wave(let id): board = .wave(id)
-        case .dashboard: return []
-        }
-        return (standupTasks(board)?.items ?? []).filter { $0.section == .autonomous && !abandoningTaskIDs.contains($0.id) }
-            .sorted { $0.task.rank < $1.task.rank }.map(\.id)
+        if case .dashboard = navigation.sidebarScope { return [] }
+        return taskRows(taskList).filter { $0.states.contains(.autonomous) }.map(\.id)
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
@@ -2819,9 +2857,14 @@ final class WorkModel {
         return identity
     }
 
-    private nonisolated static func resolveRepoOrigins(_ paths: [String]) async {
+    /// Resolve the origins of paths not seen before. Readings arrive often and
+    /// name the same repositories, so a reading with nothing new stays on the
+    /// main actor instead of waiting for a background thread and back.
+    private static func resolveRepoOrigins(_ paths: [String]) async {
+        let unknown = Set(paths.map(\.normalizedFilePath)).filter { !WaveOrigin.isKnown($0) }
+        guard !unknown.isEmpty else { return }
         await Task.detached {
-            for path in Set(paths.map(\.normalizedFilePath)) {
+            for path in unknown {
                 _ = WaveOrigin.resolve(path)
             }
         }.value
@@ -3158,6 +3201,13 @@ extension WorkModel {
         members.insert(members.remove(at: from), at: to)
         plans[index].resolution.members = members
         applySelectionPlans(plans, reason: "")
+        let key = repositoryReadingKey(repoPath ?? "")
+        if let entry = taskListReadings[key], entry.wave == nil, var list = entry.reading.value,
+           let from = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
+           let to = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) {
+            list.resolution.members.insert(list.resolution.members.remove(at: from), at: to)
+            taskListReadings[key] = (nil, .available(list))
+        }
     }
 
     /// The Working Tasks member a sidebar row shows; rows may use the planning ID.

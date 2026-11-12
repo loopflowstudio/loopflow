@@ -68,7 +68,7 @@ struct RegistryQueryTests {
         var iterator = subscription.lines.makeAsyncIterator()
         let line = try #require(await iterator.next())
         let frame = try WorkFrame.decode(part: .task,
-            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil), sequence: 0, line: line)
+            scope: WorkScope(repo: nil, headless: false, task: "task", activity: nil, taskListWave: nil), sequence: 0, line: line)
         guard case .task(let reading?) = frame.content else { Issue.record("Missing Task reading"); return }
         #expect(reading.graphProcesses == [expected])
         #expect(reading.work.graph?.position == .at(step: "demo"))
@@ -96,11 +96,11 @@ struct RegistryQueryTests {
         }
         #expect(try object(ServedRead.sessionHistory(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
             == object(#"{"kind":"session.history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
-        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil)
-        #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null}"#))
+        let sessions = ServedRead.sessionList(directory: "/r", headless: true, after: nil, limit: nil, task: nil)
+        #expect(try object(sessions) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":null,"limit":null,"task":null}"#))
         #expect(sessions.argv == ["session", "list", "--headless", "--json", "--limit", "0"])
-        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100)
-        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100}"#))
+        let page = ServedRead.sessionList(directory: "/r", headless: true, after: "cursor", limit: 100, task: nil)
+        #expect(try object(page) == object(#"{"kind":"session.list","directory":"/r","headless":true,"after":"cursor","limit":100,"task":null}"#))
         #expect(page.argv == ["session", "list", "--json", "--page", "--headless", "--limit", "100", "--after", "cursor"])
         #expect(try object(ServedRead.taskDiff(issue: "FIX-1", path: nil, base: "parent", head: nil, draft: nil))
             == object(#"{"kind":"task.diff","issue":"FIX-1","path":null,"base":"parent","head":null,"draft":null}"#))

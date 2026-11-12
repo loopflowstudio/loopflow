@@ -54,8 +54,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case creationGet(requestID: String)
     case processList
     case desktopViewList(directory: String)
-    case sessionList(directory: String, headless: Bool, after: String?, limit: Int?)
+    case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
+    case viewSelect(expression: String?)
     case taskDetail(directory: String, issue: String)
     case sessionCard(id: String)
     case planBoard(directory: String, wave: String?, task: String?, all: Bool)
@@ -115,12 +116,14 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["process", "list", "--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
-        case .sessionList(_, let headless, let after, let limit):
+        case .sessionList(_, let headless, let after, let limit, let task):
             if let limit {
                 return ["session", "list", "--json", "--page"] + (headless ? ["--headless"] : [])
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
+                    + (task.map { ["--task", $0] } ?? [])
             }
-            return ["session", "list"] + (headless ? ["--headless"] : []) + ["--json", "--limit", "0"]
+            return ["session", "list"] + (headless ? ["--headless"] : [])
+                + (task.map { ["--task", $0] } ?? []) + ["--json", "--limit", "0"]
         case .taskDetail(_, let issue):
             return ["task", "detail", issue, "--json"]
         case .sessionCard(let id):
@@ -141,6 +144,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["wave", "list", "--all", "--json"]
         case .machineSelf:
             return ["machine", "self", "--json"]
+        case .viewSelect(let expression):
+            return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
         case .configSettings(_, let wave, let skill, let graph, let step):
@@ -228,8 +233,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
         case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
-        case .sessionList(let directory, let headless, let after, let limit):
-            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit])
+        case .sessionList(let directory, let headless, let after, let limit, let task):
+            TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])
         case .taskDetail(let directory, let issue):
             TaggedFields("task.detail", ["directory": directory, "issue": issue])
         case .sessionCard(let id):
@@ -246,6 +251,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.file", ["issue": issue, "path": path])
         case .waveList: TaggedFields("wave.list")
         case .machineSelf: TaggedFields("machine.self")
+        case .viewSelect(let expression):
+            TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
@@ -330,6 +337,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                        sequence: Int, records: ProgramStatusRecords)
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
+    /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, requestID: String, id: String, agent: String?)
@@ -1292,7 +1300,7 @@ public struct RegistryQuery: Sendable {
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
         try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100)))
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -1436,8 +1444,8 @@ public struct RegistryQuery: Sendable {
 /// `lf task create REQUEST --run --json`: the created Task, the graph it took
 /// up and its admitted conversation, nil after a headless run. Both are nil
 /// when the run failed after the Task was filed.
-public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
-    public struct CreatedTask: Decodable, Sendable, Hashable {
+public struct TaskCreateReceipt: Codable, Sendable, Hashable {
+    public struct CreatedTask: Codable, Sendable, Hashable {
         public let id: String
         public let identifier: String
         public let title: String

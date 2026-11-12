@@ -125,6 +125,14 @@ with `transport 'https' not allowed`, run `swift package resolve` in `swift/` on
 and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
+
+Phone, shared Swift models and server protocol changes also select `ios`.
+`uv run python scripts/test_ios.py` runs that suite directly; pass
+`-only-testing:LoopflowiOSTests/SessionTerminalTests` for a focused check. It creates
+and removes its own Simulator, using an installed iOS runtime and ad-hoc signing.
+The suite covers pairing, Task creation and the terminal; the shared protocol
+decoders, owner stream included, run with the macOS Swift tests. Whether a
+Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or
 website command when the installed CLI differs: `PATH="$PWD/target/debug:$PATH"`.

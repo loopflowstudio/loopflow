@@ -1073,9 +1073,16 @@ mod tests {
             ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',0)", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
         ];
+        let released = Connection::open_in_memory().unwrap();
+        apply_before_migration(&released, "planning_peers");
         for (sql, expected) in cases {
-            let conn = Connection::open_in_memory().unwrap();
-            apply_before_migration(&conn, "planning_peers");
+            let mut conn = Connection::open_in_memory().unwrap();
+            // Each case upgrades its own released data; the empty historical
+            // schema is identical and need only be constructed once.
+            rusqlite::backup::Backup::new(&released, &mut conn)
+                .unwrap()
+                .run_to_completion(256, std::time::Duration::ZERO, None)
+                .unwrap();
             let wave = WaveId::new();
             let project = ProjectId::new();
             let task = TaskId::new();

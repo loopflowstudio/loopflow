@@ -167,6 +167,18 @@ Open the lid: the laptop's Desktop shows the same terminal as an ordinary pane.
   "`ssh mini`, then `lf`" enough once PATH works?
 - Jack, 2026-11-12, on this section as worded above (with "primary" for hub):
   "I think I agree with that".
+- Jack, 2026-11-12, on the flag: "i think lf --machine mini is still fine
+  idk", then "maybe not". Undecided. LOO-861 deletes the SSH transport under
+  the flag either way and lists the flag's fate as open.
+- Jack, 2026-11-12, on "the Machine that runs work uses its own preferences,
+  with nothing sent from the laptop": "Not sure about that. i think thats
+  probably wrong if we keep it". Open in LOO-861, not in its deletion list.
+- Jack, 2026-11-12: "coudl make sense if lf --machine basically means: (1) use
+  known machine routes instead of needing to otherwise know a name for te
+  machine [although is there somewhere global we should be "installing"
+  machine names so this isnt necessary) (2) prioritize this machine's config
+  rather than the other machine's config or maybe even (3) bring some
+  credentials along the way". Written into LOO-861 as the sketch for the flag.
 - Jack, 2026-11-12, on the roles: "your primary machine, as a user, is a
   laptop. Some other client may or may not be where you want work to happen …
   you have another machine that's sort of like the most reliably always-on

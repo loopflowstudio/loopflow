@@ -132,7 +132,15 @@ struct ServerProtocolTests {
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
         guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
-        #expect(owner == trace)
+        #expect(owner == .owner(lfProcessID: trace))
+        // A held terminal outlives server restarts and is named by its terminal.
+        guard case .bridged(let held) = try message("bridged_terminal") else { Issue.record("Missing held bridge"); return }
+        #expect(held == .terminal(id: "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"))
+        let start = ServerClientMessage.request(id: "start-1", operation: .sessionStart(
+            session: "session_5e55105e000040008000000000000001", request: "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+            argv: ["/usr/local/bin/lf", "session", "resume", "session_5e55105e000040008000000000000001"], cwd: "/Users/me/src/app",
+            env: [("PATH", "/usr/bin:/bin"), ("HOME", "/Users/me")], rows: 24, cols: 80, placement: "desktop-shell"), select: nil)
+        #expect(try encoded(start) == value("session_start"))
     }
 
     @Test func ticketsAdmitTerminalAndBulkConnections() throws {
@@ -155,9 +163,9 @@ struct ServerProtocolTests {
         #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil)) == value("task_create"))
         #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil)) == value("session_page"))
-        let session = try value("session_start")
-        guard case .string(let id) = session["id"], case .string(let sessionID) = session["operation"]["id"] else { Issue.record("Missing session.start fixture"); return }
-        #expect(try encoded(.request(id: id, operation: .command(.sessionStart(id: sessionID)), select: nil)) == session)
+        #expect(try encoded(.request(id: "continue-1", operation: .sessionContinue(
+            session: "session_5e55105e000040008000000000000001", request: "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
+            rows: 40, cols: 60), select: nil)) == value("session_continue"))
         #expect(try encoded(.subscribe(id: "tasks-1", operation: .viewSelect(expression: "kind:task state:open"), select: nil, resume: nil)) == value("view_select"))
     }
 
@@ -467,10 +475,13 @@ struct ServerProtocolTests {
             try ServerMessage(line: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try ServerMessage(line: Data(#"{"type":"welcome","revision":4}"#.utf8))
+            try ServerMessage(line: Data(#"{"type":"welcome","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try ServerMessage(line: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try ServerMessage(line: Data(#"{"type":"bridged","owner_lf_process_id":"x"}"#.utf8))
         }
     }
 }

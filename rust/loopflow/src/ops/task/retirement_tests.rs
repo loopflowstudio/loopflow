@@ -11,6 +11,7 @@ use crate::durable::TaskId;
 use crate::id::LfProcessId;
 use crate::store::sqlite::ViewerHold;
 use crate::store::{SharedStore, StorageConfig};
+use crate::transport::Host;
 use crate::work::task::Task;
 
 struct Workspace {
@@ -191,6 +192,102 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
     });
 }
 
+/// A held terminal is no process. The conversation's lf process names it, so
+/// its work is excused like work under an owner, and cleanup names the
+/// terminal for the server to end.
+#[test]
+fn cleanup_ends_a_done_tasks_held_conversation() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        fixture.due();
+        let terminal = crate::id::TerminalId::new();
+        fixture
+            .sql()
+            .execute(
+                "INSERT INTO held_terminals(id,holder_build,created_at) VALUES(?1,'fixture',1)",
+                [&terminal],
+            )
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .test_session("held", &crate::session_record::new_artifact_key());
+        fixture
+            .sql()
+            .execute(
+                "UPDATE agent_sessions SET task_id=?1,interactive=1,held_terminal_id=?2 WHERE id='held'",
+                params![fixture.task.id.as_str(), terminal],
+            )
+            .unwrap();
+        // The conversation's lf process, a child of the holder, which records no Process.
+        let live = crate::journal::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        let conversation = crate::process::LfProcess {
+            id: LfProcessId::new(),
+            pid: Some(live.pid),
+            os_started_at: Some(live.started_at),
+            trace_id: crate::id::TraceId::new(),
+            parent_lf_process_id: None,
+            via_agent: Some(false),
+            caller_session_id: None,
+            caller_agent_process_id: None,
+            command: None,
+            repo: None,
+            cwd: Some(fixture.checkout.display().to_string()),
+            started_at: live.started_at,
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture
+            .store
+            .sqlite
+            .record_process_within(&conversation, Some(&terminal), std::time::Duration::ZERO)
+            .unwrap();
+        // Its provider, attached to it, binds the conversation to the Task.
+        let agent = crate::id::AgentProcessId::new();
+        fixture.sql().execute(
+            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
+                agent_session_id,agent_provider,agent_interactive,attached_lf_process_id)
+             VALUES(?1,'agent',?2,?3,?4,?5,?4,'held','claude',1,?3)",
+            params![agent, conversation.trace_id, conversation.id, live.started_at, live.pid],
+        ).unwrap();
+        fixture
+            .sql()
+            .execute("UPDATE agent_sessions SET agent_process_id=?1 WHERE id='held'", [&agent])
+            .unwrap();
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        let reason = fixture.diagnostics().0.unwrap_or_default();
+        assert!(!reason.contains("still has live"), "{reason}");
+        assert_eq!(fixture.intent().phase, "closing");
+        // Past the viewing grace since completion, cleanup names the terminal.
+        let later = now() + crate::store::sqlite::WORKSPACE_GRACE;
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_close_candidates(&fixture.task.id, later)
+                .unwrap(),
+            vec![(Host::Terminal(terminal.clone()), false)]
+        );
+        fixture.assert_retained();
+        // The server ends the terminal; its conversation settles with it.
+        fixture.sql().execute_batch(&format!(
+            "UPDATE held_terminals SET ended_at=2,exit_code=0 WHERE id='{terminal}';
+             UPDATE agent_sessions SET completed_at=2 WHERE id='held';
+             UPDATE processes SET completed_at=2,outcome='succeeded' WHERE id IN ('{}','{agent}');",
+            conversation.id
+        )).unwrap();
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        assert!(!fixture.checkout.exists());
+        assert_eq!(fixture.intent().phase, "retired");
+    });
+}
+
 #[test]
 fn retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout() {
     let _ledger = crate::journal::TestLedgerGuard::new();
@@ -222,7 +319,7 @@ fn retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout() {
             .unwrap();
         assert_eq!(
             super::conversation_closes(&fixture.store.sqlite, &fixture.task.id).unwrap(),
-            vec![(owner, false)]
+            vec![(Host::Owner(owner), false)]
         );
         fixture.assert_retained();
     });
@@ -530,7 +627,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
         super::conversation_closes(&store, &task)
             .unwrap()
             .into_iter()
-            .find(|(id, _)| id == &owner)
+            .find(|(host, _)| host == &Host::Owner(owner.clone()))
             .map(|(_, abandoned)| abandoned)
     };
     assert_eq!(request(), Some(false));
@@ -748,12 +845,12 @@ fn cleanup_recognizes_current_session_launchers_without_process_parents() {
             params![agent,launcher,live.pid,live.started_at]).unwrap();
         fixture.sql().execute("UPDATE agent_sessions SET agent_process_id=?1 WHERE id='fresh'", [&agent]).unwrap();
         let closes = || super::conversation_closes(&fixture.store.sqlite, &fixture.task.id).unwrap();
-        assert_eq!(closes(), vec![(owner.clone(),false)]);
+        assert_eq!(closes(), vec![(Host::Owner(owner.clone()),false)]);
         // A live request still holds the provider and its parentless launcher.
         fixture.sql().execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded) VALUES('fresh',?1,1,0,1,1)", [&agent]).unwrap();
         assert!(closes().is_empty());
         fixture.sql().execute("UPDATE session_activity SET pending_input=0", []).unwrap();
-        assert_eq!(closes(), vec![(owner,false)]);
+        assert_eq!(closes(), vec![(Host::Owner(owner),false)]);
         // The association is current ownership, not every past Session process.
         fixture.sql().execute("UPDATE agent_sessions SET agent_process_id=NULL WHERE id='fresh'", []).unwrap();
         assert!(closes().is_empty());

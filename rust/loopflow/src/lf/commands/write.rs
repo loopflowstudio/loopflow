@@ -339,13 +339,6 @@ writes! {
         id, task, preview, ..
     } => super::session::bound(id, task, *preview)?,
 
-    /// Open the exact Session under its retained terminal owner, without a viewer.
-    #[serde(rename = "session.start")]
-    SessionStart { id: crate::id::LfSessionId } => crate::ops::human_session::SessionRecord;
-    { id } => tokio::runtime::Runtime::new()?.block_on(
-        super::session::started(id.as_str(), directory, None, Vec::new())
-    )?,
-
     /// `lf [--agent <agent>] session resume [<id>] [--task <task>] [--wave <wave>]
     /// --prepare --json`, with `--repo <directory>` when it names none of them:
     /// the conversation and the command that opens it, no provider started.
@@ -1303,8 +1296,7 @@ impl Write {
             | Self::DesktopDashboardSlots { directory, .. }
             | Self::DesktopDashboardMove { directory, .. }
             | Self::DesktopLayoutSave { directory, .. } => directory,
-            Self::SessionStart { .. }
-            | Self::DesktopPortfolioSet { .. }
+            Self::DesktopPortfolioSet { .. }
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }
             | Self::AccountSet { .. }

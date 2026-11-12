@@ -1338,10 +1338,8 @@ fn server_operations_match_their_lf_commands() {
         directory: directory.clone(),
         issue: "INF-123".into(),
     }) {
-        // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution;
-        // Session startup is exercised through its retained owner (transport_tests).
+        // Creation has its own two-order comparison in served_session_adoption_matches_cli_without_new_execution.
         Write::TaskCreate { .. }
-        | Write::SessionStart { .. }
         | Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
@@ -2108,17 +2106,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
     use loopflow::portfolio::PortfolioCommand;
     let path = |path: &Path| path.display().to_string();
     let (directory, words): (String, Vec<String>) = match write {
-        Write::SessionStart { id } => (
-            "/".into(),
-            vec![
-                "session".into(),
-                "resume".into(),
-                "--start-only".into(),
-                "--json".into(),
-                "--".into(),
-                id.to_string(),
-            ],
-        ),
         Write::TaskCreate {
             directory,
             request_id,

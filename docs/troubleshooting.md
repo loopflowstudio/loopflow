@@ -77,7 +77,8 @@ lf doctor          # selected installation and store health
 input readiness. Its last available screen stays readable; without a saved
 screen the same pane stays empty until output arrives.
 **Reconnecting…** means a connection was lost and Desktop is trying the same
-Session owner. Neither status changes the terminal's dimensions. Keep the pane
+running conversation. Its agent is still working: agents run in a holder
+process that a server restart leaves alone. Neither status changes the terminal's dimensions. Keep the pane
 open; its screen and local reading actions remain available. If automatic retries
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
@@ -132,11 +133,23 @@ lf server status
 
 Agents started by a Task or Wave command (`lf task run`, `--task`, `--wave`,
 a Task or Wave conversation) start only once the Machine server answers,
-because their turns and steers go through it. A launch that finds none runs
+including headless runs, because their turns and steers go through it. A launch that finds none runs
 `lf install server` itself; the message appears when that did not bring one
 up, and carries what the install said. On another Machine, run the two
 commands there: `lf --machine <machine> install server`. Plain `lf`,
 `lf <skill>` and `lf graph` run without a server, in a Task's checkout too.
+
+Conversations already running in a holder keep running while the server is
+away, and their views reconnect when it returns.
+
+## Several `lf holder run` processes
+
+One per installed build that still has an open Task or Wave conversation.
+Each exits a minute after its last conversation ends; ending those
+conversations, not killing the holder, is how to retire one. Killing a holder
+ends every agent it holds. `lf session serve` processes belong to
+conversations opened before holders, or to runs outside a Task or Wave, and
+end with their conversation.
 
 ## A creation has no confirmed answer
 

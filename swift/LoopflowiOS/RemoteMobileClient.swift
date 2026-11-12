@@ -68,12 +68,16 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         catch { terminal.close(); throw error }
     }
 
-    /// Continue a recorded conversation whose terminal has stopped.
-    func startSession(sessionID: String) async throws {
-        let record = try decode(SessionRecord.self, await request(.command(.sessionStart(id: sessionID))))
-        guard record.id == sessionID else {
-            throw RegistryQueryError("The Machine returned a different Session")
-        }
+    private struct Started: Decodable {
+        let terminalID: String
+        enum CodingKeys: String, CodingKey { case terminalID = "terminal_id" }
+    }
+
+    /// Continue a recorded conversation whose terminal has stopped, in a
+    /// terminal the Machine holds; repeating `request` starts nothing.
+    func startSession(sessionID: String, request: String, size: TerminalGeometry) async throws {
+        _ = try decode(Started.self, await self.request(.sessionContinue(
+            session: sessionID, request: request, rows: size.rows, cols: size.columns)))
     }
 
     func creationContext() async throws -> MobileCreationContext {

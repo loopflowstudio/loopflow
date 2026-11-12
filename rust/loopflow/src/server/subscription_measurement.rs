@@ -263,7 +263,7 @@ fn subscription_server() {
                     let tickets = tickets.clone();
                     let subscriptions = subscriptions.clone();
                     connections.spawn(async move {
-                        connection(socket, "subscription-fixture", "frozen-by-runner", &clients, None, tickets, &slots, &subscriptions).await
+                        connection(socket, "subscription-fixture", "frozen-by-runner", &clients, None, None, tickets, &slots, &subscriptions).await
                     });
                 }
                 Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap().unwrap(); }

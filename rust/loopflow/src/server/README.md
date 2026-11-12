@@ -19,8 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Session owners retain their existing lifetime policy; this
-service creates no PTYs, retention records or Graphs. Logout/reboot do not
+stop the service. Managed Sessions run in a holder the service starts with
+`setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
+stopping or replacing the service leaves holders and their agents running.
+Session owners retain their existing lifetime policy. This service holds no
+PTY itself and starts no Graphs. Logout/reboot do not
 preserve live processes. Disabled Background Items remain disabled. Upgrade
 retires the previous
 `com.loopflow.machine` registration before starting `com.loopflow.server`.
@@ -141,7 +144,7 @@ After `welcome`, many requests share the connection. A `request` carries an `id`
 `operation`; the server answers `response {id, trace_id, result}` or `error
 {id, code, message, data}` in whatever order work finishes. `result` is the
 operation's value: what its CLI spelling prints with `--json`, a ticket
-`{ticket, owner_lf_process_id, expires_in_ms}` for `session.attach`, and null
+`{ticket, owner_lf_process_id, terminal_id, expires_in_ms}` for `session.attach`, and null
 once a subscription is confirmed.
 A completed request's ID can be reused immediately after its response or error. A
 subscription keeps its ID after acknowledgement and readings, until `ended`,
@@ -230,7 +233,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.attach` | `lf session attach` (Desktop panes' relay; ordinary CLI attachment reaches the owner's socket directly) | server |
+| `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
+| `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` and CLI attachment to an owner reaches its socket directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
@@ -275,7 +279,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
 | `view.select` | `lf desktop view list --all` | read |
-| `session.start` | `lf session resume --start-only <id>` | shared retained-owner launch |
+| `session.continue` | the phone's Continue | held-terminal launch |
 | `mobile.status`, `.configure` | `lf server mobile` | remote endpoint setup |
 | `request.upload` | none | upload ticket for an oversized request |
 
@@ -377,12 +381,41 @@ the phone's `view.select` Task list and its creation destinations all read it.
   response means outcome unknown; inspect state before retrying. Transport IDs
   correlate diagnostics and are **not** durable deduplication receipts. Only
   `task.create` and `session.new` have the creation retry contract below.
-- `session.attach {session, owner_lf_process_id?}` resolves the Session's current
-  owner and answers `{ticket, owner_lf_process_id, expires_in_ms}`. Resolution
-  never starts a provider. An optional owner ID requires that exact owner;
-  reconnecting by Session alone reaches its current owner after replacement.
+- `session.start {session, request, argv, cwd, env, rows, cols}` starts the
+  Session's agent in this build's holder and answers `{terminal_id}`. `env` is
+  the caller's complete environment; the server's own is not used. `request`
+  identifies the start: repeating it answers the same terminal and starts
+  nothing, and a start whose holder reply was lost is reconciled against the
+  holder's inventory first; a start that could not be reconciled answers
+  `outcome_unknown`, and repeating the same `request` settles it. It creates
+  a process and, with `session.continue`, the only operation here that does;
+  attaching never does.
+- `session.continue {session, request, rows, cols}` starts `lf session resume`
+  of exactly that Session in a held terminal, in its recorded directory, with
+  the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
+  with no environment to send (the phone). It answers and repeats like
+  `session.start`; a Session `run_refusal` refuses is `conflict`.
+- `session.attach {session}` prefers the Session's held terminal to an owner,
+  and `{session, terminal_id}` attaches only to that terminal. Either answers
+  a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
+  and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
+  The bridged connection speaks the viewer protocol with the server's
+  terminal registry. A terminal that has ended answers `not_found` with
+  `terminal_id` and `current_terminal_id` (null when the Session has none).
+  A terminal whose holder has not answered this server since it started
+  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+  agent keeps running, and the same request attaches once the holder answers.
+  A ticket presented after its terminal ended, or while its holder is not
+  answering, gets the same two errors with a null `id` in place of `bridged`.
+  The owner form below serves owners only, with `terminal_id` null in its
+  ticket and its `bridged`; an owner ID is never a terminal ID.
+- `session.attach {session, owner_lf_process_id}` resolves the Session's current
+  owner and answers `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`. Resolution
+  never starts a provider. A non-null owner ID requires that exact owner;
+  with a null one and no held terminal, the Session's current owner after
+  replacement is reached.
   The terminal opens a separate connection and sends `attach {ticket}` as its
-  first message. It reads `bridged {owner_lf_process_id}`, then carries the
+  first message. It reads `bridged {owner_lf_process_id, terminal_id: null}`, then carries the
   unchanged binary owner protocol in `transport/README.md`: raw bytes locally,
   binary frames remotely. An owner whose endpoint refuses at redemption is
   `not_found {owner_lf_process_id}`. Tickets (`ticket.rs`) are single use, expire
@@ -419,13 +452,15 @@ the phone's `view.select` Task list and its creation destinations all read it.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task or Wave command starts it: `lf task run`
-and its Graph's steps, `--task`, `--wave`, a Task or Wave conversation,
-`lf resume [ID] --task` or `--wave`. Every other launch is bare, including
+A launch is managed when a Task, Wave or repository command starts it: `lf
+task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
+repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
+with `lf session bind`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
 checkout; that run still counts toward the Task. The command decides
-(`Cli::names_work`) and sets `AgentConfig::managed` on the launch; nothing
-reads it back from the Session row.
+(`Cli::names_work`) and sets `AgentConfig::managed` on the launch. Reopening
+a recorded conversation names no Work: there the Session row
+(`WorkSource::is_managed`) decides whether it is held and needs the server.
 
 For a managed launch, and for any conversation opened in a terminal, Claude
 and Codex hooks run `lf __context-block --moment <moment>` at session start,
@@ -436,7 +471,7 @@ same request from inside the provider
 ([below](#opencode-and-pi-ask-from-inside-the-provider)):
 
 ```text
-→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
+→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
@@ -995,8 +1030,11 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 
 ### Terminal and provider recovery
 
-Terminal continuation addresses the exact owner, separately from Work reads.
-Byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
+Terminal continuation addresses the exact owner or held terminal, separately
+from Work reads. A view of a held terminal resumes from its PTY byte position,
+served from the holder's 2 MiB ring; a server restart does not invalidate the
+position, and one older than the ring falls back to a fresh screen. For
+owners, byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
 reconnect grace; expired continuation falls back to a fresh screen from that
 owner. Terminal-mode viewers request a fresh screen. Uncertain input is
 never replayed. Recovery takes only free claims or those held by the viewer's

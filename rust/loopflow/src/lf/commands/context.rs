@@ -174,22 +174,14 @@ pub fn explain_session_resume(
     target: crate::ops::human_session::SessionTarget<'_>,
     fork: bool,
     prepare_only: bool,
-    start_only: bool,
 ) -> Result<SessionResumeExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
         match read_registry() {
             Ok(store) => {
-                crate::ops::human_session::explain_resume(
-                    &store,
-                    &cwd,
-                    target,
-                    fork,
-                    prepare_only,
-                    start_only,
-                )
-                .await
+                crate::ops::human_session::explain_resume(&store, &cwd, target, fork, prepare_only)
+                    .await
             }
             Err(error) => SessionResumeExplanation::unavailable(error),
         }

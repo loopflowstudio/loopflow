@@ -158,8 +158,6 @@ struct DTOFixtureTests {
         #expect(reports[2].action?.intent == .takeOver)
         #expect(reports[4].action?.intent == .newThread)
         #expect(reports[4].action?.agent == "codex")
-        #expect(reports[5].action?.startOnly == true)
-        #expect(reports[5].action?.intent == .reuse)
         #expect(!reports[2].unavailable.isEmpty)
         #expect(reports[3].state == nil)
         #expect(reports[3].action == nil)

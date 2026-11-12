@@ -13,6 +13,7 @@ use super::service::{self, Carrier, Clients, Greeting};
 use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
 use super::wire::MAX_BULK;
+use crate::transport::registry::Registry;
 use anyhow::{Context, Result};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -52,6 +53,7 @@ pub(super) async fn manage(
     clients: Clients,
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
+    terminals: Option<Arc<Registry>>,
 ) -> Result<()> {
     let mut status = match initial {
         Ok(configuration) => Status {
@@ -101,7 +103,7 @@ pub(super) async fn manage(
                         .context("Could not save mobile access; no listener was enabled")?;
                     status.configuration = Some(bound.config.clone());
                     status.ready = true;
-                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone()));
+                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone(), terminals.clone()));
                     Ok(status.configuration.clone())
                 }.await;
                 status.error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -126,7 +128,7 @@ pub(super) async fn manage(
                             status.ready = true;
                             status.error = None;
                             reported_failure = false;
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone()));
+                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone(), terminals.clone()));
                         }
                         Err(error) => {
                             if !reported_failure {
@@ -244,6 +246,7 @@ async fn maintain(host: Host, config: Configuration, tls: mpsc::Sender<TlsAccept
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run(
     bound: Listener,
     instance: Arc<str>,
@@ -252,6 +255,7 @@ async fn run(
     clients: Clients,
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
+    terminals: Option<Arc<Registry>>,
 ) -> Result<()> {
     tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
     let mut connections = JoinSet::new();
@@ -271,6 +275,7 @@ async fn run(
         };
         let slots = slots.clone();
         let subscriptions = subscriptions.clone();
+        let terminals = terminals.clone();
         let (host, owner, tls, instance, executable, clients, tickets) = (
             bound.host.clone(),
             bound.config.owner.clone(),
@@ -293,6 +298,7 @@ async fn run(
                     &executable,
                     &clients,
                     tickets,
+                    terminals,
                     &slots,
                     &subscriptions,
                 )
@@ -326,6 +332,7 @@ async fn connection<S>(
     executable: &str,
     clients: &Clients,
     tickets: Arc<Tickets>,
+    terminals: Option<Arc<Registry>>,
     slots: &Arc<Semaphore>,
     subscriptions: &Arc<Subscriptions>,
 ) -> Result<()>
@@ -387,6 +394,7 @@ where
                 None,
                 admission,
                 tickets,
+                terminals,
                 subscriptions,
                 queue,
             )
@@ -584,6 +592,7 @@ mod tests {
                 "test-executable",
                 &Clients::default(),
                 tickets,
+                None,
                 &Arc::new(tokio::sync::Semaphore::new(
                     crate::server::wire::MAX_CONNECTIONS,
                 )),
@@ -699,6 +708,7 @@ mod tests {
                 operation: Operation::Server(ServerOperation::SessionAttach {
                     session: crate::id::LfSessionId::from("session_missing"),
                     owner_lf_process_id: None,
+                    terminal_id: None,
                 }),
             }))
             .await

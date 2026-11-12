@@ -100,12 +100,12 @@ final class SessionLink {
 
     /// Continue a recorded conversation whose terminal stopped, then open it.
     func start() async {
-        guard canStart, let session = task.primarySession else { return }
+        guard canStart, let session = task.primarySession, let size else { return }
         close()
         state = .opening
         let opening = generation
         do {
-            try await client.startSession(sessionID: session)
+            try await client.startSession(sessionID: session, request: UUID().uuidString.lowercased(), size: size)
             guard opening == generation else { return }
             await open()
         } catch {

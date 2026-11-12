@@ -159,13 +159,20 @@ public enum ServerOperation: Encodable, Sendable {
     /// expires_in_ms}`; with `owner`, only while that exact LfProcess owns it.
     case sessionAttach(session: String, owner: String?)
     case requestUpload(bytes: Int)
+    /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
+    /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
+    /// pane (`LF_TERMINAL_ID`) the child continues.
+    case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
+    /// Continue an existing Session in a held terminal the server starts with its own
+    /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
+    case sessionContinue(session: String, request: String, rows: Int, cols: Int)
     /// A provider hook's turn or tool boundary, answered `{steers, update, waiting}`.
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String], inbox: JSONValue?)
 
     private enum Keys: String, CodingKey {
-        case kind, bytes, session, ownerLfProcessID = "owner_lf_process_id"
+        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, ownerLfProcessID = "owner_lf_process_id", terminalID = "terminal_id"
         case moment, delivery, adapter, callback, gap, printed, inbox
     }
     public func encode(to encoder: Encoder) throws {
@@ -183,6 +190,26 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(owner, forKey: .ownerLfProcessID)
+            // Desktop attaches to owners; a held terminal is named by `terminal_id`.
+            try box.encodeNil(forKey: .terminalID)
+        case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols, let placement):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.start", forKey: .kind)
+            try box.encode(session, forKey: .session)
+            try box.encode(request, forKey: .request)
+            try box.encode(argv, forKey: .argv)
+            try box.encode(cwd, forKey: .cwd)
+            try box.encode(env.map { [$0.0, $0.1] }, forKey: .env)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
+            try box.encode(placement, forKey: .placement)
+        case .sessionContinue(let session, let request, let rows, let cols):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("session.continue", forKey: .kind)
+            try box.encode(session, forKey: .session)
+            try box.encode(request, forKey: .request)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
         case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed, let inbox):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)
@@ -283,8 +310,9 @@ public enum ServerMessage: Sendable {
     /// What the request returned: a read's or write's value, or the ticket for
     /// `session.attach`; null once a subscription is confirmed.
     case response(id: String, traceID: String, result: RawJSON)
-    /// The answer to `attach`: the connection now speaks the owner protocol with this LfProcess.
-    case bridged(ownerLfProcessID: String)
+    /// The answer to `attach`: the connection now speaks the viewer protocol
+    /// with this owner LfProcess or held terminal.
+    case bridged(ServerBridge)
     case reading(id: String, checkpoint: String, frame: RawJSON)
     /// The answer for `id` is `bytes` long; a ticketed connection delivers it.
     case bulk(id: String, ticket: String, bytes: Int)
@@ -316,7 +344,14 @@ public enum ServerMessage: Sendable {
         case "welcome": self = .welcome(try JSONDecoder().decode(ServerWelcome.self, from: line))
         case "status": self = .status(try JSONDecoder().decode(ServerStatus.self, from: line))
         case "response": self = .response(id: try text("id"), traceID: try text("trace_id"), result: try field("result"))
-        case "bridged": self = .bridged(ownerLfProcessID: try text("owner_lf_process_id"))
+        case "bridged":
+            // Both keys are required; exactly one is not null.
+            func optional(_ key: String) throws -> String? { try field(key).isNull ? nil : text(key) }
+            switch (try optional("owner_lf_process_id"), try optional("terminal_id")) {
+            case (let owner?, nil): self = .bridged(.owner(lfProcessID: owner))
+            case (nil, let terminal?): self = .bridged(.terminal(id: terminal))
+            default: throw RegistryQueryError("A bridge names one owner or one terminal")
+            }
         case "reading": self = .reading(id: try text("id"), checkpoint: try text("checkpoint"), frame: try field("frame"))
         case "bulk": self = .bulk(id: try text("id"), ticket: try text("ticket"), bytes: try field("bytes").decode(Int.self))
         case "admitted": self = .admitted
@@ -338,6 +373,12 @@ extension JSONValue {
         if case .object(let fields) = self { return fields[field] ?? .null }
         return .null
     }
+}
+
+/// What a bridge reached: a Session owner LfProcess, or a terminal held beside the server.
+public enum ServerBridge: Equatable, Sendable {
+    case owner(lfProcessID: String)
+    case terminal(id: String)
 }
 
 public struct ServerWelcome: Decodable, Sendable {

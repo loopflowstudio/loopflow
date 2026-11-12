@@ -101,7 +101,7 @@ pub(crate) fn preview_prompt(
 /// using `message` and the provider's own history without re-executing its skill.
 /// `managed` when the resume command named a Task or Wave, or is a Task-run step.
 pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
-    if crate::transport::delegate_current(true)? {
+    if crate::transport::delegate_current(true, managed)? {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;

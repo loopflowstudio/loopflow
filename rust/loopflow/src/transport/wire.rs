@@ -1,7 +1,11 @@
 //! What crosses a viewer connection: length-prefixed frames, JSON requests and
 //! replies, and events riding inside the terminal stream as nonce-tagged APC
-//! sequences. The stream a viewer counts and the owner spools is the bytes of
-//! its snapshot, out and err frames, in order.
+//! sequences. The stream an owner's viewer counts and the owner spools is the
+//! bytes of its snapshot, out and err frames, in order. A held terminal's
+//! viewer counts PTY bytes instead: its out frames are exactly the PTY's
+//! output, a position frame says where a snapshot or a skipped stretch leaves
+//! it, and lf's own reports and events travel in aside frames it writes but
+//! does not count.
 
 use std::io;
 
@@ -26,6 +30,12 @@ pub(super) enum Tag {
     Out = 0x03,
     /// Stream 2: stderr for a piped command.
     Err = 0x04,
+    /// A held terminal's PTY position the stream stands at now, eight bytes
+    /// big-endian.
+    Position = 0x05,
+    /// Bytes for the viewer's terminal that are not the PTY's output: lf's
+    /// reports and events. Never counted as a position.
+    Aside = 0x06,
     /// JSON carrying an `id`.
     Request = 0x11,
     /// Keystrokes from the controlling connection.
@@ -48,6 +58,8 @@ impl Tag {
             0x02 => Self::Snapshot,
             0x03 => Self::Out,
             0x04 => Self::Err,
+            0x05 => Self::Position,
+            0x06 => Self::Aside,
             0x11 => Self::Request,
             0x12 => Self::Input,
             _ => return None,
@@ -60,6 +72,19 @@ pub(super) fn encode(tag: Tag, payload: &[u8], into: &mut impl Extend<u8>) {
     into.extend([tag as u8]);
     into.extend((payload.len() as u32).to_be_bytes());
     into.extend(payload.iter().copied());
+}
+
+/// A position frame's payload.
+pub(super) fn position(at: u64) -> [u8; 8] {
+    at.to_be_bytes()
+}
+
+/// The position a position frame carries.
+pub(super) fn parse_position(payload: &[u8]) -> io::Result<u64> {
+    let bytes: [u8; 8] = payload
+        .try_into()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "position frame is not 8 bytes"))?;
+    Ok(u64::from_be_bytes(bytes))
 }
 
 pub(super) fn frame(tag: Tag, payload: &[u8]) -> Vec<u8> {
@@ -137,6 +162,11 @@ pub(super) enum Request {
         name: Option<String>,
         /// What a controlling viewer this attachment replaces prints as it leaves.
         moved: Option<String>,
+        /// A held terminal's PTY position this viewer's screen already shows.
+        /// The stream continues from there with no snapshot, or begins with
+        /// one when the holder's ring no longer reaches back that far. Relays
+        /// from before positions leave it out.
+        from: Option<u64>,
     },
     /// Continue a dropped viewer's stream, no snapshot.
     Resume(Resume),
@@ -145,7 +175,8 @@ pub(super) enum Request {
         cols: u16,
     },
     EndInput,
-    /// Cleanup is ending this owner; deliver the reason and retain its final screen.
+    /// Cleanup is ending this execution; deliver the reason and retain its final
+    /// screen. A held terminal ends on it; an owner is signalled next.
     CloseNotice {
         text: String,
     },
@@ -302,6 +333,9 @@ pub(super) enum Event {
     Directory {
         cwd: std::path::PathBuf,
     },
+    /// A viewer that attached from a position has caught up: what follows is
+    /// the live stream, and its terminal's answers to replayed queries are over.
+    Live,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -344,6 +378,12 @@ impl Scanner {
             prefix: prefix(nonce),
             held: Vec::new(),
         }
+    }
+
+    /// Recognize events by `nonce` from here on. Bytes held as a possible
+    /// event are scanned again under it.
+    pub fn renonce(&mut self, nonce: &str) {
+        self.prefix = prefix(nonce);
     }
 
     pub fn scan(&mut self, bytes: &[u8]) -> Vec<Piece> {

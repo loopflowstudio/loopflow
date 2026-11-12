@@ -23,11 +23,13 @@ use super::subscriptions::{Member, Subscriptions};
 use super::ticket::{Admission, Purpose, Tickets};
 use super::wire::{
     ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
-    ServerOperation, SessionAttached, Status, Welcome, MAX_BULK, MAX_CONNECTIONS, MAX_MESSAGE,
-    MIN_REVISION, REVISION, TICKET_LIFETIME,
+    ServerOperation, SessionAttached, SessionStarted, Status, Welcome, MAX_BULK, MAX_CONNECTIONS,
+    MAX_MESSAGE, MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
 use crate::engine::{Error, ErrorCode};
 use crate::lf::commands::read::Read;
+use crate::transport::registry::Registry;
+use crate::transport::Host;
 
 /// How long a connection has to send its first message.
 pub(super) const FIRST_MESSAGE: Duration = Duration::from_secs(5);
@@ -175,6 +177,15 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     super::wake::start();
+    // Held terminals keep running in their holders whether or not this server
+    // can host them; without a registry their views wait for the next server.
+    let terminals = match Registry::open(&executable_sha256) {
+        Ok(terminals) => Some(terminals),
+        Err(error) => {
+            tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
+            None
+        }
+    };
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),
@@ -185,12 +196,13 @@ pub(super) async fn run() -> Result<()> {
         clients.clone(),
         tickets.clone(),
         subscriptions.clone(),
+        terminals.clone(),
     );
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
-        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions) => result,
+        result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals) => result,
     }
 }
 
@@ -204,6 +216,7 @@ async fn local(
     remote_control: mpsc::Sender<Control>,
     tickets: Arc<Tickets>,
     subscriptions: Arc<Subscriptions>,
+    terminals: Option<Arc<Registry>>,
 ) -> Result<()> {
     loop {
         let (socket, _) = match listener.accept().await {
@@ -235,6 +248,7 @@ async fn local(
         let remote_control = remote_control.clone();
         let tickets = tickets.clone();
         let subscriptions = subscriptions.clone();
+        let terminals = terminals.clone();
         tokio::spawn(async move {
             if let Err(error) = connection(
                 socket,
@@ -242,6 +256,7 @@ async fn local(
                 &executable_sha256,
                 &clients,
                 Some(remote_control),
+                terminals.clone(),
                 tickets,
                 &slots,
                 &subscriptions,
@@ -263,6 +278,7 @@ pub(super) async fn connection(
     executable_sha256: &str,
     clients: &Clients,
     remote_control: Option<mpsc::Sender<Control>>,
+    terminals: Option<Arc<Registry>>,
     tickets: Arc<Tickets>,
     slots: &Arc<Semaphore>,
     subscriptions: &Arc<Subscriptions>,
@@ -307,6 +323,7 @@ pub(super) async fn connection(
                 remote_control,
                 Admission::Local,
                 tickets,
+                terminals,
                 subscriptions,
                 queue,
             )
@@ -507,6 +524,7 @@ pub(super) async fn session<C: Carrier>(
     remote_control: Option<mpsc::Sender<Control>>,
     admission: Admission,
     tickets: Arc<Tickets>,
+    terminals: Option<Arc<Registry>>,
     subscriptions: &Arc<Subscriptions>,
     mut queue: mpsc::Receiver<super::outbox::Frame>,
 ) -> Result<()> {
@@ -661,12 +679,89 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
             Start::Request(
-                Operation::Server(ServerOperation::SessionAttach {
+                Operation::Server(ServerOperation::SessionStart {
                     session,
-                    owner_lf_process_id: exact,
+                    request,
+                    argv,
+                    cwd,
+                    env,
+                    rows,
+                    cols,
+                    placement,
                 }),
                 None,
             ) => {
+                let start = crate::transport::registry::Start {
+                    session,
+                    request,
+                    argv,
+                    cwd,
+                    env,
+                    rows,
+                    cols,
+                    placement,
+                };
+                send(lines, &start_held(id, terminals.clone(), Ok(start)).await).await?;
+                continue;
+            }
+            Start::Request(
+                Operation::Server(ServerOperation::SessionContinue {
+                    session,
+                    request,
+                    rows,
+                    cols,
+                }),
+                None,
+            ) => {
+                let start =
+                    tokio::task::spawn_blocking(move || continuing(session, request, rows, cols))
+                        .await
+                        .map_err(unavailable)
+                        .and_then(|start| start);
+                send(lines, &start_held(id, terminals.clone(), start).await).await?;
+                continue;
+            }
+            Start::Request(
+                Operation::Server(ServerOperation::SessionAttach {
+                    session,
+                    owner_lf_process_id: exact,
+                    terminal_id,
+                }),
+                None,
+            ) => {
+                let held = terminals
+                    .as_ref()
+                    .and_then(|terminals| terminals.session_terminal(&session));
+                // A terminal whose holder has not answered this server yet.
+                let pending = terminals.as_ref().and_then(|terminals| {
+                    terminals.pending_terminal(&session, terminal_id.as_ref())
+                });
+                if exact.is_none() && (terminal_id.is_some() || held.is_some() || pending.is_some())
+                {
+                    let message = match (terminal_id, held, pending) {
+                        (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
+                            let ticket = tickets.issue(admission.clone(), Purpose::Terminal(Host::Terminal(held.clone())));
+                            ServerMessage::Response {
+                                id,
+                                trace_id: crate::id::TraceId::default(),
+                                result: serde_json::to_value(SessionAttached {
+                                    ticket,
+                                    owner_lf_process_id: None,
+                                    terminal_id: Some(held),
+                                    expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                                })
+                                .expect("a ticket serializes"),
+                            }
+                        }
+                        // Nothing ended; asking again later attaches.
+                        (_, _, Some(pending)) => ServerMessage::error(Some(id), crate::transport::registry::waiting(&pending)),
+                        (wanted, current, None) => ServerMessage::error(Some(id), Error::new(ErrorCode::NotFound,
+                            "terminal has ended; nothing was started and no input replayed",
+                        ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
+                    };
+                    send(lines, &message).await?;
+                    continue;
+                }
                 let owner = match attached_owner(session, exact).await {
                     Ok(owner) => owner,
                     Err(refusal) => {
@@ -682,10 +777,14 @@ pub(super) async fn session<C: Carrier>(
                     ).with(serde_json::json!({ "owner_lf_process_id": owner })))).await?;
                     continue;
                 }
-                let ticket = tickets.issue(admission.clone(), Purpose::Terminal(owner.clone()));
+                let ticket = tickets.issue(
+                    admission.clone(),
+                    Purpose::Terminal(Host::Owner(owner.clone())),
+                );
                 let result = serde_json::to_value(SessionAttached {
                     ticket,
-                    owner_lf_process_id: owner,
+                    owner_lf_process_id: Some(owner),
+                    terminal_id: None,
                     expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
                 })
                 .expect("a ticket serializes");
@@ -802,6 +901,102 @@ pub(super) async fn session<C: Carrier>(
     }
 }
 
+/// Start a held terminal and answer `{terminal_id}`. Starting a holder can
+/// take seconds; nothing else on this connection waits on it but its own
+/// requests.
+async fn start_held(
+    id: String,
+    terminals: Option<Arc<Registry>>,
+    start: Result<crate::transport::registry::Start, Error>,
+) -> ServerMessage {
+    let Some(terminals) = terminals else {
+        return ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
+            "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
+        ).with(serde_json::json!({ "resource": "held_terminals" })));
+    };
+    let start = match start {
+        Ok(start) => start,
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    match tokio::task::spawn_blocking(move || terminals.start(start)).await {
+        Ok(Ok(terminal_id)) => ServerMessage::Response {
+            id,
+            trace_id: crate::id::TraceId::default(),
+            result: serde_json::to_value(SessionStarted { terminal_id })
+                .expect("a terminal ID serializes"),
+        },
+        // The child may be running: the caller repeats the same request to
+        // learn which.
+        Ok(Err(failure)) => ServerMessage::error(
+            Some(id),
+            Error::new(ErrorCode::OutcomeUnknown, format!("{failure:#}")),
+        ),
+        Err(join) => ServerMessage::error(
+            Some(id),
+            Error::new(ErrorCode::OutcomeUnknown, join.to_string()),
+        ),
+    }
+}
+
+/// What `session.continue` starts: `lf session resume` of exactly this
+/// Session, in its directory, with this server's environment and its own
+/// `LF_HOME` and `LF_BIN`.
+fn continuing(
+    session: crate::id::LfSessionId,
+    request: String,
+    rows: u16,
+    cols: u16,
+) -> Result<crate::transport::registry::Start, Error> {
+    let registry = crate::store::read_existing_registry()
+        .map_err(unavailable)?
+        .ok_or_else(|| {
+            Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
+                .with(serde_json::json!({ "resource": "machine_registry" }))
+        })?;
+    let record = registry
+        .sqlite
+        .session(session.as_str())
+        .map_err(unavailable)?
+        .ok_or_else(|| {
+            Error::new(ErrorCode::NotFound, "Session is unavailable")
+                .with(serde_json::json!({ "session": session }))
+        })?;
+    if let Some(reason) =
+        crate::ops::human_session::run_refusal(&registry.sqlite, &record).map_err(unavailable)?
+    {
+        return Err(Error::new(ErrorCode::Conflict, reason));
+    }
+    let context = crate::os_process::execution_context().map_err(unavailable)?;
+    // This exact Session owns its child, not the service's launcher.
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(name, _)| !name.starts_with("LF_"))
+        .collect();
+    env.push((
+        "LF_HOME".into(),
+        context.lf_home.to_string_lossy().into_owned(),
+    ));
+    env.push((
+        "LF_BIN".into(),
+        context.lf_bin.to_string_lossy().into_owned(),
+    ));
+    Ok(crate::transport::registry::Start {
+        argv: vec![
+            context.lf_bin.to_string_lossy().into_owned(),
+            "session".into(),
+            "resume".into(),
+            "--".into(),
+            session.to_string(),
+        ],
+        cwd: record.cwd.clone(),
+        session: Some(session),
+        request,
+        env,
+        rows,
+        cols,
+        placement: None,
+    })
+}
+
 /// `{ticket}`: single use, bound to this connection's admission, expiring in
 /// [`TICKET_TTL`](super::ticket::TICKET_TTL).
 fn ticket_response(id: String, ticket: String) -> ServerMessage {
@@ -836,7 +1031,41 @@ pub(super) async fn ticketed<C: Carrier>(
         return Ok(None);
     };
     match purpose {
-        Purpose::Terminal(owner) => {
+        Purpose::Terminal(Host::Terminal(terminal)) => {
+            let mut destination =
+                UnixStream::connect(crate::transport::registry::entrance()?).await?;
+            destination
+                .write_all(&crate::transport::registry::named(&terminal))
+                .await?;
+            // The entrance says whether the viewer protocol follows; a
+            // terminal that ended or whose holder has not answered since the
+            // ticket is refused by name.
+            let mut answer = Vec::new();
+            tokio::time::timeout(FIRST_MESSAGE, async {
+                loop {
+                    match destination.read_u8().await? {
+                        b'\n' => return std::io::Result::Ok(()),
+                        byte => answer.push(byte),
+                    }
+                }
+            })
+            .await
+            .context("held terminal entrance did not answer")??;
+            if let Some(refusal) = crate::transport::registry::refusal(&answer, &terminal)? {
+                send(carrier, &ServerMessage::error(None, refusal)).await?;
+                return Ok(None);
+            }
+            send(
+                carrier,
+                &ServerMessage::Bridged {
+                    owner_lf_process_id: None,
+                    terminal_id: Some(terminal),
+                },
+            )
+            .await?;
+            Ok(Some(destination))
+        }
+        Purpose::Terminal(Host::Owner(owner)) => {
             let destination = match UnixStream::connect(crate::transport::endpoint(&owner)?).await {
                 Ok(destination) => destination,
                 Err(failure) => {
@@ -850,7 +1079,8 @@ pub(super) async fn ticketed<C: Carrier>(
             send(
                 carrier,
                 &ServerMessage::Bridged {
-                    owner_lf_process_id: owner,
+                    owner_lf_process_id: Some(owner),
+                    terminal_id: None,
                 },
             )
             .await?;
@@ -954,7 +1184,10 @@ async fn attached_owner(
                 Error::new(ErrorCode::Unavailable, "Machine registry is unavailable")
                     .with(serde_json::json!({ "resource": "machine_registry" }))
             })?;
-            Ok(registry.sqlite.session_transport(session.as_str())?)
+            Ok(registry
+                .sqlite
+                .session_transport(session.as_str())?
+                .and_then(|host| host.owner().cloned()))
         }
     })
     .await
@@ -1187,9 +1420,12 @@ async fn operate(
             .await
         }
         Operation::Server(
-            ServerOperation::SessionAttach { .. } | ServerOperation::RequestUpload { .. },
+            ServerOperation::SessionAttach { .. }
+            | ServerOperation::SessionStart { .. }
+            | ServerOperation::SessionContinue { .. }
+            | ServerOperation::RequestUpload { .. },
         ) => {
-            unreachable!("the session dispatches attachment")
+            unreachable!("the session dispatches attachment, starts and uploads")
         }
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
@@ -1344,6 +1580,7 @@ mod tests {
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
         MAX_MESSAGE, REVISION,
     };
+    use crate::transport::Host;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use tokio::sync::Semaphore;
@@ -1393,6 +1630,7 @@ mod tests {
                     "incarnation",
                     "fixture",
                     &clients,
+                    None,
                     None,
                     tickets,
                     &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
@@ -1596,7 +1834,10 @@ mod tests {
                     .unwrap();
             let mut client = Client::connect_with(&clients, tickets.clone());
             client.hello(REVISION, REVISION).await;
-            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(owner.clone()));
+            let ticket = tickets.issue(
+                Admission::Local,
+                Purpose::Terminal(Host::Owner(owner.clone())),
+            );
             let terminal = Client::redeem(tickets.clone(), &ticket).await;
             let (mut owned, _) = listener.accept().await.unwrap();
             let Client {
@@ -1632,7 +1873,7 @@ mod tests {
             ));
             // An owner that ended between ticket and redemption fails by name.
             drop(listener);
-            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(owner));
+            let ticket = tickets.issue(Admission::Local, Purpose::Terminal(Host::Owner(owner)));
             let mut late = Client::connect_with(&clients, tickets.clone());
             late.send(&ClientMessage::Attach { ticket }).await;
             let ServerMessage::Error {
@@ -1773,6 +2014,7 @@ mod tests {
                 "incarnation",
                 "fixture",
                 &Clients::default(),
+                None,
                 None,
                 Default::default(),
                 &Arc::new(Semaphore::new(MAX_CONNECTIONS)),

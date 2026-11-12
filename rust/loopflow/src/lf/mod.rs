@@ -582,6 +582,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ServerCommand,
     },
+    /// Keep this build's Task and Wave terminals; started only by the server
+    Holder {
+        #[command(subcommand)]
+        cmd: HolderCommand,
+    },
     /// Name, connect, pool and rent Machines
     Machine {
         #[command(subcommand)]
@@ -1164,7 +1169,7 @@ impl Commands {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
-            Self::Server { .. } => false,
+            Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
@@ -1412,6 +1417,12 @@ impl WtCommand {
             Self::Create { .. } | Self::Delete { .. } => true,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HolderCommand {
+    /// Hold PTYs and their agents until the last one ends.
+    Run,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1859,7 +1870,7 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nWith --start-only, reuse or start its retained terminal and return without attaching. Existing viewers keep input and geometry; harness and account options apply only when starting an owner. A lost reply requires inspection before another explicit open.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID; beside
@@ -1870,9 +1881,6 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
-        /// Start or reuse the terminal owner, then return without taking control
-        #[arg(long, conflicts_with_all = ["fork", "prepare", "message"])]
-        start_only: bool,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness

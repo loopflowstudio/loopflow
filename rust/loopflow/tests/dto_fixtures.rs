@@ -902,11 +902,6 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());
     assert!(reports[3].actions.is_empty());
-    assert!(reports[5].action.as_ref().unwrap().start_only);
-    assert_eq!(
-        reports[5].action.as_ref().unwrap().intent,
-        SessionResumeIntent::Reuse
-    );
     assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
     for field in ["resolution", "actions", "impediments", "unavailable"] {
         let mut missing = wire[0].clone();

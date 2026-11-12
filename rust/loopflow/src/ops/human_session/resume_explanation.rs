@@ -20,8 +20,6 @@ pub enum SessionResumeIntent {
     /// A retained terminal or client holds it and hands it over; if it is
     /// gone, saved history resumes.
     TakeOver,
-    /// Reuse a retained owner without acquiring any viewer claims.
-    Reuse,
     /// Another harness starts a new thread seeded from the conversation log.
     NewThread,
 }
@@ -34,7 +32,6 @@ pub struct SessionResumeAction {
     /// A new conversation continues from this one's log; its holder keeps it.
     pub fork: bool,
     pub prepare_only: bool,
-    pub start_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +62,6 @@ impl SessionResumeExplanation {
             let intent = match action.intent {
                 SessionResumeIntent::Start => "Start this conversation",
                 SessionResumeIntent::Resume => "Resume saved provider history",
-                SessionResumeIntent::Reuse => "Reuse the retained owner if it is still available; otherwise resume saved history",
                 SessionResumeIntent::TakeOver => {
                     "Take over from the terminal or client holding it; if none remains, resume saved provider history"
                 }
@@ -78,9 +74,7 @@ impl SessionResumeExplanation {
                 .as_deref()
                 .map(|agent| format!(" on {agent}"))
                 .unwrap_or_default();
-            let holder = if action.start_only {
-                "return without attaching; input and geometry stay with their viewers"
-            } else if action.fork {
+            let holder = if action.fork {
                 "fork into a new conversation; whatever holds this one keeps it"
             } else {
                 "take it over; a terminal showing it hands it over, a client lf started stops, unsent text there is lost"
@@ -125,7 +119,6 @@ pub(crate) async fn explain_resume(
     target: super::SessionTarget<'_>,
     fork: bool,
     prepare_only: bool,
-    start_only: bool,
 ) -> SessionResumeExplanation {
     use crate::session::PrimaryScope;
     let selected = async {
@@ -200,16 +193,7 @@ pub(crate) async fn explain_resume(
         }
     }
     if let Some(selector) = selector {
-        if let Err(error) = read_resume(
-            store,
-            &selector,
-            fork,
-            prepare_only,
-            start_only,
-            &mut report,
-        )
-        .await
-        {
+        if let Err(error) = read_resume(store, &selector, fork, prepare_only, &mut report).await {
             report.unavailable.push(error.to_string());
         }
     } else {
@@ -218,7 +202,6 @@ pub(crate) async fn explain_resume(
             agent: crate::config::agent_override(),
             fork: false,
             prepare_only,
-            start_only,
         });
         report.actions = vec![SessionAction {
             kind: super::SessionActionKind::Open,
@@ -235,7 +218,6 @@ async fn read_resume(
     selector: &str,
     fork: bool,
     prepare_only: bool,
-    start_only: bool,
     report: &mut SessionResumeExplanation,
 ) -> Result<()> {
     let Some(session) = super::find_session(store, selector, true).await? else {
@@ -255,9 +237,7 @@ async fn read_resume(
     let handoff = provider.as_ref().and(super::handoff_agent(&session));
     // Opening refuses a Run whatever the flags, so nothing would happen.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
-    let intent = if start_only && connection.is_some() {
-        SessionResumeIntent::Reuse
-    } else if !fork && !prepare_only && handoff.is_some() {
+    let intent = if !fork && !prepare_only && handoff.is_some() {
         SessionResumeIntent::NewThread
     } else if !prepare_only && connection.is_some() {
         SessionResumeIntent::TakeOver
@@ -269,17 +249,11 @@ async fn read_resume(
     match refusal {
         Some(refusal) => report.impediments.push(refusal),
         None => {
-            let agent = if matches!(intent, SessionResumeIntent::Reuse) {
-                session.provider.clone()
-            } else {
-                crate::config::agent_override().or_else(|| session.provider.clone())
-            };
             report.action = Some(SessionResumeAction {
                 intent,
-                agent,
+                agent: crate::config::agent_override().or_else(|| session.provider.clone()),
                 fork,
                 prepare_only,
-                start_only,
             })
         }
     }

@@ -338,7 +338,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// With `preview`, the Task a bind would assign, assigning nothing.
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// Start the Session's provider process as its own `lf` process, assigning nothing.
-    case sessionStart(id: String)
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
     case sessionNew(directory: String, requestID: String, id: String, agent: String?)
@@ -413,7 +412,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
         case .skillRun(_, let name, let message, let agent):
             return ["--batch"] + argument("--agent", agent) + ["skill", name] + argument(nil, message)
-        case .sessionStart(let id): return ["session", "resume", "--start-only", "--json", "--", id]
         case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
             var argv = ["task", "create", "--request-id", requestID]
             argv += argument("--title", title)
@@ -652,7 +650,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                        "revision": revision, "content": content])
         case .sessionSteer(let directory, let session, let wave, let message):
             TaggedFields("session.steer", ["directory": directory, "session": session, "wave": wave, "message": message])
-        case .sessionStart(let id): TaggedFields("session.start", ["id": id])
         case .sessionRename(let directory, let id, let name):
             TaggedFields("session.rename", ["directory": directory, "id": id, "name": name])
         case .sessionStatus(let directory, let id, let terminal, let agentProcess, let stream, let sequence, let records):

@@ -85,12 +85,16 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "serve-graph"],
         &["session", "ensure"],
         &["session", "connect", "missing-session"],
-        &["session", "attach", "missing-session"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"));
     }
+    // A relay that names no host is told the form it takes.
+    let output = run(home.path(), &["session", "attach", "missing-session"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`"));
     let output = run(
         home.path(),
         &[

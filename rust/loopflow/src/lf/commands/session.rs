@@ -52,57 +52,6 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     }
 }
 
-/// Start an exact Session under its retained terminal owner; the server is only a caller.
-pub(super) async fn started(
-    id: &str,
-    directory: &Path,
-    agent: Option<String>,
-    step_args: Vec<String>,
-) -> anyhow::Result<SessionRecord> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::session_by_id(&store, id)
-        .await?
-        .context("Session is unavailable")?;
-    if let Some(reason) = crate::ops::human_session::run_refusal(&store.sqlite, &session)? {
-        bail!(reason);
-    }
-    // Pin the selected conversation: do not resolve a Task/scope
-    // again in the child after its primary may have changed.
-    let context = crate::os_process::execution_context()?;
-    let mut argv = vec![context.lf_bin.to_string_lossy().into_owned()];
-    argv.extend(step_args);
-    if let Some(agent) = &agent {
-        argv.extend(["--agent".into(), agent.clone()]);
-    }
-    argv.extend([
-        "session".into(),
-        "resume".into(),
-        "--".into(),
-        id.to_owned(),
-    ]);
-    let starting = id.to_owned();
-    let cwd = directory.to_path_buf();
-    crate::journal::request::spawn_blocking(move || {
-        crate::transport::start_session(&starting, &argv, true, &cwd, &|command| {
-            // This exact Session owns its child, not the service's launcher or
-            // a different Session that invoked the CLI.
-            for (key, _) in std::env::vars_os() {
-                if key.to_string_lossy().starts_with("LF_") {
-                    command.env_remove(key);
-                }
-            }
-            command
-                .env("LF_HOME", &context.lf_home)
-                .env("LF_BIN", &context.lf_bin);
-        })
-    })
-    .await??;
-    let session = crate::ops::human_session::session_by_id(&store, id)
-        .await?
-        .context("Session is unavailable")?;
-    crate::ops::human_session::surface(&store, &session).await
-}
-
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
         SessionCommand::Serve { .. } => {
@@ -261,23 +210,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             id,
             connection,
             fork,
-            start_only,
         } => {
-            if *start_only {
-                anyhow::ensure!(!cli.batch, "--start-only opens an interactive Session");
-                anyhow::ensure!(
-                    cli.output_schema.is_none(),
-                    "response schemas require a headless Run (-b)"
-                );
-                let store = open_shared_store().await?;
-                let cwd = std::env::current_dir()?;
-                let id = select(&store, &cwd, connection.target(cli, id.as_deref())?).await?;
-                let record = started(&id, &cwd, cli.agent.clone(), cli.step_args()).await?;
-                if !connection.json && !cli.json {
-                    println!("{}", record.id);
-                }
-                return print_opened(connection.json || cli.json, &record);
-            }
             resume(
                 cli,
                 connection,
@@ -874,7 +807,6 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 id,
                 connection,
                 fork,
-                ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
                 let managed = resumes_work(cli, connection);

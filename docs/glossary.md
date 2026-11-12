@@ -24,7 +24,8 @@ first, then the engineering words it borrows.
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
 | **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
 | **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
-| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window. |
+| **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, independently of the app window, and starts Task and Wave conversations in a holder. |
+| **Holder** | The process beside the server that keeps the terminals and agents of Task and Wave conversations. One per build; an install never restarts it. |
 | **Installation** | The selected Loopflow build and its registration, updated with `lf install`, including the client server. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |

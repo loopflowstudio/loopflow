@@ -13,11 +13,13 @@ peers refused before upgrade) and the local service (replay, a phone's
 ticket). README contract and `docs/server.md` phone access are no longer
 marked planned.
 
-Checks Nov 12 at `faa8ad755c`: `cargo test -p loopflow --lib server::` passed
-(103, 2 ignored); clippy `--all-targets -D warnings` and `cargo fmt --check`
-clean.
+Gate Nov 12 at `53d2b62ee7` (runner stopped at its uv-cache `du` deadline
+with 124.7 GiB free; plan run by hand): architecture, test inventory, fmt pass;
+nextest `server::ticket|remote|service|schema::tests` + `documented_commands::`
+44/44; clippy `--all-targets -D warnings` clean; website 73 passed; iOS
+`test_ios.py` succeeded.
 
-Remaining: gate runs the affected suites; QA inspects the docs visually.
+Remaining: QA inspects the docs visually.
 
 ## Concept review (Nov 12)
 

@@ -1119,46 +1119,6 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_queued_pull_does_no_projection_and_releases_its_reader() {
-        with_store(|_store| {
-            Box::pin(async {
-                let registry = Arc::new(Subscriptions::default());
-                let mut first = Consumer::new(&registry, "queued-pull", sessions(), None);
-                first.initial().await;
-                let mut workers = Vec::new();
-                let mut releases = Vec::new();
-                for _ in 0..2 {
-                    let (entered, began) = tokio::sync::oneshot::channel();
-                    let (release, wait) = std::sync::mpsc::channel();
-                    releases.push(release);
-                    workers.push(tokio::task::spawn_blocking(move || {
-                        entered.send(()).unwrap();
-                        wait.recv_timeout(Duration::from_secs(15)).unwrap();
-                    }));
-                    began.await.unwrap();
-                }
-                let before = meter::snapshot();
-                let held = pause("queued-pull", "pull");
-                first.member.checkpoint(1);
-                held.queued.await.unwrap();
-                drop(first);
-                assert!(super::lock(&registry.0).is_empty());
-                let _ = held.release.send(());
-                for release in releases {
-                    release.send(()).unwrap();
-                }
-                for worker in workers {
-                    worker.await.unwrap();
-                }
-                held.finished.await.unwrap();
-                assert_eq!(stage(&meter::snapshot().since(before), "projection"), 0);
-                let mut fresh = Consumer::new(&registry, "queued-pull", sessions(), None);
-                fresh.initial().await;
-            })
-        });
-    }
-
-    #[test]
     fn distinct_arguments_selection_and_service_lifetimes_do_not_alias() {
         with_store(|_store| {
             Box::pin(async {

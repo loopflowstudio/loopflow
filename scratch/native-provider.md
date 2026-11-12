@@ -122,6 +122,24 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 - The hook spec key is `turns` (`harness/context.rs`, `context_opencode.js`,
   `context_pi.mjs`).
 
+## Next implement: docs match the decider (concept review 2)
+
+`docs/sessions.md` tells people two things `transport::delegate` does not do.
+
+- "Run one in your terminal" lists "the same commands typed in a Desktop
+  shell", and troubleshooting says "An `lf <skill>` run has none" (no
+  `lf session serve`). A Desktop pane sets `LF_SERVER_STATUS`, so
+  `runs_in_terminal` is false and the launch keeps an owner
+  (`Holder::Owner`). Say a Desktop shell keeps its owner until the "Every
+  view types" row removes the handshake; drop it from the direct list.
+- "Where a conversation runs" puts "bare Graphs" with `-b`/pipe/`--json` as
+  "its own process, as before". By item 5 a bare Graph typed at a terminal
+  runs there; only its headless `-b` steps keep owners. Move bare Graphs to
+  the "your terminal" row.
+
+No code change. `Holder::Owner` stays the one name for the Desktop-shell
+and framed-viewer exception; it disappears with that row, not here.
+
 ## Open
 
 Repository and Wave primaries record `WorkSource::Declared` since LOO-824's
@@ -153,4 +171,5 @@ compaction), which loses nothing.
 - concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).
 - implement 4 (those three): `cargo build --bin lf` clean; `--lib` `harness::context::` + `ops::human_session::` + `session_record::capture_tests::resume` + `bare_pi_` — 58 passed; clippy, fmt clean.
 - compress 4: the direction's three items were already in `8a516adad2`; this pass only imports `Holder` in `agent_process` tests (18+/40−). clippy clean; `--lib harness::agent_process::` 19 passed.
+- concept review 2: no tests; design-only (two `docs/sessions.md` rows, one troubleshooting line).
 - realign 4: no tests; grep confirms one `is_work` (transport, `util::resume_session_with_env`), no `managed` flag in `human_session`/`commands::session`/`util`, no `"managed"` hook spec key.

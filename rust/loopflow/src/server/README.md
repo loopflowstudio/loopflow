@@ -368,12 +368,12 @@ JSON message. After `bridged {owner_lf_process_id}`, it speaks the
 [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
 as 22 base64url characters, opens one bridge and lasts 60 seconds; expiry does
 not close an open bridge. Local tickets bind to the requesting client's Unix
-peer UID. Every redemption attempt consumes the ticket, whether it succeeds or fails.
-An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
-and closes the connection. Bridges do not occupy the 64 client slots.
+peer UID. An unknown, spent, expired or foreign ticket is `not_found` with a
+null `id` and closes the connection. Bridges do not occupy the 64 client slots.
 
-After a ticket failure or a disconnect before `bridged`, request a fresh ticket
-and bridge: the previous ticket may already be spent.
+Every redemption attempt consumes the ticket, whether it succeeds or fails, so
+after a ticket failure or a disconnect before `bridged`, request a fresh ticket
+and bridge.
 
 The owner is the LfProcess holding the Session's terminal (`lf session serve`),
 never the provider's AgentProcess beneath it. The server resolves the Session's

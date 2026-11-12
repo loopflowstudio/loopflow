@@ -5,32 +5,32 @@ This checkout documents the planned contract; implementation and authenticated
 acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
 
-Read the shipping docs in this checkout before implementation:
-[phone access](../docs/server.md#phone-access) and the
-[server attachment contract](../rust/loopflow/src/server/README.md#terminal-attachment).
+The current docs describe [phone access](../docs/server.md#phone-access) as
+planned and keep local attachment and retry rules in the
+[shared attachment contract](../rust/loopflow/src/server/README.md#terminal-attachment).
 
 ## Transport dependency
 
-At November 12 01:57 UTC, `gh pr view 1812` still reported `OPEN`,
-`mergedAt: null`, `autoMergeRequest: null`, at head
-`4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetching `origin/main` returned
-`d382d0b72e4b7c41773e4c4070322387f8b4ce65`, without `server/mobile.rs` or
-`server/ticket.rs`. Reinspect the shared store and endpoints when LOO-718 lands;
-landing its PR is outside this Task.
+At November 12 02:37 UTC, GitHub's PR metadata still reported #1812 open and
+unmerged, at head `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`.
+Fetching `origin/main` returned `baa09168df59ae063d737a31f0e36b07e15c91d9`,
+without `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
+Implementation remains blocked on the shared transport landing; landing its
+PR is outside this Task. The earlier 02:01 UTC read reported no auto-merge
+request and main at `d382d0b72e4b7c41773e4c4070322387f8b4ce65`.
 
-The November 11 23:27 UTC inspection of that head found
+Inspection of that head found
 `remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
 `mobile.rs::permits_peer` binds admission to node/user identity;
 `mobile-same-device` permits the host's own node without changing that identity.
 `ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
-foreign attempts and background release of abandoned reservations. Reinspection
-of the admission paths at November 12 01:20 UTC and the ticket store at
-01:57 UTC found the same behavior.
+foreign attempts and background release of abandoned reservations. The
+November 12 02:01 UTC reinspection found the same admission and ticket behavior.
 
-The November 12 01:57 UTC `lf task status LOO-718 --json` inspection reported
+The November 12 02:01 UTC `lf task status LOO-718 --json` inspection reported
 `feature` / `demo`, with PR #1812 open and settlement not armed. LOO-809's
-status read timed out after 20 seconds; its Graph position remains unverified.
+status read timed out after 25 seconds; its Graph position remains unverified.
 Earlier observations and history references are in
 `9e2a9aeaa1a0951a806e3a92ccd914c84ffd303f:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.

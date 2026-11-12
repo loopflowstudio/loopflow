@@ -39,9 +39,16 @@ pub(crate) fn is_linear(repo: &str) -> bool {
     )
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SCOPE_READS: std::cell::RefCell<std::collections::BTreeMap<std::path::PathBuf, usize>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
 /// The team every repository Task belongs to: a Linear Team, an Asana team or
 /// the Notion page that holds the Tasks database.
 pub(crate) fn repository_scope(repo: &Path) -> OpsResult<String> {
+    #[cfg(test)]
+    SCOPE_READS.with_borrow_mut(|reads| *reads.entry(repo.to_path_buf()).or_default() += 1);
     match transport(repo) {
         Some(PlanningConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
         Some(PlanningConfig::Notion { team }) => Ok(crate::notion::notion_id(&team)),

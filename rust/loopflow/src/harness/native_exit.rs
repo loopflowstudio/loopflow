@@ -91,6 +91,13 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             }
         }
     }
+    if let Some((store, ..)) = &owner {
+        crate::transcript::facts::record_session(
+            store,
+            &exit.session,
+            crate::transcript::facts::Moment::Exit,
+        );
+    }
     if let Some(capture) = &exit.capture {
         if let Err(error) = crate::session_record::SessionRecorder::adopt(capture.clone()).and_then(
             |mut capture| {

@@ -7488,7 +7488,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> session list`, with `--interactive all`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
+          "description": "`lf --cwd <directory> session list`, with `--headless`\nwhen `headless` Sessions are shown too: every row, or with a `limit`\none page (`--page --limit <limit> [--after <after>]`). Only the whole\nlist has a subscription.",
           "properties": {
             "after": {
               "type": [
@@ -10804,6 +10804,10 @@
             "null"
           ]
         },
+        "raw": {
+          "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
+          "type": "boolean"
+        },
         "ready_summary": {
           "type": [
             "string",
@@ -10844,6 +10848,17 @@
               "type": "null"
             }
           ]
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionTurn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its current or last turn while it is live; `null` when nothing says."
         },
         "wave_id": {
           "anyOf": [
@@ -10910,7 +10925,9 @@
         "state",
         "ready_summary",
         "open_argv",
-        "terminal_ids"
+        "terminal_ids",
+        "turn",
+        "raw"
       ],
       "type": "object"
     },
@@ -10943,6 +10960,61 @@
         "unavailable"
       ],
       "type": "string"
+    },
+    "SessionTurn": {
+      "description": "A conversation's current or last turn: a transcript `Turn` without what\nwas said in it.",
+      "properties": {
+        "ended_at": {
+          "description": "RFC 3339; absent while it runs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The provider's name for the turn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "description": "RFC 3339; absent when the turn began before what was read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/TurnState"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tokens across the turn's model calls so far; absent when nothing\nreports them."
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "started_at",
+        "ended_at",
+        "model",
+        "usage"
+      ],
+      "type": "object"
     },
     "SessionUsage": {
       "description": "Provider-authored cumulative usage reduced once per independent stream.\n\nOptional counters stay unknown when no stream reported them. Finality is a\ncount of direct provider receipts; Recorder settlement never upgrades it.",
@@ -14721,6 +14793,40 @@
       ],
       "type": "string"
     },
+    "TurnState": {
+      "enum": [
+        "running",
+        "ended",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "TurnUsage": {
+      "description": "`input_tokens` counts every input token, cached ones included.",
+      "properties": {
+        "cached_input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens"
+      ],
+      "type": "object"
+    },
     "UnavailableTaskEvidence": {
       "description": "Non-terminal durable Task Work whose historical Project is no longer in the\ncurrent PM snapshot.",
       "properties": {
@@ -16619,6 +16725,7 @@
             "primary_scope": null,
             "program_status": null,
             "provider": "codex",
+            "raw": false,
             "ready_summary": "The design now reflects Jack's requested changes.",
             "state": "unknown",
             "task_ids": [
@@ -16629,6 +16736,7 @@
             "title": "Served name",
             "title_source": "generated",
             "transition": null,
+            "turn": null,
             "wave_id": "00000000-0000-0000-0000-000000000001",
             "work": {
               "id": "task_00000000000000000000000000000001",

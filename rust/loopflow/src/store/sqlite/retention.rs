@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{OsProcess, ProcessIdentityEvidence};
-use crate::session_record::{late_usage_key, merge_native_usage, native_usage_key};
+use crate::session_record::{native_baseline, native_peak, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
 const PROCESS_BATCH: i64 = 10_000;
@@ -206,6 +206,44 @@ fn native_turn_merges(
         });
     }
     Ok(merges)
+}
+
+/// The key of native usage receipts that arrived after the thread's next turn
+/// began at `started`.
+fn late_usage_key(key: &str, started: i64) -> String {
+    format!("{key}:after:{started}")
+}
+
+/// Merge a later native usage receipt into the retained one. Codex reports
+/// thread-cumulative `total` and the latest request as `last`: the turn keeps
+/// its first receipt's baseline (`total - last`), the largest total of each
+/// counter, whether any counter ever went backwards, and its largest request.
+/// Other providers report the turn's or message's own cumulative counter.
+fn merge_native_usage(saved: &serde_json::Value, later: &serde_json::Value) -> serde_json::Value {
+    let mut merged = later.clone();
+    if later.get("total").is_some() {
+        merged["baseline"] = native_baseline(saved);
+        merged["peakInputTokens"] = native_peak(saved).max(native_peak(later)).into();
+        let mut regressed = saved["regressed"] == true;
+        if let Some(totals) = merged["total"].as_object_mut() {
+            for (key, total) in totals {
+                if let Some(saved) = saved["total"][key.as_str()].as_u64() {
+                    regressed |= total.as_u64().is_some_and(|later| later < saved);
+                    *total = total
+                        .as_u64()
+                        .map_or(saved, |later| later.max(saved))
+                        .into();
+                }
+            }
+        }
+        if regressed {
+            merged["regressed"] = true.into();
+        }
+    }
+    if saved["final"] == true {
+        merged["final"] = true.into();
+    }
+    merged
 }
 
 fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult<u64> {

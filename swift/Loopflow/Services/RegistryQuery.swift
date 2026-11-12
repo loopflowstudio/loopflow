@@ -117,10 +117,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit):
             if let limit {
-                return ["session", "list", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+                return ["session", "list", "--json", "--page"] + (headless ? ["--headless"] : [])
                     + ["--limit", String(limit)] + (after.map { ["--after", $0] } ?? [])
             }
-            return ["session", "list"] + (headless ? ["--interactive", "all"] : []) + ["--json", "--limit", "0"]
+            return ["session", "list"] + (headless ? ["--headless"] : []) + ["--json", "--limit", "0"]
         case .taskDetail(_, let issue):
             return ["task", "detail", issue, "--json"]
         case .sessionCard(let id):

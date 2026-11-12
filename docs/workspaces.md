@@ -4,6 +4,7 @@
 lf open --task ENG-123              # attach the Task's conversation in this terminal
 lf open --task ENG-123 --tab         # open it in a sibling tab
 lf open --task ENG-123 --focus       # reveal its existing view
+lf task run ENG-123 --open          # start or continue its Graph, then open its conversation
 ```
 
 `lf open` opens one conversation. From a Task checkout it selects that Task's
@@ -11,6 +12,8 @@ primary Session; from a Wave or repository checkout it selects that scope's
 conversation. Use `--task`, `--wave` or `--session <id>` to choose another.
 A Task without a conversation gets its first one. An ended Session continues
 from its saved history. Opening neither advances a Graph nor replays a prompt.
+To run the Graph and open the conversation together, use
+[`lf task run --open`](work.md#hand-off-more-than-one).
 
 ## Choose where it appears
 

@@ -472,6 +472,12 @@ For Herdr, isolate `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, start
 `<config>/herdr/sessions/qa/herdr.sock` in clients. `herdr pane list` and
 `herdr pane read <pane> --source visible --format text` show the real destination.
 Two simultaneous opens of one prepared Session should create one attachment.
+`herdr workspace create --cwd <repo>` makes the calling pane; to act as an agent
+tool call from it, set `HERDR_ENV=1`, `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID` and
+`LF_AGENT_CALLER` to `{"session_id":…}` of a Session prepared with
+`lf session resume --prepare --json` (process IDs may be any UUIDs). Opening
+then takes the sibling-tab path. In zsh, kill a PID list with `kill ${=pids}`:
+an unquoted variable is not word-split.
 
 To exercise failed-start recovery with real Codex, exit its private sign-in
 screen with Ctrl+C, temporarily put invalid TOML in the private Codex config,

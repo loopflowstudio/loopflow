@@ -103,14 +103,16 @@ public actor CreationSubmissions {
         // Own recovery before the first await, including destination lookup.
         guard active.insert(record.id).inserted else { return nil }
         defer { active.remove(record.id) }
-        guard record.version == ServerProtocol.revision else {
-            throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
-        }
         guard try await currentMachine() == record.destination else {
             throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
         }
+        // A receipt reads the same on every revision; only sending the saved
+        // payload again needs the revision it was written for.
         var receipt = try await receipt(record.id)
         if receipt == nil || receipt?.disposition == .continue {
+            guard record.version == ServerProtocol.revision else {
+                throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
+            }
             _ = try await send(record.payload)
             receipt = try await self.receipt(record.id)
             guard receipt != nil else { throw RegistryQueryError("The Machine has no receipt for creation \(record.id)") }

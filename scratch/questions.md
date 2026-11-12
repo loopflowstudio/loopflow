@@ -1,0 +1,1 @@
+- LOO-860: `resume_native_session` still reopens a Codex bootstrap that has no provider history under the input's own provider, even if this invocation selected another harness. `open` diverts the case with history to `new_thread`; this rarer case was left alone.

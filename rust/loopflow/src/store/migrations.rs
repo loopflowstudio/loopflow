@@ -1541,6 +1541,70 @@ mod tests {
     }
 
     #[test]
+    fn sessions_upgrade_to_the_provider_that_recorded_their_thread() {
+        let conn = open();
+        apply_before_migration(&conn, "resume_on_latest_input_provider");
+        conn.execute_batch(
+            "INSERT INTO provider_accounts(provider,account_id,credential_state,created_at,updated_at)
+             VALUES('codex','account','connected',10,10),('opencode','account','connected',10,10)",
+        )
+        .unwrap();
+        for (session, provider, thread) in [
+            ("switched", "claude", "codex-thread"),
+            ("same", "codex", "own-thread"),
+            ("ambiguous", "claude", "shared-thread"),
+            ("unrecorded", "claude", "unknown-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
+                    interactive,provider,model,provider_thread)
+                 VALUES(?1,?1,'generated',10,'/repo',1,1,?2,'opus',?3)",
+                rusqlite::params![session, provider, thread],
+            )
+            .unwrap();
+        }
+        for (provider, thread) in [
+            ("codex", "codex-thread"),
+            ("codex", "own-thread"),
+            ("codex", "shared-thread"),
+            ("opencode", "shared-thread"),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_session_accounts(provider,provider_session_id,account_id,created_at)
+                 VALUES(?1,?2,'account',10)",
+                rusqlite::params![provider, thread],
+            )
+            .unwrap();
+        }
+
+        upgrade_from_migration(&conn, "resume_on_latest_input_provider");
+
+        let sessions = conn
+            .prepare("SELECT id,provider,model FROM agent_sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let opus = Some("opus".to_string());
+        assert_eq!(
+            sessions,
+            [
+                ("ambiguous".into(), "claude".into(), opus.clone()),
+                ("same".into(), "codex".into(), opus.clone()),
+                ("switched".into(), "codex".into(), None),
+                ("unrecorded".into(), "claude".into(), opus),
+            ]
+        );
+    }
+
+    #[test]
     fn task_update_revision_upgrade_preserves_existing_counters() {
         let conn = open();
         apply_before_migration(&conn, "task_update_revision");

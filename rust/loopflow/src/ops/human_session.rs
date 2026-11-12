@@ -1483,18 +1483,20 @@ async fn open_waiting_locked(
     crate::agent_input_timing::record("fresh_launch_selected", &id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
-    let session = if capture_is_prepared(session.input_key()?)? {
+    // An input launches on the provider it recorded, so another harness
+    // selected here appends its own.
+    let session = if handoff_agent(&session).is_some() {
+        append_input(store, session).await?
+    } else if capture_is_prepared(session.input_key()?)? {
         session
+    } else if session.input_published {
+        append_input(store, session).await?
     } else {
-        if session.input_published {
-            append_input(store, session).await?
-        } else {
-            publish_prepared_input(
-                &store.sqlite,
-                &session,
-                crate::session_record::SessionGraphMembership::Independent,
-            )?
-        }
+        publish_prepared_input(
+            &store.sqlite,
+            &session,
+            crate::session_record::SessionGraphMembership::Independent,
+        )?
     };
     serve_locked(
         store,
@@ -1515,6 +1517,12 @@ pub(super) fn handoff_agent(session: &LfSession) -> Option<String> {
         crate::config::Resume::Import { agent } => Some(agent),
         crate::config::Resume::Native(_) => None,
     }
+}
+
+fn switch_agent(session: &mut LfSession, agent: &str) {
+    let (provider, model) = crate::config::parse_agent(agent);
+    session.provider = Some(provider);
+    session.model = model;
 }
 
 /// Start a fresh provider thread on the same Session, on `agent` or its
@@ -1595,9 +1603,7 @@ pub(crate) async fn new_thread(
     )?;
     let mut next = session;
     if let Some(agent) = agent {
-        let (provider, model) = crate::config::parse_agent(agent);
-        next.provider = Some(provider);
-        next.model = model;
+        switch_agent(&mut next, agent);
     }
     // The skill ran in the earlier conversation and is in its log. The
     // continuation is stored so a relaunch after a failed start still carries it.
@@ -1650,8 +1656,13 @@ async fn finish_thread_creation(
 }
 
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
+/// The input records the agent it launches: another harness this invocation
+/// selected moves the Session to it.
 pub(crate) async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
+    if let Some(agent) = handoff_agent(&next) {
+        switch_agent(&mut next, &agent);
+    }
     next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;
     let next = store.replace_session_input(replaced, next, None).await?;

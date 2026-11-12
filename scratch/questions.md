@@ -73,3 +73,7 @@ conversations still keep their host when their older row has no WorkSource.
 ## Demo (November 11)
 
 Jack Heart: "i dont need to demo", then "2c, then maybe 2b" (walk through `scratch/qa.html`, then maybe an isolated `LF_HOME` run).
+
+## Ship (November 11)
+
+After the holder moved to `server/holder/` (`386bb540d5`), Jack Heart: "sounds godo ship it".

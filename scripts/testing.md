@@ -54,6 +54,9 @@ Creation receipt changes also run `test(local_planning::)`,
 `test(harness::fact_writer::tests::)` and
 `test(store::sqlite::sessions::metadata_tests::)`: recovery owners, turn attribution
 and metadata reads over historical detail all depend on it.
+Session completion or attachment changes also run
+`test(session_record::capture_tests::)`: a headless continuation reopens its
+Session while retaining the saved provider thread and completes again on exit.
 
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes

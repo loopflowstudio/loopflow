@@ -369,8 +369,6 @@ JSON message. After `bridged {owner_lf_process_id}`, it speaks the
 as 22 base64url characters, opens one bridge and lasts 60 seconds; expiry does
 not close an open bridge. Local tickets bind to the requesting client's Unix
 peer UID. Every redemption attempt consumes the ticket, including a UID mismatch.
-Remote identity and sleep-aware expiry are planned in the
-[remote attach contract](#remote-attach-contract).
 An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
 and closes the connection. Bridges do not occupy the 64 client slots.
 
@@ -388,8 +386,8 @@ bytes and a control failure never closes a bridged terminal. Follow
 
 ### Remote attach contract
 
-LOO-718's authenticated remote transport will use the attachment and recovery
-rules above, with the following connection and identity requirements.
+Planned for LOO-718's authenticated remote transport; not available in this
+build. The attachment and recovery rules above apply, with these additions.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
@@ -412,13 +410,13 @@ the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
 Keep `/v1/machine` for requests and live Work updates.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
-owner's Tailscale user; a rejected connection cannot present a ticket. The ticket
-binds the two connections to the same Tailscale node stable ID and user ID, so
-another device on the same account cannot redeem it. Neither a ticket,
-client-supplied identity nor a proxy's Unix UID substitutes for authentication.
-Local and remote tickets are not interchangeable.
+owner's Tailscale user; a rejected connection cannot present a ticket. Tickets
+bind both connections to the same Tailscale node stable ID and user ID; another
+device on the same account cannot redeem them. Tickets, client-supplied identity
+and a proxy's Unix UID cannot substitute for authentication. Local and remote
+tickets are not interchangeable.
 
-The 60-second ticket lifetime includes host sleep. Every admitted terminal redemption
+The 60-second lifetime includes host sleep. Every admitted terminal redemption
 attempt consumes the ticket, including identity and local/remote mismatches.
 After a ticket failure, retry with a fresh ticket and bridge.
 

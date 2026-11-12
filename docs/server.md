@@ -110,12 +110,10 @@ helper. For a mismatched build or another startup error, read the diagnosis from
 
 ## Phone access
 
-The planned [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
-lets a phone view a Session's running terminal without starting or resuming a
-provider.
-
-Phone access requires LOO-718's authenticated remote transport, which is not
-part of this build, and a phone signed in as the host owner's Tailscale user.
+Phone access is planned, pending LOO-718's authenticated remote transport.
+A phone signed in as the host owner's Tailscale user will be able to
+[attach to a Session's running terminal](../rust/loopflow/src/server/README.md#remote-attach-contract)
+without starting or resuming a provider.
 Local server readiness and adding a Machine as an execution destination do not
 grant phone access.
 

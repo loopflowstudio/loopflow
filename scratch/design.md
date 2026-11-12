@@ -5,9 +5,14 @@ This checkout documents the planned contract; implementation and authenticated
 acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
 
+Shipping docs to read during implementation: `docs/server.md` (phone access)
+and `rust/loopflow/src/server/README.md` (attachment contract and recovery).
+The existing examples and requirements remain the chosen direction; no product
+question is open.
+
 ## Transport dependency
 
-At November 12 00:04 UTC, `gh pr view 1812` still reported `OPEN`,
+At November 12 00:07 UTC, `gh pr view 1812` still reported `OPEN`,
 `mergedAt: null`, `autoMergeRequest: null`, at head
 `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetching `origin/main` returned
 `1570bef610a0a0cee0402ecc37d3a31461b213a8`, without `server/mobile.rs` or
@@ -15,13 +20,19 @@ At November 12 00:04 UTC, `gh pr view 1812` still reported `OPEN`,
 landing; landing its PR is outside this Task. Reinspect the shared store and
 endpoints when it lands.
 
+At November 12 00:41 UTC, PR #1812 remained open at the same head, with no
+merge or auto-merge request. Fetched `origin/main` advanced to
+`d382d0b72e4b7c41773e4c4070322387f8b4ce65`; both transport files remain absent.
+Implementation is still blocked on LOO-718, not on a product decision or QA.
+
 The November 11 23:27 UTC inspection of that head found
 `remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
 `mobile.rs::permits_peer` binds admission to node/user identity;
 `mobile-same-device` permits the host's own node without changing that identity.
 `ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
-foreign attempts and background release of abandoned reservations.
+foreign attempts and background release of abandoned reservations. Reinspection
+of `ticket.rs` at November 12 00:08 UTC found the same behavior.
 
 The last successful LOO-718 status read, November 11 17:27 UTC, reported
 `feature` / `demo`. Earlier observations and their history references are in
@@ -64,5 +75,8 @@ Keep the remote contract linked to shared attachment and recovery rules rather
 than repeating them. Mark it planned until integration, then update its revision
 4 anchor to the transport's revision 5 section. Keep phone prerequisites in
 `docs/server.md` consistent.
+
+The remote contract states its planned status at the entry point; the local
+attachment section describes only the running protocol.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

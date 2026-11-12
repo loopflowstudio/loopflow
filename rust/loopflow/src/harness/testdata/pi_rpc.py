@@ -121,6 +121,7 @@ if "--mode" not in args:
                     "callback": event,
                     "gap": None,
                     "printed": [],
+                    "inbox": None,
                 },
                 "select": None,
             }

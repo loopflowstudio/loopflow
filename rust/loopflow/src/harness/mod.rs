@@ -3,7 +3,6 @@ pub mod claude;
 mod claude_decode;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
-pub(crate) mod claude_updates;
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;

@@ -1749,9 +1749,12 @@ fn _run_agent_once(
     };
     let command = build_session_command(launch, invocation, process.context_file.as_deref())
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let hooks =
-        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref())
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    let hooks = crate::harness::context::native_args(
+        &harness,
+        launch.conversation_context.as_ref(),
+        launch.managed,
+    )
+    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let program = &command.program;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),

@@ -128,9 +128,9 @@ lf task unassign LOO-12                           # nobody owns it: ship and CI 
 ```
 
 A steer saves locally first, then reaches every Session working on the Task at
-its next supported boundary: before a Graph step or after an agent turn. Idle
-Sessions stay idle; nothing is replayed into them. Direction from teammates, in
-Loopflow or as comments in your tracker, arrives the same way.
+its next supported boundary: before a Graph step or after an agent turn. An
+idle Task conversation is woken with it. Direction from teammates, in Loopflow
+or as comments in your tracker, arrives the same way.
 
 `lf task claim LOO-12` takes it back without starting anything; `lf task run`
 claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).

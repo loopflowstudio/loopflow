@@ -300,6 +300,7 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
+            identity: None,
             repository: None,
             repo: home.path().to_owned(),
             home: home.path().to_owned(),

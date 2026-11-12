@@ -323,6 +323,7 @@ mod tests {
             .unwrap();
         let delivery = home.path().join("delivery.json");
         ContextDelivery {
+            identity: None,
             repository: None,
             repo,
             wave: None,

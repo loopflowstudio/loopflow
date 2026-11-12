@@ -99,9 +99,9 @@ Each step is something to run and see.
 | Step | You run | You see | Needs |
 |---|---|---|---|
 | 0 | `lf task move X --machine mini` on a Task mini has never seen | It moves | This branch, installed on laptop and mini. Not yet run for real |
-| 1 | The same | The Graph is running on mini when the command returns, one line per stage; this terminal prints `lf resume --task X` (see Decided against) | Receive ends in `lf task run` there; stage lines |
+| 1 | The same | The Graph is running on mini when the command returns, one line per stage; this terminal prints `lf resume --task X` (see Decided against) | Built |
 | 2 | Move mid-`implement` | The step restarts on mini from the checkpoint commit; earlier steps of the run don't repeat (its conversation doesn't travel, see Decided against) | Built; keeping the step's conversation needs a step continuation in `run_skill`, its own Task |
-| 3 | `lf task status X`, `lf task list`, `lf machine list` on the laptop | Where X runs and since when; no leftover worktree | Sending retires local live rows |
+| 3 | `lf task status X`, `lf task list`, `lf machine list` on the laptop | Where X runs and since when; no leftover worktree | Built |
 | 4 | Close the lid; open the phone | The mini's Session, live | Mini as hub: Machines dial it, Desktop shows mini Tasks as ordinary rows |
 | 5 | `lf task run X --rent …`, then `lf machine end` | The conversation comes home with the Task | Rental placement and give-back become moves |
 
@@ -127,7 +127,7 @@ Steps 0 to 3 of the build order. Step 4 is LOO-861 (hub) and step 5 is LOO-862
 (rentals and pools move). Jack, 2026-11-12: "i think 0-3 could be this task,
 and 4 and 5 could be follow up tasks?"
 
-Built (committed on this branch, e2d2246fdb and 3559e8838b):
+Built (e2d2246fdb, 3559e8838b; step 2 in a5a403171e, d3e7af99dd):
 - Step 0: `arriving_task` / `acquire_from_planning`; `session receive --check
   --task --issue --repository`; version token comparison.
 - Step 1: the move continues a Graph it stopped (`StoppedRun::resume` →
@@ -233,12 +233,11 @@ lf task interrupt X && lf task abandon X     # clean up
 
 ## Checks
 
-- 2026-11-12, compress (EndRecorded in the live-Graph test): `machine_commands::`
-  44 passed; clippy clean; no launchd job or process from this checkout left.
-- `cargo test -p loopflow --test integration machine_commands::`: 43 passed.
-  `documented_commands::` 4 passed; `--lib server::schema::tests:: lf::tests::
-  ops::task_ownership::` 52 passed; `git::worktrees::` 22 passed; clippy clean.
-- Compress: one ownership reading (`TaskOwnership::owner_elsewhere`/`since`, `MachineRef::name`) serves status, list, machine list and prune; machine_commands:: 43 passed, worktrees/task_ownership/schema lib tests passed, clippy clean.
+- 2026-11-12, after d3e7af99dd: `machine_commands::` 44 passed (all four
+  acceptance items); clippy clean. Earlier: `documented_commands::` 4,
+  `--lib server::schema::tests:: lf::tests:: ops::task_ownership::` 52,
+  `git::worktrees::` 22 passed.
+- Realign 2026-11-12: no launchd job or `lf` process from this checkout left.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)`
   plus `lf::tests::` for the CLI, and clippy.
 - End-to-end laptop → mini: left to a person (Live check above).

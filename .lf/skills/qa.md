@@ -363,6 +363,26 @@ from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
+## Waking idle conversations
+
+Real turns need real logins: keep the account's `HOME` (Claude's Keychain login
+and `~/.codex`) and isolate only `LF_HOME`, with the branch `lf` first on `PATH`.
+Interactive `-i` launches need no lf account. `lf checkout <task>` itself starts
+the Task's primary Claude conversation, which runs one `task-session` turn and
+goes idle: that alone is a managed idle conversation. Start Codex with
+`lf --task <task> -i -a codex : "Reply only with QA_OK"` in a PTY; its first turn
+needs no typing. A conversation is a wake candidate once
+`session_activity.yielded` is 1 and `processes.inbox` (Claude) or
+`processes.endpoint` (Codex) is set. Then `lf comment <task> 'Reply only with X'`
+and read the reply: Claude's in
+`~/.claude/projects/<cwd with / as ->/<thread>.jsonl` (a `queue-operation`
+then a `user` cross-session message), Codex's through its app-server
+(`thread/turns/list` with `itemsView: full`). A Codex client may sit on an
+update dialog; its app-server still runs the turn. Kill the private server's
+PID (find it by `LF_HOME` in `ps -E`) to check news recorded while it was down.
+`ps` matches `__context-block` in Codex app-server argv: those are hook
+declarations, not processes.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with

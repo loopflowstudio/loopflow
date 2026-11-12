@@ -174,27 +174,43 @@ lf --wave billing session steer "invoices before refunds"    # every Session on 
 lf session steers <session>                                  # was it delivered?
 ```
 
-A steer starts no turn. Each Session receives it at its next supported provider
-boundary; idle ones stay idle until they next run. For a Task, `lf task steer`
-does the same for every Session on it ([Work](work.md#steer-it-while-it-runs)).
+Each Session receives a steer at its next supported provider boundary. An idle
+managed conversation is woken with it now
+([below](#keep-several-conversations-open)); an idle bare one waits until it
+next runs. For a Task, `lf task steer` does the same for every Session on it
+([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
 `lf session steers <session> --retry <steer>` retries an uncertain delivery.
 
 ## Keep several conversations open
 
-Leave Task conversations open while their Graphs run. LF watches for new
-comments and progress; once work settles, idle update checks read revision
-counters instead of rebuilding unchanged Task history on every clock tick.
-This is automatic and needs no setting.
-Transcript, usage and ordinary tool activity in other conversations do not
-trigger those history rebuilds. A comment or workflow change on another Task
-can still do so because observers share the workflow revision counter.
+```bash
+lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake and report it
+lf process list       # no Task-update watcher per conversation
+```
 
-Locally saved comments can reach a conversation even when planning connection
-settings are unavailable. Sync badges remain in the Task thread. A busy provider
-leaves an update pending for retry. A failed store read is retried even if nothing else changes;
-lf records the gap in `logs/lf.log` while the provider conversation continues.
-Live Graphs still get periodic checks so an unrecorded process exit can be noticed.
+Leave Task conversations open while their Graphs run. When a Graph step
+settles, the Graph moves, a comment arrives on its Task or a steer is saved for
+it, this Machine's lf server wakes each managed Claude or Codex conversation on
+it that is waiting for you, one opened through a Task or Wave command or from Desktop,
+even if the server restarted since its last turn. Claude takes the news as a
+message from `loopflow`, Codex as a turn of its own. A comment with direction
+arrives as a steer; other comments arrive as Task updates. A
+conversation in the middle of a turn hears updates at its next boundary.
+Pi and OpenCode hear updates at their next boundary too. Idle update delivery
+needs no watcher or timer per conversation.
+
+A conversation you start with a bare `lf <skill>` in a terminal is never woken.
+In a Task's checkout it hears the Task's progress at its next turn; a headless
+bare run hears none.
+
+Locally saved comments reach a conversation even when planning connection
+settings are unavailable; sync badges stay in the Task thread. An update that
+lands while the server is down reaches the idle conversation when the server
+comes back. Failed wake attempts are logged in `logs/lf.log`. Steers remain
+pending until sent; Task progress is marked delivered before sending, so a
+failed send can lose that progress update. Progress delivery confirmation is
+tracked in [LOO-841](https://linear.app/loopflow/issue/LOO-841).
 
 ## One more headless turn
 

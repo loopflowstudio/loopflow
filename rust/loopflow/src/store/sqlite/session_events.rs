@@ -301,22 +301,6 @@ impl SqliteStore {
         )? != 0)
     }
 
-    /// A boundary lf could not record enters the Session's history as unknown at
-    /// the next one that succeeds (Jack Heart, 2026-11-05): one observation per
-    /// gap, written before the gap closes so a failed write keeps it open. Hooks
-    /// and the Codex relay share this writer.
-    pub(crate) fn close_recording_gap(
-        &self,
-        session: &str,
-        gap: &mut crate::store::RecordingGap,
-    ) -> StoreResult<()> {
-        if let Some(span) = gap.span() {
-            self.record_recording_gap(session, span.first_miss, span.last_miss)?;
-        }
-        gap.recovered();
-        Ok(())
-    }
-
     /// One `store-gap` observation for boundaries missed from `first_miss` to
     /// `last_miss`.
     pub(crate) fn record_recording_gap(
@@ -895,6 +879,19 @@ mod tests {
         );
     }
 
+    /// What a hook and the server do together: the hook sends its span, the
+    /// server records it, and the hook clears its marker.
+    fn close(store: &SqliteStore, gap: &mut RecordingGap) {
+        if let Some(span) = gap.span() {
+            store
+                .record_recording_gap("session", span.first_miss, span.last_miss)
+                .unwrap();
+        }
+        gap.recovered();
+    }
+
+    /// A boundary lf could not record enters the Session's history as unknown
+    /// at the next one that succeeds (Jack Heart, 2026-11-05).
     #[test]
     fn a_recovered_gap_enters_the_sessions_history_once() {
         let home = tempfile::tempdir().unwrap();
@@ -916,7 +913,7 @@ mod tests {
                 .unwrap()
         };
         // A boundary that records with no gap open writes nothing extra.
-        store.close_recording_gap("session", &mut gap()).unwrap();
+        close(&store, &mut gap());
         assert_eq!(observations(), 0);
         // Two hook processes miss the store; the next one that reaches it records
         // the hole once, and later boundaries have nothing left to say.
@@ -924,7 +921,7 @@ mod tests {
         gap().note("steers", &"database is locked");
         let mut open = gap();
         let span = open.span().unwrap().clone();
-        store.close_recording_gap("session", &mut open).unwrap();
+        close(&store, &mut open);
         assert!(open.span().is_none());
         assert_eq!(observations(), 1);
         let payload: String = store
@@ -941,7 +938,7 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(payload["first_miss"], span.first_miss);
         assert_eq!(payload["last_miss"], span.last_miss);
-        store.close_recording_gap("session", &mut gap()).unwrap();
+        close(&store, &mut gap());
         assert_eq!(observations(), 1);
     }
 

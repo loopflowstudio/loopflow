@@ -49,6 +49,15 @@ impl SqliteStore {
         )?)
     }
 
+    /// Moves whenever a steer is saved, in any scope.
+    pub(crate) fn steer_revision(&self) -> StoreResult<i64> {
+        Ok(self.conn.lock().expect("store mutex poisoned").query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM steers",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn read_snapshot(&self) -> StoreResult<ReadSnapshot<'_>> {
         self.conn
             .lock()

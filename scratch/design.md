@@ -24,7 +24,7 @@ attempts and uses `Instant`. Its direct tests cover only bulk purposes, includin
 foreign attempts and background release of abandoned reservations.
 
 The November 12 11:59 UTC `lf task status LOO-718 --json` read reported
-`active`: "PR is published but settlement is not armed with `lf pr land -c`".
+`active`: "required checks have not passed for the requested merge".
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.

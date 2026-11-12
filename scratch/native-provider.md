@@ -204,3 +204,8 @@ compaction), which loses nothing.
 - realign 7: no tests; `bare_exit_code` backs all three paths (`agent/mod.rs` `run_interactive`, `util.rs` `run_native_agent` and `result`, `run.rs` bare return), `a_hung_up_bare_provider_exits_lf_with_its_own_status` present. Main moved 5 PRs; sync recorded in Remaining.
 - concept review 5: no tests; no change. #1880's transcript watchers and exit read cover the bare turn hooks this branch dropped; the three post-sync checks in Remaining still apply. The steer question and pre-LOO-824 primaries remain open as written.
 - qa 2: live PTY pass in `scratch/qa.html`. Fixed: a fresh bare launch ended by Ctrl+C, SIGTERM or hang-up was recorded failed (`run_prompt` settled from `Result<()>`); `launch_session` now returns the `SessionCommandOutcome` and `run_prompt` settles with `capture_outcome`, as resume does. `session_cli_tests::a_hung_up_bare_provider_exits_lf_with_its_own_status` asserts completed for fresh and resume (fails on the old rule). `--lib lf::commands::util:: lf::commands::run:: agent::` 78 passed; `session_cli_tests::a_` 2 passed; clippy, fmt clean.
+
+## Demo, November 12
+
+Jack Heart ran the branch build (`scripts/dev-lf`) in Rex after syncing onto
+main: "swee, the rex icon worked".

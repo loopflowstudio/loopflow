@@ -376,10 +376,12 @@ part of what a phone or bot client is offered.
 `session.attach` answers a ticket on an ordinary client connection. A separate
 bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only JSON message
 and is answered `bridged`. A ticket is 16 random bytes as 22 base64url
-characters, opens one bridge and lasts 60 seconds; expiry does not close an
-open bridge. Local tickets bind to the requesting client's Unix peer UID. An
-unknown, spent, expired or foreign ticket is `not_found` with a null `id` and
-closes the connection. Bridges do not occupy the 64 client slots.
+characters and lasts 60 seconds; expiry does not close an open bridge. Local
+tickets bind to the requesting client's Unix peer UID. Every redemption attempt
+spends the ticket, successful or not: an unknown, spent, expired or foreign
+ticket is `not_found` with a null `id` and closes the connection. After a
+failure or a disconnect before `bridged`, request a new ticket and bridge.
+Bridges do not occupy the 64 client slots.
 
 `session.attach {session}` prefers the Session's held terminal to an owner,
 and `{session, terminal_id}` attaches only to that terminal. Either answers
@@ -399,9 +401,6 @@ answering, gets the same two errors with a null `id` in place of `bridged`.
 answers `bridged {owner_lf_process_id, terminal_id: null}` and then speaks the
 [binary owner protocol](../transport/README.md). An owner ID is never a
 terminal ID.
-
-Every redemption attempt spends the ticket, successful or not; after a failure
-or a disconnect before `bridged`, request a new ticket and bridge.
 
 The owner is the LfProcess holding the Session's terminal (`lf session serve`),
 never the provider's AgentProcess beneath it. The server resolves the Session's

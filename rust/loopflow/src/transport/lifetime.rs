@@ -28,6 +28,8 @@ pub(super) struct Client(Mutex<ClientState>);
 struct ClientState {
     attached: Option<(String, SessionAttachment)>,
     departure: Option<Settled>,
+    /// Wakes the watcher's wait, which blocks while nothing is attached.
+    wake: Option<mpsc::Sender<Message>>,
 }
 
 impl Client {
@@ -37,6 +39,9 @@ impl Client {
             .filter(|record| record.client)
             .map(|record| (record.session.clone(), record.attachment.clone()));
         state.departure = None;
+        if let (Some(_), Some(wake)) = (&state.attached, &state.wake) {
+            let _ = wake.send(Message::Wake);
+        }
     }
 
     pub fn take_departure(&self) -> Option<Settled> {
@@ -119,6 +124,8 @@ enum Message {
     Watch(u64, Box<Watch>),
     Hold(u64, Option<ViewerHold>),
     Gone(u64),
+    /// A native client attached: look again without a viewing change.
+    Wake,
 }
 
 impl Watcher {
@@ -147,6 +154,11 @@ impl Watcher {
     ) -> (Viewing, mpsc::Receiver<()>) {
         let key = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (close, closing) = mpsc::channel();
+        client
+            .0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .wake = Some(self.messages.clone());
         let watch = Watch {
             host,
             shell,
@@ -251,6 +263,7 @@ fn record(received: &mpsc::Receiver<Message>) {
             Message::Gone(key) => {
                 watches.remove(&key);
             }
+            Message::Wake => {}
         };
         match message {
             Ok(message) => apply(message),
@@ -363,6 +376,7 @@ mod tests {
         let client = Client(std::sync::Mutex::new(ClientState {
             attached: Some((session.id.to_string(), attachment.clone())),
             departure: None,
+            wake: None,
         }));
         assert!(!client.check(&store).unwrap());
         store

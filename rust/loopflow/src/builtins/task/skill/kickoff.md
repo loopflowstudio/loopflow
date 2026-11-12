@@ -1,12 +1,13 @@
 ---
-requires: product direction, an existing design, or a Task brief
+requires: a chosen direction, an existing design, or a Task brief
 produces: an implementation plan with risks answered, sequencing and acceptance checks
 ---
 Shape the supplied product direction into an implementation plan.
 
-Start from the intended experience and what people have already said. Find the
-technical risks, read the existing system, pick mechanisms that work today and
-sequence the work with concrete acceptance checks. Don't restart product
+Start from the intended experience: the direction chosen in explore when it ran,
+and what people have already said. Find the technical risks, read the existing
+system, pick mechanisms that work today and sequence the work with concrete
+acceptance checks. Don't restart product
 discovery or swap in a technically convenient outcome. If an open product choice
 blocks planning, name it and ask. If the plan is already good enough, keep it.
 

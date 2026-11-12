@@ -489,11 +489,11 @@ mod tests {
         let pursue = graph.find("pursue").unwrap();
         assert_eq!(pursue.cursor().index, next.cursor().index);
         assert_eq!(
-            graph.find("write-docs").unwrap().cursor().index,
+            graph.find("kickoff").unwrap().cursor().index,
             next.cursor().index
         );
         assert_eq!(
-            graph.find("implement").unwrap().cursor().index,
+            graph.find("write-docs").unwrap().cursor().index,
             next.cursor().index + 1
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);

@@ -34,6 +34,38 @@ then claude` with no warning; `lf set --global default_agent claude,codex`
 printed `warning: …/config.yaml: default_agent: claude,codex is the old
 spelling; write agents: [claude, codex] and default_agent: claude`.
 
+## Next implement direction (concept review 2, 2026-11-12)
+
+A narrower `agents` does not narrow when a wider `default_agent` exists. Run in
+a throwaway home with `default_agent: claude` (global) and
+`lf set --global skill.implement.agents codex`:
+
+    agent    claude, then codex  Personal global · skill implement + Personal global
+
+Implement starts on Claude. `docs/config.md` says of the same shape
+(`lf set --global skill.review.agents codex`) "review: Codex only, everywhere",
+and of `lf --wave frontend set agents claude` "this Wave: Claude only". Both
+are false for the config in the Task's incident, which has a global
+`default_agent: claude`. The Task asks for a list "set globally and narrowed or
+reordered per repository, Wave or skill".
+
+Build (default for open choice 4):
+
+- `default_agent` leads the order only when it is declared at least as
+  specifically as the `agents` in force, by the source, scope and target
+  ordering both keys already use. A more specific `agents` is the whole order.
+  Same level keeps "d,a,b,c"; `skill.compress.default_agent: codex` over a
+  global list keeps "Codex, then Claude".
+- `--explain` marks the outranked `default_agent` candidate with why, as it
+  does for a list under an `agent` choice.
+- `docs/config.md`: one row in the "Keep going" table and one in the
+  precedence table for global `default_agent: claude` plus
+  `skill.review.agents: [codex]` → Codex only.
+- Test in `agents_orders_what_a_fallback_moves_through`: that shape, and the
+  Wave-scoped list under a global `default_agent`.
+- The old-spelling warning printed twice for one `lf config settings` read of
+  `default_agent: claude,codex`; print it once per file.
+
 ## Settled without a new answer
 
 - `-a` is not checked against `agents`: the Task says "An explicit one-off
@@ -68,6 +100,16 @@ Each has a default built; none stops the work.
    picker. Should the picker read `agents` and the setting go?
 3. "model unavailable" was named beside usage limits as a reason to move. Only
    usage limits move a step.
+4. Does a wider `default_agent` lead a narrower `agents`? Said so far: "Only
+   for the scope at which the default_agent works" and "agents: [a,b,c] /
+   default_agent: d / then the real order is d,a,b,c", both about one level.
+   Nobody has said what a global `default_agent: claude` does to
+   `skill.review.agents: [codex]`. Default to build: the narrower list is the
+   whole order, because the Task says "narrowed". The alternative keeps
+   today's run (Claude, then Codex) and makes `agent` the only way to get
+   "Codex only"; then the docs' two "only" comments go. It matters because it
+   decides whether `agents` can take a provider away from a skill or Wave, or
+   only add ones behind the default.
 
 ## Checks
 

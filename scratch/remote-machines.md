@@ -168,8 +168,8 @@ Acceptance tests in `rust/loopflow/tests/machine_commands.rs`:
   `task status` → `task wait` → `demo`; the move interrupts `task wait`. The
   test checks the half-written file on the pushed branch, that the printed
   stopped step is `task wait …`, that `lf --machine mini task status --json`
-  shows mini's Graph process at that step, and that mini's Graph recorded no
-  `task status` step.
+  shows mini's Graph process at that step, and that once mini's `task wait`
+  runs its Graph has recorded no `task status` step.
 - Item 4 (sending Machine's views, prune):
   `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
 
@@ -204,11 +204,9 @@ Decided against, with the reason:
 - Auto-Ship approval does not travel.
 
 Test hazard, fixed: tests that continue a run on the fixture's mini hold a
-`loopflow_test_support::MachineServer` for each home and end the run. A `cmd`
-step is an operation that an interrupt lets finish, so the test interrupts the
-Task on mini, then signals mini's recorded `task wait` step by its verified
-pid. After the run, no launchd job and no process from this checkout remained;
-the fixture's two `lf holder run` processes exit after their 60 s idle.
+`loopflow_test_support::MachineServer` for each home, and an `EndRecorded`
+guard ends every Process both homes recorded (by verified pid) on drop, also
+when an assertion fails.
 
 Not approved: `lf install` on the laptop or the mini, or any real move of a
 live Task. The reply to "Should I install it on both and run a move with a
@@ -235,9 +233,8 @@ lf task interrupt X && lf task abandon X     # clean up
 
 ## Checks
 
-- 2026-11-12, after items 2 and 3: `machine_commands::` 44 passed;
-  `--lib ops::human_session::moves::` 1 passed; clippy clean; no launchd job or
-  process from this checkout left afterwards.
+- 2026-11-12, compress (EndRecorded in the live-Graph test): `machine_commands::`
+  44 passed; clippy clean; no launchd job or process from this checkout left.
 - `cargo test -p loopflow --test integration machine_commands::`: 43 passed.
   `documented_commands::` 4 passed; `--lib server::schema::tests:: lf::tests::
   ops::task_ownership::` 52 passed; `git::worktrees::` 22 passed; clippy clean.

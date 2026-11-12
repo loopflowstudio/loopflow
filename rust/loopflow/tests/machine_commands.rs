@@ -2592,16 +2592,19 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
 }
 
 /// A Task move that continues a run starts it for real on mini: each home
-/// gets its own server, so no launch installs one, and the test ends the run.
+/// gets its own server, so no launch installs one.
 #[test]
 fn task_move_leaves_a_live_graph_running_on_mini() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let lf = env!("CARGO_BIN_EXE_lf");
-    let _laptop =
-        loopflow_test_support::MachineServer::start(lf, &fixture.root.path().join("local"));
+    let local_home = fixture.root.path().join("local");
     let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    // Ends the run on mini (and anything left on the laptop), also when an
+    // assertion fails.
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
     let (task, worktree) = placed_task(&plan, "graph-task");
     // A route whose step runs until something stops it.
     fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
@@ -2620,40 +2623,16 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        let waiting: i64 = rusqlite::Connection::open(&local_db)
-            .unwrap()
-            .query_row(
-                "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        if waiting > 0 {
-            break;
-        }
-        if run.try_wait().unwrap().is_some() {
-            let output = run.wait_with_output().unwrap();
-            panic!(
-                "the Task run ended before its step started: {}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        if std::time::Instant::now() >= deadline {
-            let rows: Vec<(Option<String>, Option<i64>)> = rusqlite::Connection::open(&local_db)
-                .unwrap()
-                .prepare("SELECT command,completed_at FROM processes")
-                .unwrap()
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            panic!("the step never started: {rows:?}");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    let local_db = local_home.join("loopflow.db");
+    let remote_db = remote_home.join("loopflow.db");
+    if !wait_step_live(&local_db) {
+        let _ = run.kill();
+        let output = run.wait_with_output().unwrap();
+        panic!(
+            "the laptop's step never started: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     // What the step had written so far travels in the checkpoint.
     fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
@@ -2670,76 +2649,6 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     if !stopped {
         run.kill().unwrap();
     }
-    // Read mini's Graph before ending it, so a failed assertion still stops it.
-    let remote_db = remote_home.join("loopflow.db");
-    let live_graph = || -> Option<String> {
-        rusqlite::Connection::open(&remote_db)
-            .unwrap()
-            .query_row(
-                "SELECT p.id FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
-                 WHERE g.task_id=?1 AND p.completed_at IS NULL",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .ok()
-    };
-    let running = live_graph();
-    let mini_status = fixture
-        .command(&[
-            "--machine",
-            "mini",
-            "task",
-            "status",
-            task.as_str(),
-            "--json",
-        ])
-        .current_dir(&plan.local_path)
-        .output()
-        .unwrap();
-    let interrupted = fixture
-        .command(&["--machine", "mini", "task", "interrupt", task.as_str()])
-        .current_dir(&plan.local_path)
-        .output()
-        .unwrap();
-    // Its step is an operation, which an interrupt lets finish: end the step
-    // mini recorded, once its pid is shown to run that `task wait`.
-    let step: Option<i64> = rusqlite::Connection::open(&remote_db)
-        .unwrap()
-        .query_row(
-            "SELECT pid FROM processes WHERE command LIKE '%\"wait\"%'
-             AND completed_at IS NULL AND pid IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
-        .ok();
-    if let Some(pid) = step {
-        let command = Command::new("ps")
-            .args(["-o", "command=", "-p", &pid.to_string()])
-            .output()
-            .unwrap();
-        let command = String::from_utf8_lossy(&command.stdout);
-        if command.contains(env!("CARGO_BIN_EXE_lf"))
-            && command.contains(&format!("task wait {task}"))
-        {
-            // SAFETY: signals the verified pid only.
-            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-        }
-    }
-    let ended = (0..300).any(|_| {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        live_graph().is_none()
-    });
-    // Every step mini's Graph recorded, now that it has ended.
-    let mini_first_steps: i64 = rusqlite::Connection::open(&remote_db)
-        .unwrap()
-        .query_row(
-            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id
-             WHERE s.graph_lf_process_id=?1 AND p.command LIKE '%\"status\"%'",
-            [running.as_deref().unwrap_or_default()],
-            |row| row.get(0),
-        )
-        .unwrap();
-
     assert_success(&moved);
     assert!(stopped, "the Task run outlived its stopped Graph");
     let stderr = String::from_utf8_lossy(&moved.stderr);
@@ -2759,6 +2668,17 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         ),
         "halfway"
     );
+
+    // The Graph was running on mini when the move returned.
+    let graph: String = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT p.id FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
+             WHERE g.task_id=?1 AND p.completed_at IS NULL",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .expect("no live Graph on mini when the move returned");
     // Mini's Graph stands at the step the laptop stopped, not the route's start.
     let stopped_at = stderr
         .lines()
@@ -2766,20 +2686,58 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         .and_then(|(_, step)| step.strip_suffix('`'))
         .unwrap_or_else(|| panic!("no stopped step in:\n{stderr}"));
     assert_eq!(stopped_at, format!("task wait {task} --timeout 120s"));
+    let mini_status = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "status",
+            task.as_str(),
+            "--json",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
     assert_success(&mini_status);
     let mini_status: Value = serde_json::from_slice(&mini_status.stdout).unwrap();
     assert_eq!(
         mini_status["graph_processes"][0]["step"], stopped_at,
         "{mini_status}"
     );
-    assert_eq!(mini_first_steps, 0, "mini ran the route's first step again");
-    // The Graph was running on mini when the move returned.
-    assert!(
-        running.is_some(),
-        "no live Graph on mini when the move returned"
-    );
-    assert_success(&interrupted);
-    assert!(ended, "mini's Graph outlived its interrupt");
+    // Once mini's `task wait` runs, a restarted route would already have
+    // recorded its `task status` step.
+    assert!(wait_step_live(&remote_db), "mini's step never started");
+    let first_steps: i64 = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id
+             WHERE s.graph_lf_process_id=?1 AND p.command LIKE '%\"status\"%'",
+            [&graph],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_steps, 0, "mini ran the route's first step again");
+}
+
+/// Whether a `task wait` step recorded in `db` is running within a minute.
+fn wait_step_live(db: &Path) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        let waiting: i64 = rusqlite::Connection::open(db)
+            .and_then(|sql| {
+                sql.query_row(
+                    "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap_or(0);
+        if waiting > 0 {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    false
 }
 
 #[test]

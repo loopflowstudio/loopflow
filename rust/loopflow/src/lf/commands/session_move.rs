@@ -78,7 +78,7 @@ struct StoppedRun {
     place: String,
     /// This Machine's checkout of the Task's repository; the run is addressed
     /// from it and starts on the Task's owner.
-    repository: Option<std::path::PathBuf>,
+    repository: Result<std::path::PathBuf, String>,
 }
 
 impl StoppedRun {
@@ -86,18 +86,17 @@ impl StoppedRun {
     /// run that does not start is reported, never an error.
     fn resume(&self) {
         let name = &self.identifier;
-        let started = match &self.repository {
-            Some(repository) => crate::engine::task::run(
-                repository,
+        let started = self.repository.clone().and_then(|repository| {
+            crate::engine::task::run(
+                &repository,
                 self.task.as_str(),
                 self.from.as_deref(),
                 None,
                 None,
                 false,
             )
-            .map_err(|error| error.message),
-            None => Err("this Machine has no checkout of its repository".to_string()),
-        };
+            .map_err(|error| error.message)
+        });
         match started {
             Ok(crate::engine::task::TaskRun::Running {
                 graph_process,
@@ -226,7 +225,8 @@ async fn relay_task(
         from,
         task: task.id.clone(),
         place: place.clone(),
-        repository: crate::ops::task::repository_for_task(store, &task).ok(),
+        repository: crate::ops::task::repository_for_task(store, &task)
+            .map_err(|error| error.to_string()),
     });
     Ok((store.sqlite.task_ownership(&task.id)?, stopped))
 }

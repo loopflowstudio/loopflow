@@ -431,17 +431,13 @@ with a Session ID from `session.list`:
 ```
 
 Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
-`attach` first, without `hello`:
+`attach` first, without `hello`; `/v1/machine` keeps carrying requests and
+live Work updates:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
 ← {"type":"bridged","owner_lf_process_id":null,"terminal_id":"<terminal ID>"}
 ```
-
-A Session with a held terminal reaches it, as here; one served by an owner
-answers with `owner_lf_process_id` set and `terminal_id` null.
-
-Keep `/v1/machine` for requests and live Work updates.
 
 Both WebSocket endpoints authenticate before upgrade and admit only the host
 owner's Tailscale user; a rejected connection cannot present a ticket. Tickets

@@ -104,9 +104,10 @@ its process inventory rejects an additional remote PTY.
 holds a SQLite writer while typing and returning to the viewer. Input and control
 keep flowing while the store is locked; returning does not replay input.
 
-One `transport_tests` case records a Session with an owner transport from an
-earlier build and a live stand-in owner; `lf resume` ends the stand-in by
-verified pid and birth and the Session resumes held.
+`transport_tests::resume_ends_an_earlier_builds_owner_and_continues_held`
+records a Session with an owner transport from an earlier build and a live
+stand-in owner; `lf resume` ends the stand-in by verified pid and birth and the
+Session resumes held.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
@@ -966,12 +967,9 @@ cargo test -p loopflow --lib server::
 cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
-cargo test -p loopflow --test transport_tests server_watches_refresh_work_and_resolve_primary_session
-cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
-cargo test -p loopflow --test transport_tests server_reconnect_
-cargo test -p loopflow --test transport_tests server_failed_setup_retry_only_reconnects_and_preserves_newer_claims
-cargo test -p loopflow --test transport_tests server_move_here_
-cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
+cargo test -p loopflow --test transport_tests held_session_survives_server_restart
+cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 
 The development registration proof uses two isolated launchd labels: disabled

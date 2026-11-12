@@ -78,6 +78,16 @@ Steers (Jack Heart, 2026-11-12), word for word where it matters:
   `process_ownership_tests::interruption_records_the_process_without_a_fabricated_signal_name`,
   `graph_tests::ordinary_graph_crash_retains_effects…` (no non-agent blocking
   Graph step without serve).
+  Owner-backed server tests deleted in `64f2b3697f`
+  (`server_reconnect_*`, `server_move_here_*`,
+  `server_failed_setup_retry_only_reconnects_and_preserves_newer_claims`,
+  `server_preserves_owner_and_graph_across_restart`,
+  `installed_server_preserves_owner_and_graph_across_replacement`): held cases
+  cover restart (`held_session_survives_server_restart`), reconnect
+  (`a_held_pane_reads_reconnecting_until_the_next_server_answers`) and
+  ownership (`ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it`).
+  Move here with a lost ack, failed-setup retry and installed-server
+  replacement have no held case; the control-model Task is where they return.
 
 ## Checks
 
@@ -117,14 +127,6 @@ code contradicts them:
   wait, resume held; unverifiable or not exiting keeps running and names its
   pid), nothing sweeps them. Per the steer above.
 
-Docs written against the code slice's end state, not yet in the tree when
-written: `session.attach` ticket `{ticket, terminal_id, expires_in_ms}` and
-`bridged {terminal_id}` (no `owner_lf_process_id`); terminal-moved
-`not_found {terminal_id, current_terminal_id}`; relay takes a terminal only
-(described as "`lf session attach`, run by `lf resume`", no flag spelling);
-no per-viewer spool or `resume {received}`. `rust/loopflow/tests/README.md`
-still names owner tests the code slice may delete or rename
-(`server_preserves_owner_and_graph_across_restart`,
-`installed_server_preserves_owner_and_graph_across_replacement`,
-`process::runtime::tests::resume_*dead_owners*`); the resume-restart test is
-described without a name.
+The owner-protocol docs above now match the tree (no `owner_lf_process_id`,
+spool or `resume {received}` left in docs). `rust/loopflow/tests/README.md`'s
+Client API server list names held tests in place of the deleted owner ones.

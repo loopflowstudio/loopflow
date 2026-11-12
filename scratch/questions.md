@@ -22,7 +22,8 @@ The request spelled the list "we should just be doing agents: a,b".
 
 - `agents` reads a comma string as the list in files, `lf set` and
   `--setting`; `lf set` saves it as a YAML list. `config::agent_list` splits
-  it and stays after LOO-875, whose notes list it for deletion.
+  it, so LOO-875 deletes `old_default_agent_warning` and `_split_agent_list`
+  (`config/settings.rs`) but keeps `agent_list`.
 - `lf set … default_agent claude,codex` warns with the replacement as it saves.
 - `docs/config.md` says a lone bare `claude` tries Opus, Sonnet, Haiku; which
   rule is right is still open choice 1.

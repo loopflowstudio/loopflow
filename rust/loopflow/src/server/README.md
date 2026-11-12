@@ -387,12 +387,12 @@ bytes and a control failure never closes a bridged terminal. Follow
 ### Remote attach contract
 
 Planned for LOO-718's authenticated remote transport; not available in this
-build. The attachment and recovery rules above apply, with these additions.
+build. The [attachment](#terminal-attachment) and
+[recovery](#terminal-and-provider-recovery) rules apply, with these additions.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
-with a Session ID from `session.list`. A null `owner_lf_process_id` selects the
-current terminal owner:
+with a Session ID from `session.list`:
 
 ```text
 → {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}

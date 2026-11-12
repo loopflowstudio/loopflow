@@ -260,6 +260,8 @@ read -r answer < /dev/tty
         )
         .unwrap();
     }
+    // Resuming a repository conversation starts it under the Machine server.
+    let _server = loopflow_test_support::MachineServer::start(&binary, &home);
     let mut resume = command();
     resume.args(["resume", &session]);
     if case == "reveal" {

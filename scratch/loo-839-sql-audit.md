@@ -79,6 +79,33 @@ writer.
 - LOO-868 `export_in` over the whole planning history under the lock on a moved revision.
 - LOO-869 `work_in` runs 3 queries per Task (180–220 ms for 750 Tasks) on every selection read.
 - LOO-870 `query_plans` exempts partial-index walks and cannot see FK checks.
+- LOO-872 test that store paths take no write lock when they change nothing (the guard below).
+
+## Write-lock guard, filed as LOO-872 (concept review, 2026-11-12)
+
+The design has two rules and one guard. Scans have `store::query_plans`;
+"open no write transaction when nothing changes" has none, and every write
+connection begins IMMEDIATE, so a read-only `conn.transaction()` takes the lock
+silently. `contention::watch_write_holds` reports only holds past 3 s; a fast
+empty write is invisible, though it queues behind every writer and makes each
+writer behind it wait. The fixes in both passes were found by reading code.
+
+Direction for LOO-872:
+
+- `query_plans` gains a sibling to `statements`: run a closure and return the
+  call sites of write transactions that took the lock and changed no row
+  (the update hook already marks a change; the commit and rollback hooks see
+  the end). Test-only, beside the scan helper, same fixture.
+- Run it over the paths `query_plans` already drives (boundary, retirement,
+  viewer hold, steer reads, planning import with nothing unseen) asserting
+  none, and over `lf task status`/Work reads if a fixture reaches them.
+- Fix what it finds the way this branch did (read first, or a savepoint); a
+  find that needs a rewrite goes to a linked Task like LOO-865..870.
+- `docs/dev/data.md` § "Query cost and the write lock" names the check next to
+  the scan guard.
+
+Not production logging: an empty write is cheap alone and only costs under
+contention, so a log line per one would be noise; the test catches the spelling.
 
 ## Checks
 

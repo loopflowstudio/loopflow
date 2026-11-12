@@ -1471,21 +1471,24 @@ async fn open_waiting_locked(
         session
     };
     let token = session_token(&session);
-    if resume_native_session(
-        store,
-        session.input_key()?,
-        &token,
-        &mut launch_lock,
-        named_work,
-    )? {
+    // An input launches on the provider it recorded, so another harness
+    // selected here appends its own instead of reopening native history.
+    let handoff = handoff_agent(&session).is_some();
+    if !handoff
+        && resume_native_session(
+            store,
+            session.input_key()?,
+            &token,
+            &mut launch_lock,
+            named_work,
+        )?
+    {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
-    // An input launches on the provider it recorded, so another harness
-    // selected here appends its own.
-    let session = if handoff_agent(&session).is_some() {
+    let session = if handoff {
         append_input(store, session).await?
     } else if capture_is_prepared(session.input_key()?)? {
         session

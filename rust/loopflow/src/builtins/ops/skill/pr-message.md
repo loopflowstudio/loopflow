@@ -19,7 +19,7 @@ opening doesn't already say it. Note real risks or limits. Keep checks that
 can only run after merge: what is still untried, the environment
 or release it needs, and what to look for. A later Task may be created from
 this text after `scratch/` is cleared; mark new-scope ideas as suggestions.
-Put test and lint results in **Checks**, or link CI. End with **Try it** when
+Test, lint and QA results never go in the body; CI shows them. End with **Try it** when
 a walkthrough helps: a concrete action and the visible result. Tests never go
 in **Try it**. Say which steps were actually run and which are suggested.
 

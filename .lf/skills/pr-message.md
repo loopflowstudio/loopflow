@@ -21,8 +21,8 @@ matters** after that, and omit it if the summary already explains the consequenc
 Include material risks or limitations when needed. Preserve concrete accepted
 checks whose evidence comes after merge: the unverified outcome, environment or
 release prerequisite and expected evidence. Optional later Task creation can use
-this copy after scratch cleanup; suggestions for new scope stay labeled as suggestions. Keep automated test and lint
-results in **Checks** when useful, or link to CI. Finish with **Try it** when there
+this copy after scratch cleanup; suggestions for new scope stay labeled as suggestions. Test, lint and QA
+results never go in the body; CI shows them on the PR. Finish with **Try it** when there
 is a useful walkthrough: describe a concrete user action and the visible result
 that demonstrates the benefit. Tests, test commands, and test results never belong
 in this section. Distinguish suggested steps from behavior actually observed;

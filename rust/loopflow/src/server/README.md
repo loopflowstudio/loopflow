@@ -424,8 +424,8 @@ Connect to the host's `/v1/machine` WebSocket, complete
 with a Session ID from `session.list`:
 
 ```text
-→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null},"select":null}
-← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null,"terminal_id":null},"select":null}
+← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":null,"terminal_id":"<terminal ID>","expires_in_ms":60000}}
 ```
 
 Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
@@ -433,8 +433,11 @@ Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}
-← {"type":"bridged","owner_lf_process_id":"<owner ID>"}
+← {"type":"bridged","owner_lf_process_id":null,"terminal_id":"<terminal ID>"}
 ```
+
+A Session with a held terminal reaches it, as here; one served by an owner
+answers with `owner_lf_process_id` set and `terminal_id` null.
 
 Keep `/v1/machine` for requests and live Work updates.
 

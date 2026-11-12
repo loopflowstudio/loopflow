@@ -7,9 +7,11 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 11:25 UTC, GitHub's PR metadata reported #1812 open and
-unmerged, at head `dc055a5ae57c67caf4c696a1bb77a3f578004c69`, which does not
-contain `origin/main` `45a0eecc94` (#1887); this checkout has merged that main. `ticket.rs` is unchanged since head `28e2321c`. `origin/main` does not contain
+At November 12 11:56 UTC, GitHub's PR metadata reported #1812 open and
+unmerged, at head `14044268c29d003add3899ced792183bfb2ae798`, which does not
+contain `origin/main` `d978de77c5`; this checkout has merged `45a0eecc94` (#1887).
+Since `28e2321c`, `ticket.rs` changed only `Purpose::Terminal(LfProcessId)` to
+`Purpose::Terminal(transport::Host)` (owner or held terminal). `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
@@ -60,4 +62,7 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed after Nov 12 11:25 realign (scratch only; no build or test rerun).
+Remote contract example updated to the held-terminal `session.attach` shape
+(`terminal_id` in request, ticket and `bridged`), matching `wire.rs` here and on #1812.
+
+`git diff --check` — passed after Nov 12 11:56 docs edit (prose only; no build or test rerun).

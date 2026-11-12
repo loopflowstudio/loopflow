@@ -29,15 +29,18 @@ unviewed conversation. A conversation you are viewing stays open.
 Preparing a conversation, including Desktop's preload, does not launch an agent.
 
 Add `--open` to open the Task's primary conversation when launch returns,
-including when the Task is waiting at an interactive step. It reuses the same
-Session started in the background. A bare run opens at Graph registration;
-`-b` and `-i` still wait for their foreground run before opening.
+including when the Task is waiting at an interactive step. It reuses the Task's
+primary Session, including one already started in the background. A bare run
+opens at Graph registration; `-b` and `-i` still wait for their foreground run
+before opening.
 
 Opening follows [`lf open`'s host selection](workspaces.md#choose-where-it-appears):
 a direct CLI invocation attaches in the current terminal; an agent tool call
 opens a sibling tab. When the Graph runs on another Machine, the conversation
 opens locally where you invoked the command. `--explain` and `--quote` open
 nothing. Task runs reject `--context`; use `--explain` to inspect their selection.
+With `--json`, stdout holds only the `task.run` value; the open receipt goes to
+stderr.
 
 A failed launch opens nothing. An opening failure does not stop the Graph.
 Fix the reported host or attachment problem, then use

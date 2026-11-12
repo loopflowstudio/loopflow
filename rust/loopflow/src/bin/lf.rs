@@ -2319,7 +2319,16 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn task_run_open_args(cli: &Cli) -> Option<Vec<String>> {
+/// The `lf open` invocation that follows a successful `task run --open`.
+#[derive(Debug)]
+struct TaskRunOpen {
+    args: Vec<String>,
+    /// The launch writes its `task.run` value to stdout; the opener's receipt
+    /// then goes to stderr so stdout holds exactly one JSON document.
+    json: bool,
+}
+
+fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
     let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
@@ -2348,13 +2357,19 @@ fn task_run_open_args(cli: &Cli) -> Option<Vec<String>> {
             args.extend([flag.to_owned(), value.clone()]);
         }
     }
-    if *json || cli.json {
-        args.push("--json".into());
-    }
-    Some(args)
+    Some(TaskRunOpen {
+        args,
+        json: *json || cli.json,
+    })
 }
 
-fn run_task_and_open(args: &[String], mut open: Vec<String>) -> anyhow::Result<()> {
+fn run_task_and_open(
+    args: &[String],
+    TaskRunOpen {
+        args: mut open,
+        json,
+    }: TaskRunOpen,
+) -> anyhow::Result<()> {
     let mut literal = false;
     let launch: Vec<_> = args[1..]
         .iter()
@@ -2365,9 +2380,10 @@ fn run_task_and_open(args: &[String], mut open: Vec<String>) -> anyhow::Result<(
         .cloned()
         .collect();
     let executable = std::env::current_exe()?;
-    let run = |args: &[String]| -> anyhow::Result<()> {
+    let run = |args: &[String], stdout: std::process::Stdio| -> anyhow::Result<()> {
         let status = std::process::Command::new(&executable)
             .args(args)
+            .stdout(stdout)
             .status()?;
         if !status.success() {
             let code = status
@@ -2378,7 +2394,7 @@ fn run_task_and_open(args: &[String], mut open: Vec<String>) -> anyhow::Result<(
         }
         Ok(())
     };
-    run(&launch)?;
+    run(&launch, std::process::Stdio::inherit())?;
     // Resolve on the same Machine with the same selectors, after launch has
     // acquired any previously unknown Task. Only portable identities cross
     // back into presentation; remote checkout paths never enter the local CLI.
@@ -2408,7 +2424,12 @@ fn run_task_and_open(args: &[String], mut open: Vec<String>) -> anyhow::Result<(
             }
         }
     }
-    run(&open)
+    let receipt = if json {
+        std::io::stderr().into()
+    } else {
+        std::process::Stdio::inherit()
+    };
+    run(&open, receipt)
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
@@ -3262,9 +3283,11 @@ mod tests {
             "--json",
         ])
         .unwrap();
-        let args = super::task_run_open_args(&cli).unwrap();
+        let open = super::task_run_open_args(&cli).unwrap();
+        assert!(open.json);
+        assert!(!open.args.iter().any(|arg| arg == "--json"));
         let opened = Cli::try_parse_from(reorder_args(
-            std::iter::once("lf".to_owned()).chain(args).collect(),
+            std::iter::once("lf".to_owned()).chain(open.args).collect(),
         ))
         .unwrap();
         assert!(matches!(opened.command, Some(Commands::Open(_))));

@@ -741,6 +741,11 @@ fn task_run_open_opens_the_selected_waiting_task() {
             .output()
             .unwrap();
         assert!(waiting.status.success(), "{args:?}: {waiting:?}");
+        if args.contains(&"--json") {
+            // Exactly the `task.run` value; the open receipt goes to stderr.
+            serde_json::from_slice::<serde_json::Value>(&waiting.stdout)
+                .unwrap_or_else(|error| panic!("{error}: {waiting:?}"));
+        }
         assert_eq!(
             fs::read_to_string(&opened).unwrap().trim(),
             "opening-primary"

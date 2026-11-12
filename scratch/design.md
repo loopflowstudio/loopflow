@@ -24,18 +24,28 @@ The Graph launcher and primary Session selection remain their existing owners.
 non-interactive runs; `commands/open.rs` resolves its primary and host.
 The foreground timing assumption remains in `scratch/questions.md`.
 
-Fetched `origin/main` on 2026-11-11: its tip is `4dc15b7302`, already merged
+Re-fetched `origin/main` during realign on 2026-11-11: its tip remains
+`4dc15b7302`, already merged
 at `b7bed56e4b`. The newer live-Session change affects `open::available`'s
 listing query, not Task selection or launch timing. The earlier idle-conversation
 wake change (`baa09168df`) leaves primary selection with the existing
 conversation machinery. No Wave is selected.
 
-## Delete — do not maintain
+## Headless coverage
 
-No deletion targets remain. The local omitted-Task lookup and filesystem-selector
-forwarding are gone; selection stays on the launch Machine. The foreground-only
-attachment wrapper is also removed: `GraphTask::open_fixture` captures Graph
-outcomes at attachment, so the foreground test reads that snapshot directly.
+The two remaining coverage findings are closed in
+`rust/loopflow/tests/linear/task_graph_launch_tests.rs`:
+
+- `task_run_open_waits_for_foreground_runs` holds the Graph for both `-b` and
+  `-i`, checks that nothing opens while held, then checks the successful Graph
+  outcome captured at attachment by `GraphTask::open_fixture`.
+- `task_run_open_successful_quote_launches_and_opens_nothing` uses a configured
+  rental offer, succeeds, and checks that no attachment, Graph or rental was
+  created and the Task's Graph position stayed unchanged.
+
+The six opening tests passed after fixture consolidation. They establish the
+implemented timing; they do not settle the product choice in
+`scratch/questions.md`. No implementation gap remains from that feedback.
 
 ## Remote selection
 
@@ -45,16 +55,25 @@ opener against two repositories with the same Task alias and different Task IDs.
 It does not exercise an actual remote Graph or host attachment. Selection is read
 after successful launch; it adds a read round trip.
 
+## JSON output
+
+`task run --open --json` writes exactly the `task.run` value to stdout.
+`task_run_open_args` no longer forwards `--json`; `run_task_and_open` sends the
+opener's stdout to stderr when the launch has `--json`, and an opening failure
+still exits non-zero.
+
 ## Remaining verification
 
-Foreground timing remains an assumption for demo, not a recorded product
-decision; `scratch/questions.md` retains it.
+Demo decision: should `-b` and `-i` keep waiting for their foreground run before
+opening? That is the implemented assumption in `scratch/questions.md`; no
+recorded product decision settles it.
 
 Gate: `test(task_graph_launch_tests::) | test(lf::tests::) | binary(lf) |
 test(work_open_tests::) | test(documented_commands::) | test(cli_discovery::) |
 test(task_initialization_tests::) | test(machine_commands::task_run_open) | binary(global_commands) |
-(binary(transport_tests) & test(conversation_open_))`; formatting, clippy and
-affected documentation checks remain for the merged tree.
+(binary(transport_tests) & test(conversation_open_))`; clippy and affected
+documentation checks remain. Formatting passed on the current Rust tree;
+reuse that result unless the tree or gate's command plan changes.
 Demo: configured remote execution, direct terminal opening and agent sibling-tab
 opening through the real host.
 
@@ -69,11 +88,9 @@ lists the entry point alongside existing conversation commands.
 ## Focused checks
 
 `cargo test -p loopflow --test integration task_run_open_resolves_remote_selectors_before_opening_locally`: passed after compression, 1 test including `--` (2026-11-11), simulated SSH and attachment.
-`cargo test -p loopflow --lib --bin lf task_run_open`: passed after compression, 5 library and 2 binary tests including local `--json` and `--` (2026-11-11); macOS linker warned that `__eh_frame` exceeds 16MB.
-`cargo test -p loopflow --lib task_graph_launch_tests::task_run_open`: 5 passed, including the successful rental quote; the new foreground test failed because step output was absent from the caller log (2026-11-11). Its corrected fixture inspects recorded Graph outcomes at attachment.
-`cargo test -p loopflow --lib task_graph_launch_tests::task_run_open_waits_for_foreground_runs`: passed for both `-b` and `-i` (2026-11-11); same macOS linker warning. The other five tests are unchanged since their pass.
-`cargo test -p loopflow --lib task_graph_launch_tests::task_run_open` (with `LF_*` unset and null stdin): 6 passed after consolidating attachment fixtures (2026-11-11), including foreground ordering and the successful rental quote; same linker warning.
-`cargo fmt --check` and `git diff --check`: passed.
+`cargo test -p loopflow --lib task_graph_launch_tests::task_run_open` (with `LF_*` unset and null stdin): 6 passed after consolidating attachment fixtures (2026-11-11), including foreground ordering and the successful rental quote; macOS linker warned that `__eh_frame` exceeds 16MB.
+`cargo test -p loopflow --lib --bin lf task_run_open` (with `LF_*` unset and null stdin): 7 library (6 `task_graph_launch_tests::task_run_open*`) and 2 binary tests passed after the one-JSON-document change, including stdout parsing as one value (2026-11-11).
+`cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed after compressing `run_task_and_open`'s parameter destructuring; `cargo test -p loopflow --bin lf task_run_open`: 2 passed (2026-11-11).
 
 Earlier preview fixtures expected success for refused invocations: `--context`
 reported "--context requires a skill, Graph or inline agent request; use --explain

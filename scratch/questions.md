@@ -104,6 +104,9 @@ Each has a default built; none stops the work.
 - `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass (after the narrowing rule).
 - Compress: `_split_agent_list` now keys off `old_default_agent_warning`; a
   `default_agent: ','` with no entries is left as written instead of dropped.
+- Compress 2: dropped a narrowing test case that could not fail (global
+  `default_agent: claude` over a Wave `agents: [claude]`); focused tests 143
+  pass, clippy clean.
 - `cargo test -p loopflow --test integration documented_commands::`: pass.
 - `cargo clippy --all-targets -- -D warnings`: clean.
 - Gate: `(test(config::) | test(agent::tests::) | test(ops::task_execution::) | test(settings_launch_tests::) | test(documented_commands::) | test(configuration_changes_reach_an_existing_subscription) | test(graph_defaults_follow_task_wave_and_repository) | test(wave_setup_tests::)) | binary(two_people)`.

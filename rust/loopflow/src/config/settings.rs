@@ -1181,7 +1181,7 @@ mod tests {
             SettingScope::Wave,
             "agents: [claude]",
         );
-        assert_eq!(order(&[personal.clone(), wave.clone()], None), ["claude"]);
+        assert_eq!(order(&[personal.clone(), wave], None), ["claude"]);
         // A default_agent leads only a list no more specific than it.
         let fallback = layer(
             ConfigSource::Personal,
@@ -1215,20 +1215,6 @@ mod tests {
             "unused: a more specific agents list is the whole order".into()
         )));
         assert!(reasons(&narrowed).contains(&("agents".into(), "selected".into())));
-        assert_eq!(
-            order(
-                &[
-                    layer(
-                        ConfigSource::Personal,
-                        SettingScope::Global,
-                        "default_agent: claude"
-                    ),
-                    wave
-                ],
-                None
-            ),
-            ["claude"]
-        );
         let codex_wave = layer(
             ConfigSource::Personal,
             SettingScope::Wave,

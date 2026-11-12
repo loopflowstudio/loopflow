@@ -350,10 +350,21 @@ impl SqliteStore {
         Ok(latest)
     }
 
-    pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
+    /// Unfinished Tasks `machine` owns, each with when its claim reached it.
+    pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<(TaskId, i64)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        tasks_held_in(&snapshot, machine).map(task_ids)
+        tasks_held_in(&snapshot, machine)?
+            .into_iter()
+            .map(|(task, ownership)| {
+                let since = ownership.since(machine).ok_or_else(|| {
+                    StoreError::InvalidData(format!(
+                        "Task {task} is owned on {machine} with no log entry naming it"
+                    ))
+                })?;
+                Ok((task, since))
+            })
+            .collect()
     }
 
     // -- On-demands ----------------------------------------------------------

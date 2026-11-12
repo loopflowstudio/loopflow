@@ -127,7 +127,7 @@ Steps 0 to 3 of the build order. Step 4 is LOO-861 (hub) and step 5 is LOO-862
 (rentals and pools move). Jack, 2026-11-12: "i think 0-3 could be this task,
 and 4 and 5 could be follow up tasks?"
 
-Built (e2d2246fdb, 3559e8838b; step 2 in a5a403171e, d3e7af99dd):
+Built (see `git log`):
 - Step 0: `arriving_task` / `acquire_from_planning`; `session receive --check
   --task --issue --repository`; version token comparison.
 - Step 1: the move continues a Graph it stopped (`StoppedRun::resume` →
@@ -135,7 +135,7 @@ Built (e2d2246fdb, 3559e8838b; step 2 in a5a403171e, d3e7af99dd):
   `Checked mini: it can take X`, `Stopped X at <step>`, `Committed and pushed X
   on <branch>`, `Arrived on mini (Graph at <step>)…`, `Running on mini as Graph
   process <id>`. Test: `task_move_leaves_a_live_graph_running_on_mini`.
-- Step 3: `SqliteStore::tasks_owned_by`, `ops::task_ownership::runs_elsewhere`.
+- Step 3: `SqliteStore::tasks_held_by` (also rentals' Task list), `ops::task_ownership::runs_elsewhere`.
   `lf task status` prints `X  Runs on mini since <time>` in place of the local
   execution snapshot; `lf task list` adds it to the row; `lf machine list`
   lists each Machine's Tasks (`tasks` in `--json`, schema fixture regenerated);
@@ -217,9 +217,9 @@ and 5 could be follow up tasks?", which doesn't say.
 
 The move, stage lines, restart-at-step and the laptop's views match "What a
 move should feel like" items 1, 2, 6, 7 and 9; items 3 and 4 stay as decided
-against above. No open product choice. Its one fix is built: `tasks_held_in`
-returns the ownership it read, and `tasks_owned_by` takes `since` from it
-(a held Task with no entry naming its Machine is `InvalidData`, never 0).
+against above. No open product choice. Its one fix is built: `tasks_held_by` takes `since`
+from the ownership `tasks_held_in` read (no entry naming the Machine is
+`InvalidData`, never 0); compress folded `tasks_owned_by` into it.
 
 ## Live check (for a person, both Machines on this build)
 
@@ -241,9 +241,9 @@ lf task interrupt X && lf task abandon X     # clean up
 
 ## Checks
 
-- 2026-11-12, after the `tasks_owned_by` fix: `machine_commands::` 44 passed
-  (the prune test now asserts `since > 0` in `machine list --json`),
-  `--lib ops::task_ownership::` 2, `store::sqlite::rentals` 9; clippy clean. Earlier: `documented_commands::` 4,
+- 2026-11-12, after folding `tasks_owned_by` into `tasks_held_by`:
+  `machine_commands::` 44 passed (prune test asserts `since > 0`), `--lib
+  ops::task_ownership:: store::sqlite::rentals rental::` 36; clippy clean. Earlier: `documented_commands::` 4,
   `--lib server::schema::tests:: lf::tests:: ops::task_ownership::` 52,
   `git::worktrees::` 22 passed.
 - 2026-11-12, after these runs: no launchd job or `lf` process from this checkout left.

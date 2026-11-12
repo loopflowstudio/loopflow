@@ -51,7 +51,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
     let mut listed = Vec::new();
     for machine in machines {
         let mut tasks = Vec::new();
-        for (task, since) in store.sqlite.tasks_owned_by(&machine.id)? {
+        for (task, since) in store.sqlite.tasks_held_by(&machine.id)? {
             if let Some(saved) = store.sqlite.task(&task)? {
                 tasks.push(HeldTask {
                     id: task,

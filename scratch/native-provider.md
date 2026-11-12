@@ -153,3 +153,4 @@ compaction), which loses nothing.
 - concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).
 - implement 4 (those three): `cargo build --bin lf` clean; `--lib` `harness::context::` + `ops::human_session::` + `session_record::capture_tests::resume` + `bare_pi_` — 58 passed; clippy, fmt clean.
 - compress 4: the direction's three items were already in `8a516adad2`; this pass only imports `Holder` in `agent_process` tests (18+/40−). clippy clean; `--lib harness::agent_process::` 19 passed.
+- realign 4: no tests; grep confirms one `is_work` (transport, `util::resume_session_with_env`), no `managed` flag in `human_session`/`commands::session`/`util`, no `"managed"` hook spec key.

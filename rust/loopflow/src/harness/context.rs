@@ -401,14 +401,6 @@ const server = createServer((socket) => {
 await new Promise((resolve) => server.listen(SOCKET, resolve));
 "#;
 
-    fn holder(managed: bool) -> Holder {
-        if managed {
-            Holder::Server
-        } else {
-            Holder::Caller
-        }
-    }
-
     struct Probe {
         /// Each `lf` the plugin started, one line of arguments per process.
         calls: String,
@@ -470,7 +462,8 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
 
     /// One conversation through the OpenCode plugin: a prompt, three model
     /// requests with a compaction before the third, then the turn's end.
-    fn opencode_turn(managed: bool) -> Probe {
+    fn opencode_turn(holder: Holder) -> Probe {
+        let managed = holder.reports_turns();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
@@ -487,7 +480,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
             references: Vec::new(),
         };
         let mut config = serde_json::json!({});
-        add_opencode_context(&mut config, &context, "Fixed instructions", holder(managed)).unwrap();
+        add_opencode_context(&mut config, &context, "Fixed instructions", holder).unwrap();
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
@@ -530,7 +523,7 @@ await close();
 
     #[test]
     fn a_managed_opencode_turn_asks_the_server_and_renders_only_at_start_and_compaction() {
-        let managed = opencode_turn(true);
+        let managed = opencode_turn(Holder::Server);
         let renders: Vec<_> = managed
             .calls
             .lines()
@@ -553,7 +546,7 @@ await close();
 
     #[test]
     fn a_bare_opencode_run_serves_context_and_opens_no_connection() {
-        let bare = opencode_turn(false);
+        let bare = opencode_turn(Holder::Caller);
         assert_eq!(bare.calls.lines().count(), 2, "{}", bare.calls);
         assert!(bare.calls.contains("--moment start") && bare.calls.contains("--moment compact"));
         assert!(moments(&bare).is_empty(), "{}", bare.server);
@@ -562,13 +555,14 @@ await close();
 
     /// One headless Pi turn with two tool calls through the extension, with
     /// Pi's package stood in.
-    fn pi_turn(native: bool, managed: bool, frozen: bool) -> Probe {
+    fn pi_turn(native: bool, holder: Holder, frozen: bool) -> Probe {
+        let managed = holder.reports_turns();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", recording_lf(home.path()));
-        let args = super::pi_args(None, native, holder(managed)).unwrap();
+        let args = super::pi_args(None, native, holder).unwrap();
         let package = home
             .path()
             .join("hook-settings/node_modules/@earendil-works/pi-coding-agent");
@@ -641,7 +635,7 @@ assert.deepEqual(steers, {steers});
 
     #[test]
     fn a_managed_native_pi_turn_reports_events_and_takes_steers_without_starting_lf() {
-        let native = pi_turn(true, true, false);
+        let native = pi_turn(true, Holder::Server, false);
         // One render at start, beside the conversation's Task-update watcher;
         // no lf per event, tool, steer check or bash command.
         let calls: Vec<_> = native
@@ -684,21 +678,21 @@ assert.deepEqual(steers, {steers});
 
     #[test]
     fn a_driven_pi_turn_asks_for_steers_and_a_bare_one_opens_no_connection() {
-        let driven = pi_turn(false, true, false);
+        let driven = pi_turn(false, Holder::Server, false);
         assert_eq!(driven.calls, "__context-block --moment start\n");
         // Pi's RPC driver records the events; the extension asks only for steers.
         assert_eq!(
             moments(&driven),
             ["start", "tool", "tool", "tool", "tool", "tool", "tool", "stop"]
         );
-        let bare = pi_turn(false, false, false);
+        let bare = pi_turn(false, Holder::Caller, false);
         assert_eq!(bare.calls, "__context-block --moment start\n");
         assert!(moments(&bare).is_empty(), "{}", bare.server);
     }
 
     #[test]
     fn a_native_pi_turn_against_a_frozen_server_waits_only_where_a_steer_can_land() {
-        let frozen = pi_turn(true, true, true);
+        let frozen = pi_turn(true, Holder::Server, true);
         // Nine boundaries reach a live server. With no answer, only session
         // start, the start render, each tool start, the turn end and `stop`
         // wait their two seconds; the rest fall into the open gap.

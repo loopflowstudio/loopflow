@@ -1231,6 +1231,15 @@ impl SqliteStore {
         Ok(attachment)
     }
 
+    /// Whether a recorded Session is bare: neither recorded as Task, Wave or
+    /// repository work nor a scope's ongoing conversation.
+    pub(crate) fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
+        Ok(!session
+            .work_source
+            .is_some_and(crate::session::WorkSource::is_managed)
+            && self.primary_scope(&session.id)?.is_none())
+    }
+
     /// Whether this interactive Session runs as the foreground program of the
     /// terminal that started it (`lf <skill>`): no holder or owner keeps it,
     /// so nothing else may stop it, and another launch on its thread runs
@@ -1240,9 +1249,7 @@ impl SqliteStore {
             return Ok(false);
         };
         Ok(record.interactive
-            && !record
-                .work_source
-                .is_some_and(crate::session::WorkSource::is_managed)
+            && self.is_bare(&record)?
             && self.session_transport(session)?.is_none())
     }
 

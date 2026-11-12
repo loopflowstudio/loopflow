@@ -1166,14 +1166,11 @@ pub(crate) async fn open(
 fn opens_bare(store: &SqliteStore, id: &str, managed: bool) -> bool {
     !managed
         && crate::transport::runs_in_terminal(false)
-        && store.session(id).is_ok_and(|session| {
-            session.is_some_and(|session| {
-                !session
-                    .work_source
-                    .is_some_and(crate::session::WorkSource::is_managed)
-            })
-        })
-        && store.primary_scope(id).is_ok_and(|scope| scope.is_none())
+        && store
+            .session(id)
+            .ok()
+            .flatten()
+            .is_some_and(|session| store.is_bare(&session).unwrap_or(false))
 }
 
 /// Open without replacing a client. Start may initialize a first thread, but

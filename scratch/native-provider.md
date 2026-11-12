@@ -169,5 +169,6 @@ so at send time, or skip bare Sessions?
 - `cargo test -p loopflow --test transport_tests` — 15 failed against the first cut; after keeping owners for headless/JSON and the test changes above, the 15 rerun: 12 pass, 3 deleted; full binary rerun left to gate.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — clean; implement.
 - realign: no tests; plan repairs only.
+- compress 2: `opens_bare` and `runs_in_its_terminal` share `SqliteStore::is_bare` (a pre-LOO-824 primary is no longer "beside"); probes take `Holder`. `cargo test --lib` resume + `harness::context::` + `ops::human_session::` — 57 passed; clippy clean.
 - compress: `cargo build -p loopflow --bin lf` — clean; `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed.
 - Holder: `cargo test --lib` `harness::context::` 11, `context_block::` 12, `harness::agent_process::` 19 (fixture now a Task's Session: a bare one resumes beside its stale attachment), `session_record::capture_tests::` 26, `ops::human_session::` 43 — pass; `--test integration session_steers::` 9 pass; `--test session_launch_contract` 29/30 twice, a different fixture each time (server-start timeout, pid count) at load 25, each passes alone — gate reruns; clippy, fmt, `documented_commands::` clean.

@@ -316,11 +316,10 @@ mod tests {
             assert_eq!(args[0], "--settings");
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
+        // No owner holds this launch, so it gets only the context hooks.
         let bare = settings(false);
-        assert!(
-            bare["hooks"]["Stop"].is_array(),
-            "bare keeps its turn hooks"
-        );
+        assert!(bare["hooks"]["SessionStart"].is_array());
+        assert!(bare["hooks"].get("Stop").is_none());
         assert!(bare.get("crossSessionInbound").is_none());
         assert_eq!(settings(true)["crossSessionInbound"], "accept");
     }

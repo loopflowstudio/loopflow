@@ -233,6 +233,13 @@ printf '%s\n' "$*" >> "$HOME/launches"
     let session: String = sql
         .query_row("SELECT id FROM agent_sessions", [], |r| r.get(0))
         .unwrap();
+    // Only a scope's conversation, which stays open across exits, resumes
+    // under an owner behind the preview; any other runs bare in the terminal.
+    sql.execute(
+        "UPDATE agent_sessions SET primary_scope='repository', completed_at=NULL WHERE id=?1",
+        [&session],
+    )
+    .unwrap();
     std::fs::rename(
         home.join(format!("screens/{SESSION}.ghostsnp")),
         home.join(format!("screens/{session}.ghostsnp")),

@@ -24,8 +24,7 @@ attempts and uses `Instant`. Its direct tests cover only bulk purposes, includin
 foreign attempts and background release of abandoned reservations.
 
 The November 12 03:23 UTC `lf task status LOO-718 --json` read reported
-`feature` / `demo`, with PR #1812 open and settlement not armed. LOO-809's
-status read timed out after 25 seconds; its Graph position remains unverified.
+`feature` / `demo`, with PR #1812 open and settlement not armed.
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.
@@ -63,4 +62,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed; prose-only edits, no build or test rerun.
+`git diff --check` — passed after compress; prose-only edits, no build or test rerun.

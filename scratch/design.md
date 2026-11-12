@@ -7,7 +7,7 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 04:40 UTC, GitHub's PR metadata reported #1812 open and
+At November 12 04:35 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `28e2321c8e2ea0ca8d8ecb199f31c5bb1a0e844f`.
 `origin/main` was at `649f11db4b460fd33662d44da24ba656ea048b64`, merged into
 this checkout. Between heads `4e0ccacd` and `28e2321c`, #1812 changed
@@ -24,7 +24,7 @@ Inspection of #1812 found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 03:23 UTC `lf task status LOO-718 --json` read reported
+The November 12 04:35 UTC `lf task status LOO-718 --json` read reported
 `feature` / `demo`, with PR #1812 open and settlement not armed.
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.

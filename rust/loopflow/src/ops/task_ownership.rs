@@ -106,25 +106,12 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
 /// that Machine: `Runs on mini since Nov 12 10:42`. `None` when `local` owns
 /// it or nobody does.
 pub fn runs_elsewhere(ownership: &TaskOwnership, local: &MachineId) -> Option<String> {
-    let owner = ownership.owner.as_ref()?;
-    let machine = owner
-        .machine
-        .id
-        .as_ref()
-        .filter(|machine| *machine != local)?;
-    let since = ownership
-        .log
-        .iter()
-        .rev()
-        .find(|entry| entry.machine_id.as_ref() == Some(machine))?;
-    let label = owner
-        .machine
-        .label
-        .clone()
-        .unwrap_or_else(|| machine.to_string());
+    let machine = ownership.owner_elsewhere(local)?;
+    let since = ownership.since(machine.id.as_ref()?)?;
     Some(format!(
-        "Runs on {label} since {}",
-        crate::lf::output::format_time(since.at)
+        "Runs on {} since {}",
+        machine.name(),
+        crate::lf::output::format_time(since)
     ))
 }
 

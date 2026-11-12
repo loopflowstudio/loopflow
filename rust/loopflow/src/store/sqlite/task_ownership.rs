@@ -721,12 +721,7 @@ impl SqliteStore {
         super::rentals::tasks_held_in(&snapshot, machine)?
             .into_iter()
             .map(|task| {
-                let since = ownership_in(&snapshot, &task)?
-                    .log
-                    .iter()
-                    .rev()
-                    .find(|entry| entry.machine_id.as_ref() == Some(machine))
-                    .map_or(0, |entry| entry.at);
+                let since = ownership_in(&snapshot, &task)?.since(machine).unwrap_or(0);
                 Ok((task, since))
             })
             .collect()

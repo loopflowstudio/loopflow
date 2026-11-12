@@ -878,28 +878,17 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         };
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
-        } else {
-            let local = match &store {
-                Some(store) => Some(store.sqlite.local_machine()?.id),
-                None => None,
-            };
+        } else if let Some(store) = &store {
+            // Without a store there are no Tasks to print.
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
-                let owner = owner_text(task.runtime.as_ref());
-                let elsewhere = match (&store, &local) {
-                    (Some(store), Some(local)) => crate::ops::task_ownership::runs_elsewhere(
-                        &store
-                            .sqlite
-                            .task_ownership(&crate::durable::TaskId::from_raw(
-                                task.task.id.clone(),
-                            ))?,
-                        local,
-                    ),
-                    _ => None,
-                };
-                let owner = match elsewhere {
-                    Some(place) => format!("{owner} · {place}"),
-                    None => owner.to_string(),
-                };
+                let id = crate::durable::TaskId::from_raw(task.task.id.clone());
+                let ownership = store.sqlite.task_ownership(&id)?;
+                let mut owner = owner_text(task.runtime.as_ref()).to_string();
+                if let Some(place) = crate::ops::task_ownership::runs_elsewhere(&ownership, &local)
+                {
+                    owner = format!("{owner} · {place}");
+                }
                 println!("{} · {owner} · {}", task.task.identifier, task.task.name);
             }
         }

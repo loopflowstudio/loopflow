@@ -1763,23 +1763,13 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
                 // A move pushed the branch before handing the Task off.
                 let elsewhere = if open {
-                    store
-                        .sqlite
-                        .task_ownership(&task.id)?
-                        .owner
-                        .filter(|owner| owner.machine.id.as_ref().is_some_and(|id| *id != local))
+                    let owned = store.sqlite.task_ownership(&task.id)?;
+                    owned.owner_elsewhere(&local).map(|machine| machine.name())
                 } else {
                     None
                 };
                 if let Some(worktree) = task.worktree {
-                    if let Some(owner) = elsewhere {
-                        let machine = owner.machine.label.unwrap_or_else(|| {
-                            owner
-                                .machine
-                                .id
-                                .map(|id| id.to_string())
-                                .unwrap_or_default()
-                        });
+                    if let Some(machine) = elsewhere {
                         ownership
                             .departed_checkouts
                             .insert(worktree, (task.identifier, machine));

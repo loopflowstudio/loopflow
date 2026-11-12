@@ -207,6 +207,7 @@ lf task interrupt X && lf task abandon X     # clean up
 - `cargo test -p loopflow --test integration machine_commands::`: 43 passed.
   `documented_commands::` 4 passed; `--lib server::schema::tests:: lf::tests::
   ops::task_ownership::` 52 passed; `git::worktrees::` 22 passed; clippy clean.
+- Compress: one ownership reading (`TaskOwnership::owner_elsewhere`/`since`, `MachineRef::name`) serves status, list, machine list and prune; machine_commands:: 43 passed, worktrees/task_ownership/schema lib tests passed, clippy clean.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)`
   plus `lf::tests::` for the CLI, and clippy.
 - End-to-end laptop → mini: left to a person (Live check above).

@@ -1572,6 +1572,8 @@ fn classify(
 ) -> Result<PruneVerdict, GitError> {
     use WorktreeKeepReason as Keep;
     let branch = state.branch.as_deref();
+    // The release registry still lists a departed Task's checkout and branch
+    // as unfinished, so departure outranks both.
     let departed = held_by(&state.path, &ownership.departed_checkouts).cloned();
     let held = if state.path == current_path {
         Some(Keep::Current)
@@ -1579,10 +1581,8 @@ fn classify(
         Some(Keep::DefaultBranch)
     } else if is_persistent_worktree(&state.path)? {
         Some(Keep::Persistent)
-    } else if let Some(task) = departed
-        .is_none()
-        .then(|| held_by(&state.path, &ownership.unfinished_checkouts))
-        .flatten()
+    } else if let Some(task) =
+        held_by(&state.path, &ownership.unfinished_checkouts).filter(|_| departed.is_none())
     {
         Some(Keep::UnfinishedTask { task: task.clone() })
     } else if departed.is_none()

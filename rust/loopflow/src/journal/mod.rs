@@ -820,6 +820,12 @@ pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
 }
 
+/// Whether the ledger exists, so a read that could only find nothing can
+/// skip creating it.
+pub(crate) fn ledger_exists() -> bool {
+    ledger_db_path().is_ok_and(|path| path.exists())
+}
+
 /// This Process's retained ledger connection, opening one only when no receipt
 /// has yet; every open revalidates the schema.
 pub(crate) fn process_ledger() -> Result<SqliteStore, crate::store::StoreError> {

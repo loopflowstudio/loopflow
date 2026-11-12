@@ -576,6 +576,11 @@ impl Registry {
                 }
             }
         }
+        // A Machine with no store recorded nothing, and starting a server
+        // creates none.
+        if !crate::journal::ledger_exists() {
+            return (entries, pending);
+        }
         // A terminal the store still calls running whose holder is gone.
         let recorded = crate::journal::process_ledger()
             .and_then(|store| store.running_terminals())

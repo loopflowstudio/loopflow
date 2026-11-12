@@ -624,25 +624,18 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     let Some(list) = values
         .get("default_agent")
         .and_then(Value::as_str)
-        .filter(|list| list.contains(','))
         .map(str::to_owned)
     else {
         return;
     };
-    let entries: Vec<&str> = super::agent_list(&list).collect();
-    let Some(first) = entries.first() else {
-        values.remove("default_agent");
+    let Some(warning) = old_default_agent_warning(&list) else {
         return;
     };
-    if let Some(warning) = old_default_agent_warning(&list) {
-        super::reader::warn(std::path::Path::new(locator), None, &warning);
-    }
-    values.insert("default_agent".into(), (*first).into());
+    super::reader::warn(std::path::Path::new(locator), None, &warning);
+    let entries: Vec<Value> = super::agent_list(&list).map(Value::from).collect();
+    values.insert("default_agent".into(), entries[0].clone());
     if !values.contains_key("agents") {
-        values.insert(
-            "agents".into(),
-            Value::Sequence(entries.iter().map(|entry| (*entry).into()).collect()),
-        );
+        values.insert("agents".into(), Value::Sequence(entries));
     }
 }
 

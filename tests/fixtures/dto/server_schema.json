@@ -10122,6 +10122,7 @@
                 "first": 1794358000,
                 "last": 1794358020
               },
+              "inbox": "/Users/maya/.claude/sessions/4242.9c1d.key",
               "kind": "session.boundary",
               "moment": "stop",
               "printed": [
@@ -10160,6 +10161,13 @@
               ],
               "description": "The hook's open recording gap; the server writes it into the\nSession's history as one `store-gap` observation."
             },
+            "inbox": {
+              "description": "The key file Claude publishes for the conversation's cross-session\ninbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration\ndirectory, where an idle conversation takes steers and Task updates.\nA path; the server reads the key when it sends. Null for other\nproviders and a Claude with no inbox.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "const": "session.boundary",
               "type": "string"
@@ -10182,7 +10190,8 @@
             "adapter",
             "callback",
             "gap",
-            "printed"
+            "printed",
+            "inbox"
           ],
           "type": "object",
           "x-result": {
@@ -10190,6 +10199,7 @@
           },
           "x-result-example": {
             "steers": null,
+            "update": null,
             "waiting": false
           }
         }
@@ -10299,6 +10309,13 @@
           ],
           "description": "The next pending steers; null when none are ready."
         },
+        "update": {
+          "description": "What changed on the Session's Tasks since its last update, rendered\nfor the provider; null when nothing did. Recorded as delivered when\nanswered.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "waiting": {
           "description": "An earlier answer's batch is unconfirmed and its hook may still print\nit: the hook asks again at its next tool boundary.",
           "type": "boolean"
@@ -10306,6 +10323,7 @@
       },
       "required": [
         "steers",
+        "update",
         "waiting"
       ],
       "type": "object"

@@ -191,6 +191,7 @@ pub(super) async fn run() -> Result<()> {
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    super::wake::start();
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on

@@ -584,6 +584,7 @@ fn run_native_session(
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
+        command.managed,
     )?);
     process.args(&command.args);
     if command.program == "claude" {
@@ -603,13 +604,6 @@ fn run_native_session(
     let output = crate::terminal_output::TerminalOutput::enter()?;
     output.configure_child(&mut process)?;
     record_interactive_opened(environment)?;
-    // A failed observer is a recording gap; the conversation opens regardless.
-    let client_opened = |client: u32| {
-        crate::transport::report_directory(&command.cwd);
-        if let Err(error) = observe_client(command, agent_session, &account, &attachment, client) {
-            tracing::warn!(%error, session = attachment.1, "Codex conversation will go unrecorded");
-        }
-    };
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
@@ -642,7 +636,7 @@ fn run_native_session(
                         launch_lock,
                     ),
                     None => {
-                        client_opened(std::process::id());
+                        crate::transport::report_directory(&command.cwd);
                         crate::harness::agent_process::exec_client(process, launch_lock)
                     }
                 };
@@ -681,14 +675,26 @@ fn run_native_session(
 
     drop(activation);
     if owned.is_none() {
-        client_opened(child.id());
+        crate::transport::report_directory(&command.cwd);
     }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
+    // A client's conversation can move to another attachment; this client then
+    // stops, so only one writes to it.
+    let client = owned.is_none().then(|| child.id());
+    let mut checked = std::time::Instant::now();
     let status = crate::os_process::wait_for_exit(&mut child, None, || {
         if let Some(title) = &mut title {
             title.refresh();
+        }
+        let Some(pid) = client.filter(|_| checked.elapsed() >= CLIENT_ATTACHMENT_CHECK) else {
+            return;
+        };
+        checked = std::time::Instant::now();
+        if attachment_lost(&attachment).unwrap_or(false) {
+            // SAFETY: kill reads no memory; `pid` is this process's unreaped child.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
         }
     })
     .map(|result| result.0);
@@ -728,32 +734,8 @@ fn run_native_session(
     })
 }
 
-fn observe_client(
-    command: &SessionCommand,
-    agent_session: Option<&AgentSessionId>,
-    account: &Option<crate::store::ProviderAccountId>,
-    (_, session, attachment): &crate::harness::agent_process::AttachmentOwner,
-    client: u32,
-) -> Result<()> {
-    let (Some(endpoint), Some(thread)) = (&command.remote, agent_session) else {
-        return Ok(());
-    };
-    let born = crate::journal::process_started_at(client)?
-        .ok_or_else(|| anyhow!("native client birth unavailable"))?;
-    crate::harness::codex_connection::spawn_observer(
-        &crate::harness::codex_connection::CodexObserver {
-            database: crate::store::database_path_from_env()?,
-            session: session.clone(),
-            attachment: attachment.clone(),
-            endpoint: endpoint.clone(),
-            thread: thread.clone(),
-            account: account.clone(),
-            cwd: command.cwd.clone(),
-            client: (client, born),
-            input: command.input.clone(),
-        },
-    )
-}
+/// How often a native client checks that its Session is still attached here.
+const CLIENT_ATTACHMENT_CHECK: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub(crate) fn run_native_agent(
     launch: &crate::agent::AgentConfig,
@@ -847,16 +829,9 @@ fn run_opencode_native(
                 // The native renderer owns output. Rust still records history and
                 // attention, and drains errors without writing over its screen.
                 tokio::pin!(closed_rx);
-                let mut updates = crate::harness::task_updates::TaskUpdates::default();
-                let mut clock = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     tokio::select! {
                         _ = &mut closed_rx => break,
-                        _ = clock.tick() => {
-                            if let Err(error) = harness.report_task_update(&mut updates).await {
-                                tracing::warn!(%error, "native Task update delivery unavailable");
-                            }
-                        }
                         event = rx.recv() => {
                             if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
                                 if let Some(path) = observer_diagnostics {
@@ -989,7 +964,6 @@ fn run_codex_native(
         command.cwd.clone(),
         &opened.thread,
         opened.endpoint,
-        opened.input,
         command.attachment.clone(),
     );
     run_native_session(
@@ -1007,8 +981,6 @@ struct OpenedCodex {
     thread: AgentSessionId,
     endpoint: PathBuf,
     account: Option<crate::store::ProviderAccountId>,
-    /// The launch's first turn, while the conversation has not received it.
-    input: Option<String>,
 }
 
 /// Start the app-server and open the conversation with lf's configuration, so
@@ -1062,11 +1034,24 @@ async fn open_codex_native(
         // launch file. Bind before the client can send a turn.
         context.bind_codex_session(thread.as_str())?;
     }
+    if turns == 0 && !launch.task_prompt.is_empty() {
+        // Provider history settles on the next read whether it ran, so a
+        // broken store cannot stop the turn.
+        codex_connection::start_turn(
+            store,
+            session,
+            attachment,
+            &endpoint,
+            &thread,
+            &launch.task_prompt,
+        )
+        .await
+        .context("Codex first turn was not sent")?;
+    }
     Ok(OpenedCodex {
         thread,
         endpoint,
         account,
-        input: (turns == 0 && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
     })
 }
 
@@ -1240,9 +1225,9 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
-            managed: false,
             input: None,
             context: None,
+            managed: false,
             attachment: None,
             remote: None,
             program: provider.display().to_string(),
@@ -1455,9 +1440,9 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
-            managed: false,
             input: None,
             context: None,
+            managed: false,
             program: "/bin/sleep".into(),
             args: vec!["10".into()],
             cwd: home.into(),
@@ -1478,12 +1463,12 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
-            managed: false,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
             cwd: home.into(),
             context: None,
+            managed: false,
             attachment: None,
             remote: None,
         };
@@ -1586,12 +1571,12 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
-                managed: false,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
                 cwd: home.into(),
                 context: None,
+                managed: false,
                 attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(endpoint.clone()),
             };
@@ -1669,9 +1654,9 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
-                managed: false,
                 input: None,
                 context: None,
+                managed: false,
                 attachment: capture.session_attachment(),
                 remote: None,
                 program: "/bin/sleep".into(),

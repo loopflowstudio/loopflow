@@ -55,6 +55,26 @@ pub(crate) enum NativeBoundary<'a> {
     Turn,
 }
 
+/// A managed conversation whose last boundary was a turn end, and how the
+/// Machine server reaches it there.
+#[derive(Debug, Clone)]
+pub(crate) struct IdleConversation {
+    pub adapter: SteerAdapter,
+    /// The Session's selected native conversation.
+    pub thread: String,
+    /// The Session's working directory, where rendered steers are saved.
+    pub cwd: std::path::PathBuf,
+    pub reach: IdleReach,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IdleReach {
+    /// The inbox key file Claude publishes beside its session record.
+    Claude(std::path::PathBuf),
+    /// The Session's private app-server.
+    Codex(std::path::PathBuf),
+}
+
 impl std::fmt::Debug for SteerAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SteerAdapter")

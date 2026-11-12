@@ -2032,22 +2032,6 @@ pub fn start_conversation_beside(task: &Task) {
     }
 }
 
-/// One Task's tracker sync beside a conversation that just started: pending
-/// writes out, then comments made elsewhere in. Nothing else in the repository.
-pub(crate) fn sync_for_conversation(issue: &str) -> OpsResult<()> {
-    let outbound = task_sync(issue, false);
-    let inbound = block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        super::linear_observe::refresh_task_comments(&store, &task).await
-    });
-    outbound.and(inbound)
-}
-
 pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;

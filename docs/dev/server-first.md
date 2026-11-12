@@ -7,6 +7,8 @@ title: Server-first Sessions
 
 Planned in LOO-819. Hooks call the Machine server
 ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)),
+the server delivers Task updates and records Codex turns itself
+([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)),
 Desktop sends pane status as `session.status`, and live turn readings and
 turn recording from provider transcripts (LOO-822) are built. The rest is not;
 [Client API server](server.md) and the
@@ -259,7 +261,7 @@ deleted when the server's emulator reads status itself.
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |
 | Every view types; size follows the newest view | Takeover tokens, Move here | Holder |
-| Observers become server registrations | `__codex-observe`, Task-update watchers | Hooks call the server |
+| Observers become server registrations ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)) | `__codex-observe`, Task-update watchers | Hooks call the server |
 | CLI cleanup: `session serve`, `session attach`, the detach key, `session.end_detached_after` | The owner's surface | Bare direct, holder |
 
 Server operations for these pieces are added under one protocol revision

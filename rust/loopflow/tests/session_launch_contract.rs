@@ -1,6 +1,7 @@
 //! Public launch and continuation contract, with providers recording their real process inputs.
 #![cfg(unix)]
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -900,13 +901,14 @@ fn a_running_claude_named_onto_another_login_keeps_its_client_and_says_where_it_
     fs::write(
         bin.join("claude"),
         r#"#!/usr/bin/python3
-import os, sys, time
+import os, select, sys
 if '--version' in sys.argv:
     print('fixture'); sys.exit(0)
 home = os.environ['LF_HOME']
 open(home+'/claude-pids', 'a').write(str(os.getpid())+'\n')
 while not os.path.exists(home+'/quit'):
-    time.sleep(0.05)
+    if select.select([sys.stdin], [], [], 0.05)[0] and sys.stdin.readline():
+        open(home+'/resumed-input', 'w').write(str(os.getpid()))
 "#,
     )
     .unwrap();
@@ -951,36 +953,26 @@ while not os.path.exists(home+'/quit'):
     assert!(signed_in("fixture"));
     let session = fixture.session();
 
-    let output = fixture
+    let mut output = fixture
         .command()
         .env("USER", "fixture")
         .args(["--account", "claude=other@example.com", "resume", &session])
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     wait("the login never moved", &mut || signed_in("other"));
-    // Resume attaches after the login moves; until the first viewer hears
-    // it moved, quitting Claude would leave resume nothing to attach to.
-    let told = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    for stream in [
-        Box::new(first.stdout.take().unwrap()) as Box<dyn std::io::Read + Send>,
-        Box::new(first.stderr.take().unwrap()),
-    ] {
-        let told = told.clone();
-        std::thread::spawn(move || {
-            use std::io::Read;
-            let mut stream = stream;
-            let mut buffer = [0; 4096];
-            while let Ok(read @ 1..) = stream.read(&mut buffer) {
-                told.lock()
-                    .unwrap()
-                    .push_str(&String::from_utf8_lossy(&buffer[..read]));
-            }
-        });
-    }
-    wait("the first viewer never heard it moved", &mut || {
-        told.lock().unwrap().contains("This conversation moved")
+    output
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"resumed\n")
+        .unwrap();
+    // The login changes before resume attaches. Quit only after its viewer can
+    // reach the existing client, or the test itself can make resume relaunch it.
+    wait("the resumed viewer never reached Claude", &mut || {
+        machine.join("resumed-input").exists()
     });
     fs::write(machine.join("quit"), "").unwrap();
     let output = output.wait_with_output().unwrap();

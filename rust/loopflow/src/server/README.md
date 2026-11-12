@@ -388,9 +388,8 @@ bytes and a control failure never closes a bridged terminal. Follow
 
 ### Remote attach contract
 
-This planned contract extends [terminal attachment](#terminal-attachment) to
-LOO-718's authenticated remote transport. Owner resolution, bridge protocol,
-errors and [recovery](#terminal-and-provider-recovery) follow the shared contract.
+LOO-718's authenticated remote transport will use the attachment and recovery
+rules above, with the following connection and identity requirements.
 
 Connect to the host's `/v1/machine` WebSocket, complete
 [`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`

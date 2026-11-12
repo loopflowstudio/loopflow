@@ -5,45 +5,28 @@ This checkout documents the planned contract; implementation and authenticated
 acceptance await LOO-718.
 The listener, mobile settings and bulk protocol are outside this Task.
 
-Shipping docs are in `docs/server.md` (phone prerequisites) and
-`rust/loopflow/src/server/README.md` (attachment, remote exchange and recovery).
-They define the attachment and recovery contract for implementation.
-
-## Transport dependency — November 11, 2026 UTC
+## Transport dependency
 
 At November 12 00:04 UTC, `gh pr view 1812` still reported `OPEN`,
-`mergedAt: null`, `autoMergeRequest: null`, and the same head below. Fetching
-`origin/main` returned the same commit, still without `server/mobile.rs` or
-`server/ticket.rs`. The dependency is unchanged; implementation cannot proceed
-within the supplied scope.
+`mergedAt: null`, `autoMergeRequest: null`, at head
+`4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. Fetching `origin/main` returned
+`1570bef610a0a0cee0402ecc37d3a31461b213a8`, without `server/mobile.rs` or
+`server/ticket.rs`. Implementation and authenticated acceptance await LOO-718
+landing; landing its PR is outside this Task. Reinspect the shared store and
+endpoints when it lands.
 
-At 23:27 UTC, GitHub's PR metadata reported
-[#1812](https://github.com/loopflowstudio/loopflow/pull/1812) `open`,
-`merged: false`, `merged_at: null`, at unchanged head
-`4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`. A fresh `git fetch origin main`
-returned `1570bef610a0a0cee0402ecc37d3a31461b213a8`, still without
-`server/mobile.rs` or `server/ticket.rs`. Implementation and authenticated
-acceptance remain dependent on LOO-718 landing. Landing that PR is outside this
-Task; reinspect its shared store and endpoints after it lands. Earlier status
-observations, including the 22:47 UTC `autoMergeRequest: null`, are in
-`7e498be5ca473fb1fc5d6d562648d05eeb925ece:scratch/design.md`.
+The November 11 23:27 UTC inspection of that head found
+`remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
+`mobile.rs::permits_peer` binds admission to node/user identity;
+`mobile-same-device` permits the host's own node without changing that identity.
+`ticket.rs::Tickets::redeem` leaves tickets redeemable after foreign terminal
+attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
+foreign attempts and background release of abandoned reservations.
 
-At that head, the ticket, remote and mobile modules are unchanged from the 22:09 UTC
-inspection of `2a23883cb399fc5d7de180a024cc8fac4e49fdbe` (then also open,
-without auto-merge). That inspection confirms `remote.rs::connection` refuses
-unadmitted peers before either WebSocket upgrade. `mobile.rs::permits_peer`
-binds admission to node/user identity; `mobile-same-device` permits the host's
-own node without changing that identity. Reinspection at 23:27 UTC confirms
-`ticket.rs::Tickets::redeem` still leaves a ticket redeemable after a foreign
-terminal attempt, and expiry uses `Instant`. Direct store tests cover only bulk purposes, including retaining a
-ticket after a foreign attempt and releasing abandoned reservations in the
-background. Terminal consumption must change without changing that bulk behavior.
-
-The last successful LOO-718 status read, at 17:27 UTC, reported `feature` / `demo`.
-No fresh Task service status was read in this pass. Earlier observations,
-including the cancelled LOO-809 status read, and their history references are in
-`966ba96e44ba13b13f86f6ca09aca9f90e3740f3:scratch/design.md`.
-Desktop QA remains deferred in `questions.md`.
+The last successful LOO-718 status read, November 11 17:27 UTC, reported
+`feature` / `demo`. Earlier observations and their history references are in
+`4f9f541ecce0e6db4055d52b61fb55a9a8eab953:scratch/design.md`; repeated status
+notes are consolidated here. Desktop QA remains deferred in `questions.md`.
 
 ## Delete — do not maintain
 
@@ -81,9 +64,5 @@ Keep the remote contract linked to shared attachment and recovery rules rather
 than repeating them. Mark it planned until integration, then update its revision
 4 anchor to the transport's revision 5 section. Keep phone prerequisites in
 `docs/server.md` consistent.
-
-The remote exchange sits under terminal attachment so the shared bridge rules
-and transport-specific steps can be read together, without repeating the binary
-protocol handoff.
 
 `git diff --check` — passed; prose-only edits, no build or test rerun.

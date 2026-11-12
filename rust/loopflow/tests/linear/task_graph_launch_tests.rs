@@ -601,6 +601,8 @@ fn task_run_open_opens_the_selected_waiting_task() {
     // Omitted and root Task selectors retain the same primary, including --repo.
     for args in [
         vec!["task", "run", "--from", "review", "--open"],
+        vec!["task", "run", "--from", "review", "--open", "--json"],
+        vec!["task", "run", "--from", "review", "--open", "--", "INF-123"],
         vec![
             "--repo",
             task.repo.path().to_str().unwrap(),

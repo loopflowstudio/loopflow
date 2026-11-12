@@ -36,8 +36,8 @@ Session started in the background. A bare run opens at Graph registration;
 Opening follows [`lf open`'s host selection](workspaces.md#choose-where-it-appears):
 a direct CLI invocation attaches in the current terminal; an agent tool call
 opens a sibling tab. When the Graph runs on another Machine, the conversation
-opens locally where you invoked the command. Preview (`--context` or `--explain`)
-and `--quote` open nothing.
+opens locally where you invoked the command. `--explain` and `--quote` open
+nothing. Task runs reject `--context`; use `--explain` to inspect their selection.
 
 A failed launch opens nothing. An opening failure does not stop the Graph.
 Fix the reported host or attachment problem, then use

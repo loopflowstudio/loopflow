@@ -1615,7 +1615,7 @@ fn run() -> anyhow::Result<()> {
         if let Ok(normalized) = loopflow::lf::navigation::normalize_args(raw_args.clone()) {
             if let Ok(cli) = Cli::try_parse_from(reorder_args(normalized)).and_then(Cli::checked) {
                 if let Some(open) = task_run_open_args(&cli) {
-                    return run_task_and_open(&cli, &raw_args, open);
+                    return run_task_and_open(&raw_args, open);
                 }
             }
         }
@@ -2323,7 +2323,6 @@ fn task_run_open_args(cli: &Cli) -> Option<Vec<String>> {
     let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
-                issue,
                 open: true,
                 quote: false,
                 json,
@@ -2337,22 +2336,8 @@ fn task_run_open_args(cli: &Cli) -> Option<Vec<String>> {
         return None;
     }
     let mut args = vec!["open".to_owned()];
-    for (flag, value) in [
-        ("--task", issue.as_ref().or(cli.task.as_ref())),
-        ("--wave", cli.wave.as_ref()),
-        ("--repo", cli.repo.as_ref()),
-        ("--wt", cli.wt.as_ref()),
-        ("--agent", cli.agent.as_ref()),
-    ] {
-        if let Some(value) = value {
-            args.extend([flag.to_owned(), value.clone()]);
-        }
-    }
-    if let Some(repository) = &cli.repository {
-        args.extend(["--repo-id".into(), repository.to_string()]);
-    }
-    if let Some(cwd) = &cli.cwd {
-        args.extend(["--cwd".into(), cwd.to_string_lossy().into_owned()]);
+    if let Some(agent) = &cli.agent {
+        args.extend(["--agent".into(), agent.clone()]);
     }
     for (flag, values) in [
         ("--account", &cli.account),
@@ -2369,7 +2354,7 @@ fn task_run_open_args(cli: &Cli) -> Option<Vec<String>> {
     Some(args)
 }
 
-fn run_task_and_open(cli: &Cli, args: &[String], mut open: Vec<String>) -> anyhow::Result<()> {
+fn run_task_and_open(args: &[String], mut open: Vec<String>) -> anyhow::Result<()> {
     let mut literal = false;
     let launch: Vec<_> = args[1..]
         .iter()
@@ -2394,18 +2379,34 @@ fn run_task_and_open(cli: &Cli, args: &[String], mut open: Vec<String>) -> anyho
         Ok(())
     };
     run(&launch)?;
-    if !open.iter().any(|arg| arg == "--task") {
-        // Unlike `open --repo`, an omitted Task on `task run --repo` still
-        // selects that checkout's Task. Carry that selection into opening.
-        let _directory = CwdGuard::enter(&configuration_directory(cli)?)?;
-        let _worktree = cli
-            .wt
-            .as_deref()
-            .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
-            .transpose()?;
-        let task = checkout_task(&std::env::current_dir()?, cli.wave.as_deref())?
-            .context("No Task selected; name a Task or run from its checkout")?;
-        open.extend(["--task".into(), task]);
+    // Resolve on the same Machine with the same selectors, after launch has
+    // acquired any previously unknown Task. Only portable identities cross
+    // back into presentation; remote checkout paths never enter the local CLI.
+    // Root preview flags also precede any end-of-options marker in the launch.
+    let output = std::process::Command::new(&executable)
+        .args(["--explain", "--json"])
+        .args(&launch)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Task launched, but its selection could not be read for opening"
+    );
+    let selected: loopflow::ops::task::TaskRunExplanation =
+        serde_json::from_slice(&output.stdout).context("read the launched Task's selection")?;
+    for (flag, fact) in [
+        ("--task", selected.resolution.task),
+        ("--repo-id", selected.resolution.repository),
+    ] {
+        use loopflow::ops::context::ContextFact;
+        match fact {
+            ContextFact::Bound { value, .. } => open.extend([flag.into(), value]),
+            ContextFact::Unavailable { reason } => anyhow::bail!(reason),
+            ContextFact::Unbound => {
+                anyhow::bail!("Task launched, but {flag} is unavailable for opening")
+            }
+        }
     }
     run(&open)
 }
@@ -3241,7 +3242,7 @@ mod tests {
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     #[test]
-    fn task_run_open_keeps_selection_and_opens_on_the_calling_machine() {
+    fn task_run_open_keeps_presentation_options_without_execution_selectors() {
         let cli = Cli::try_parse_from([
             "lf",
             "--machine",
@@ -3268,9 +3269,11 @@ mod tests {
         .unwrap();
         assert!(matches!(opened.command, Some(Commands::Open(_))));
         assert!(opened.machine.is_none());
-        assert_eq!(opened.task.as_deref(), Some("LOO-42"));
-        assert_eq!(opened.repository, cli.repository);
-        assert_eq!(opened.cwd, cli.cwd);
+        assert!(opened.task.is_none());
+        assert!(opened.repository.is_none());
+        assert!(opened.repo.is_none());
+        assert!(opened.wt.is_none());
+        assert!(opened.cwd.is_none());
         assert_eq!(opened.agent, cli.agent);
         assert_eq!(opened.account, cli.account);
     }

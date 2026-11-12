@@ -111,7 +111,7 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 ## Delete — do not maintain
 
 - `ExitRecord`/`DropExitRecord`/`hand_exit_record` stay: held terminals use
-  them through `transport/hosted.rs`; bare launches no longer reach them.
+  them through `transport.rs`; bare launches no longer reach them.
 - Deleted from `transport_tests.rs`, bare-owner behavior by design:
   `codex_original_request_channel_and_turn_survive_all_viewers`,
   `nested_cli_execution_survives_its_calling_provider_and_viewer`,
@@ -170,3 +170,4 @@ compaction), which loses nothing.
 - qa: live PTY walkthrough in `scratch/qa.html`. Fixed: a bare provider ended by SIGINT/SIGHUP/SIGTERM is interrupted, not "another client still owns this session"; bare Codex resume no longer re-sends its first turn (`bare_codex_resume_does_not_resend_its_first_turn`). `--lib` `lf::commands::util::` + `agent::session::` + `ops::human_session::` — 64 passed; clippy, fmt clean. Open from QA: a closed terminal leaves the agent row unfinished; nonzero exits still print the "another client" hint.
 - implement 6 (QA's three): `--lib lf::commands::util::` 13 passed (new `a_bare_launch_returns_its_providers_own_status`; the SIGTERM test now expects 143); `--test integration session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed, and failed (agent row open) with `end_leader` disabled; `--lib pi_` 32 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.
 - compress 5: the bare exit code reuses `transport::provider_exit_code`; `Foreground` clears the leader on drop (the `Leading` guard is gone); Pi `resume_args` reads one `conversation_file`. `--lib lf::commands::util:: pi_` 44 passed; `session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed; clippy, fmt clean.
+- realign 6: no tests; QA's three items are in `2d972e033d`/`79b456f453` (grep: the "another client" hint only on the held arm of `util.rs`, `end_leader`, both new tests). The parent's merge (holder moved under `server/`) changes nothing here.

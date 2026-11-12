@@ -1,9 +1,9 @@
 # Linear sync wedged on "conflicting planning facts at the same provider revision"
 
 **State (2026-11-12):** the three wedged Tasks were cleared by hand (stored
-revision moved back 1 ms). The code fix is in progress in this checkout's `code`
-Graph (implement step): at an equal `updatedAt` the later read wins, and
-errors name `lf task sync <issue>` / `lf wave sync`.
+revision moved back 1 ms). The code fix is on this branch (`scratch/plan.md`):
+at an equal `updatedAt` the later read wins, and errors name
+`lf task sync <issue>` / `lf wave sync`.
 
 ## What failed
 
@@ -66,11 +66,11 @@ wedges: a pending field edit, ownership read, project order or inventory.
 
 ## Prevention
 
-- Fix in progress (Graph implement step): the equal-revision read is accepted
-  as the newer observation. This holds for any field Linear re-renders, not
-  just `branch_name`. Check: replay a stored long branch name at Linear's
-  revision and confirm the next sync stores Linear's value. The open question
-  in `questions.md` about the pending local edit still stands.
+- Fixed on this branch: the equal-revision read is accepted as the newer
+  observation, for any field Linear re-renders, not just `branch_name`.
+  `shortened_branch_name_at_the_same_revision_replaces_the_stored_one` replays
+  a stored long branch name at Linear's revision. Pending `task_changes` are
+  not touched, so a local edit stays queued.
 - Not pursued: a narrower carve-out for derived columns (`branch_name`, `url`).
   It would keep the refusal for authored fields, but it only works if we know
   which fields Linear re-renders, and this incident shows we can't know that

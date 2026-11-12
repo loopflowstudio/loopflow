@@ -11,6 +11,8 @@ Built:
 - Messages name real remedies: Task errors `lf task sync <issue>`
   (`ops/linear.rs`), Project errors "edit it in Linear / add it back, then run
   `lf wave sync`".
+- `docs/work.md` (Linear sync section): the equal-`updatedAt` behavior and
+  which command each error names.
 - Deleted unused `StoreError::ProviderObservationConflict`.
 - Tests: `shortened_branch_name_at_the_same_revision_replaces_the_stored_one`,
   equal-revision cases in `acceptance.rs` and `planning_lookup_tests.rs`

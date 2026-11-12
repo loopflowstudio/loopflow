@@ -63,19 +63,14 @@ roots, the Session, each demo process's exact identity, the teardown command and
 how to reopen the private Machine's history in the note. Keep both roots through
 rebuilds while those processes live.
 
-When the demo ends, mark each draft and pending request settled or given up. A
-person's input is released only by their answer in the conversation. Closing a
-viewer, age or a socket failure releases nothing; without an answer both roots
-stay. A headless run settles its own input when it ends.
+When the demo ends, wait for live turns and pending requests to settle. Then
+`lf resume` each demo Session and quit its provider, signaling only its verified
+PID if it won't exit. Quitting discards unsent input; saved history cannot
+recreate the editor.
 
-If all input is settled, end only the verified demo processes, confirm they
-exited and remove the runtime root. A Session whose draft was edited stays
-running even after the draft is sent, and no command stops a Session: `lf resume`
-it, exit its provider, and signal only its verified PID if it won't exit. If any
-input was given up, leave the processes running and record what is at risk:
-saved history can't recreate a dead editor. Never delete the history root. If
-teardown is incomplete, keep the runtime root and record what survives and the
-next action. No other cleaner, no signaling by process name.
+Confirm the demo processes exited before removing the runtime root. Never delete
+the history root. If teardown is incomplete, keep the runtime root and record
+what survives and the next action. No other cleaner, no signaling by process name.
 
 ## Headless
 

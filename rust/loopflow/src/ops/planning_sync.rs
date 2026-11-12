@@ -47,11 +47,25 @@ pub(crate) async fn find_task(
 /// One acquisition per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
 pub(crate) async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, false).await
+    exchange_repository(store, repo, Exchange::Acquire).await
 }
 
+/// Publishes unless another process is publishing; that one or the next
+/// connection tick sends this save out.
 pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, true).await
+    exchange_repository(store, repo, Exchange::Publish { wait: false }).await
+}
+
+/// Publishes after any concurrent publication, whose export may predate this
+/// Machine's latest save, so pending changes are out when it returns.
+pub(crate) async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Publish { wait: true }).await
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Exchange {
+    Acquire,
+    Publish { wait: bool },
 }
 
 /// A short command saves first, then makes one foreground exchange attempt.
@@ -201,7 +215,7 @@ pub(crate) fn defer_exchange(deferred: bool) {
     EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
 }
 
-async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
+async fn exchange_repository(store: &Store, repo: &str, exchange: Exchange) -> OpsResult<()> {
     if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -211,22 +225,33 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
     let sqlite = store.sqlite.clone();
     let repo = repo.to_owned();
     crate::journal::request::spawn_blocking(move || {
-        exchange_destination(&sqlite, &repo, &destination, publish)
+        exchange_destination(&sqlite, &repo, &destination, exchange)
     })
     .await
     .map_err(message)?
 }
 
-fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool) -> OpsResult<()> {
+fn exchange_destination(
+    store: &SqliteStore,
+    repo: &str,
+    id: &str,
+    exchange: Exchange,
+) -> OpsResult<()> {
+    let publish = matches!(exchange, Exchange::Publish { .. });
     // The blocking worker retains effect ownership through status writes, even
     // if its async waiter is canceled. Acquisition never takes this lock.
-    let _lock = if publish {
+    let _lock = if let Exchange::Publish { wait } = exchange {
         let path = store
             .home_dir()
             .map_err(message)?
             .join("locks/planning-peers")
             .join(format!("{id}.lock"));
-        let Some(lock) = super::planning_delivery::lock_delivery(&path)? else {
+        let lock = if wait {
+            wait_for_publication(&path)?
+        } else {
+            super::planning_delivery::lock_delivery(&path)?
+        };
+        let Some(lock) = lock else {
             return Ok(());
         };
         Some(lock)
@@ -259,6 +284,22 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
         .map_err(message)?;
     result
 }
+
+/// A holder stuck past the wait leaves the save to the next publication.
+fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
+    let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
+    loop {
+        if let Some(lock) = super::planning_delivery::lock_delivery(path)? {
+            return Ok(Some(lock));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
 
 fn acquire_destination(
     store: &SqliteStore,

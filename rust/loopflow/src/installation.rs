@@ -897,10 +897,8 @@ fn gate_artifact<'a>(
         })
 }
 
-/// Whether a launch through the entry now runs another build than
-/// `executable`: the one judgement behind a Session owner ending at idle,
-/// `lf resume` taking an owner over, and a viewer following the entry. An
-/// entry or executable nobody can read is not superseded; it is judged again.
+/// Whether the selected entry launches a different build from `executable`.
+/// An unreadable entry or executable is not superseded; the next check retries.
 pub(crate) fn superseded(executable: &Path) -> bool {
     launch_target().is_ok_and(|target| !same_build(executable, &target))
 }

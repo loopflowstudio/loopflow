@@ -10,6 +10,7 @@ Waves.
 ```bash
 pbpaste | lf task create                     # first line is the title, the rest its notes
 lf task run LOO-12                           # returns once its Graph is running
+lf task run LOO-12 --open                    # continue its Graph and open its conversation
 lf task run LOO-13 --stack-on LOO-12         # builds on LOO-12's open PR before it merges
 lf capture-tasks                             # talk it through; the Session files the Tasks
 ```
@@ -22,10 +23,29 @@ carries the child through the parent's updates and squash merge.
 conversation in the background when an agent is configured and installed.
 An in-place `lf -i task run` uses its current terminal instead.
 `lf resume` in its worktree reattaches to it. Previously opened conversations
-stay as they are, and starting stops at sixteen running Task conversations.
+stay as they are. Every newly checked-out Task can start its conversation;
+there is no background conversation cap.
 A running Graph keeps its conversation alive; abandoning the Task stops its
 unviewed conversation. A conversation you are viewing stays open.
 Preparing a conversation, including Desktop's preload, does not launch an agent.
+
+Add `--open` to open the Task's primary conversation when launch returns,
+including when the Task is waiting at an interactive step. It reuses the Task's
+primary Session, including one already started in the background. A bare run
+opens at Graph registration; `-b` and `-i` still wait for their foreground run
+before opening.
+
+Opening follows [`lf open`'s host selection](workspaces.md#choose-where-it-appears):
+a direct CLI invocation attaches in the current terminal; an agent tool call
+opens a sibling tab. When the Graph runs on another Machine, the conversation
+opens locally where you invoked the command. `--explain` and `--quote` open
+nothing. Task runs reject `--context`; use `--explain` to inspect their selection.
+With `--json`, stdout holds only the `task.run` value; the open receipt goes to
+stderr.
+
+A failed launch opens nothing. An opening failure does not stop the Graph.
+Fix the reported host or attachment problem, then use
+`lf open --task LOO-12` to open the conversation without advancing the Graph.
 
 Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,

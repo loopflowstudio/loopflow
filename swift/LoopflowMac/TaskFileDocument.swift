@@ -583,7 +583,7 @@ final class TaskFilesStore {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", checkout, "check-ignore", "--stdin", "-z"]
-        let input = Pipe(), output = Pipe(), errors = Pipe()
+        let input = Pipe.uninherited(), output = Pipe.uninherited(), errors = Pipe.uninherited()
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors

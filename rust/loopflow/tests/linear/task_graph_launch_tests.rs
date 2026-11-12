@@ -470,6 +470,292 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
 }
 
 #[test]
+fn task_run_open_reuses_the_primary_while_the_graph_is_running() {
+    task_run_open_while_running(false);
+}
+
+#[test]
+fn task_run_open_attachment_failure_leaves_the_graph_running() {
+    task_run_open_while_running(true);
+}
+
+fn task_run_open_while_running(fail_open: bool) {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    if fail_open {
+        fs::write(task.home.path().join("open-fails"), "").unwrap();
+    }
+    let hold = hold_script(task.home.path(), false);
+    task.repo.create_file(
+        ".lf/graphs/held.yaml",
+        &format!("- cmd: session serve -- python3 {}\n", hold.display()),
+    );
+    task.repo.create_file(
+        ".lf/graphs/held-flow.yaml",
+        "- graph: held\n- interactive: {name: demo, id: review}\n",
+    );
+    let out = task.home.path().join("open.out");
+    let log = fs::File::create(&out).unwrap();
+    let child = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "run", "INF-123", "held-flow", "--open"],
+    )
+    .env("LF_BIN", &lf)
+    .stdin(std::process::Stdio::null())
+    .stdout(log.try_clone().unwrap())
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    let mut held = HeldGraph {
+        child,
+        release: task.home.path().join("release"),
+        caller: task.home.path().join("unused-caller"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = held.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "opening waited for the Graph: {}",
+            fs::read_to_string(&out).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let text = fs::read_to_string(&out).unwrap();
+    assert_eq!(status.success(), !fail_open, "{text}");
+    let launched = text.find("running as Graph process").unwrap();
+    let opened = text
+        .find(if fail_open {
+            "Conversation exited"
+        } else {
+            ": Attached"
+        })
+        .unwrap();
+    assert!(launched < opened, "opening preceded launch: {text}");
+    assert_eq!(
+        fs::read_to_string(task.home.path().join("opened"))
+            .unwrap()
+            .trim(),
+        "opening-primary"
+    );
+    assert_eq!(
+        task.status()["work"]["graph_processes"][0]["state"],
+        "current"
+    );
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM agent_sessions WHERE task_id=?1 AND interactive=1",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+    fs::write(&held.release, "").unwrap();
+    assert!(task
+        .ran(std::process::Output {
+            status,
+            stdout: text.into_bytes(),
+            stderr: Vec::new()
+        })
+        .success());
+}
+
+#[test]
+fn task_run_open_waits_for_foreground_runs() {
+    for mode in ["-b", "-i"] {
+        let task = GraphTask::new();
+        let lf = task.open_fixture();
+        let hold = hold_script(task.home.path(), true);
+        task.repo.create_file(
+            ".lf/graphs/foreground.yaml",
+            &format!(
+                "- cmd: session serve -- python3 {}\n- cmd: task sync --plan\n",
+                hold.display(),
+            ),
+        );
+        let out = task.home.path().join("foreground.out");
+        let log = fs::File::create(&out).unwrap();
+        let mut held = HeldGraph {
+            child: command(
+                task.repo.path(),
+                task.home.path(),
+                &[mode, "task", "run", "INF-123", "foreground", "--open"],
+            )
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap(),
+            release: task.home.path().join("release"),
+            caller: task.home.path().join("unused-caller"),
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !task.home.path().join("ready").exists() {
+            assert!(
+                held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(held.child.try_wait().unwrap().is_none());
+        assert!(!task.home.path().join("opened").exists());
+        fs::write(&held.release, "").unwrap();
+        let status = loop {
+            if let Some(status) = held.child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{mode}: {}",
+                fs::read_to_string(&out).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(status.success(), "{mode}: {text}");
+        assert!(text.contains(": Attached"), "{mode}: {text}");
+        assert_eq!(
+            fs::read_to_string(task.home.path().join("opened"))
+                .unwrap()
+                .trim(),
+            "opening-primary"
+        );
+        let outcomes: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(task.home.path().join("opened-graphs.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(outcomes, serde_json::json!(["succeeded"]), "{mode}");
+    }
+}
+
+#[test]
+fn task_run_open_successful_quote_launches_and_opens_nothing() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    task.ok(&[
+        "ondemand",
+        "add",
+        "quote",
+        "--provider",
+        "daytona",
+        "--vcpus",
+        "4",
+        "--memory-gb",
+        "8",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1",
+    ]);
+    let before = task.graph();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &[
+            "task", "run", "INF-123", "--rent", "quote", "--quote", "--open",
+        ],
+    )
+    .env("LF_BIN", &lf)
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("would rent") && text.contains("runs nothing"),
+        "{text}"
+    );
+    assert!(!task.home.path().join("opened").exists());
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+    assert_eq!(task.graph(), before);
+    assert!(task
+        .registered
+        .store
+        .sqlite
+        .rentals(None)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn task_run_open_leaves_failed_launches_and_reads_alone() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    let opened = task.home.path().join("opened");
+    for (args, success) in [
+        (
+            vec!["task", "run", "INF-123", "--open", "--from", "missing-step"],
+            false,
+        ),
+        // Task runs have no assembled prompt for --context to print.
+        (vec!["task", "run", "INF-123", "--open", "--context"], false),
+        (vec!["task", "run", "INF-123", "--open", "--explain"], true),
+        // A quote without --pool or --rent is refused before launch.
+        (vec!["task", "run", "INF-123", "--open", "--quote"], false),
+        // A plain waiting run leaves presentation alone too.
+        (vec!["task", "run", "INF-123", "--from", "review"], true),
+    ] {
+        let output = command(task.repo.path(), task.home.path(), &args)
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), success, "{args:?}: {output:?}");
+        assert!(!opened.exists(), "{args:?}: {output:?}");
+        assert!(support::recorded_graphs(task.home.path()).is_empty());
+    }
+}
+
+#[test]
+fn task_run_open_opens_the_selected_waiting_task() {
+    let task = GraphTask::new();
+    let lf = task.open_fixture();
+    let opened = task.home.path().join("opened");
+    // Omitted and root Task selectors retain the same primary, including --repo.
+    for args in [
+        vec!["task", "run", "--from", "review", "--open"],
+        vec!["task", "run", "--from", "review", "--open", "--json"],
+        vec!["task", "run", "--from", "review", "--open", "--", "INF-123"],
+        vec![
+            "--repo",
+            task.repo.path().to_str().unwrap(),
+            "task",
+            "run",
+            "--from",
+            "review",
+            "--open",
+        ],
+        vec![
+            "--task", "INF-123", "task", "run", "--from", "review", "--open",
+        ],
+    ] {
+        let waiting = command(task.repo.path(), task.home.path(), &args)
+            .env("LF_BIN", &lf)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(waiting.status.success(), "{args:?}: {waiting:?}");
+        if args.contains(&"--json") {
+            // Exactly the `task.run` value; the open receipt goes to stderr.
+            serde_json::from_slice::<serde_json::Value>(&waiting.stdout)
+                .unwrap_or_else(|error| panic!("{error}: {waiting:?}"));
+        }
+        assert_eq!(
+            fs::read_to_string(&opened).unwrap().trim(),
+            "opening-primary"
+        );
+        fs::remove_file(&opened).unwrap();
+    }
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
+#[test]
 fn task_run_returns_while_its_graph_keeps_running() {
     let task = GraphTask::new();
     let hold = hold_script(task.home.path(), false);
@@ -801,6 +1087,51 @@ impl Ran {
 }
 
 impl GraphTask {
+    /// A retained primary and a stand-in for terminal attachment, not Graph execution.
+    fn open_fixture(&self) -> PathBuf {
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO agent_sessions(
+                id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd,provider
+             ) VALUES('opening-primary','Task conversation','generated',unixepoch(),1,1,?1,?2,?3,'claude')",
+            rusqlite::params![
+                self.registered.task.id.as_str(),
+                self.registered.task.wave_id.as_ref().unwrap().as_str(),
+                self.repo.path().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE tasks SET primary_session_id='opening-primary' WHERE id=?1",
+            [self.registered.task.id.as_str()],
+        )
+        .unwrap();
+        let lf = self.home.path().join("lf-open-fixture");
+        fs::write(
+            &lf,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sqlite3, sys
+from pathlib import Path
+if sys.argv[1:4] == ['session', 'resume', '--start-if-free']:
+    home = Path(os.environ['LF_HOME'])
+    # Capture completion at attachment, not after the caller exits.
+    with sqlite3.connect(home / 'loopflow.db') as db:
+        outcomes = [row[0] for row in db.execute('SELECT p.outcome FROM processes p JOIN graph_processes g ON g.lf_process_id=p.id')]
+    (home / 'opened-graphs.json').write_text(json.dumps(outcomes))
+    with (home / 'opened').open('a') as opened:
+        opened.write(sys.argv[4] + '\n')
+    sys.exit(9 if (home / 'open-fails').exists() else 0)
+os.execv({binary}, [{binary}, *sys.argv[1:]])
+"#,
+                binary = serde_json::to_string(&loopflow_test_support::lf_binary()).unwrap(),
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        lf
+    }
+
     /// The fixture, its Wave selecting `feature`.
     fn new() -> Self {
         let task = Self::without_wave_graph(&[]);

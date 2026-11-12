@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer, SteerAdapter, SteerContext,
+    IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
+    SteerAdapter, SteerContext,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -165,14 +166,17 @@ impl SqliteStore {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
             let (native, previous_work): (bool, i64) =
                 self.conn.lock().expect("store mutex poisoned").query_row(
-                    "SELECT p.agent_interactive, COALESCE(act.open_tools,0)
-                     FROM processes p LEFT JOIN session_activity act
-                       ON act.agent_process_id=p.id AND act.session_id=?2
+                    "SELECT s.interactive, COALESCE(act.open_tools,0)
+                     FROM processes p JOIN agent_sessions s ON s.id=?2
+                     LEFT JOIN session_activity act
+                       ON act.agent_process_id=p.id AND act.session_id=s.id
                      WHERE p.id=?1",
                     params![adapter.agent_process_id, adapter.session],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
-            // Structured providers already report through their owned stream.
+            // A headless run reports through the stream lf owns. A person's
+            // conversation reports here, Codex's included: its AgentProcess is
+            // an app-server lf spawned, but a native client takes the turns.
             if !native {
                 return Ok(());
             }
@@ -192,6 +196,98 @@ impl SqliteStore {
                 },
             )
         })
+    }
+
+    /// Save where an idle Claude conversation takes messages: the inbox key
+    /// file its hook found. Written only when it changes.
+    pub(crate) fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE processes SET inbox=?3 WHERE id=?2 AND inbox IS NOT ?3 AND EXISTS(
+                SELECT 1 FROM steer_adapters a JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+                WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?4)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                key.to_string_lossy(),
+                adapter.capability
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Managed conversations whose last boundary was a turn end, on a live
+    /// AgentProcess the server can reach; only `session` when given. Driven
+    /// from unfinished processes: every Session ever recorded is far more.
+    pub(crate) fn idle_conversations(
+        &self,
+        session: Option<&str>,
+    ) -> StoreResult<Vec<IdleConversation>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
+                CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
+                s.work_source,p.pid,p.os_started_at
+             FROM processes p INDEXED BY processes_unfinished
+             JOIN agent_sessions s ON s.agent_process_id=p.id
+             JOIN steer_adapters a ON a.agent_process_id=p.id
+             JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
+             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+               AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
+               AND (?1 IS NULL OR s.id=?1)",
+        )?;
+        let rows = statement.query_map([session], |row| {
+            let reach = match row.get::<_, Option<String>>(5)? {
+                Some(endpoint) => IdleReach::Codex(endpoint.into()),
+                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+            };
+            let source: Option<crate::session::WorkSource> = row
+                .get::<_, Option<String>>(7)?
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            let live = row
+                .get::<_, Option<u32>>(8)?
+                .zip(row.get::<_, Option<i64>>(9)?)
+                .is_some_and(|(pid, start)| {
+                    crate::journal::process_identity_evidence(pid, start)
+                        == crate::journal::ProcessIdentityEvidence::Live
+                });
+            let conversation = IdleConversation {
+                adapter: SteerAdapter {
+                    session: row.get(0)?,
+                    agent_process_id: row.get(1)?,
+                    capability: row.get(2)?,
+                },
+                thread: row.get(3)?,
+                cwd: row.get::<_, String>(4)?.into(),
+                reach,
+            };
+            Ok(
+                (live && source.is_some_and(crate::session::WorkSource::is_managed))
+                    .then_some(conversation),
+            )
+        })?;
+        Ok(rows
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// A woken conversation is in a turn until its next Stop says otherwise.
+    pub(crate) fn record_woken(&self, adapter: &SteerAdapter) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_activity SET yielded=0,observed_at=unixepoch()
+             WHERE session_id=?1 AND agent_process_id=?2",
+            params![adapter.session, adapter.agent_process_id],
+        )?;
+        Ok(())
     }
 
     /// The Session's published resume reference with the input it belongs to.

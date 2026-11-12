@@ -1,7 +1,7 @@
 # Data and persistence
 
 ```bash
-lf session list --interactive false --json
+lf session list --headless --json
 lf session history SESSION --json
 lf process show GRAPH_PROCESS --json
 lf process list --json

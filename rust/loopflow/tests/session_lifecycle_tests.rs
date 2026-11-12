@@ -99,6 +99,21 @@ impl Fixture {
         serde_json::from_value(self.json(&["desktop", "sessions", "--all", "--json"])).unwrap()
     }
 
+    fn recorded_sessions(&self) -> Vec<Value> {
+        let db = self.db();
+        let mut query = db
+            .prepare("SELECT id FROM agent_sessions ORDER BY title,id")
+            .unwrap();
+        let ids = query
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        ids.iter()
+            .map(|id| self.json(&["session", "card", id, "--json"])["session"].clone())
+            .collect()
+    }
+
     fn launches(&self) -> Vec<String> {
         std::fs::read_to_string(&self.launched)
             .unwrap_or_default()
@@ -502,7 +517,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "primary": primary,
         "reopened": again,
         "task_primary": task_primary,
-        "sessions": fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]),
+        "sessions": fixture.recorded_sessions(),
         "roadmap": fixture.json(&["desktop", "plan", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
@@ -821,9 +836,9 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         (saved_title.as_str(), saved_source.as_str()),
         ("Parser review", "human")
     );
-    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
-    assert_eq!(history[0]["id"], id);
-    assert_eq!(history[0]["state"], "closed");
+    let card = fixture.json(&["session", "card", &id, "--json"]);
+    assert_eq!(card["session"]["id"], id);
+    assert_eq!(card["session"]["state"], "closed");
 
     let (second, second_run) = fixture.attach(&LAUNCH);
     let (second_id, ..) = fixture.session_row(&second_run);
@@ -972,9 +987,18 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     ]);
     assert_eq!(filtered.as_array().unwrap().len(), 1);
     assert_eq!(filtered[0]["id"], "inventory-112");
-    let end = fixture.json(&["session", "list", "--json", "--limit", "2", "--offset", "2"]);
-    assert_eq!(end.as_array().unwrap().len(), 1);
-    assert_eq!(end[0]["id"], "inventory-112");
+    let end = fixture.json(&[
+        "session",
+        "list",
+        "--json",
+        "--page",
+        "--limit",
+        "2",
+        "--after",
+        "inventory-111",
+    ]);
+    assert_eq!(end["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(end["entries"][0]["id"], "inventory-112");
     fixture
         .db()
         .execute(
@@ -984,15 +1008,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         .unwrap();
     let default = fixture.json(&["session", "list", "--json", "--limit", "0"]);
     assert_eq!(default.as_array().unwrap().len(), 2);
-    let both = fixture.json(&[
-        "session",
-        "list",
-        "--interactive",
-        "all",
-        "--json",
-        "--limit",
-        "0",
-    ]);
+    let both = fixture.json(&["session", "list", "--headless", "--json", "--limit", "0"]);
     assert_eq!(both.as_array().unwrap().len(), 3);
     assert!(both
         .as_array()
@@ -1002,8 +1018,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     let everywhere = fixture.json(&[
         "session",
         "list",
-        "--interactive",
-        "all",
+        "--headless",
         "--all",
         "--json",
         "--limit",
@@ -1026,19 +1041,22 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
         assert_eq!(current.as_array().unwrap().len(), 1);
         assert_eq!(current[0]["id"], "inventory-111");
     }
-    let history = fixture.json(&[
+    let current = fixture.json(&[
         "session",
         "list",
         "--task",
         &task.task.identifier,
-        "--interactive",
-        "all",
-        "--history",
+        "--headless",
         "--json",
     ]);
-    assert_eq!(history.as_array().unwrap().len(), 3);
+    assert_eq!(current.as_array().unwrap().len(), 2);
+    let history = fixture.json(&["session", "card", "inventory-110", "--json"]);
     // A historical Session completion without an AgentProcess proves no death.
-    assert_eq!(history[0]["state"], "unknown");
+    assert_eq!(history["session"]["state"], "unknown");
+    assert_eq!(
+        history["session"]["task_ids"],
+        serde_json::json!([task.task.id])
+    );
     assert_eq!(fixture.count("agent_sessions"), 113);
 }
 
@@ -1107,15 +1125,12 @@ fn binding_closed_session_preserves_history_and_primary() {
     assert!(output.status.success(), "{output:?}");
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
-    let before = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    let before = fixture.recorded_sessions();
     let refused = fixture.run(&["session", "bind", &session, "--task", task_id]);
     assert!(!refused.status.success(), "{refused:?}");
     assert!(String::from_utf8_lossy(&refused.stderr).contains("unfinished interactive Session"));
     assert_eq!(fixture.run_parents(&capture), (None, None, None));
-    assert_eq!(
-        fixture.json(&["session", "list", "--history", "--all", "--json"]),
-        before
-    );
+    assert_eq!(fixture.recorded_sessions(), before);
     assert_eq!(
         fixture.json(&["resume", "--task", task_id, "--prepare", "--json"])["id"],
         primary["id"]
@@ -1916,7 +1931,7 @@ fn unavailable_store_starts_no_provider() {
 }
 
 #[test]
-fn headless_history_is_discoverable_without_entering_the_interactive_list() {
+fn finished_headless_runs_leave_the_open_list_and_keep_their_history() {
     let fixture = Fixture::new(false);
     support::managed_codex_account(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
@@ -1943,8 +1958,12 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     ]);
     assert!(output.status.success(), "{output:?}");
     assert!(fixture.sessions().is_empty());
-    let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
-    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    assert_eq!(
+        fixture.json(&["session", "list", "--headless", "--json"]),
+        serde_json::json!([])
+    );
+    let sessions = fixture.recorded_sessions();
+    assert_eq!(sessions.len(), 1);
     let session = &sessions[0]["id"];
     {
         let rows = fixture.json(&["history", "usage", "--wave", "task-pr-tests", "--json"]);

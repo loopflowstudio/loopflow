@@ -95,7 +95,7 @@ pub enum Read {
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::work::selection::ViewPlan>>()))]
     DesktopViewList { directory: PathBuf },
-    /// `lf --cwd <directory> session list`, with `--interactive all`
+    /// `lf --cwd <directory> session list`, with `--headless`
     /// when `headless` Sessions are shown too: every row, or with a `limit`
     /// one page (`--page --limit <limit> [--after <after>]`). Only the whole
     /// list has a subscription.
@@ -975,7 +975,7 @@ impl Read {
 
 fn session_flags(headless: bool) -> &'static [&'static str] {
     if headless {
-        &["--interactive", "all"]
+        &["--headless"]
     } else {
         &[]
     }
@@ -1032,8 +1032,7 @@ mod tests {
                 "/r",
                 "session",
                 "list",
-                "--interactive",
-                "all",
+                "--headless",
                 "--json",
                 "--limit",
                 "0"
@@ -1081,6 +1080,46 @@ mod tests {
         let sessions = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(sessions.len(), 101);
         assert!(sessions.iter().any(|session| session.id == "session-100"));
+    }
+
+    #[test]
+    fn served_session_lists_include_headless_but_never_completed() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        for id in ["interactive", "headless", "closed", "closed-headless"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+        }
+        store.conn.lock().unwrap().execute_batch(
+            "UPDATE agent_sessions SET interactive=0 WHERE id IN ('headless','closed-headless');
+             UPDATE agent_sessions SET completed_at=2 WHERE id IN ('closed','closed-headless');"
+        ).unwrap();
+        for limit in [None, Some(100)] {
+            for headless in [false, true] {
+                let read = Read::SessionList {
+                    directory: home.path().into(),
+                    headless,
+                    after: None,
+                    limit,
+                };
+                let filter = read.session_filter(home.path()).unwrap();
+                let sessions = store.session_summaries(&filter, 0).unwrap();
+                let mut ids = sessions
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<Vec<_>>();
+                ids.sort_unstable();
+                assert_eq!(
+                    ids,
+                    if headless {
+                        vec!["headless", "interactive"]
+                    } else {
+                        vec!["interactive"]
+                    }
+                );
+            }
+        }
     }
 
     #[test]

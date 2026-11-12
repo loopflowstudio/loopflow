@@ -213,19 +213,43 @@ pub enum WorkSource {
     Bound,
 }
 
-/// SQL selection for conversation inventory; mode and completion are independent.
+impl WorkSource {
+    /// A launch is managed when a Task or Wave command named its Work (a
+    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
+    /// `lf` in a Task's checkout, or a child run a Session's agent started,
+    /// only counts toward the Task. What each kind gets is in
+    /// `server/README.md` ("Turn and tool boundaries").
+    pub(crate) fn is_managed(self) -> bool {
+        matches!(self, Self::Declared | Self::Bound)
+    }
+}
+
+/// Which scopes' current primary conversations to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SessionPrimary {
+    All,
+    Task,
+    Wave,
+    Repository,
+}
+
+/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
+    /// Attribution or resolved checkout membership, selected before pagination.
+    pub wave: Option<WaveId>,
+    pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
-    pub interactive: Option<bool>,
+    /// Include headless Sessions alongside interactive conversations.
+    pub headless: bool,
     /// Only conversations available for a person, chosen before paging.
     pub available: bool,
-    pub history: bool,
+    /// Also list raw conversations: providers lf never launched, which have no Session.
+    pub raw: bool,
     pub limit: usize,
-    pub offset: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
     /// Only Sessions whose next message would fail: their login cannot take
@@ -243,12 +267,13 @@ impl Default for SessionFilter {
             orphan: false,
             repo: None,
             task: None,
+            wave: None,
+            primary: None,
             search: None,
-            interactive: Some(true),
+            headless: false,
             available: false,
-            history: false,
+            raw: true,
             limit: 100,
-            offset: 0,
             after: None,
         }
     }

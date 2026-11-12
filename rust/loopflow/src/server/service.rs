@@ -162,7 +162,8 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
-    let _observations = crate::observe::Cache::shared();
+    let observations = crate::observe::Cache::shared();
+    let _transcripts = crate::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -190,6 +191,7 @@ pub(super) async fn run() -> Result<()> {
     let clients = Clients::default();
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    super::wake::start();
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     loop {
         // One connection's failure is never the listener's: every client on

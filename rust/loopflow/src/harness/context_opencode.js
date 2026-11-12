@@ -55,7 +55,7 @@ export default {
           recordingGap(error);
         }
       }
-      const text = `${answer?.steers?.text ?? ""}${block ?? ""}`;
+      const text = `${news(answer)}${block ?? ""}`;
       if (text) input.system.push({ type: "text", text });
       if (answer?.steers) server.printed(answer.steers.batch);
     });

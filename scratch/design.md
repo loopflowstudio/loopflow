@@ -10,8 +10,7 @@ The listener, mobile settings and bulk protocol are outside this Task.
 At November 12 10:30 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `dc055a5ae57c67caf4c696a1bb77a3f578004c69`, which contains
 `origin/main` `eb2b0726bfc4ee9373e7aea6e57c2c1d58f19fc3`; this checkout has
-merged that main. Since head `28e2321c`, #1812's only server change removed 10
-lines from `boundary.rs`; `ticket.rs` is unchanged. `origin/main` does not contain
+merged that main. `ticket.rs` is unchanged since head `28e2321c`. `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
@@ -62,4 +61,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed after Nov 12 compress (README prose only; no build or test rerun).
+`git diff --check` — passed after Nov 12 compress (scratch only; no build or test rerun).

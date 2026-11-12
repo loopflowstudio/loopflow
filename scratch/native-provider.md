@@ -202,3 +202,4 @@ compaction), which loses nothing.
 - concept review 4: no tests; design-only (one bare exit status, above). The steer question and pre-LOO-824 primaries stay as written in Open.
 - compress 6: production code already had one decider (`bare_exit_code`); the two PTY tests share `spawn_in_terminal` and `bare_claude` (79+/126−). `--test integration session_cli_tests::a_` 2 passed; clippy, fmt clean.
 - realign 7: no tests; `bare_exit_code` backs all three paths (`agent/mod.rs` `run_interactive`, `util.rs` `run_native_agent` and `result`, `run.rs` bare return), `a_hung_up_bare_provider_exits_lf_with_its_own_status` present. Main moved 5 PRs; sync recorded in Remaining.
+- concept review 5: no tests; no change. #1880's transcript watchers and exit read cover the bare turn hooks this branch dropped; the three post-sync checks in Remaining still apply. The steer question and pre-LOO-824 primaries remain open as written.

@@ -37,9 +37,9 @@ footer{margin-top:36px;font-size:14px;color:var(--muted)}
 </style>
 </head>
 <body><main>
-<p class="meta">LOO-820 · concept-review (Graph, no person) · 2026-11-11 · built from <code>scratch/native-provider.md</code>, <code>rust/loopflow/src/transport.rs</code>, <code>session.rs</code>, <code>store/sqlite/processes.rs</code>, <code>docs/sessions.md</code>, <code>docs/troubleshooting.md</code></p>
-<h1>The model holds; two doc rows don't</h1>
-<p class="lead">Decision needed: none. The next implement pass corrects two rows of <code>docs/sessions.md</code> and one line of troubleshooting so they say what <code>transport::delegate</code> does.</p>
+<p class="meta">LOO-820 · concept-review 5 (Graph, no person) · 2026-11-11 · built from <code>scratch/native-provider.md</code>, <code>rust/loopflow/src/transport.rs</code>, <code>lf/commands/util.rs</code>, <code>agent/mod.rs</code>, origin/main <code>4dc15b7302</code> (#1880)</p>
+<h1>Nothing to change; main already reads what bare launches dropped</h1>
+<p class="lead">Decision needed: none. Review 4's one exit status is built (<code>bare_exit_code</code> on all three paths). The next move is the sync onto main, not a design change.</p>
 
 <section><h2>Actions → concepts → APIs</h2>
 <div class="wrap"><table>
@@ -52,13 +52,14 @@ footer{margin-top:36px;font-size:14px;color:var(--muted)}
 </table></div>
 </section>
 
-<section><h2>Biggest mismatch: the docs</h2>
+<section><h2>Biggest mismatch: none in the model; main moved</h2>
+<p>#1880 makes transcripts the only source of per-turn usage and reads them live for every conversation, raw ones included. A bare launch dropped its turn hooks; under #1880 that loses nothing, because watchers and the exit read cover it.</p>
 <div class="wrap"><table>
-<tr><th>Doc says</th><th>Code does</th></tr>
-<tr><td class="x">“the same commands typed in a Desktop shell” run in your terminal; “An <code>lf &lt;skill&gt;</code> run has none”</td><td>A Desktop pane keeps an owner until “Every view types” removes the status handshake</td></tr>
-<tr><td class="x">“bare Graphs … its own process, as before”</td><td>A bare Graph at a terminal runs there</td></tr>
+<tr><th>After the sync, check</th><th>Why</th></tr>
+<tr><td>Bare usage and completion rows come from #1880's exit read</td><td>Bare <code>Holder::Caller</code> has no turn-end hook to ask the server</td></tr>
+<tr><td>Pi <code>*_&lt;id&gt;.jsonl</code> lookup is one resolver with #1880's Pi reader</td><td>Two resolvers for one file drift</td></tr>
+<tr><td>#1880's raw pairing finds a bare Codex rollout with no hooks</td><td>If it does, the <code>.thread</code> start-hook file may be unnecessary; if it pairs only by cwd and time, keep the hook</td></tr>
 </table></div>
-<div class="prop"><b>Proposed</b>Drop Desktop shells from the direct list with the reason; move bare Graphs to the “your terminal” row. No code change.</div>
 </section>
 
 <section class="questions"><h2>Questions</h2>

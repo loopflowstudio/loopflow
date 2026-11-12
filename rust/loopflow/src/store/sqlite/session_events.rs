@@ -1648,7 +1648,8 @@ mod tests {
     }
 
     #[test]
-    fn session_exit_retires_orphans_but_preserves_primary_and_task_conversations() {
+    fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task_conversations()
+    {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::id::WaveId::new();
@@ -1671,10 +1672,12 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, primary, retired) in [
-            ("orphan", None, true),
-            ("primary", Some("repository"), false),
-            ("task", None, false),
+        for (id, primary, outcome, retired) in [
+            ("orphan", None, "interrupted", true),
+            ("primary", Some("repository"), "interrupted", false),
+            ("task", None, "interrupted", false),
+            ("task-run", None, "interrupted", true),
+            ("task-failed-run", None, "failed", true),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let process = crate::id::LfProcessId::new();
@@ -1690,10 +1693,10 @@ mod tests {
                     rusqlite::params![id, primary],
                 )
                 .unwrap();
-                if id == "task" {
+                if id.starts_with("task") {
                     conn.execute(
-                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                        rusqlite::params![id, task.as_str(), wave],
+                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3,interactive=?4 WHERE id=?1",
+                        rusqlite::params![id, task.as_str(), wave, id == "task"],
                     )
                     .unwrap();
                 }
@@ -1702,7 +1705,7 @@ mod tests {
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &attachment, "interrupted", None, || Ok(false))
+                .finish_session_attachment(id, &attachment, outcome, None, || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1711,7 +1714,7 @@ mod tests {
             assert!(history
                 .iter()
                 .any(|event| event.payload["type"] == "attachment_exit"
-                    && event.payload["outcome"] == "interrupted"));
+                    && event.payload["outcome"] == outcome));
             assert!(!history
                 .iter()
                 .any(|event| event.kind == SessionEventKind::Completed));
@@ -1721,6 +1724,37 @@ mod tests {
             .unwrap()
             .iter()
             .any(|session| session.id == "orphan"));
+
+        // Another turn on the finished run reopens it until that turn exits.
+        let process = crate::id::LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',2)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let expected = store.session_attachment("task-run").unwrap();
+        let turn = store
+            .claim_session_attachment("task-run", expected.as_ref(), &process, true)
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        store
+            .finish_session_attachment("task-run", &turn, "completed", None, || Ok(true))
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     /// `lf history` reads inputs by this bound and stops early, so an input

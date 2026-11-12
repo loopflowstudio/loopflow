@@ -1916,7 +1916,7 @@ fn unavailable_store_starts_no_provider() {
 }
 
 #[test]
-fn headless_history_is_discoverable_without_entering_the_interactive_list() {
+fn finished_headless_runs_leave_the_open_list_and_keep_their_history() {
     let fixture = Fixture::new(false);
     support::managed_codex_account(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
@@ -1943,7 +1943,18 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     ]);
     assert!(output.status.success(), "{output:?}");
     assert!(fixture.sessions().is_empty());
-    let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
+    assert_eq!(
+        fixture.json(&["session", "list", "--interactive", "false", "--json"]),
+        serde_json::json!([])
+    );
+    let sessions = fixture.json(&[
+        "session",
+        "list",
+        "--interactive",
+        "false",
+        "--history",
+        "--json",
+    ]);
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
     {

@@ -263,11 +263,13 @@ already finished are not repeated. Programs the agent
 had started, such as a training job or a dev server, end on the laptop and are
 not restarted.
 
-**Nothing to prepare on mini.** A Machine that has never seen the Task takes it
-in from planning, and clones the repository when it has no checkout. A provider
-login it lacks is asked for in the foreground, as account-selected launches do.
-Both Machines need an `lf` that knows how to take a Task in; an older one fails
-the check, and nothing moves.
+**Nothing to prepare on mini.** The check before the move clones the repository
+on a Machine that has none and takes the Task in from planning. A personal Git
+plan (`planning: {provider: git, personal: true}`) is read under the laptop's
+planning key, which a Machine without one adopts; a Machine already planning
+under another key fails the check. A provider login mini lacks is asked for in
+the foreground, as account-selected launches do. Both Machines need an `lf` that
+knows how to take a Task in; an older one fails the check, and nothing moves.
 
 **The laptop afterwards.**
 
@@ -292,6 +294,10 @@ branch out again.
 
 **Failures.** A move refuses before anything stops when mini can't be reached or
 can't take the Task, or the worktree is mid-merge or mid-rebase; nothing changes.
+The move hands the Task to mini before it stops the Graph, so nothing on the
+laptop restarts it meanwhile. If the checkpoint can't be pushed, the Task is
+handed back: the log shows both handoffs, its conversation stays on the laptop,
+and the Graph stays stopped at the step `lf task status` names.
 If the Task was sent but did not arrive, the error prints one retry command that
 delivers what was sent. A retried delivery does not restart the Graph; run
 `lf --machine mini task run MTG-321 --from implement` after it arrives. If the
@@ -299,8 +305,11 @@ Graph does not start on mini, the move still stands and the last line prints
 `lf task run MTG-321 --from 'implement'`, which starts it at that step on the
 Task's owner.
 
-Auto-Ship approval does not travel: the continued run is a plain `lf task run`,
-which approves Auto-Ship only when no interactive step is left ahead.
+Auto-Ship approval is planning, so it travels. The continued run is a plain
+`lf task run`; when it stops at an interactive step, mini's ship process carries
+the Task on, as it would have on the laptop. `lf task hold MTG-321` withdraws the
+approval on either Machine. A Machine ships only Tasks it owns: once a Task has
+left, its old checkout starts nothing.
 
 ## Own and rent Machines
 

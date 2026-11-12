@@ -2595,6 +2595,239 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     unchanged();
 }
 
+/// The move hands the Task off before it stops anything, so nothing here
+/// restarts it meanwhile. When the checkpoint cannot be pushed, it hands the
+/// Task back: this Machine owns it again and its conversation stays open.
+#[test]
+fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, worktree) = placed_task(&plan, "refused-task");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
+    fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
+    executable(
+        &plan._repos[0].bare_path().join("hooks/pre-receive"),
+        "#!/bin/sh\necho 'push refused' >&2\nexit 1\n",
+    );
+
+    let output = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("push refused"), "{stderr}");
+
+    let local = plan.local.local_machine().unwrap().id;
+    let ownership = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(ownership.owner.unwrap().machine.id, Some(local.clone()));
+    let kinds: Vec<_> = ownership
+        .log
+        .iter()
+        .rev()
+        .take(2)
+        .map(|entry| entry.machine_id.clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        [Some(local), Some(plan.remote.local_machine().unwrap().id)],
+        "the log reads: handed to mini, handed back"
+    );
+    assert!(plan
+        .local
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+    assert!(plan
+        .remote
+        .task(&task)
+        .unwrap()
+        .is_none_or(|task| task.worktree.is_none()));
+}
+
+/// A repository that plans through a personal Git plan on its origin, the
+/// same person on both Machines, and a Task the laptop created in it. Mini
+/// has neither the repository nor a planning key yet.
+fn personal_plan_task(
+    fixture: &Machines,
+) -> (
+    loopflow_test_support::TestRepo,
+    loopflow::durable::TaskId,
+    String,
+) {
+    fs::write(
+        fixture.root.path().join("remote/.gitconfig"),
+        "[user]\n\temail = test@test.com\n\tname = Jack\n",
+    )
+    .unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: git\n  personal: true\n",
+    )
+    .unwrap();
+    git(repo.path(), &["add", ".lf/config.yaml"]);
+    git(repo.path(), &["commit", "-qm", "plan personally"]);
+    git(repo.path(), &["push", "-q", "origin", "main"]);
+    let created = fixture
+        .command(&["task", "create", "--title", "Cold move", "--json"])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_success(&created);
+    let created: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let task = loopflow::durable::TaskId::parse(created["task"]["id"].as_str().unwrap()).unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_string();
+    (repo, task, identifier)
+}
+
+/// The check clones the repository, takes the laptop's planning key and the
+/// Task, and the move lands. Only planning and origin are shared.
+#[test]
+fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
+    let fixture = preview_machines();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (repo, task, identifier) = personal_plan_task(&fixture);
+
+    let moved = fixture
+        .command(&["task", "move", &identifier, "--machine", "mini"])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    assert!(
+        stderr.contains(&format!("Checked mini: it can take {identifier}")),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Arrived on mini"), "{stderr}");
+
+    let remote =
+        loopflow::store::sqlite::SqliteStore::new(&remote_home.join("loopflow.db")).unwrap();
+    assert!(
+        remote.task(&task).unwrap().is_some(),
+        "mini never took the Task in"
+    );
+    assert_eq!(
+        remote
+            .task_ownership(&task)
+            .unwrap()
+            .owner
+            .unwrap()
+            .machine
+            .id,
+        Some(remote.local_machine().unwrap().id)
+    );
+    let local = loopflow::store::sqlite::SqliteStore::new(&local_home.join("loopflow.db")).unwrap();
+    assert_eq!(
+        remote.planning_user_key().unwrap(),
+        local.planning_user_key().unwrap(),
+        "mini reads another person's plan"
+    );
+    assert!(
+        fixture
+            .root
+            .path()
+            .join("remote/src")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some(),
+        "mini has no clone"
+    );
+}
+
+/// The laptop's run approved Auto-Ship, and the approval travels in planning.
+/// Once the Task moved back, mini's recovery must not start shipping it.
+#[test]
+fn mini_starts_nothing_for_a_task_that_moved_back() {
+    let fixture = preview_machines();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let (repo, task, identifier) = personal_plan_task(&fixture);
+    fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
+    fs::write(
+        repo.path().join(".lf/graphs/hold.yaml"),
+        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+    )
+    .unwrap();
+    git(repo.path(), &["add", ".lf/graphs/hold.yaml"]);
+    git(repo.path(), &["commit", "-qm", "hold"]);
+    git(repo.path(), &["push", "-q", "origin", "main"]);
+    let mut run = fixture
+        .command(&["-b", "task", "run", &identifier, "hold"])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert!(
+        wait_step_live(&local_home.join("loopflow.db")),
+        "the laptop's step never started"
+    );
+    let move_to = |machine: &str| {
+        let output = fixture
+            .command(&["task", "move", &identifier, "--machine", machine])
+            .current_dir(repo.path())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+    };
+    move_to("mini");
+    assert!(
+        exits_within_ten_seconds(&mut run),
+        "the laptop's run outlived the move"
+    );
+    assert!(
+        wait_step_live(&remote_home.join("loopflow.db")),
+        "mini's step never started"
+    );
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    move_to(laptop.split('.').next().unwrap());
+
+    // Each process read on mini runs its recovery, which restarts ship processes.
+    for _ in 0..5 {
+        let read = fixture
+            .command(&["process", "list", "--json"])
+            .env("HOME", fixture.root.path().join("remote"))
+            .env("LF_HOME", &remote_home)
+            .current_dir(fixture.root.path().join("remote"))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&read);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    let remote_db = remote_home.join("loopflow.db");
+    assert_eq!(live_graph(&remote_db, &task), None, "a Graph runs on mini");
+    let ships: i64 = rusqlite::Connection::open(&remote_db)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM processes WHERE command LIKE '%\"ship\"%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(ships, 0, "mini started shipping a Task it no longer owns");
+}
+
 /// A Task move that continues a run starts it for real on mini: each home
 /// gets its own server, so no launch installs one.
 #[test]

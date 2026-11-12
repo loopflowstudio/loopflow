@@ -233,7 +233,7 @@ async fn relay_task(
 
 /// Before anything is committed, pushed, stopped or handed off, `target`
 /// answers that it can receive the move and, for a Task, takes it in from
-/// planning when it has the repository.
+/// planning, cloning the repository first when it has none.
 async fn ready(
     store: &SharedStore,
     target: &Machine,
@@ -253,6 +253,20 @@ async fn ready(
             "--repository".into(),
             repository.to_string(),
         ]);
+        if let Some(path) = store.sqlite.repository_path(repository)? {
+            args.extend([
+                "--origin".into(),
+                crate::git::git_stdout(
+                    std::path::Path::new(&path),
+                    &["remote", "get-url", "origin"],
+                )?
+                .trim()
+                .to_string(),
+            ]);
+        }
+        if let Some(key) = store.sqlite.planning_user_key()? {
+            args.extend(["--planning-key".into(), key]);
+        }
     }
     super::ssh::request(target, &args, None)
         .await

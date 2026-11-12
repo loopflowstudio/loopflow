@@ -251,14 +251,22 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             task: Some(task),
             issue: Some(issue),
             repository: Some(repository),
+            origin,
+            planning_key,
             ..
         } => {
             let store = open_shared_store().await?;
-            if let Some(path) = store.sqlite.repository_path(repository)? {
-                let main = crate::git::worktrees::main_repo_root(std::path::Path::new(&path))?;
-                let id = crate::durable::TaskId::parse(task)?;
-                crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            let path = crate::ops::human_session::moves::checkout_of(
+                &store,
+                repository,
+                origin.as_deref(),
+            )?;
+            let main = crate::git::worktrees::main_repo_root(&path)?;
+            if let Some(key) = planning_key {
+                crate::ops::planning_sync::adopt_personal_key(&store, &main, key).await?;
             }
+            let id = crate::durable::TaskId::parse(task)?;
+            crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
             Ok(())
         }
         SessionCommand::Receive { check: true, .. } => {

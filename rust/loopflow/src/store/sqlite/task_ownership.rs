@@ -352,6 +352,31 @@ fn my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<(MachineI
     }
 }
 
+fn handoff_in(
+    conn: &Connection,
+    task: &TaskId,
+    target: &MachineId,
+) -> StoreResult<TaskOwnershipEntry> {
+    let Some((local, holder)) = my_claim_in(conn, task)? else {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Task {task} is unowned"
+        )));
+    };
+    if *target == local {
+        return Err(StoreError::InvalidData(format!(
+            "Task {task} is already owned on this Machine"
+        )));
+    }
+    append_in(
+        conn,
+        task,
+        OwnershipKind::Handoff,
+        holder.person,
+        holder.person_key,
+        target,
+    )
+}
+
 fn person() -> StoreResult<Option<String>> {
     crate::config::participant_name().map_err(|error| StoreError::InvalidData(error.to_string()))
 }
@@ -695,6 +720,7 @@ impl SqliteStore {
 
     /// Move your claim to another Machine. The Task's primary Session here is
     /// completed; the target admits its own on first connect.
+    /// Hand the Task to `target`; its primary conversation here ends.
     pub fn handoff_task(
         &self,
         task: &TaskId,
@@ -702,27 +728,53 @@ impl SqliteStore {
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+        let entry = handoff_in(&tx, task, target)?;
+        super::sessions::complete_primary_session_in(
+            &tx,
+            &crate::session::PrimaryScope::Task(task.clone()),
+        )?;
+        tx.commit()?;
+        Ok(entry)
+    }
+
+    /// A move's handoff, written before the move stops anything: the Task's
+    /// conversation travels with it, and the move completes it once taken.
+    pub(crate) fn handoff_moving_task(
+        &self,
+        task: &TaskId,
+        target: &MachineId,
+    ) -> StoreResult<TaskOwnershipEntry> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let entry = handoff_in(&tx, task, target)?;
+        tx.commit()?;
+        Ok(entry)
+    }
+
+    /// Take back `sent`, the handoff this Machine just wrote, when the move it
+    /// began could not leave. Nothing may follow it in the log: until it is
+    /// received, its target has not taken the Task. The log keeps both entries.
+    pub(crate) fn hand_back(
+        &self,
+        task: &TaskId,
+        sent: &TaskOwnershipEntry,
+    ) -> StoreResult<TaskOwnershipEntry> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (rows, _) = reading_in(&tx, task)?;
+        if rows.last().map(|row| &row.entry.id) != Some(&sent.id) {
             return Err(StoreError::InvalidAuthority(format!(
-                "Task {task} is unowned"
-            )));
-        };
-        if *target == local {
-            return Err(StoreError::InvalidData(format!(
-                "Task {task} is already owned on this Machine"
+                "Task {task} changed hands after its handoff {}; it stays where that left it",
+                sent.id
             )));
         }
         let entry = append_in(
             &tx,
             task,
             OwnershipKind::Handoff,
-            holder.person,
-            holder.person_key,
-            target,
-        )?;
-        super::sessions::complete_primary_session_in(
-            &tx,
-            &crate::session::PrimaryScope::Task(task.clone()),
+            sent.person.clone(),
+            sent.person_key.clone(),
+            &local_machine_in(&tx)?,
         )?;
         tx.commit()?;
         Ok(entry)

@@ -174,7 +174,6 @@ Decided against, with the reason:
 - The worktree stays until `lf wt prune`.
 - A repeated move after a failed receive does not continue the Graph: the
   second send finds nothing running.
-- Auto-Ship approval does not travel.
 
 Test hazard, fixed: a `MachineServer` per home and an `EndRecorded` guard.
 
@@ -215,6 +214,32 @@ where you ask. To move back from the laptop you type the laptop's host name
 that travels with ownership entries and per-viewer labels is a product choice
 about what a Machine is. It belongs with the forwarded-origin label above.
 
+## QA pass (2026-11-12)
+
+Branch `lf` on two private homes (laptop, mini) on one host, an `ssh` stand-in
+running mini's commands, a bare local origin, personal Git planning. Report:
+`scratch/qa.html`. Found and fixed:
+- The check passed vacuously on a mini without the repository; the receive then
+  failed after the laptop had stopped, pushed and handed off. The check now gets
+  `--origin` and clones (`moves::checkout_of`, shared with receive).
+- Personal Git planning: the cold acquire minted mini a new planning key, and
+  keys never change, so mini could never read the plan. The check sends
+  `--planning-key`; a Machine with none adopts it, one with another refuses.
+- The checkout on arrival failed on `gh pr list` (no GitHub login on mini).
+  `prepare_placement` now leaves an unreadable PR unknown and logs it.
+- Moving back left a second Graph running on mini: `restart_ships` (run by
+  any lf read) checked `task_owned`, which means "has an owner", and restarted
+  ship for the departed Task. Both recovery sweeps now require
+  `task_claimed_here`. The move also hands off before it stops anything
+  (`handoff_moving_task`, which leaves the conversation to the move), so the
+  window between stop and handoff is gone; a failed leave calls
+  `SqliteStore::hand_back`, allowed only while the move's handoff is the last
+  entry.
+- The sweep no longer restarts ship while a run another `lf task run` carries is
+  live; it failed and backed off for as long as the continued Graph ran.
+Auto-Ship approval travels (it is planning): mini's ship took over at `demo`.
+Docs say so now.
+
 ## Live check (for a person, both Machines on this build)
 
 ```sh
@@ -246,6 +271,10 @@ lf task interrupt X && lf task abandon X     # clean up
   tests; clippy clean; no launchd job or `lf` from this checkout left.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)
   | binary(two_people) | test(planning_foreground_tests::)` plus `lf::tests::`, and clippy.
+- 2026-11-12, QA pass: `machine_commands::` (incl. three new tests, each seen
+  failing without its fix) `documented_commands:: planning_foreground_tests::`
+  58 passed; `two_people` 1; `--lib ops::task store::sqlite::task_ownership
+  task_adoption` 68; clippy clean; no launchd job or `lf` from this checkout left.
 - Laptop → mini for real: Live check above, for a person.
 
 ## Docs

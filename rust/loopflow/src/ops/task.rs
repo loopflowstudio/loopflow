@@ -1388,19 +1388,25 @@ fn prepare_placement(
             base_commit
         }
     };
-    let github = if observe_pr {
-        super::pr::branch_pr(main_repo, &plan.branch)?
-            .map(|pr| {
-                Ok::<_, OpsError>(GithubPr {
-                    number: u32::try_from(pr.number).map_err(task_error)?,
-                    url: pr.url,
-                    head_sha: pr.head_sha,
-                })
+    // An unreadable PR (no GitHub login on this Machine, an origin GitHub
+    // does not host) leaves the checkout without one; a later sync finds it.
+    let found = observe_pr
+        .then(|| {
+            super::pr::branch_pr(main_repo, &plan.branch).unwrap_or_else(|error| {
+                tracing::warn!(branch = %plan.branch, %error, "PR unread for the Task checkout");
+                None
             })
-            .transpose()?
-    } else {
-        None
-    };
+        })
+        .flatten();
+    let github = found
+        .map(|pr| {
+            Ok::<_, OpsError>(GithubPr {
+                number: u32::try_from(pr.number).map_err(task_error)?,
+                url: pr.url,
+                head_sha: pr.head_sha,
+            })
+        })
+        .transpose()?;
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)

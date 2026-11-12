@@ -146,9 +146,9 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     })
 }
 
-/// Stop the Task's Graph, commit and push its worktree, take its conversation
-/// and hand it off to `to`. Nothing is handed off when a step before fails;
-/// repeating it after a failed receive reuses the handoff.
+/// Hand the Task off to `to`, then stop its Graph, commit and push its
+/// worktree and take its conversation. A failure in those steps hands it back
+/// here; repeating it after a failed receive reuses the handoff.
 pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
     let task = store
         .get_task_by_issue(issue)
@@ -159,9 +159,64 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
     }
-    let stopped = stop_graphs(store, &task).await?;
+    // Owned by `to` from here, so nothing on this Machine (recovery restarting
+    // a ship process, a run waiting out a limit) starts the Task again while
+    // the move stops it. If it cannot leave, it is handed back.
+    let sent_before = store
+        .sqlite
+        .task_ownership(&task.id)?
+        .owner
+        .and_then(|owner| owner.machine.id)
+        .as_ref()
+        == Some(to);
+    let handoff = hand_off(&store.sqlite, &task.id, to)?;
+    let (stopped, checkout, conversation, taken) =
+        match leave(store, &task, worktree.as_deref(), to).await {
+            Ok(left) => left,
+            Err(error) if sent_before => return Err(error),
+            Err(error) => {
+                store.sqlite.hand_back(&task.id, &handoff)?;
+                return Err(error);
+            }
+        };
+    if let Some(session) = &conversation {
+        store.sqlite.complete_moved_session(&session.id, to)?;
+    }
+    let (session, history) =
+        taken.map_or((None, None), |(session, history)| (Some(session), history));
+    Ok(Move {
+        from_machine_id: store.sqlite.local_machine()?.id,
+        session,
+        checkout,
+        history,
+        task: Some(MovedTask {
+            task_id: task.id.clone(),
+            identifier: task.identifier.clone(),
+            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
+            graph: store.sqlite.task_graph_record(&task.id)?,
+            stopped,
+        }),
+    })
+}
+
+type Left = (
+    Option<StoppedGraph>,
+    Option<MovedCheckout>,
+    Option<LfSession>,
+    Option<(MovedSession, Option<MovedHistory>)>,
+);
+
+/// What leaves with the Task: its stopped Graph, its pushed checkpoint and
+/// its stopped conversation.
+async fn leave(
+    store: &SharedStore,
+    task: &Task,
+    worktree: Option<&Path>,
+    to: &MachineId,
+) -> Result<Left> {
+    let name = &task.identifier;
+    let stopped = stop_graphs(store, task).await?;
     let checkout = worktree
-        .as_deref()
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
     let conversation = match super::primary::task_conversation(store, &task.id).await? {
@@ -186,25 +241,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
         }
         None => None,
     };
-    let handoff = hand_off(&store.sqlite, &task.id, to)?;
-    if let Some(session) = &conversation {
-        store.sqlite.complete_moved_session(&session.id, to)?;
-    }
-    let (session, history) =
-        taken.map_or((None, None), |(session, history)| (Some(session), history));
-    Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
-        session,
-        checkout,
-        history,
-        task: Some(MovedTask {
-            task_id: task.id.clone(),
-            identifier: task.identifier.clone(),
-            ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
-            graph: store.sqlite.task_graph_record(&task.id)?,
-            stopped,
-        }),
-    })
+    Ok((stopped, checkout, conversation, taken))
 }
 
 /// A conversation checked out moments ago may still be launching: its
@@ -275,7 +312,7 @@ fn hand_off(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOw
     if owner.is_none() {
         store.claim_task(task)?;
     }
-    Ok(store.handoff_task(task, to)?)
+    Ok(store.handoff_moving_task(task, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still
@@ -559,8 +596,7 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     .map(Some)
 }
 
-/// This Machine's checkout of the moved repository, cloned from its origin
-/// under `repo_root` when there is none.
+/// This Machine's checkout of the moved repository.
 async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let repository = match (&moved.checkout, &moved.task) {
         (Some(checkout), _) => checkout.repository_id.clone(),
@@ -578,21 +614,33 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
         }
         (None, None) => bail!("the move names neither a checkout nor a Task"),
     };
-    if let Some(path) = store.sqlite.repository_path(&repository)? {
-        return Ok(PathBuf::from(path));
-    }
-    let checkout = moved
+    let origin = moved
         .checkout
         .as_ref()
-        .ok_or_else(|| anyhow!("repository {repository} has no checkout on this Machine"))?;
-    let name = checkout
-        .origin
+        .map(|checkout| checkout.origin.as_str());
+    checkout_of(store, &repository, origin)
+}
+
+/// This Machine's checkout of `repository`, cloned from `origin` under
+/// `repo_root` when there is none. The pre-move check clones too, so a Machine
+/// that has never seen the repository can take its Task in before anything stops.
+pub(crate) fn checkout_of(
+    store: &SharedStore,
+    repository: &RepositoryId,
+    origin: Option<&str>,
+) -> Result<PathBuf> {
+    if let Some(path) = store.sqlite.repository_path(repository)? {
+        return Ok(PathBuf::from(path));
+    }
+    let origin =
+        origin.ok_or_else(|| anyhow!("repository {repository} has no checkout on this Machine"))?;
+    let name = origin
         .trim_end_matches('/')
         .rsplit(['/', ':'])
         .next()
         .map(|name| name.trim_end_matches(".git"))
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| anyhow!("cannot name a checkout for {}", checkout.origin))?;
+        .ok_or_else(|| anyhow!("cannot name a checkout for {origin}"))?;
     let root = crate::repo::checkouts_root()?;
     let path = root.join(name);
     anyhow::ensure!(
@@ -601,13 +649,10 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
         path.display()
     );
     fs::create_dir_all(&root)?;
-    crate::git::git_stdout(
-        &root,
-        &["clone", "-q", &checkout.origin, &path.to_string_lossy()],
-    )?;
+    crate::git::git_stdout(&root, &["clone", "-q", origin, &path.to_string_lossy()])?;
     store
         .sqlite
-        .bind_repository(&path.canonicalize()?.to_string_lossy(), &repository)?;
+        .bind_repository(&path.canonicalize()?.to_string_lossy(), repository)?;
     Ok(path.canonicalize()?)
 }
 

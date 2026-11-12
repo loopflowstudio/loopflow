@@ -116,7 +116,7 @@ impl Drop for Viewing {
 
 #[derive(Debug)]
 enum Message {
-    Watch(u64, Watch),
+    Watch(u64, Box<Watch>),
     Hold(u64, Option<ViewerHold>),
     Gone(u64),
 }
@@ -159,7 +159,7 @@ impl Watcher {
             close_failure: RecordingGap::default(),
             client_failure: RecordingGap::default(),
         };
-        let _ = self.messages.send(Message::Watch(key, watch));
+        let _ = self.messages.send(Message::Watch(key, Box::new(watch)));
         let viewing = Viewing {
             key,
             messages: self.messages.clone(),
@@ -241,7 +241,7 @@ fn record(received: &mpsc::Receiver<Message>) {
         };
         let mut apply = |message| match message {
             Message::Watch(key, watch) => {
-                watches.insert(key, watch);
+                watches.insert(key, *watch);
             }
             Message::Hold(key, hold) => {
                 if let Some(watch) = watches.get_mut(&key) {

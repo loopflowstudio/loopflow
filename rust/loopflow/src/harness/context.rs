@@ -313,9 +313,14 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
         let owned = settings(Holder::Owner);
-        assert!(owned["hooks"]["Stop"].is_array(), "an owner keeps turn hooks");
+        assert!(
+            owned["hooks"]["Stop"].is_array(),
+            "an owner keeps turn hooks"
+        );
         assert!(owned.get("crossSessionInbound").is_none());
-        assert!(settings(Holder::Caller).get("crossSessionInbound").is_none());
+        assert!(settings(Holder::Caller)
+            .get("crossSessionInbound")
+            .is_none());
         assert_eq!(settings(Holder::Server)["crossSessionInbound"], "accept");
     }
 

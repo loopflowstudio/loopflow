@@ -1840,6 +1840,30 @@ mod tests {
             );
             let terminal = Client::redeem(tickets.clone(), &ticket).await;
             let (mut owned, _) = listener.accept().await.unwrap();
+            // Replaying the ticket, or presenting a phone's here, opens nothing
+            // and spends it.
+            let phone = Admission::Remote {
+                node: "phone".into(),
+                user: 1,
+            };
+            let remote =
+                tickets.issue(phone.clone(), Purpose::Terminal(Host::Owner(owner.clone())));
+            for presented in [ticket, remote.clone()] {
+                let mut refused = Client::connect_with(&clients, tickets.clone());
+                refused
+                    .send(&ClientMessage::Attach { ticket: presented })
+                    .await;
+                assert!(matches!(
+                    refused.receive().await.unwrap(),
+                    ServerMessage::Error {
+                        id: None,
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+                refused.ended().await;
+            }
+            assert!(tickets.redeem(&remote, &phone).is_none());
             let Client {
                 mut reader,
                 mut writer,

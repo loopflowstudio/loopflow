@@ -111,6 +111,28 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
   (asserts no owner), `sessions_keep_serving_when_their_lf_executable_goes`
   (resume reopens in the terminal, no new owner).
 
+## Next implement (concept review, November 11)
+
+The model holds: a launch is bare or Work, and a Holder says who listens
+for its turns. Two leftovers name the old `managed` flag instead:
+
+- One question, asked in three places. "Is this launch Work?" is
+  `transport::works` (flag or `!is_bare(row)`), `resume_session_with_env`
+  (`managed || !store.is_bare(&session)?`) and `run.rs`
+  (`work.source.is_managed()`). Make it one function beside `is_bare`
+  that transport and resume both call. Rename the `managed: bool` threaded
+  through `human_session::{open, open_without_replacing, open_waiting,
+  open_waiting_locked, resume_native_session}`, `commands::session` and
+  `util::resume_session*` (34 mentions) to `named_work`: it is only "the
+  command said `--task`/`--wave`", and the row decides the rest.
+- The hook spec's `"managed": holder.reports_turns()`
+  (`harness/context.rs`, read by `context_opencode.js` and
+  `context_pi.mjs`) is true for `Holder::Owner`, which is bare. Name the
+  key `turns`.
+
+No behavior change; the focused `harness::context::`, `ops::human_session::`
+and resume tests cover it.
+
 ## Open
 
 Repository and Wave primaries record `WorkSource::Declared` since LOO-824's
@@ -119,7 +141,11 @@ WorkSource and resume bare in the terminal; nothing migrates them.
 
 With turn hooks gone, a steer to a bare Session arrives only at its next start
 or resume, or at compaction. Should `lf session steer` / `lf task steer` say
-so at send time, or skip bare Sessions?
+so at send time, or skip bare Sessions? Jack Heart leaned toward "remove lf
+session steer and only allow lf task steer" (`questions.md`), which leaves
+Wave and repository conversations without a steer command. That is its own
+Task; this PR ships with today's delivery (next start, resume or
+compaction), which loses nothing.
 
 ## Checks
 
@@ -135,3 +161,4 @@ so at send time, or skip bare Sessions?
 - implement 3 (one decider, Pi, Codex): `cargo test --lib` `ops::human_session::` + `harness::context::` + `lf::commands::graph::` + resume — 63 passed; `pi_` — 32 passed (new `bare_pi_names_its_thread_and_resumes_it_by_that_id`); `agent::` + `harness::context::` + `harness::codex` + `lf::commands::context::` + `lf::commands::util::` — 112 passed (new `bare_codex_runs_plain_codex_and_a_held_one_keeps_its_app_server`); `--test session_launch_contract` 29/30, the failing `a_running_claude_named_onto_another_login…` passes alone (pid-count flake seen before); `documented_commands::` 4 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.
 - compress 3: `configure_hooks` returns its delivery path (no env lookup for the Codex `.thread` file; the hook's `launched` test dropped, the file's existence is the request); `delegate` returns early on `cfg!(test)`, no `#[cfg(test)]` arm or `dead_code` allows. clippy clean; `--lib` `harness::context::` 11, `lf::commands::context::` 3, `agent::session::` 9, `bare_pi_` 1, `ops::human_session::` 43, `context_block::` 12 — pass.
 - realign 3: no tests; grep confirms `bare_conversation`, `opens_bare`, `names_work`, `resumes_work`, `task_run_step` are gone and `runs_in_terminal` is private to transport; `simplification-opportunities.md` trimmed to what remains (Opportunity 1 → LOO-824, Server-only observers).
+- concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).

@@ -224,6 +224,44 @@ impl WorkSource {
     }
 }
 
+/// Who holds a launch's provider process. It decides the launch's hooks,
+/// whether it needs the Machine server and whether it takes steers, and is
+/// decided once, where the launch is configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Holder {
+    /// A bare launch: the terminal it runs in, or the caller waiting on a
+    /// headless run. It behaves as the harness alone would, with only the two
+    /// context hooks, no server and no steers.
+    #[default]
+    Caller,
+    /// A bare conversation a per-Session owner holds (a Desktop shell's
+    /// relay, a framed `lf ssh` viewer). Its hooks say when it can take a
+    /// reply, so it gets every hook and steers, without the server check.
+    Owner,
+    /// Task, Wave or repository work: every hook and steers, beside a
+    /// Machine server that must be up before the agent starts.
+    Server,
+}
+
+impl Holder {
+    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
+    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
+    pub(crate) fn of(work: bool, interactive: bool) -> Self {
+        if work {
+            Self::Server
+        } else if interactive && crate::transport::current().is_some() {
+            Self::Owner
+        } else {
+            Self::Caller
+        }
+    }
+
+    /// Whether the provider reports its turn and tool boundaries and takes steers.
+    pub(crate) fn reports_turns(self) -> bool {
+        self != Self::Caller
+    }
+}
+
 /// Which scopes' current primary conversations to list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SessionPrimary {

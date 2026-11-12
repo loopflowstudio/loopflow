@@ -2096,3 +2096,194 @@ fn retired_title_hooks_never_block_their_provider() {
     assert!(output.status.success(), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
 }
+
+/// Starts `lf` as a terminal's foreground job, as a login shell would, and
+/// returns the terminal's other end with the launch.
+#[cfg(unix)]
+fn spawn_in_terminal(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    bin: &std::path::Path,
+    args: &[&str],
+) -> (std::fs::File, std::process::Child) {
+    use std::fs;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default PTY settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned independently owned descriptors.
+    let master = unsafe { fs::File::from_raw_fd(master) };
+    // SAFETY: the fresh slave descriptor is owned only by this File.
+    let slave = unsafe { fs::File::from_raw_fd(slave) };
+    // SAFETY: fcntl only changes this fixture's own descriptor. lf must not
+    // inherit the master, or closing it here would not hang the terminal up.
+    unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
+    let mut launch = Command::new(env!("CARGO_BIN_EXE_lf"));
+    launch
+        .env_clear()
+        .args(args)
+        .current_dir(cwd)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("RUST_LOG", "off")
+        .env("HOME", home)
+        .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::from(slave.try_clone().unwrap()))
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave));
+    // SAFETY: setsid and TIOCSCTTY are async-signal-safe.
+    unsafe {
+        launch.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = launch.spawn().unwrap();
+    (master, child)
+}
+
+/// Writes a stand-in `claude` that runs `body` after answering `--version`.
+#[cfg(unix)]
+fn bare_claude(bin: &std::path::Path, body: &str) {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"2.1.0 (Claude Code)\"; exit 0; fi\n{body}"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A closed terminal hangs up a bare launch and its provider together; lf
+/// still records the provider's exit.
+#[cfg(unix)]
+#[test]
+fn a_closed_terminal_finishes_a_bare_launchs_agent() {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::time::{Duration, Instant};
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    let repo = loopflow_test_support::TestRepo::new();
+    bare_claude(
+        &bin,
+        "touch \"$LF_HOME/ready\"\nwhile :; do sleep 0.02; done\n",
+    );
+
+    let (mut master, mut child) = spawn_in_terminal(
+        home.path(),
+        repo.path(),
+        &bin,
+        &["-a", "claude", ":", "Wait for the terminal"],
+    );
+    // SAFETY: fcntl only changes this fixture's own descriptor.
+    unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
+    let mut output = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !home.path().join("ready").exists()
+        && Instant::now() < deadline
+        && child.try_wait().unwrap().is_none()
+    {
+        let mut chunk = [0; 4096];
+        if let Ok(read) = master.read(&mut chunk) {
+            output.extend_from_slice(&chunk[..read]);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        home.path().join("ready").exists(),
+        "provider never started: {}",
+        String::from_utf8_lossy(&output)
+    );
+
+    drop(master);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if child.try_wait().unwrap().is_none() {
+        // SAFETY: only this fixture's own session leader is signaled.
+        unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
+        panic!("lf outlived its closed terminal");
+    }
+
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (agents, open): (i64, i64) = db
+        .query_row(
+            "SELECT count(*), count(*) FILTER (WHERE completed_at IS NULL)
+             FROM processes WHERE kind='agent'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((agents, open), (1, 0), "agent rows (all, unfinished)");
+}
+
+/// A bare provider hung up exits lf as it would exit the shell alone: 129,
+/// whether lf started the conversation or reopened it.
+#[cfg(unix)]
+#[test]
+fn a_hung_up_bare_provider_exits_lf_with_its_own_status() {
+    use std::io::Read;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    let repo = loopflow_test_support::TestRepo::new();
+    bare_claude(&bin, "kill -HUP $$\n");
+
+    let run = |args: &[&str]| {
+        let (mut master, mut child) = spawn_in_terminal(home.path(), repo.path(), &bin, args);
+        let mut output = Vec::new();
+        // The terminal reports EIO once lf and its provider have closed it.
+        let _ = master.read_to_end(&mut output);
+        (
+            child.wait().unwrap().code(),
+            String::from_utf8_lossy(&output).into_owned(),
+        )
+    };
+    // A hang-up ends the conversation as the person meant it: the record
+    // says completed even though the shell sees the provider's status.
+    let ended = || -> (String, bool) {
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT id, completed_at IS NOT NULL FROM agent_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    let (fresh, output) = run(&["-a", "claude", ":", "Hang up"]);
+    assert_eq!(fresh, Some(129), "fresh launch: {output}");
+    let (id, completed) = ended();
+    assert!(completed, "fresh launch recorded a failure: {output}");
+    let (resumed, output) = run(&["session", "resume", &id]);
+    assert_eq!(resumed, Some(129), "resume: {output}");
+    assert!(ended().1, "resume recorded a failure: {output}");
+}

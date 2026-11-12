@@ -203,7 +203,7 @@ fn prepare_prompt(
         system_prompt,
         conversation_context,
         // The command that names the launch's Work decides this.
-        managed: false,
+        holder: crate::session::Holder::Caller,
         task_prompt,
         skill_invocation,
         output_schema: None,

@@ -27,8 +27,8 @@ export default {
       console.error(`recording gap closed (context ${gap}); lf serves context from here`);
       gap = undefined;
     };
-    // A bare headless run opens no connection: no steers, no turn end.
-    const server = spec.managed ? machineServer(delivery, (line) => console.error(line)) : undefined;
+    // A launch that reports no turns opens no connection: no steers, no turn end.
+    const server = spec.turns ? machineServer(delivery, (line) => console.error(line)) : undefined;
     // The block comes from checkout files; the boundary itself went to the server.
     const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;
     const render = (moment, callback) => JSON.parse(execFileSync(spec.executable,

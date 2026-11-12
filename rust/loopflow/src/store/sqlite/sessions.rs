@@ -1536,7 +1536,7 @@ impl SqliteStore {
     ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
         let _admission = self.lock_session_checkouts(&next)?;
         let session = next.id.clone();
-        self.with_session_resume(&session, expected, close, |tx| {
+        self.with_session_resume(&session, expected, false, close, |tx| {
             let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
             if next.task_id == previous.task_id && next.task_id.is_some() {
                 next.wave_id = previous.wave_id.clone();

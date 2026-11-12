@@ -4,8 +4,15 @@
 //! provider, not the `lf` waiting behind it.
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::{Command, ExitStatus};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+/// The provider leading the terminal while lf waits for it; 0 when none.
+static LEADER: AtomicU32 = AtomicU32::new(0);
+/// lf itself was signaled while a provider led its terminal.
+static SIGNALED: AtomicBool = AtomicBool::new(false);
 
 /// The terminal handed to a child; dropping it takes the terminal back.
 #[derive(Debug)]
@@ -55,6 +62,22 @@ pub(crate) fn hand_to(command: &mut Command) -> Option<Foreground> {
 }
 
 impl Foreground {
+    /// Name `child` as the provider a signal to lf ends, until lf takes the
+    /// terminal back.
+    pub(crate) fn lead(&self, child: u32) {
+        LEADER.store(child, Ordering::Release);
+    }
+
+    /// Whether the provider ended because its terminal or lf was signaled:
+    /// Ctrl+C, a closed terminal or a `kill`, as it would end started alone.
+    pub(crate) fn interrupted(&self, status: &ExitStatus) -> bool {
+        SIGNALED.load(Ordering::Acquire)
+            || matches!(
+                status.signal(),
+                Some(libc::SIGINT | libc::SIGHUP | libc::SIGTERM)
+            )
+    }
+
     /// A provider suspended with Ctrl+Z suspends lf with it, so the shell gets
     /// its terminal back as for the provider alone; `fg` continues both.
     /// Polled while lf waits for `child`.
@@ -76,8 +99,42 @@ impl Foreground {
 
 impl Drop for Foreground {
     fn drop(&mut self) {
+        LEADER.store(0, Ordering::Release);
         give(self.terminal.as_raw_fd(), current_group());
     }
+}
+
+/// A signal to lf while a provider leads its terminal (the shell's SIGHUP when
+/// the terminal closes, a `kill`) ends the provider, and lf's own return
+/// records that exit. Returns at once when no provider leads, otherwise only
+/// after lf has had time to finish, so the caller's interrupt exit runs only for
+/// a launch that hung.
+pub(crate) fn end_leader() {
+    let group = match libc::pid_t::try_from(LEADER.load(Ordering::Acquire)) {
+        Ok(group) if group > 0 => group,
+        _ => return,
+    };
+    SIGNALED.store(true, Ordering::Release);
+    // SAFETY: signals only the provider's own process group.
+    unsafe { libc::kill(-group, libc::SIGTERM) };
+    if !leader_cleared(Duration::from_secs(5)) {
+        // SAFETY: as above; a provider ignoring SIGTERM is killed.
+        unsafe { libc::kill(-group, libc::SIGKILL) };
+        leader_cleared(Duration::from_secs(5));
+    }
+    // lf records the exit and returns on its own thread; the process ends there.
+    std::thread::sleep(Duration::from_secs(30));
+}
+
+fn leader_cleared(within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    while LEADER.load(Ordering::Acquire) != 0 {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    true
 }
 
 fn current_group() -> libc::pid_t {

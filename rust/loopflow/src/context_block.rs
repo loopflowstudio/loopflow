@@ -246,18 +246,19 @@ impl ContextDelivery {
     }
 
     /// Each provider process receives its own saved launch context separately
-    /// from the declarations the provider asks a person to trust.
+    /// from the declarations the provider asks a person to trust. Returns the
+    /// delivery file the provider's hooks read.
     pub(crate) fn configure_hooks(
         &self,
         command: &mut std::process::Command,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<PathBuf> {
         // Provider environments outlive directory moves. Keep their launch
         // description in the Machine, where the hook's address stays valid.
         let directory = self.home.join("context-deliveries");
         let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
         self.save(&path)?;
-        command.env(CONTEXT_DELIVERY_ENV, path);
-        Ok(())
+        command.env(CONTEXT_DELIVERY_ENV, &path);
+        Ok(path)
     }
 
     /// App-server hooks inherit the server environment, not thread shell policy,
@@ -290,10 +291,14 @@ impl ContextDelivery {
     }
 
     /// The provider hooks of one launch. Every launch prints its context
-    /// block at session start and after a compaction. A managed launch
-    /// (`AgentConfig::managed`) also reports its turn and tool boundaries
-    /// to the Machine server, whose answers carry its steers and Task updates.
-    pub fn hook_settings(&self, managed: bool) -> anyhow::Result<serde_json::Value> {
+    /// block at session start and after a compaction. A launch an owner or
+    /// the Machine server holds (`Holder::reports_turns`) also reports its
+    /// turn and tool boundaries, whose answers carry its steers and Task
+    /// updates.
+    pub fn hook_settings(
+        &self,
+        holder: crate::session::Holder,
+    ) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
@@ -302,7 +307,7 @@ impl ContextDelivery {
             quote(&executable),
         );
         let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
-        if !managed {
+        if !holder.reports_turns() {
             return Ok(serde_json::json!({"SessionStart": [
                 {"matcher": "startup|resume|clear", "hooks": [context("start")]},
                 {"matcher": "compact", "hooks": [context("compact")]},
@@ -326,6 +331,13 @@ impl ContextDelivery {
             {"matcher": "compact", "hooks": [context("compact")]}
         ]}))
     }
+}
+
+/// Where a launch's start hook leaves the provider thread it started, beside
+/// the launch's delivery file. Only a bare Codex needs it, so lf creates the
+/// file for that launch alone: it names every other bare thread before launch.
+pub(crate) fn reported_thread_path(delivery: &Path) -> PathBuf {
+    delivery.with_extension("thread")
 }
 
 pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
@@ -916,7 +928,9 @@ mod tests {
         let delivery = delivery(repo.path());
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let bare = delivery.hook_settings(false).unwrap();
+        let bare = delivery
+            .hook_settings(crate::session::Holder::Caller)
+            .unwrap();
         assert_eq!(
             bare.as_object().unwrap().keys().collect::<Vec<_>>(),
             ["SessionStart"]
@@ -951,7 +965,9 @@ mod tests {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
-        let settings = delivery.hook_settings(true).unwrap();
+        let settings = delivery
+            .hook_settings(crate::session::Holder::Server)
+            .unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();

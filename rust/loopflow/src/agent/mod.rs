@@ -89,6 +89,8 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    // Before taking the hooks lock: the command's own return waits on it.
+    crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
     if let Some(hooks) = &hooks {
         for hook in hooks.iter().rev() {
@@ -191,10 +193,9 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
-    /// Whether a Task or Wave command launched this (`Cli::names_work`): it
-    /// needs the Machine server, and a headless run gets every hook. A native
-    /// terminal launch an owner holds gets every hook either way.
-    pub managed: bool,
+    /// Who holds the provider process, which decides its hooks, its server
+    /// check and its steers.
+    pub holder: crate::session::Holder,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -928,6 +929,46 @@ pub fn build_codex_thread_start_params(
     }
 
     params
+}
+
+/// A bare Codex launch's options, as plain `codex` takes them: the thread
+/// settings an app-server launch would send, the writable roots and the two
+/// context hooks. Nothing else of lf's configuration rides along.
+pub(crate) fn codex_terminal_options(launch: &AgentConfig) -> anyhow::Result<Vec<String>> {
+    let params = build_codex_thread_start_params(launch, false);
+    let mut args = Vec::new();
+    if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
+        args.extend(["--model".into(), model.into()]);
+    }
+    if let Some(sandbox) = params.get("sandbox").and_then(serde_json::Value::as_str) {
+        args.extend(["--sandbox".into(), sandbox.into()]);
+    }
+    if let Some(approval) = params
+        .get("approvalPolicy")
+        .and_then(serde_json::Value::as_str)
+    {
+        args.extend(["--ask-for-approval".into(), approval.into()]);
+    }
+    for dir in provider_writable_roots(launch) {
+        args.extend(["--add-dir".into(), dir.display().to_string()]);
+    }
+    let mut config = serde_json::Map::new();
+    for (param, key) in [
+        ("serviceTier", "service_tier"),
+        ("developerInstructions", "developer_instructions"),
+    ] {
+        if let Some(value) = params.get(param) {
+            config.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(context) = &launch.conversation_context {
+        config.insert(
+            "hooks".into(),
+            crate::harness::context::codex_hooks(context, None, launch.holder)?,
+        );
+    }
+    args.extend(crate::harness::codex::config_overrides(&config.into())?);
+    Ok(args)
 }
 
 /// Extra workspace roots agents need for Git worktree metadata.
@@ -1755,7 +1796,7 @@ fn _run_agent_once(
     let hooks = crate::harness::context::native_args(
         &harness,
         launch.conversation_context.as_ref(),
-        launch.managed,
+        launch.holder,
     )
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let program = &command.program;
@@ -1770,7 +1811,7 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(
-        session_environment(launch, process.context_file.as_deref(), true)
+        session_environment(launch, process.context_file.as_deref())
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
     );
     if let Some(context) = launch
@@ -1880,7 +1921,7 @@ fn _run_agent_once(
         admitted_runtime,
         activation,
         title,
-        launch.managed,
+        launch.holder,
     );
     result.map(|result| AgentAttempt::Finished {
         result,
@@ -1894,10 +1935,10 @@ fn spawn_agent_child(
     cmd: Command,
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
-    managed: bool,
+    holder: crate::session::Holder,
 ) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
     let child = runtime
-        .spawn_native_agent(cmd, managed)
+        .spawn_native_agent(cmd, holder)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
@@ -1909,13 +1950,17 @@ fn run_interactive(
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
     mut title: Option<crate::terminal_title::TerminalTitle>,
-    managed: bool,
+    holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
+    let program = cmd.get_program().to_string_lossy().into_owned();
     let foreground = crate::os_process::foreground::hand_to(&mut cmd);
-    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, managed)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
     let pid = child.id();
     let _pid_guard = ChildPidGuard::new(pid);
+    if let Some(foreground) = &foreground {
+        foreground.lead(pid);
+    }
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
@@ -1941,8 +1986,21 @@ fn run_interactive(
             format_timeout(timeout)
         )));
     }
+    let exit_code = if holder == crate::session::Holder::Caller {
+        crate::lf::commands::util::SessionCommandOutcome {
+            status,
+            interrupted: foreground
+                .as_ref()
+                .is_some_and(|foreground| foreground.interrupted(&status)),
+            moved: None,
+        }
+        .bare_exit_code(&program)
+        .into()
+    } else {
+        status.code().unwrap_or(1)
+    };
     Ok(AgentProcessResult {
-        exit_code: status.code().unwrap_or(1),
+        exit_code,
         stdout: String::new(),
         stderr: String::new(),
         agent_session: None,

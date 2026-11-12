@@ -875,14 +875,7 @@ impl RunningGraph<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
-        command.env(
-            crate::journal::GRAPH_STEP_ENV,
-            if self.task_run {
-                crate::journal::TASK_RUN_STEP
-            } else {
-                "1"
-            },
-        );
+        command.env(crate::journal::GRAPH_STEP_ENV, "1");
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
@@ -1099,6 +1092,11 @@ impl SkillExecutor for &RunningGraph<'_> {
         )?;
         step_cli.skill_input = Some(input.path().to_path_buf());
         let mut args = step_cli.step_args();
+        // A Task run's step is the Task's own conversation, not a bare `lf`
+        // in its checkout, so it names the Task.
+        if let Some(task) = self.task.as_ref().filter(|_| self.task_run) {
+            args.extend(["--task".to_owned(), task.to_string()]);
+        }
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {
             args.push(message);

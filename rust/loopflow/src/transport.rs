@@ -285,37 +285,58 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
 /// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
 /// launches without a terminal on stdin, which need the owner's PTY, and a
 /// Desktop surface waiting for a relay to acknowledge it.
-pub fn runs_in_terminal(batch: bool) -> bool {
+fn runs_in_terminal(batch: bool) -> bool {
     !batch
-        && current().is_none()
         && io::stdin().is_terminal()
         && std::env::var_os("LF_SERVER_STATUS").is_none()
         && std::env::var_os(STREAM_ENV).is_none()
 }
 
-/// Delegate before capture admission or provider effects. A missing startup
-/// acknowledgement is uncertainty, never permission to launch again.
-///
-/// `managed` says the command is a Task or Wave command (`Cli::names_work`)
-/// or starts a Task's Graph; its conversation is held for the Machine server
-/// when a terminal views it.
-pub fn delegate_current(batch: bool, managed: bool) -> Result<bool> {
-    let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, managed)
+/// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
+/// keeps the launch Work.
+fn works(named_work: bool, session: Option<&str>) -> bool {
+    let Some(session) = session else {
+        return named_work;
+    };
+    crate::journal::process_ledger()
+        .and_then(|store| store.is_work(named_work, store.session(session)?.as_ref()))
+        .unwrap_or(true)
 }
 
+/// Delegate before capture admission or provider effects. A missing startup
+/// acknowledgement is uncertainty, never permission to launch again. Returns
+/// false when this process runs the launch itself: inside its owner, or as a
+/// bare launch in its own terminal.
+///
+/// `named_work` says the command names its Task or Wave or starts a Task's
+/// Graph; its conversation is held for the Machine server when a terminal
+/// views it.
+pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
+    let argv: Vec<String> = std::env::args().collect();
+    delegate(batch, None, None, argv, true, named_work)
+}
+
+/// Delegate the reopening of a recorded Session; `named_work` as for
+/// `delegate_current`.
 pub(crate) fn delegate_session(
-    batch: bool,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     replace: bool,
+    named_work: bool,
 ) -> Result<bool> {
     let mut argv: Vec<String> = std::env::args().collect();
     if json_session.is_some() {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(batch, json_session, preview_session, argv, replace, false)
+    delegate(
+        false,
+        json_session,
+        preview_session,
+        argv,
+        replace,
+        named_work,
+    )
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
@@ -331,102 +352,64 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
     )
 }
 
+/// The one place a launch's host is chosen. A Work launch a terminal views
+/// runs in a terminal the Machine server's holder keeps, so it outlives every
+/// lf process that views it. A bare launch at a terminal runs here, as the
+/// terminal's foreground program. Piped, `-b` and Desktop shell launches keep
+/// their own owner.
 fn delegate(
     batch: bool,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
-    managed: bool,
+    named_work: bool,
 ) -> Result<bool> {
-    if current().is_some() {
+    // Library tests do not execute the CLI entry point.
+    if cfg!(test) || current().is_some() {
         return Ok(false);
     }
-    // Library tests do not execute the CLI entry point.
-    #[cfg(test)]
-    {
-        let _ = (
-            batch,
-            json_session,
-            preview_session,
-            &mut argv,
-            replace,
-            managed,
-        );
-        Ok(false)
+    let work = works(named_work, preview_session.or(json_session));
+    if !work && runs_in_terminal(batch) {
+        return Ok(false);
     }
-    #[cfg(not(test))]
-    {
-        crate::journal::admit_process(
-            &std::env::current_dir()?,
-            &std::env::args().collect::<Vec<_>>(),
-        );
-        crate::journal::current_lf_process_id()
-            .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
-        argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-        // `lf -b … > file` typed at a terminal writes only the answer, never a
-        // relayed screen; an interactive run keeps the terminal it reads from.
-        let terminal = std::env::var_os(STREAM_ENV).is_some()
-            || io::stdout().is_terminal()
-            || (!batch && io::stdin().is_terminal());
-        let preview = if std::env::var_os(STREAM_ENV).is_some() {
-            if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
-                io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
-            }
-            None
-        } else {
-            ViewerTerminal::preview(preview_session)?
-        };
-        let session = preview_session.map(LfSessionId::from);
-        let cwd = std::env::current_dir()?;
-        let owner = if held(
-            terminal && !batch,
-            managed,
-            preview_session.or(json_session),
-        ) {
-            Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
-        } else {
-            Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
-        };
-        relay_with_preview(
-            &owner,
-            session.as_ref(),
-            None,
-            json_session,
-            preview,
-            replace,
-        )?;
-        Ok(true)
-    }
-}
-
-/// Whether a launch's agent runs in a terminal a holder keeps for the Machine
-/// server, so that it outlives every lf process that views it. A held launch
-/// is a managed one with a terminal viewing it: a Task or Wave command or a
-/// Task run (`managed`, the rule hooks follow), or the reopening of a
-/// conversation recorded as Task, Wave or repository work
-/// (`WorkSource::is_managed`), wherever it is opened. A bare launch, one
-/// attributed only by its checkout, a piped or `-b` execution and a Desktop
-/// Task shell do not use the holder. Bare terminal launches run directly;
-/// piped, headless and Desktop shell launches keep their own owner.
-#[cfg_attr(test, allow(dead_code))]
-fn held(viewed: bool, managed: bool, session: Option<&str>) -> bool {
-    if !viewed {
-        return false;
-    }
-    if managed {
-        return true;
-    }
-    let Some(session) = session else {
-        return false;
+    crate::journal::admit_process(
+        &std::env::current_dir()?,
+        &std::env::args().collect::<Vec<_>>(),
+    );
+    crate::journal::current_lf_process_id().context(
+        "Execution requires an admitted invocation; check the process ledger and caller provenance",
+    )?;
+    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    // `lf -b … > file` typed at a terminal writes only the answer, never a
+    // relayed screen; an interactive run keeps the terminal it reads from.
+    let terminal = std::env::var_os(STREAM_ENV).is_some()
+        || io::stdout().is_terminal()
+        || (!batch && io::stdin().is_terminal());
+    let preview = if std::env::var_os(STREAM_ENV).is_some() {
+        if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
+            io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
+        }
+        None
+    } else {
+        ViewerTerminal::preview(preview_session)?
     };
-    // An unreadable store leaves the launch as it was before holders.
-    crate::journal::process_ledger()
-        .and_then(|store| store.session(session))
-        .ok()
-        .flatten()
-        .and_then(|session| session.work_source)
-        .is_some_and(crate::session::WorkSource::is_managed)
+    let session = preview_session.map(LfSessionId::from);
+    let cwd = std::env::current_dir()?;
+    let owner = if terminal && !batch && work {
+        Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
+    } else {
+        Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
+    };
+    relay_with_preview(
+        &owner,
+        session.as_ref(),
+        None,
+        json_session,
+        preview,
+        replace,
+    )?;
+    Ok(true)
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine

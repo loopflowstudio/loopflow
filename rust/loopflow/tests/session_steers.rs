@@ -679,7 +679,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         "min_revision":loopflow::server::wire::MIN_REVISION,
         "platform":std::env::consts::OS, "name":"lf opencode plugin", "version":"fixture"});
     fs::write(&plugin, format!("const spec = {};\nconst delivery = {};\n{}\n{}",
-        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","managed":true,"server":plugin_server}),
+        serde_json::json!({"executable":env!("CARGO_BIN_EXE_lf"),"delivery":delivery,"instructions":"","turns":true,"server":plugin_server}),
         serde_json::to_string(delivery_path).unwrap(),
         include_str!("../src/harness/server_connection.js"),
         include_str!("../src/harness/context_opencode.js"))).unwrap();

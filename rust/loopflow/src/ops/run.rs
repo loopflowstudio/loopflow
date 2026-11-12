@@ -300,10 +300,6 @@ pub async fn resolve_execution_binding(
     } else {
         cwd.to_path_buf()
     };
-    // A Task's run starts its steps in the Task's checkout: the run named the Task.
-    if checkout && crate::journal::task_run_step() {
-        binding.source = crate::session::WorkSource::Declared;
-    }
     Ok(Some(binding))
 }
 

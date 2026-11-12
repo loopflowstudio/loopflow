@@ -2085,7 +2085,7 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
     for valid in [true, false] {
         let fixture = Fixture::new();
         let path = fixture.waiting_provider();
-        // A bare launch keeps its own owner, from a Desktop pane too.
+        // A bare launch runs directly, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
         command.env("PATH", path).env("LF_SERVER", "1");
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
@@ -2097,7 +2097,17 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
             "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.parent_lf_process_id WHERE s.id=?1",
             [&session], |row| row.get(0),
         ).unwrap();
+        // A bare launch runs in its terminal: no owner serves it.
+        let owner: Option<String> = fixture
+            .sql()
+            .query_row(
+                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
         terminal.stop();
+        assert_eq!(owner, None);
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
 }
@@ -2898,137 +2908,6 @@ fn returned_session(output: &Output) -> Value {
         .find("{\n")
         .unwrap_or_else(|| panic!("Session JSON missing: {output:?}"));
     serde_json::from_str(text[start..].trim()).unwrap()
-}
-
-#[test]
-fn prepared_start_and_take_back_keep_one_thread_with_or_without_a_session() {
-    for existing in [false, true] {
-        let fixture = Fixture::new();
-        let path = fixture.provider(
-            r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
-read -r answer < /dev/tty
-printf '%s' "$answer" > "$HOME/answer"
-"#,
-        );
-        let prepare = |args: &[&str]| -> Value {
-            let result = fixture.command(args).env("PATH", &path).output().unwrap();
-            assert!(result.status.success(), "{result:?}");
-            serde_json::from_slice(&result.stdout).unwrap()
-        };
-        let before = existing.then(|| prepare(&["-a", "claude", "resume", "--prepare", "--json"]));
-        let mut args = vec![
-            "-a",
-            "claude",
-            "resume",
-            "--start-if-free",
-            "--prepare",
-            "--json",
-        ];
-        if let Some(before) = &before {
-            args.push(before["id"].as_str().unwrap());
-        }
-        let prepared = prepare(&args);
-        let session = prepared["id"].as_str().unwrap();
-        if let Some(before) = &before {
-            assert_eq!(before["id"], session);
-        }
-        // A repository conversation recorded before it was managed stays bare,
-        // with an owner of its own: Start and Take back are that owner's.
-        fixture
-            .sql()
-            .execute(
-                "UPDATE agent_sessions SET work_source=NULL WHERE id=?1",
-                [session],
-            )
-            .unwrap();
-        assert!(!fixture.home.path().join("launches").exists());
-        assert!(prepared["open_argv"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("--start-if-free")));
-
-        // Execute exactly what preparation returned, through delegation and relay.
-        let mut command = fixture.prepared_command(&prepared);
-        command.env("PATH", &path);
-        let mut first = Terminal::spawn(command);
-        let launched = fixture.wait_file("launches");
-        let owner = fixture.owner_of(session);
-        fixture.wait_controlled(&owner);
-        let capture: i64 = fixture
-            .sql()
-            .query_row(
-                "SELECT current_capture FROM agent_sessions WHERE id=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .unwrap();
-
-        // This prepared Start predates the holder. It may not replay or replace it.
-        let refused = fixture
-            .prepared_command(&prepared)
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(!refused.status.success(), "{refused:?}");
-        assert!(String::from_utf8_lossy(&refused.stderr).contains("Take back"));
-        assert_eq!(fixture.wait_file("launches"), launched);
-        assert!(!fixture.home.path().join("answer").exists());
-
-        // Explicit Take back alone carries ordinary CLI resume authority.
-        let takeover = prepare(&["session", "resume", session, "--prepare", "--json"]);
-        assert!(!takeover["open_argv"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("--start-if-free")));
-        let mut next = fixture
-            .prepared_command(&takeover)
-            .env("PATH", &path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let departed = loop {
-            if let Some(status) = first.child.try_wait().unwrap() {
-                break status;
-            }
-            assert!(Instant::now() < deadline, "viewer did not depart");
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        assert!(departed.success(), "{departed:?}");
-        next.stdin
-            .take()
-            .unwrap()
-            .write_all(b"taken-back\n")
-            .unwrap();
-        let result = wait_for_viewer(next, Duration::from_secs(30));
-        assert!(result.status.success(), "{result:?}");
-        assert_eq!(fixture.wait_file("answer"), "taken-back");
-        assert_eq!(fixture.wait_file("launches"), launched);
-        assert_eq!(
-            fixture
-                .sql()
-                .query_row(
-                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
-                    [session],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap(),
-            capture
-        );
-        assert_eq!(
-            fixture
-                .sql()
-                .query_row("SELECT count(*) FROM agent_sessions", [], |r| r
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        fixture.ends(&owner);
-    }
 }
 
 #[test]
@@ -4146,8 +4025,6 @@ fn sessions_keep_serving_when_their_lf_executable_goes() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == sessions[2],
         "reopened without history: {line}"
     );
-    let reopened = fixture.owner_of(&sessions[2]);
-    assert_ne!(reopened, owners[2]);
     assert!(
         !fixture.running(&owners[2]),
         "resume left the superseded owner"
@@ -4157,7 +4034,7 @@ fn sessions_keep_serving_when_their_lf_executable_goes() {
         assert!(fixture.running(owner), "resume of another Session ended it");
     }
     terminal.stop();
-    for owner in owners[..2].iter().chain([&reopened]) {
+    for owner in &owners[..2] {
         fixture.stop(owner);
     }
     // No viewer of an untouched owner was ever told to move.

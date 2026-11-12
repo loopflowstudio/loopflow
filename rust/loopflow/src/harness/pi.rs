@@ -1,7 +1,7 @@
 //! Pi 1.3 RPC transport. Pi owns models, credentials and its JSONL conversation.
 use std::collections::HashMap;
 use std::io::BufRead;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -70,14 +70,15 @@ pub struct PiHarness {
     seed: Option<String>,
 }
 
-/// Pi accepts missing paths as new sessions. Validate retained files before launch.
-pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<()> {
-    let path = Path::new(token.as_str());
+/// Pi accepts missing paths as new sessions. Validate retained files before
+/// launch, and return the file to pass as `--session`.
+pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<PathBuf> {
+    let path = conversation_file(token);
     anyhow::ensure!(
         path.is_absolute() && path.is_file(),
         "Pi conversation file is missing: {token}; restore it before resuming"
     );
-    let file = std::fs::File::open(path)?;
+    let file = std::fs::File::open(&path)?;
     let line = std::io::BufReader::new(file)
         .lines()
         .next()
@@ -88,7 +89,50 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<()> {
         header["type"] == "session" && header["id"].as_str().is_some(),
         "Invalid Pi conversation file: {token}"
     );
-    Ok(())
+    Ok(path)
+}
+
+/// Pi arguments that reopen a recorded thread. A bare launch's id with no file
+/// yet never got a reply, so Pi starts it fresh under that id, as it would
+/// alone; a held launch's recorded file must still exist.
+pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
+    // An unfound bare id stays the relative token.
+    if conversation_file(token).is_relative() {
+        return Ok(["--session-id".into(), token.to_string()]);
+    }
+    Ok([
+        "--session".into(),
+        validate_resume(token)?.display().to_string(),
+    ])
+}
+
+/// The file holding a recorded Pi thread. A held launch records the file Pi
+/// reports; a bare launch records the `--session-id` lf gave it, which Pi
+/// keeps as `<agent dir>/sessions/<cwd>/<time>_<id>.jsonl`.
+pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
+    let path = Path::new(token.as_str());
+    if path.is_absolute() {
+        return path.to_owned();
+    }
+    let agent_dir = std::env::var_os("PI_CODING_AGENT_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".pi").join("agent")));
+    let suffix = format!("_{token}.jsonl");
+    agent_dir
+        .and_then(|dir| std::fs::read_dir(dir.join("sessions")).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|project| std::fs::read_dir(project.path()).ok())
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|file| {
+            file.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&suffix))
+        })
+        .unwrap_or_else(|| path.to_owned())
 }
 
 pub(crate) fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
@@ -183,21 +227,24 @@ impl PiHarness {
 
     async fn start_process(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = self.owner()?;
-        if let Some(token) = self.session.as_ref().or(config.resume_token.as_ref()) {
-            validate_resume(token)?;
-        }
+        let resumed = self
+            .session
+            .as_ref()
+            .or(config.resume_token.as_ref())
+            .map(validate_resume)
+            .transpose()?;
         let context = crate::agent::write_system_prompt_file(config, "pi")?;
         let mut command = Command::new("pi");
         command
             .args(["--mode", "rpc"])
             .args(options(config, context.as_deref())?);
-        if let Some(token) = self.session.as_ref().or(config.resume_token.as_ref()) {
-            command.args(["--session", token.as_str()]);
+        if let Some(file) = &resumed {
+            command.arg("--session").arg(file);
         }
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
-            config.managed,
+            config.holder,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
@@ -211,7 +258,7 @@ impl PiHarness {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner, config.managed)
+        let mut child = super::agent_process::spawn(command, None, &owner, config.holder)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
         let (store, session, attachment) = owner;
         self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(

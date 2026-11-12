@@ -43,10 +43,10 @@ async function guardBashTools(pi, ctx) {
 }
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
-// Every launch gets the bash guard and the context block. A managed launch
-// asks the Machine server at each event it reports, one connection per
-// boundary; the answer may carry steers. A bare headless run (`spec.managed` false)
-// opens none, asks for no steers and reports no turn end.
+// Every launch gets the bash guard and the context block. A launch that reports
+// turns (`spec.turns`) asks the Machine server at each event, one connection
+// per boundary; the answer may carry steers. One that doesn't opens none, asks
+// for no steers and reports no turn end.
 export default function (pi) {
   let turn;
   let started = false;
@@ -78,7 +78,7 @@ export default function (pi) {
     log(`recording gap closed (${gap}); lf records from here`);
     gap = undefined;
   };
-  const server = spec.managed && process.env.LF_CONTEXT_DELIVERY
+  const server = spec.turns && process.env.LF_CONTEXT_DELIVERY
     ? machineServer(process.env.LF_CONTEXT_DELIVERY, log) : undefined;
   // The block comes from checkout files; the boundary itself went to the server.
   const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;

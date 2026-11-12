@@ -47,7 +47,10 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
         })
     });
     built.agent_config.holder = crate::session::Holder::of(
-        built.work.as_ref().is_some_and(|work| work.source.is_managed()),
+        built
+            .work
+            .as_ref()
+            .is_some_and(|work| work.source.is_managed()),
         !cli.batch,
     );
 
@@ -681,7 +684,8 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         // Claude and a bare Pi take the thread id lf gives them; a held Pi
         // reports its file through its extension.
         let names_thread = built.harness == "claude"
-            || (built.harness == "pi" && built.agent_config.holder == crate::session::Holder::Caller);
+            || (built.harness == "pi"
+                && built.agent_config.holder == crate::session::Holder::Caller);
         let agent_session: Option<crate::id::AgentSessionId> = if names_thread {
             let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key

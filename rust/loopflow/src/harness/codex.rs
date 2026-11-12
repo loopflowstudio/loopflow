@@ -98,7 +98,7 @@ async fn read_inherited_config(
 }
 
 /// `-c key=value` pairs for dotted config keys; Codex parses each value as TOML.
-fn config_overrides(config: &Value) -> Result<Vec<String>> {
+pub(crate) fn config_overrides(config: &Value) -> Result<Vec<String>> {
     let Value::Object(entries) = config else {
         anyhow::bail!("Codex configuration is not a table");
     };

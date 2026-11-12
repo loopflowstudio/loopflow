@@ -252,6 +252,8 @@ pub fn emit_block(
     if input.get("agent_id").is_some_and(|id| !id.is_null()) {
         return Ok(());
     }
+    let launched = delivery.is_none()
+        && std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).is_some();
     let (path, delivery) = load_delivery(delivery, &input)?;
     #[cfg(unix)]
     if moment == ContextMoment::TaskUpdates {
@@ -285,6 +287,18 @@ pub fn emit_block(
             );
         }
         return crate::harness::claude_updates::watch(&delivery.home, &input);
+    }
+    // A launch's own delivery file (not a native binding) keeps the thread
+    // its provider last started; it opens no store, and a failed write only
+    // leaves the conversation unresumable.
+    if moment == ContextMoment::Start && launched {
+        // lf asks only a bare Codex launch for its thread.
+        let reported = crate::context_block::reported_thread_path(&path);
+        if let (Some(thread), true) = (input["session_id"].as_str(), reported.exists()) {
+            if let Err(error) = std::fs::write(&reported, thread) {
+                tracing::warn!(%error, "cannot keep the provider's thread for resume");
+            }
+        }
     }
     let boundary = match moment {
         ContextMoment::Start => BoundaryMoment::Start,

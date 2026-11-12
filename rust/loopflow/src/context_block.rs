@@ -319,6 +319,13 @@ pub(crate) fn follow_codex_session(home: &Path, from: &str, to: &str) -> anyhow:
     serde_json::from_slice::<ContextDelivery>(&bytes)?.bind_codex_session(to)
 }
 
+/// Where a launch's start hook leaves the provider thread it started, beside
+/// the launch's delivery file. Only a bare Codex needs it, so lf creates the
+/// file for that launch alone: it names every other bare thread before launch.
+pub(crate) fn reported_thread_path(delivery: &Path) -> PathBuf {
+    delivery.with_extension("thread")
+}
+
 pub(crate) fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
     // Native IDs are opaque; never interpret one as a filesystem path.
     home.join("context-deliveries")

@@ -504,7 +504,7 @@ fn run_native_session(
             .or_else(super::open::host_placement)
             .as_deref(),
     )?;
-    if command.program == "codex" && command.remote.is_none() {
+    if command.program == "codex" && command.launch.is_some() {
         return run_codex_native(
             command,
             environment,
@@ -667,6 +667,17 @@ fn run_native_session(
             }
         }
     }
+    // A bare Codex names its thread only to its start hook.
+    let reported_thread = (command.program == "codex" && agent_session.is_none())
+        .then(|| {
+            process
+                .get_envs()
+                .find(|(name, _)| *name == crate::context_block::CONTEXT_DELIVERY_ENV)
+                .and_then(|(_, delivery)| delivery)
+                .map(|delivery| crate::context_block::reported_thread_path(Path::new(delivery)))
+        })
+        .flatten()
+        .filter(|path| std::fs::write(path, "").is_ok());
     let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
         Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.holder),
@@ -724,6 +735,11 @@ fn run_native_session(
         tracing::warn!(%error, "cannot read this launch's Session attachment");
         false
     });
+    if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
+        if let Err(error) = record_reported_thread(path, capture_dir, account.clone()) {
+            tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
+        }
+    }
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir), false) = (&account_route, capture_dir.as_deref(), lost)
     {
@@ -739,6 +755,23 @@ fn run_native_session(
         interrupted: interrupted || lost,
         moved,
     })
+}
+
+/// Record the thread a bare launch's start hook reported as the conversation
+/// `lf resume` reopens.
+fn record_reported_thread(
+    path: &Path,
+    capture_dir: &Path,
+    account: Option<crate::store::ProviderAccountId>,
+) -> Result<()> {
+    let thread = std::fs::read_to_string(path)?;
+    let _ = std::fs::remove_file(path);
+    crate::session_record::write_provider_session(
+        capture_dir,
+        &AgentSessionId::from(thread.trim()),
+        account,
+    )?;
+    Ok(())
 }
 
 fn observe_client(

@@ -207,6 +207,12 @@ coverage; this source path does not establish configured resume acceptance.
 
 ## Connect and transfer attachment
 
+A bare Codex launch is plain `codex [OPTIONS] -- <prompt>` (`codex resume -- <thread>
+<prompt>` to reopen) in the calling terminal, with lf's instructions, writable
+roots and two context hooks as options: no app-server, `--remote` client or
+observer. Its start hook leaves the thread it started beside the launch's delivery
+file, and lf records it when Codex exits. What follows is a held Codex Session.
+
 The Codex terminal talks to its app-server directly, on the private Unix WebSocket
 the AgentProcess opened; lf carries none of its bytes. lf's instructions, hooks,
 shell policy and writable roots are `-c` overrides on that private `codex app-server`,

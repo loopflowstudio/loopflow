@@ -929,6 +929,46 @@ pub fn build_codex_thread_start_params(
     params
 }
 
+/// A bare Codex launch's options, as plain `codex` takes them: the thread
+/// settings an app-server launch would send, the writable roots and the two
+/// context hooks. Nothing else of lf's configuration rides along.
+pub(crate) fn codex_terminal_options(launch: &AgentConfig) -> anyhow::Result<Vec<String>> {
+    let params = build_codex_thread_start_params(launch, false);
+    let mut args = Vec::new();
+    if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
+        args.extend(["--model".into(), model.into()]);
+    }
+    if let Some(sandbox) = params.get("sandbox").and_then(serde_json::Value::as_str) {
+        args.extend(["--sandbox".into(), sandbox.into()]);
+    }
+    if let Some(approval) = params
+        .get("approvalPolicy")
+        .and_then(serde_json::Value::as_str)
+    {
+        args.extend(["--ask-for-approval".into(), approval.into()]);
+    }
+    for dir in provider_writable_roots(launch) {
+        args.extend(["--add-dir".into(), dir.display().to_string()]);
+    }
+    let mut config = serde_json::Map::new();
+    for (param, key) in [
+        ("serviceTier", "service_tier"),
+        ("developerInstructions", "developer_instructions"),
+    ] {
+        if let Some(value) = params.get(param) {
+            config.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(context) = &launch.conversation_context {
+        config.insert(
+            "hooks".into(),
+            crate::harness::context::codex_hooks(context, None, launch.holder)?,
+        );
+    }
+    args.extend(crate::harness::codex::config_overrides(&config.into())?);
+    Ok(args)
+}
+
 /// Extra workspace roots agents need for Git worktree metadata.
 pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
     let Ok(main_repo) = crate::git::worktrees::main_repo_root(cwd) else {

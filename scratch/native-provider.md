@@ -28,8 +28,8 @@ commit. LOO-824's scratch (`holder.md`, `explore.html`, `concept-review.html`,
 main ← LOO-823 (#1877) ← LOO-824 (#1887) ← this branch. LOO-821 (#1879)
 merged November 11 and is in this branch. LOO-823's launch replaced this
 branch's first cut (`ForegroundAgent`, `on_interrupt` are gone): a bare
-interactive terminal launch (`transport::runs_in_terminal`, `bin/lf.rs`
-`bare_conversation`) runs in the calling process and
+interactive terminal launch (`transport::delegate` declines to delegate)
+runs in the calling process and
 `os_process::foreground::hand_to` makes the provider the terminal's
 foreground process-group leader. Headless, JSON and framed launches keep
 their owner: `-b` runs and Graph steps rely on it to outlive their caller
@@ -58,41 +58,36 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
   lifetime, which `batch` carries; `Owner` stays while bare Desktop-shell
   and framed viewers keep owners; `Server` carries no scope because a
   `--task` launch has no primary Session to name.
+- One decider (e01693a21): `transport::delegate` chooses holder, owner or
+  this terminal from `managed || !is_bare(row)`. Task run steps carry
+  `--task`, so a launch's `WorkSource` decides its Holder. Deleted:
+  `Cli::names_work`, `resumes_work`, `journal::task_run_step`,
+  `bare_conversation`, `opens_bare`; `runs_in_terminal` is private to
+  transport. Bare Graphs at a terminal now run there (item 5).
+- Bare Pi (f69514edf): `--session-id <minted id>`; resume and the
+  transcript reader resolve `*_<id>.jsonl` under `PI_CODING_AGENT_DIR`
+  (default `~/.pi/agent`) and still refuse a missing file.
+- Bare Codex (`Holder::Caller`): `codex [OPTIONS] -- <prompt>` /
+  `codex resume -- <id> <prompt>`, options from
+  `agent::codex_terminal_options`; no app-server, `open_thread`,
+  `--remote` or `__codex-observe`. The start hook writes `session_id` to
+  `<delivery>.thread` (created only for this launch); lf records it at
+  exit through `write_provider_session`.
+- Item 4: server-first's "Every view types" row now names Desktop's relay
+  handshake among what it removes.
 
 ## Remaining
 
-1. Pi: bare Pi (`Caller`) now records no thread: `context_pi.mjs` reports
-   `sessionFile` only through the server boundary, which a bare launch
-   doesn't open, so a bare Pi Session can't be resumed. Launch bare
-   interactive Pi with `--session-id <minted id>` (probe in
-   `questions.md`); the thread becomes the id, resolved to `*_<id>.jsonl`
-   by LOO-822's reader.
-2. Bare Codex drops `__codex-observe`. Jack Heart, asked whether bare Codex
-   should keep starting it: "no they shoudlnt". It sits in its own setsid
-   session, outlives the terminal and writes turns live. Bare Codex launches
-   like Claude: no lf app-server, no `open_thread`, no observer; lf runs
-   `codex [OPTIONS] <prompt>` (resume: `codex resume <id> <prompt>`, both on
-   0.167.1), so the first turn is argv. Jack Heart: "why cant we do
-   something more similar to what we do with claude or any other provider".
-   Codex has no `--session-id`, so the thread id comes from the start
-   context hook's `session_id` (unverified) or the rollout at exit. Managed
-   Codex follows LOO-826's server registration.
-3. One decider. Still asked in several places: `bare_conversation`
-   (`bin/lf.rs`), `opens_bare` (`human_session.rs`), `runs_in_terminal` as a
-   decider, `Cli::names_work`, `resumes_work`, `journal::task_run_step`.
-   Asked whether `Holder` and bare Codex fold into LOO-820, Jack Heart:
-   "fold it in here". Delete them so `Holder` is decided once, where the
-   Session id is known, and delegation reads it. Calls on
-   `simplification-opportunities.md`'s open choices (reversible): headless
-   `--task` runs get every hook; a `Caller` launch on non-tty stdin runs on
-   the caller's pipes, no owner PTY.
-4. Desktop pane opening a bare Session still waits for the owner relay
-   handshake (`LF_SERVER_STATUS`, "Opening… Input paused"). It stays "for
-   now ... until server-first's Desktop pieces replace the handshake"; name
-   the `docs/dev/server-first.md` row that removes it.
-5. Bare Graph targets (`lf code`, `lf graph …`) still keep an owner. Call,
-   reversible: an interactive step of a bare Graph goes direct like a bare
-   skill (closing the terminal ends it); headless steps keep their owner.
+- Bare Codex has no end-to-end fixture of the hook → thread → `lf resume`
+  path; unit tests cover the argv and Pi resolution only. Codex 0.167.1's
+  hook input has `session_id` (strings in the binary), not run live.
+- Item 5 by construction: `transport::delegate` sends any bare execution at a
+  terminal direct, Graphs included; a bare Graph's headless steps run `-b`
+  and keep owners. Not exercised by a test.
+- Owner-held bare Codex (Desktop shell) still uses the app-server; it goes
+  direct when the "Every view types" row removes the Desktop handshake.
+- A bare Codex launch with no `conversation_context` installs no hooks, so
+  it records no thread; reading the rollout at exit would cover it.
 
 ## LOO-823 review, moved here (Jack Heart, November 11, "let 820 own it")
 
@@ -137,3 +132,4 @@ so at send time, or skip bare Sessions?
 - compress 2: `opens_bare` and `runs_in_its_terminal` share `SqliteStore::is_bare` (a pre-LOO-824 primary is no longer "beside"); probes take `Holder`. `cargo test --lib` resume + `harness::context::` + `ops::human_session::` — 57 passed; clippy clean.
 - compress: `cargo build -p loopflow --bin lf` — clean; `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed.
 - Holder: `cargo test --lib` `harness::context::` 11, `context_block::` 12, `harness::agent_process::` 19 (fixture now a Task's Session: a bare one resumes beside its stale attachment), `session_record::capture_tests::` 26, `ops::human_session::` 43 — pass; `--test integration session_steers::` 9 pass; `--test session_launch_contract` 29/30 twice, a different fixture each time (server-start timeout, pid count) at load 25, each passes alone — gate reruns; clippy, fmt, `documented_commands::` clean.
+- implement 3 (one decider, Pi, Codex): `cargo test --lib` `ops::human_session::` + `harness::context::` + `lf::commands::graph::` + resume — 63 passed; `pi_` — 32 passed (new `bare_pi_names_its_thread_and_resumes_it_by_that_id`); `agent::` + `harness::context::` + `harness::codex` + `lf::commands::context::` + `lf::commands::util::` — 112 passed (new `bare_codex_runs_plain_codex_and_a_held_one_keeps_its_app_server`); `--test session_launch_contract` 29/30, the failing `a_running_claude_named_onto_another_login…` passes alone (pid-count flake seen before); `documented_commands::` 4 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.

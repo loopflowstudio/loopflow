@@ -50,6 +50,11 @@ Its choices and reversible assumptions are in the parent branch,
 
 ## Assumptions, LOO-820, reversible
 
+- `Holder` is `{ Caller, Owner, Server }`, not the plan's
+  `{ Terminal, Server(PrimaryScope), Run }`: see `native-provider.md`
+  ("Holder, built"). A headless `-b` resume keeps its old rule: only the
+  command's `--task`/`--wave` makes it `Server`, not the row's WorkSource.
+
 - A framed remote viewer (`lf ssh`, `LF_VIEWER_STREAM`) keeps an owner for a
   bare launch; direct output would be unframed on its stream.
 - Superseded on sync: LOO-823 gives the provider its own foreground process

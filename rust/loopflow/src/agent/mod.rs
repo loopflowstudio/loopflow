@@ -191,10 +191,9 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
     pub conversation_context: Option<crate::context_block::ContextDelivery>,
-    /// Whether a Task or Wave command launched this (`Cli::names_work`): it
-    /// needs the Machine server, and a headless run gets every hook. A native
-    /// terminal launch an owner holds gets every hook either way.
-    pub managed: bool,
+    /// Who holds the provider process, which decides its hooks, its server
+    /// check and its steers.
+    pub holder: crate::session::Holder,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
     /// Native skill selection, kept separate from gathered reference context.
@@ -1752,9 +1751,12 @@ fn _run_agent_once(
     };
     let command = build_session_command(launch, invocation, process.context_file.as_deref())
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let hooks =
-        crate::harness::context::native_args(&harness, launch.conversation_context.as_ref())
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    let hooks = crate::harness::context::native_args(
+        &harness,
+        launch.conversation_context.as_ref(),
+        launch.holder,
+    )
+    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let program = &command.program;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -1767,7 +1769,7 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(
-        session_environment(launch, process.context_file.as_deref(), true)
+        session_environment(launch, process.context_file.as_deref())
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
     );
     if let Some(context) = launch
@@ -1877,7 +1879,7 @@ fn _run_agent_once(
         admitted_runtime,
         activation,
         title,
-        launch.managed,
+        launch.holder,
     );
     result.map(|result| AgentAttempt::Finished {
         result,
@@ -1891,10 +1893,10 @@ fn spawn_agent_child(
     cmd: Command,
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
-    managed: bool,
+    holder: crate::session::Holder,
 ) -> Result<(Child, crate::process::SessionAttachment), CoreError> {
     let child = runtime
-        .spawn_native_agent(cmd, managed)
+        .spawn_native_agent(cmd, holder)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
     Ok(child)
@@ -1906,11 +1908,11 @@ fn run_interactive(
     runtime: &LfProcessRuntime,
     activation: Option<std::fs::File>,
     mut title: Option<crate::terminal_title::TerminalTitle>,
-    managed: bool,
+    holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let foreground = crate::os_process::foreground::hand_to(&mut cmd);
-    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, managed)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
     let pid = child.id();
     let _pid_guard = ChildPidGuard::new(pid);
     tracing::debug!(

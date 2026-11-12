@@ -58,6 +58,26 @@ Remaining is LOO-823's.
 - `open_without_replacing` no longer bails when no transport starts; it
   re-locks and opens in this terminal.
 
+## Holder, built November 11
+
+`session::Holder { Caller, Owner, Server }` replaces `AgentConfig::managed` and
+`SessionCommand::managed`. `Holder::of(work, interactive)` decides it where the
+launch is configured: `run.rs` (`names_work`, `!batch`) and
+`resume_session_with_env` (`names_work` or the row's `WorkSource::is_managed`).
+`hook_settings(holder)`, `claude_args`, `codex_hooks`, `pi_args`,
+`add_opencode_context`, `native_args` and `steer_environment` read it. Fixed on
+the way: bare interactive launches no longer reserve a steer capability, bare
+OpenCode no longer gets turn hooks (`native || managed`), Codex and
+`native_args` no longer read `transport::current()` themselves.
+Deleted: `require_server_for`, `session_environment`'s `native`.
+
+Differs from the plan's `{ Terminal, Server(PrimaryScope), Run }`
+(reversible, `questions.md`): `Run` folded into `Caller`/`Server`, since a
+headless run's only difference is lifetime, which `batch` already carries in
+delegation; `Owner` stays while bare Desktop-shell and framed viewers keep
+owners; `Server` carries no scope because a `--task` launch has no primary
+Session to name.
+
 ## Remaining
 
 1. After LOO-821 (#1879) lands and LOO-824 syncs onto it: remove the turn and
@@ -99,9 +119,9 @@ Remaining is LOO-823's.
    LOO-826's server registration.
 
 `scratch/simplification-opportunities.md` (read at LOO-823 `8e1c71d6d5`)
-assigns LOO-820 Opportunity 2's bare half: delete `bare_conversation`,
-`opens_bare`, `runs_in_terminal` as decider; context hooks only for bare;
-drop the bare steer and exit-record handoff. Asked whether `Holder` and bare Codex fold
+assigns LOO-820 Opportunity 2's bare half. Still to delete: `bare_conversation`,
+`opens_bare`, `runs_in_terminal` as decider, the exit-record handoff for bare
+(context hooks only for bare and no bare steer are done, via `Holder`). Asked whether `Holder` and bare Codex fold
 into LOO-820 or become separate Tasks, Jack Heart: "fold it in here". So
 LOO-820 also builds `Holder { Terminal, Server(PrimaryScope), Run }`, decided
 once where the Session id is known, and deletes `names_work`, `resumes_work`,
@@ -150,3 +170,4 @@ so at send time, or skip bare Sessions?
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt` — clean; implement.
 - realign: no tests; plan repairs only.
 - compress: `cargo build -p loopflow --bin lf` — clean; `cargo test -p loopflow --lib session_record::capture_tests::resume` — 3 passed.
+- Holder: `cargo test --lib` `harness::context::` 11, `context_block::` 12, `harness::agent_process::` 19 (fixture now a Task's Session: a bare one resumes beside its stale attachment), `session_record::capture_tests::` 26, `ops::human_session::` 43 — pass; `--test integration session_steers::` 9 pass; `--test session_launch_contract` 29/30 twice, a different fixture each time (server-start timeout, pid count) at load 25, each passes alone — gate reruns; clippy, fmt, `documented_commands::` clean.

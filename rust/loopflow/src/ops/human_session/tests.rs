@@ -44,7 +44,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 command,
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
-                false,
+                crate::session::Holder::Caller,
             )?;
             let opened = super::open(&store, home, &session.id, false, true, false, false).await;
             let forked = super::open(&store, home, &session.id, true, true, false, false).await;
@@ -827,7 +827,7 @@ impl Logins {
                     session.id.to_string(),
                     attachment,
                 ),
-                false,
+                crate::session::Holder::Caller,
             )
             .unwrap(),
         )

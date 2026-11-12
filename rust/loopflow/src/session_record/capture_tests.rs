@@ -179,7 +179,8 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
             command.env_clear().args(["-c", "exit 42"]);
             command
         };
-        let (mut child, snapshot) = capture.spawn_native_agent(command(), false)?;
+        let (mut child, snapshot) =
+            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
         assert_eq!(snapshot, first);
         assert_eq!(child.wait()?.code(), Some(42));
         // Observed wait, not successful spawn or a finished capture, ends it.
@@ -188,7 +189,8 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         assert_eq!(ended.pid, Some(child.id()));
         assert!(ended.completed_at.is_some());
 
-        let (mut child, snapshot) = capture.spawn_native_agent(command(), false)?;
+        let (mut child, snapshot) =
+            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
         let second = snapshot;
         assert_ne!(first.agent_process_id, second.agent_process_id);
         assert_eq!(second.lf_process_id.as_ref(), Some(&invocation));
@@ -209,11 +211,15 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
             .completed_at
             .is_none());
         // The child exited but without its wait receipt another launch is refused.
-        assert!(capture.spawn_native_agent(command(), false).is_err());
+        assert!(capture
+            .spawn_native_agent(command(), crate::session::Holder::Caller)
+            .is_err());
         capture.record_native_agent_exit(&second)?;
         assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
         capture.finish("completed")?;
-        assert!(capture.spawn_native_agent(command(), false).is_err());
+        assert!(capture
+            .spawn_native_agent(command(), crate::session::Holder::Caller)
+            .is_err());
         assert!(store
             .session_attachment(&session)?
             .unwrap()
@@ -281,7 +287,10 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
             }
             assert!(capture.finish("failed").is_err());
             assert!(capture
-                .spawn_native_agent(std::process::Command::new("/bin/true"), false)
+                .spawn_native_agent(
+                    std::process::Command::new("/bin/true"),
+                    crate::session::Holder::Caller
+                )
                 .is_err());
             fs::remove_dir(&receipt)?;
             capture.finish("interrupted")?;

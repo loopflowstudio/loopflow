@@ -9,10 +9,11 @@ use sha2::{Digest, Sha256};
 
 use crate::context_block::ContextDelivery;
 use crate::prompt::write_prompt_log;
+use crate::session::Holder;
 
-pub(crate) fn claude_args(context: &ContextDelivery, managed: bool) -> Result<Vec<String>> {
-    let mut hooks = context.hook_settings(managed)?;
-    if managed {
+pub(crate) fn claude_args(context: &ContextDelivery, holder: Holder) -> Result<Vec<String>> {
+    let mut hooks = context.hook_settings(holder)?;
+    if holder.reports_turns() {
         hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     }
     let settings = json!({"hooks": hooks});
@@ -28,10 +29,10 @@ pub(crate) fn claude_args(context: &ContextDelivery, managed: bool) -> Result<Ve
 pub(crate) fn codex_hooks(
     context: &ContextDelivery,
     session_hooks: Option<&Value>,
-    managed: bool,
+    holder: Holder,
 ) -> Result<Value> {
     let mut hooks = session_hooks.cloned().unwrap_or_else(|| json!({}));
-    let additions = context.hook_settings(managed)?;
+    let additions = context.hook_settings(holder)?;
     let mut states = hooks
         .get("state")
         .and_then(Value::as_object)
@@ -88,9 +89,9 @@ pub(crate) fn add_opencode_context(
     config: &mut Value,
     context: &ContextDelivery,
     instructions: &str,
-    managed: bool,
+    holder: Holder,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "managed":managed,
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "managed":holder.reports_turns(),
         "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
@@ -124,14 +125,14 @@ pub(crate) fn add_opencode_context(
     Ok(())
 }
 
-/// A native terminal launch an owner holds gets every hook, whatever named its
-/// Work: they say when it can take a reply. A bare one in the terminal's
-/// foreground gets only the context hooks.
-pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
-    let held = crate::transport::current().is_some();
+pub(crate) fn native_args(
+    harness: &str,
+    context: Option<&ContextDelivery>,
+    holder: Holder,
+) -> Result<Vec<String>> {
     match (harness, context) {
-        ("claude", Some(context)) => claude_args(context, held),
-        ("pi", context) => pi_args(context, true, held),
+        ("claude", Some(context)) => claude_args(context, holder),
+        ("pi", context) => pi_args(context, true, holder),
         _ => Ok(Vec::new()),
     }
 }
@@ -139,14 +140,14 @@ pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> R
 pub(crate) fn pi_args(
     context: Option<&ContextDelivery>,
     native: bool,
-    managed: bool,
+    holder: Holder,
 ) -> Result<Vec<String>> {
     let home = context
         .map(|c| c.home.clone())
         .unwrap_or_else(crate::store::lf_home_dir);
     let source = format!(
         "const spec = {};\n{}\n{}",
-        json!({"native":native, "managed":managed, "executable":crate::os_process::resolve_lf_binary()?,
+        json!({"native":native, "managed":holder.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
             "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
@@ -223,6 +224,7 @@ fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Resu
 mod tests {
     use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
+    use crate::session::Holder;
     use sha2::{Digest, Sha256};
 
     #[test]
@@ -246,11 +248,14 @@ mod tests {
                 references: vec![repo.path().join("task-reference.md")],
             })
             .collect();
-        let first = super::codex_hooks(&contexts[0], None, true).unwrap();
-        assert_eq!(first, super::codex_hooks(&contexts[1], None, true).unwrap());
+        let first = super::codex_hooks(&contexts[0], None, Holder::Server).unwrap();
         assert_eq!(
-            super::claude_args(&contexts[0], true).unwrap(),
-            super::claude_args(&contexts[1], true).unwrap()
+            first,
+            super::codex_hooks(&contexts[1], None, Holder::Server).unwrap()
+        );
+        assert_eq!(
+            super::claude_args(&contexts[0], Holder::Server).unwrap(),
+            super::claude_args(&contexts[1], Holder::Server).unwrap()
         );
         let mut saved = Vec::new();
         for context in &contexts {
@@ -297,7 +302,7 @@ mod tests {
                 "/<session-flags>/config.toml:session_start:0:0": {"trusted_hash": "host"},
             },
         });
-        let hooks = &super::codex_hooks(&context, Some(&host), true).unwrap();
+        let hooks = &super::codex_hooks(&context, Some(&host), Holder::Server).unwrap();
         assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
         let state = hooks["state"].as_object().unwrap();
         assert_eq!(state["host-trust"]["trusted_hash"], "unchanged");
@@ -396,6 +401,14 @@ const server = createServer((socket) => {
 await new Promise((resolve) => server.listen(SOCKET, resolve));
 "#;
 
+    fn holder(managed: bool) -> Holder {
+        if managed {
+            Holder::Server
+        } else {
+            Holder::Caller
+        }
+    }
+
     struct Probe {
         /// Each `lf` the plugin started, one line of arguments per process.
         calls: String,
@@ -474,7 +487,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
             references: Vec::new(),
         };
         let mut config = serde_json::json!({});
-        add_opencode_context(&mut config, &context, "Fixed instructions", managed).unwrap();
+        add_opencode_context(&mut config, &context, "Fixed instructions", holder(managed)).unwrap();
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
@@ -555,7 +568,7 @@ await close();
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_BIN", recording_lf(home.path()));
-        let args = super::pi_args(None, native, managed).unwrap();
+        let args = super::pi_args(None, native, holder(managed)).unwrap();
         let package = home
             .path()
             .join("hook-settings/node_modules/@earendil-works/pi-coding-agent");
@@ -783,7 +796,7 @@ assert.deepEqual(steers, {steers});
         let executable = std::env::current_exe().unwrap();
         std::env::set_var("LF_BIN", &executable);
 
-        let args = super::pi_args(None, true, true).unwrap();
+        let args = super::pi_args(None, true, Holder::Server).unwrap();
 
         // A fresh machine's Pi process inherits no LF_BIN; the source carries it.
         let source = std::fs::read_to_string(&args[1]).unwrap();
@@ -813,7 +826,7 @@ assert.deepEqual(steers, {steers});
             "model": "fixture/model"
         });
         let mut config = original.clone();
-        add_opencode_context(&mut config, &context, "Fixed instructions", true).unwrap();
+        add_opencode_context(&mut config, &context, "Fixed instructions", Holder::Server).unwrap();
         assert_eq!(config["permissions"], original["permissions"]);
         assert_eq!(config["model"], original["model"]);
         let plugins = config["plugins"].as_array().unwrap();

@@ -60,7 +60,7 @@ pub(crate) fn launch_session(
         },
         context_file,
     )?;
-    let environment = session_environment(config, context_file, true)?;
+    let environment = session_environment(config, context_file)?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -99,7 +99,13 @@ pub(crate) fn resume_session_with_env(
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
-    config.managed = managed;
+    // Reopening a conversation recorded as Task, Wave or repository work is
+    // managed whatever command reopened it.
+    let work = managed
+        || session
+            .work_source
+            .is_some_and(crate::session::WorkSource::is_managed);
+    config.holder = crate::session::Holder::of(work, true);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -129,7 +135,7 @@ pub(crate) fn resume_session_with_env(
         },
         context_file.as_deref(),
     )?;
-    let environment = session_environment(&config, context_file.as_deref(), true)?;
+    let environment = session_environment(&config, context_file.as_deref())?;
     spawn_session_command_with_env(
         &command,
         &environment,
@@ -584,6 +590,7 @@ fn run_native_session(
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),
+        command.holder,
     )?);
     process.args(&command.args);
     if command.program == "claude" {
@@ -595,8 +602,8 @@ fn run_native_session(
     let owned = command.remote.is_none().then_some(&attachment);
     // Refused before the provider conversation is recorded, so the next launch
     // starts it fresh instead of resuming one that never ran.
-    if let Some(owner) = owned {
-        crate::harness::agent_process::require_server_for(owner, command.managed)?;
+    if owned.is_some() && command.holder == crate::session::Holder::Server {
+        crate::harness::agent_process::require_server()?;
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
@@ -642,7 +649,7 @@ fn run_native_session(
                     Some(owner) => crate::harness::agent_process::exec_native(
                         process,
                         owner,
-                        command.managed,
+                        command.holder,
                         launch_lock,
                     ),
                     None => {
@@ -665,7 +672,7 @@ fn run_native_session(
     }
     let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
-        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.managed),
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.holder),
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -1249,7 +1256,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
-            managed: false,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
             attachment: None,
@@ -1464,7 +1471,7 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
-            managed: false,
+            holder: crate::session::Holder::Caller,
             input: None,
             context: None,
             program: "/bin/sleep".into(),
@@ -1487,7 +1494,7 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
-            managed: false,
+            holder: crate::session::Holder::Caller,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
@@ -1573,7 +1580,7 @@ mod tests {
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), original.clone()),
-                false,
+                crate::session::Holder::Caller,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1595,7 +1602,7 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
-                managed: false,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -1678,7 +1685,7 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
-                managed: false,
+                holder: crate::session::Holder::Caller,
                 input: None,
                 context: None,
                 attachment: capture.session_attachment(),

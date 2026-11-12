@@ -156,7 +156,7 @@ conversation command, including those opened by Desktop. A bare `lf` typed insid
 a Task's checkout stays bare and records the Task as its ancestry. The
 command decides: `Cli::names_work` is true for `--task`, `--wave` (a Task or
 Wave conversation passes them), `lf resume --task`/`--wave` and a step of
-`lf task run`, and the launch carries it as `AgentConfig::managed`. Beside a
+`lf task run`, and the launch carries it as `Holder::Server` (`AgentConfig::holder`). Beside a
 Session id, `--task`/`--wave` make the resume managed and the id still
 selects: Desktop's Task and Wave workspaces prepare with `lf session resume
 [ID] --task X --prepare`, and the `open_argv` it gets back is `lf session

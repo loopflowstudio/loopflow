@@ -174,7 +174,7 @@ impl ClaudeHarness {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
-            cmd.args(super::context::claude_args(context, config.managed)?);
+            cmd.args(super::context::claude_args(context, config.holder)?);
         }
         super::configure_agent_env(&mut cmd, config);
         if let Some(context) = &config.conversation_context {
@@ -190,12 +190,12 @@ impl ClaudeHarness {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        let managed = config.managed;
+        let holder = config.holder;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner()?;
-        let mut child = super::agent_process::spawn(cmd, None, &owner, managed)?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner, holder)?;
         drop(activation);
         let stdin = child
             .stdin

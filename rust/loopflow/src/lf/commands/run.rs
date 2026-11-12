@@ -37,7 +37,7 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     }
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
-    built.agent_config.managed = cli.names_work();
+    built.agent_config.holder = crate::session::Holder::of(cli.names_work(), !cli.batch);
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
         let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
@@ -178,7 +178,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        managed,
+        holder: crate::session::Holder::of(managed, false),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
@@ -256,7 +256,7 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.agent_config.managed = managed;
+    built.agent_config.holder = crate::session::Holder::of(managed, !cli.batch);
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),

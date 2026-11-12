@@ -16,31 +16,63 @@
 - "not too worried about occasionally duplicative trying of same harness": only
   an exactly equal entry is dropped behind `default_agent`.
 
-## Open
+## Next implement (concept review, 2026-11-12)
 
-1. `agent` and `-a` are not checked against `agents`; the list covers only what
-   Loopflow picks by itself. The other reading refuses a repository
-   `agent: pi` when the personal list is `[claude, codex]`.
-2. A narrower `agents` replaces the wider one whole under normal precedence
-   (personal over repository), so a repository list cannot narrow a personal
-   one. The alternative is an intersection.
-3. `supported_harnesses` (model picker only) is left as it is.
-4. With an order behind it, a bare `claude` entry no longer tries Opus, Sonnet
-   and Haiku by itself; the list is the only ladder. With no order (a pinned
-   bare `agent: claude`, or a lone `default_agent: claude`, or `agents:
-   [claude]`) the built-in model ladder still applies. Should the built-in
-   ladder go entirely?
-5. A launch refused on a login Loopflow does not route (the MTG-328 case,
-   `account_id: null`) reports no reset time. It moves through the order once
-   and then fails with the limit; it does not wait for a reset.
-6. "model unavailable" was named beside usage limits as a reason to move. Only
-   usage limits move a step; a model-unavailable error is not classified.
-7. Status reads the move from the recorded reason's `; continuing on <agent>`
-   suffix (`task_execution::MOVED_TO`); `agent_limit_recoveries` has no column
-   for it. A column would need this Task's migration.
-8. The old `default_agent: claude,codex` warns on every read of the file, like
-   other file warnings, and `lf set default_agent claude,codex` still saves it.
-   LOO-875 removes the comma reading once `agents` ships.
+1. `agents` reads a comma string as the list, in files and in `lf set`
+   (`agents: claude,codex`, `lf set --global agents claude,codex`). The request
+   spelled it that way: "we should just be doing agents: a,b". Run on this
+   branch's build, in a throwaway home:
+   - file `agents: claude,codex` printed `warning: …/config.yaml:1: skipping
+     agents: invalid value` and then `agent    Not selected`; the warning does
+     not name the list form.
+   - `lf set --global agents claude,codex` printed `Error: invalid graph:
+     agents needs a list, such as [claude, codex]`.
+   Docs then lead with the short command and keep `[claude, codex]` for YAML.
+   `config::agent_list` stays for this; LOO-875's notes list it for deletion.
+2. `lf set --global default_agent claude,codex` printed `default_agent saved`
+   with no warning, and the next read warned. Print the old-spelling warning
+   when `lf set` saves it.
+3. `docs/config.md` says "Each entry is tried as written; nothing the list
+   lacks is tried." A one-entry order breaks that: `agents: [claude]` leaves
+   `fallback_agents` empty, so `_fallthrough_rungs` adds Opus, Sonnet and
+   Haiku. Say so there (as `docs/subscriptions.md` already does), and cover
+   `agents: [claude]` in `an_order_is_tried_as_written…` or beside it. Which
+   rule is right is open choice 1 below; the docs describe what is built.
+
+## Settled without a new answer
+
+- `-a` is not checked against `agents`: the Task says "An explicit one-off
+  `-a/--agent` still pins a single provider." A configured `agent` follows the
+  same rule because the style guide prefers dropping a refusal to adding an
+  allowlist; nobody has said so about `agent` itself.
+- A narrower `agents` replaces the wider one whole, under the precedence every
+  other setting uses. "Narrowed or reordered per repository" is met by a
+  personal repository-scoped list (`lf set agents …`); a shared repository file
+  does not outrank a personal global list.
+- Status keeps reading the move from the reason's `; continuing on <agent>`
+  suffix. The recorder already wrote that suffix before this Task; no person
+  sees the difference a column would make.
+- A launch refused on an unrouted login (`account_id: null`) has no reset time,
+  so it moves through the order once and then fails with the limit.
+
+## Open product choices
+
+Each has a default built; none stops the work.
+
+1. What a bare `claude` entry means when a limit refuses it. Built: with
+   another entry behind it, it goes straight to that entry on its configured
+   model; with none behind it (`agents: [claude]`, a lone `default_agent`, a
+   pinned `agent: claude`) it tries Opus, Sonnet, Haiku. So the same entry
+   behaves differently by list length, and the old `default_agent:
+   claude,codex` no longer tries Sonnet and Haiku before Codex. The two
+   one-rule alternatives: a bare entry always tries its harness's models
+   before the next entry (what shipped before; `claude:opus` opts out), or the
+   built-in ladder goes and only written entries are tried. It matters because
+   it decides whether `[claude, codex]` prefers Haiku or Codex after Opus.
+2. `supported_harnesses` is a second list of harnesses, read only by the model
+   picker. Should the picker read `agents` and the setting go?
+3. "model unavailable" was named beside usage limits as a reason to move. Only
+   usage limits move a step.
 
 ## Checks
 

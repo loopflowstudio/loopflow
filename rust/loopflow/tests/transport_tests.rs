@@ -6335,7 +6335,6 @@ fn task_creation_opens_one_retained_terminal_and_recovers_it_after_exit() {
             |row| row.get(0),
         )
         .unwrap();
-    let _cleanup = StopOwner(&fixture, owner.clone());
     assert_eq!(fixture.session_of_owner(&owner), session);
     fixture.launches(1);
     let mut observer = fixture.viewer(&owner, false);
@@ -6397,7 +6396,6 @@ fn task_creation_confirms_its_live_terminal_owner() {
             |row| row.get(0),
         )
         .unwrap();
-    let _cleanup = StopOwner(&fixture, owner.clone());
     assert_eq!(outcome["milestone"], "admitted", "{outcome}");
     assert_eq!(fixture.launches(1).len(), 1);
     let observer = fixture.viewer(&owner, false);
@@ -6441,7 +6439,6 @@ fn start_only_opens_one_session_without_taking_existing_viewer_claims() {
             |row| row.get(0),
         )
         .unwrap();
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let launches = fixture.launches(1);
     let mut desktop = fixture.attach(
         &owner,
@@ -6507,7 +6504,6 @@ fn start_only_lost_reply_preserves_the_started_session_for_passive_inspection() 
     let owner = resolved["owner_lf_process_id"]
         .as_str()
         .expect("the lost reply's Session kept its owner");
-    let _cleanup = StopOwner(&fixture, owner.into());
     let observer = fixture.viewer(owner, false);
     assert!(observer.token.is_none());
     // An explicit later open shares that live owner, even after service restart.
@@ -6609,7 +6605,6 @@ fn simultaneous_session_openers_share_one_retained_owner() {
             |row| row.get(0),
         )
         .unwrap();
-    let _cleanup = StopOwner(&fixture, owner.clone());
     // One opener may replace the other's input before the first screen is
     // drawn. Both must settle into viewing or a clean control-handoff exit.
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -6786,7 +6781,6 @@ printf '\r\naccepted: %s\r\n' "$answer"
         command.env_remove("CLAUDECODE");
     }
     let owner = fixture.owner(command);
-    let _cleanup = StopOwner(&fixture, owner.clone());
     let expected_launches = if provider.is_some_and(|(name, _)| name == "codex") {
         // Config discovery uses one short-lived stdio app-server before the
         // retained app-server and native TUI. Wait for all three before taking
@@ -6843,7 +6837,6 @@ read -r finish < /dev/tty
 printf 'output-final\r\n'
 "#,
     ]);
-    let _output_cleanup = StopOwner(&fixture, output_owner.clone());
     let output_session = fixture.session(&output_owner);
     let ip: std::net::IpAddr = host_status["Self"]["TailscaleIPs"]
         .as_array()
@@ -6993,13 +6986,6 @@ printf 'output-final\r\n'
     let _ = std::fs::remove_file(setup_dir.join("address.txt"));
     let _ = std::fs::remove_file(setup_dir.join("session.json"));
     let _ = std::fs::remove_dir_all(control);
-    let created_owners: Vec<String> = fixture.sql()
-        .prepare("SELECT DISTINCT transport_lf_process_id FROM agent_sessions WHERE transport_lf_process_id IS NOT NULL")
-        .unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
-    let _created_cleanup: Vec<_> = created_owners
-        .iter()
-        .map(|owner| StopOwner(&fixture, owner.clone()))
-        .collect();
     assert!(
         result.success(),
         "Native acceptance failed; inspect {} and {}",
@@ -7410,7 +7396,6 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     // The same authenticated remote client resolves a Session, then redeems its
     // ticket on a second WebSocket carrying the unchanged owner protocol.
     let owner = fixture.owner(fixture.serve(true, &["/bin/cat"]));
-    let _owner_cleanup = StopOwner(&fixture, owner.clone());
     let session = fixture.session(&owner);
     reader
         .send(Message::Text(

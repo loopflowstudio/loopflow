@@ -14,7 +14,6 @@ use serde::Serialize;
 
 use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
 use crate::prompt::{gather_documents, GatherSpec};
-use crate::steer::NativeBoundary;
 use crate::store::RecordingGap;
 
 #[derive(Debug, Serialize)]
@@ -253,38 +252,11 @@ pub fn emit_block(
         return Ok(());
     }
     let (path, delivery) = load_delivery(delivery, &input)?;
-    #[cfg(unix)]
+    // Hooks installed before Task updates rode the boundary answer still
+    // name this moment in live conversations; it has nothing left to do.
+    // Deleted with `ContextMoment::TaskUpdates` (LOO-838).
     if moment == ContextMoment::TaskUpdates {
-        if input["hook_event_name"] == "PiTaskUpdates" {
-            let adapter =
-                serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
-            let thread = input["session_id"]
-                .as_str()
-                .ok_or_else(|| anyhow!("Missing Pi Session"))?;
-            return crate::harness::task_updates::watch(
-                &delivery.home,
-                &input,
-                adapter,
-                thread,
-                |store, adapter, thread, update| {
-                    store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-                        if !store.record_task_update(
-                            &adapter.session,
-                            &update.key,
-                            "dispatched",
-                            &update.observation,
-                        )? {
-                            return Ok(());
-                        }
-                        let frame = serde_json::json!({"session":thread,"text":update.text});
-                        write_output(format!("{frame}\n").as_bytes()).map_err(|error| {
-                            crate::store::StoreError::InvalidData(error.to_string())
-                        })
-                    })
-                },
-            );
-        }
-        return crate::harness::claude_updates::watch(&delivery.home, &input);
+        return Ok(());
     }
     let boundary = match moment {
         ContextMoment::Start => BoundaryMoment::Start,
@@ -337,18 +309,25 @@ pub fn emit_block(
         return Ok(());
     }
     // An answering server may have followed a moved checkout.
-    let (delivery, steers) = match answered {
+    let (delivery, steers, update) = match answered {
         Some(answer) => (
             crate::context_block::ContextDelivery::load(&path)?,
             answer.steers,
+            answer.update,
         ),
-        None => (delivery, None),
+        None => (delivery, None, None),
     };
-    let prefix = steers.as_ref().map_or("", |steers| steers.text.as_str());
+    let mut prefix = steers
+        .as_ref()
+        .map_or(String::new(), |steers| steers.text.clone());
+    if let Some(update) = update {
+        prefix.push_str(&update);
+        prefix.push('\n');
+    }
     let text = if moment == ContextMoment::Tool {
-        prefix.to_owned()
+        prefix
     } else {
-        delivery.block_with_prefix(moment, prefix)?.text
+        delivery.block_with_prefix(moment, &prefix)?.text
     };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
     let output = serde_json::json!({"hookSpecificOutput": {
@@ -453,6 +432,7 @@ fn ask_server(
             last: span.last_miss,
         }),
         printed: printed.to_vec(),
+        inbox: adapter.and_then(|_| claude_inbox()),
     }));
     let answered = crate::server::socket_path()
         .and_then(|socket| {
@@ -473,6 +453,32 @@ fn ask_server(
             None
         }
     }
+}
+
+/// The key the Claude conversation running this hook publishes for peers of
+/// its cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
+/// configuration directory, for the socket Claude names in its children's
+/// environment.
+fn claude_inbox() -> Option<std::path::PathBuf> {
+    use sha2::{Digest, Sha256};
+    let socket = std::path::PathBuf::from(std::env::var_os("CLAUDE_CODE_MESSAGING_SOCKET")?);
+    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".claude"))
+        })?;
+    let suffix = format!(
+        ".{}.key",
+        hex::encode(Sha256::digest(socket.as_os_str().as_encoded_bytes()))
+    );
+    std::fs::read_dir(config.join("sessions"))
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&suffix))
+        })
 }
 
 /// Every hook is a fresh process, so the native conversation keeps its open gap
@@ -504,14 +510,22 @@ fn load_delivery(
     path: Option<&std::path::Path>,
     input: &serde_json::Value,
 ) -> Result<(std::path::PathBuf, crate::context_block::ContextDelivery)> {
+    // A Codex conversation's own binding wins over its app-server's launch
+    // file, which a conversation started there later falls back to.
     let path = path
         .map(std::path::Path::to_path_buf)
-        .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
         .or_else(|| {
-            input["session_id"].as_str().map(|session| {
-                crate::context_block::native_delivery_path(&crate::store::lf_home_dir(), session)
-            })
+            input["session_id"]
+                .as_str()
+                .map(|session| {
+                    crate::context_block::native_delivery_path(
+                        &crate::store::lf_home_dir(),
+                        session,
+                    )
+                })
+                .filter(|path| path.exists())
         })
+        .or_else(|| std::env::var_os(crate::context_block::CONTEXT_DELIVERY_ENV).map(Into::into))
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
         })?;

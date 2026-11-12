@@ -301,22 +301,6 @@ impl SqliteStore {
         )? != 0)
     }
 
-    /// A boundary lf could not record enters the Session's history as unknown at
-    /// the next one that succeeds (Jack Heart, 2026-11-05): one observation per
-    /// gap, written before the gap closes so a failed write keeps it open. Hooks
-    /// and the Codex relay share this writer.
-    pub(crate) fn close_recording_gap(
-        &self,
-        session: &str,
-        gap: &mut crate::store::RecordingGap,
-    ) -> StoreResult<()> {
-        if let Some(span) = gap.span() {
-            self.record_recording_gap(session, span.first_miss, span.last_miss)?;
-        }
-        gap.recovered();
-        Ok(())
-    }
-
     /// One `store-gap` observation for boundaries missed from `first_miss` to
     /// `last_miss`.
     pub(crate) fn record_recording_gap(
@@ -895,6 +879,19 @@ mod tests {
         );
     }
 
+    /// What a hook and the server do together: the hook sends its span, the
+    /// server records it, and the hook clears its marker.
+    fn close(store: &SqliteStore, gap: &mut RecordingGap) {
+        if let Some(span) = gap.span() {
+            store
+                .record_recording_gap("session", span.first_miss, span.last_miss)
+                .unwrap();
+        }
+        gap.recovered();
+    }
+
+    /// A boundary lf could not record enters the Session's history as unknown
+    /// at the next one that succeeds (Jack Heart, 2026-11-05).
     #[test]
     fn a_recovered_gap_enters_the_sessions_history_once() {
         let home = tempfile::tempdir().unwrap();
@@ -916,7 +913,7 @@ mod tests {
                 .unwrap()
         };
         // A boundary that records with no gap open writes nothing extra.
-        store.close_recording_gap("session", &mut gap()).unwrap();
+        close(&store, &mut gap());
         assert_eq!(observations(), 0);
         // Two hook processes miss the store; the next one that reaches it records
         // the hole once, and later boundaries have nothing left to say.
@@ -924,7 +921,7 @@ mod tests {
         gap().note("steers", &"database is locked");
         let mut open = gap();
         let span = open.span().unwrap().clone();
-        store.close_recording_gap("session", &mut open).unwrap();
+        close(&store, &mut open);
         assert!(open.span().is_none());
         assert_eq!(observations(), 1);
         let payload: String = store
@@ -941,7 +938,7 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(payload["first_miss"], span.first_miss);
         assert_eq!(payload["last_miss"], span.last_miss);
-        store.close_recording_gap("session", &mut gap()).unwrap();
+        close(&store, &mut gap());
         assert_eq!(observations(), 1);
     }
 
@@ -1651,7 +1648,8 @@ mod tests {
     }
 
     #[test]
-    fn session_exit_retires_orphans_but_preserves_primary_and_task_conversations() {
+    fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task_conversations()
+    {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::id::WaveId::new();
@@ -1674,10 +1672,12 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, primary, retired) in [
-            ("orphan", None, true),
-            ("primary", Some("repository"), false),
-            ("task", None, false),
+        for (id, primary, outcome, retired) in [
+            ("orphan", None, "interrupted", true),
+            ("primary", Some("repository"), "interrupted", false),
+            ("task", None, "interrupted", false),
+            ("task-run", None, "interrupted", true),
+            ("task-failed-run", None, "failed", true),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let process = crate::id::LfProcessId::new();
@@ -1693,10 +1693,10 @@ mod tests {
                     rusqlite::params![id, primary],
                 )
                 .unwrap();
-                if id == "task" {
+                if id.starts_with("task") {
                     conn.execute(
-                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                        rusqlite::params![id, task.as_str(), wave],
+                        "UPDATE agent_sessions SET task_id=?2,wave_id=?3,interactive=?4 WHERE id=?1",
+                        rusqlite::params![id, task.as_str(), wave, id == "task"],
                     )
                     .unwrap();
                 }
@@ -1705,7 +1705,7 @@ mod tests {
                 .claim_session_attachment(id, None, &process, true)
                 .unwrap();
             store
-                .finish_session_attachment(id, &attachment, "interrupted", None, || Ok(false))
+                .finish_session_attachment(id, &attachment, outcome, None, || Ok(false))
                 .unwrap();
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
@@ -1714,7 +1714,7 @@ mod tests {
             assert!(history
                 .iter()
                 .any(|event| event.payload["type"] == "attachment_exit"
-                    && event.payload["outcome"] == "interrupted"));
+                    && event.payload["outcome"] == outcome));
             assert!(!history
                 .iter()
                 .any(|event| event.kind == SessionEventKind::Completed));
@@ -1724,6 +1724,37 @@ mod tests {
             .unwrap()
             .iter()
             .any(|session| session.id == "orphan"));
+
+        // Another turn on the finished run reopens it until that turn exits.
+        let process = crate::id::LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',2)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let expected = store.session_attachment("task-run").unwrap();
+        let turn = store
+            .claim_session_attachment("task-run", expected.as_ref(), &process, true)
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        store
+            .finish_session_attachment("task-run", &turn, "completed", None, || Ok(true))
+            .unwrap();
+        assert!(store
+            .session("task-run")
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     /// `lf history` reads inputs by this bound and stops early, so an input

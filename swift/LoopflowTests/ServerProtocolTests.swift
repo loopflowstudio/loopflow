@@ -134,12 +134,14 @@ struct ServerProtocolTests {
             callback: .object(["hook_event_name": .string("Stop"), "session_id": .string("5f1c0d2e-native"),
                                "prompt_id": .string("p-12")]),
             gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
-            printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"]), select: nil)
+            printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"],
+            inbox: .string("/Users/maya/.claude/sessions/4242.9c1d.key")), select: nil)
         #expect(try encoded(boundary) == value("session_boundary"))
         guard case .response(_, _, .object(let answer)) = try message("session_boundary_answer") else {
             Issue.record("Missing boundary answer"); return
         }
         #expect(answer["steers"] == .null)
+        #expect(answer["update"] == .null)
         #expect(answer["waiting"] == .bool(false))
     }
 

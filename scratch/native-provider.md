@@ -98,24 +98,21 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 - A bare Codex launch with no `conversation_context` installs no hooks, so
   it records no thread; reading the rollout at exit would cover it.
 
-## Next implement: one exit status for bare launches (concept review 4)
+## One exit status for bare launches (concept review 4), built
 
 "for a bare session, it jsut does whatever claude or codex would do" covers
-the exit status. Today a provider that dies of a signal at the terminal
-exits lf three different ways:
-
-- fresh `run_interactive` (`agent/mod.rs`): `status.code().unwrap_or(1)`, so 1;
-- fresh `run_native_agent` (`util.rs`): `outcome.interrupted` makes it 0;
-- resume, `SessionCommandOutcome::result`: SIGINT/SIGHUP/SIGTERM count as
-  interrupted, so `Ok` (0); any other signal or code is the provider's own.
-
-Started alone, the shell would see 130/129/143. For `Holder::Caller` every
-path returns `transport::provider_exit_code(status)`: 0 stays `Ok`, anything
-else is `CommandExit`. `interrupted` keeps deciding only the record
-(`capture_outcome` "completed") and whether lf prints "<program> exited with
-…" (not after an interrupt). Held launches keep today's rules (a stop or a
-mover still ends them cleanly). One test: a bare provider killed by SIGHUP
-returns 129 on a fresh launch and on resume.
+the exit status. `SessionCommandOutcome::bare_exit_code` is the one decider:
+for `Holder::Caller` the fresh Claude path (`run_interactive`), the fresh
+Codex/OpenCode path (`run_native_agent`) and resume (`result`) all exit with
+`transport::provider_exit_code`, so a hung-up provider gives the shell 129.
+`interrupted` decides only the "completed" record and whether lf prints
+"<program> exited with …"; `run.rs` returns a bare terminal launch's code
+without its own message. A mover taking a bare conversation still ends that
+launch cleanly (lf's doing, not the provider's). Held launches and headless
+`-b` runs keep today's rules.
+Check: `session_cli_tests::a_hung_up_bare_provider_exits_lf_with_its_own_status`
+(fresh and resume in a PTY, 129; 0 before the change), `--lib
+lf::commands::util::`, the bare-launch session_cli_tests, clippy, fmt: pass.
 
 ## LOO-823 review, moved here (Jack Heart, November 11, "let 820 own it")
 

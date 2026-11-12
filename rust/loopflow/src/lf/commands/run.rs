@@ -816,6 +816,10 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
+    } else if !process.auto && agent_config.holder == crate::session::Holder::Caller {
+        // A bare terminal launch exits as its provider did; lf already said
+        // whether the provider failed.
+        Err(crate::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1)).into())
     } else if result.exit_code == 130 {
         eprintln!("The agent's turn was interrupted.");
         Err(crate::process::CommandExit(130).into())

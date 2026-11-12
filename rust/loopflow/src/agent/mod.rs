@@ -1953,6 +1953,7 @@ fn run_interactive(
     holder: crate::session::Holder,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
+    let program = cmd.get_program().to_string_lossy().into_owned();
     let foreground = crate::os_process::foreground::hand_to(&mut cmd);
     let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
     let pid = child.id();
@@ -1985,8 +1986,21 @@ fn run_interactive(
             format_timeout(timeout)
         )));
     }
+    let exit_code = if holder == crate::session::Holder::Caller {
+        crate::lf::commands::util::SessionCommandOutcome {
+            status,
+            interrupted: foreground
+                .as_ref()
+                .is_some_and(|foreground| foreground.interrupted(&status)),
+            moved: None,
+        }
+        .bare_exit_code(&program)
+        .into()
+    } else {
+        status.code().unwrap_or(1)
+    };
     Ok(AgentProcessResult {
-        exit_code: status.code().unwrap_or(1),
+        exit_code,
         stdout: String::new(),
         stderr: String::new(),
         agent_session: None,

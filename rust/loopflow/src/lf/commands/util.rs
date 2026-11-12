@@ -261,22 +261,31 @@ impl SessionCommandOutcome {
         self.moved.is_none() && !self.interrupted && !self.status.success()
     }
 
+    /// The status a bare launch exits with: the provider's own, as its shell
+    /// would see it alone. lf names a failure the person did not cause.
+    pub(crate) fn bare_exit_code(&self, program: &str) -> u8 {
+        if !self.status.success() && !self.interrupted {
+            eprintln!("{program} exited with {}", self.status);
+        }
+        crate::transport::provider_exit_code(self.status)
+    }
+
     /// A bare launch ends as its provider would alone, with the provider's
-    /// own status; only a held conversation can have another client.
+    /// own status, unless a mover took its conversation; only a held
+    /// conversation can have another client.
     pub(crate) fn result(
         &self,
         program: &str,
         resuming: bool,
         holder: crate::session::Holder,
     ) -> Result<()> {
-        if !self.failed() {
+        if holder == crate::session::Holder::Caller && self.moved.is_none() {
+            match self.bare_exit_code(program) {
+                0 => Ok(()),
+                code => Err(crate::process::CommandExit(code).into()),
+            }
+        } else if !self.failed() {
             Ok(())
-        } else if holder == crate::session::Holder::Caller {
-            eprintln!("{program} exited with {}", self.status);
-            Err(
-                crate::process::CommandExit(crate::transport::provider_exit_code(self.status))
-                    .into(),
-            )
         } else if resuming {
             Err(anyhow!(
                 "{program} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
@@ -853,7 +862,9 @@ pub(crate) fn run_native_agent(
             .transpose()?
             .flatten();
     Ok(crate::agent::AgentProcessResult {
-        exit_code: if outcome.interrupted {
+        exit_code: if launch.holder == crate::session::Holder::Caller {
+            outcome.bare_exit_code(&command.program).into()
+        } else if outcome.interrupted {
             0
         } else {
             outcome.status.code().unwrap_or(1)

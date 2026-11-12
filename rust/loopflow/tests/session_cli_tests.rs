@@ -2183,3 +2183,108 @@ while :; do sleep 0.02; done
         .unwrap();
     assert_eq!((agents, open), (1, 0), "agent rows (all, unfinished)");
 }
+
+/// Runs `lf` as a terminal's foreground job, as a login shell would, and
+/// returns its exit once its output reaches end of file.
+#[cfg(unix)]
+fn run_in_terminal(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    bin: &std::path::Path,
+    args: &[&str],
+) -> (std::process::ExitStatus, String) {
+    use std::fs;
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default PTY settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned independently owned descriptors.
+    let mut master = unsafe { fs::File::from_raw_fd(master) };
+    // SAFETY: the fresh slave descriptor is owned only by this File.
+    let slave = unsafe { fs::File::from_raw_fd(slave) };
+    let mut launch = Command::new(env!("CARGO_BIN_EXE_lf"));
+    launch
+        .env_clear()
+        .args(args)
+        .current_dir(cwd)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("RUST_LOG", "off")
+        .env("HOME", home)
+        .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::from(slave.try_clone().unwrap()))
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave));
+    // SAFETY: setsid and TIOCSCTTY are async-signal-safe.
+    unsafe {
+        launch.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = launch.spawn().unwrap();
+    drop(launch);
+    let mut output = Vec::new();
+    // The terminal reports EIO once lf and its provider have closed it.
+    let _ = master.read_to_end(&mut output);
+    (
+        child.wait().unwrap(),
+        String::from_utf8_lossy(&output).into_owned(),
+    )
+}
+
+/// A bare provider hung up exits lf as it would exit the shell alone: 129,
+/// whether lf started the conversation or reopened it.
+#[cfg(unix)]
+#[test]
+fn a_hung_up_bare_provider_exits_lf_with_its_own_status() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo \"2.1.0 (Claude Code)\"; exit 0; fi\nkill -HUP $$\n",
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let (fresh, output) = run_in_terminal(
+        home.path(),
+        repo.path(),
+        &bin,
+        &["-a", "claude", ":", "Hang up"],
+    );
+    assert_eq!(fresh.code(), Some(129), "fresh launch: {output}");
+    let id: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let (resumed, output) =
+        run_in_terminal(home.path(), repo.path(), &bin, &["session", "resume", &id]);
+    assert_eq!(resumed.code(), Some(129), "resume: {output}");
+}

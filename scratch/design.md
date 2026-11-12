@@ -22,7 +22,6 @@ registry failures distinct from an unbound checkout.
 The Graph launcher and primary Session selection remain their existing owners.
 `commands/graph.rs::carry_task_run` starts the background conversation for
 non-interactive runs; `commands/open.rs` resolves its primary and host.
-The foreground timing assumption remains in `scratch/questions.md`.
 
 Re-fetched `origin/main` during realign on 2026-11-11: its tip is
 `649f11db4b` (#1885, Session and Task identity in context), already merged
@@ -44,8 +43,7 @@ The two remaining coverage findings are closed in
   created and the Task's Graph position stayed unchanged.
 
 The six opening tests passed after fixture consolidation. They establish the
-implemented timing; they do not settle the product choice in
-`scratch/questions.md`. No implementation gap remains from that feedback.
+implemented timing. No implementation gap remains from that feedback.
 
 ## Remote selection
 
@@ -64,9 +62,9 @@ still exits non-zero.
 
 ## Remaining verification
 
-Demo decision: should `-b` and `-i` keep waiting for their foreground run before
-opening? That is the implemented assumption in `scratch/questions.md`; no
-recorded product decision settles it.
+Foreground timing follows the brief's "as soon as launch returns": `-b` and
+`-i` launches return after their foreground run, so they open then. Concept
+review (2026-11-11) found no remaining product choice in it; the demo shows it.
 
 Gate: `test(task_graph_launch_tests::) | test(lf::tests::) | binary(lf) |
 test(work_open_tests::) | test(documented_commands::) | test(cli_discovery::) |

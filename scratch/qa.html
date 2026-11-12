@@ -1,86 +1,99 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-820 QA: bare launches run direct</title>
+<html><head><meta charset="utf-8"><title>LOO-820 QA: bare launches run direct</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
 td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
 table{border-collapse:collapse} .bad{color:#a12} .ok{color:#185}
-</style>
-<h1>LOO-820 QA: bare launches run direct, November 11 2026</h1>
+</style></head><body>
+<h1>LOO-820 QA: bare launches run direct, November 11 2026 (second pass)</h1>
 
-<p>Branch <code>lf 0.15.3+bcbd5c093</code> plus the two fixes below, copied to
-<code>/tmp/lf-qa-820/lf-bin</code>. Private Machine under <code>/tmp/lf-qa-820</code>
-(HOME, LF_HOME, CLAUDE_CONFIG_DIR, CODEX_HOME with file credentials, PI_CODING_AGENT_DIR;
-<code>env -i</code>, so no inherited <code>LF_*</code>). Git repo with a local bare origin,
-<code>default_agent: claude</code>, Git planning. Providers: a stand-in <code>claude</code>
-that logs its pid, pgid, tty, terminal foreground group, parent and argv, reads its first
-turn from stdin and keys from <code>/dev/tty</code>, and writes a transcript line; real
-Codex 0.167.1 and Pi 1.3.0, both unauthenticated. Terminals: real PTYs
-(<code>scratch/qa/pty.py</code>), one of them an interactive <code>zsh -f -i</code>.
-LOO-824's report is at <code>836facd46a:scratch/qa.html</code>.</p>
+<p>Branch <code>lf 0.15.3+232cdcd8f</code> (after concept review 5) plus the fix below, copied to
+<code>/tmp/lf-qa-820/lf-bin</code> and <code>bin/lf</code>. Same private Machine as the first pass:
+<code>env -i</code> with <code>HOME</code>, <code>LF_HOME</code>, <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>,
+<code>PI_CODING_AGENT_DIR</code> under <code>/tmp/lf-qa-820</code>; a Git repo with a local bare origin and Git planning.
+Providers: the stand-in <code>claude</code> (logs pid/pgid/tpgid/argv, reads keys from <code>/dev/tty</code>,
+<code>quit</code> exits 0, <code>fail</code> exits 7), real Codex 0.167.1 and Pi 1.3.0, both unauthenticated.
+Every launch ran on a real PTY (<code>/tmp/lf-qa-820/pty.py</code>). The record was read with
+<code>lf session show &lt;id&gt;</code> ("Status: recorded …") and <code>agent_sessions.completed_at</code>.
+The first pass's report is at <code>232cdcd8fe:scratch/qa.html</code>; its three "still wrong" items were fixed in
+<code>2d972e033d</code>/<code>79b456f453</code>, and this pass checks them again.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Fresh bare <code>lf : "say hi"</code> on a PTY</td><td class="ok">The process tree is PTY → <code>lf</code> → <code>claude</code>.
-There is no <code>session serve</code>. Claude has its own pgid, and the tty's tpgid equals it.
-The hook settings hold only <code>SessionStart</code> (start and compact). No steer env was set.
-Typing reached Claude. <code>quit</code> exited 0; the Session is closed in <code>--history</code>
-and its agent row is <code>exited</code>.</td></tr>
-<tr><td><code>lf resume &lt;session&gt;</code></td><td class="ok">Direct again with <code>--resume &lt;same thread&gt;</code> and no first turn.</td></tr>
-<tr><td>Second <code>lf resume</code> while the first runs</td><td class="ok">Two providers ran on the same thread on two ttys, and lf stopped neither (decision "a").</td></tr>
-<tr><td>Terminal closed (PTY master killed)</td><td>Both <code>lf</code> and <code>claude</code> ended, and no process was left.
-The lf row says <code>interrupted</code> 130. The agent rows stay open (<code>completed_at</code> NULL,
-<code>spawn_state: spawn_requested</code>). Readers cope: <code>lf ps</code> shows nothing live,
-the Session lists as closed, and a later <code>lf resume</code> opened direct and exited 0.</td></tr>
-<tr><td>Ctrl+Z, <code>jobs</code>, <code>fg</code> in zsh</td><td class="ok">zsh says <code>suspended (signal)  lf : "shell launch"</code> and the prompt comes back. <code>fg</code> continues it and typing reaches Claude again.</td></tr>
-<tr><td>Ctrl+C / <code>kill -TERM &lt;claude&gt;</code></td><td><span class="bad">Before:</span> <code>Error: claude exited with signal: 2 (SIGINT). If another client still owns this session, close it and run `lf resume` again.</code> and status 1.
-<span class="ok">Fixed:</span> both end quietly with status 0. The lf row is <code>succeeded</code>.</td></tr>
-<tr><td>Provider exits 7</td><td>Still <code>Error: claude exited with exit status: 7. If another client still owns this session…</code> and status 1. Not changed; see below.</td></tr>
-<tr><td>Task conversation <code>lf resume --task b42c24</code></td><td class="ok">Held: <code>server run</code> → <code>holder run</code> → <code>claude</code>, with a <code>session attach</code> viewer.
-All six hooks are set (PostToolUse, PostToolUseFailure, SessionStart, Stop, StopFailure, UserPromptSubmit).
-Killing the viewer's terminal left the conversation running.</td></tr>
-<tr><td>Bare <code>lf :</code> inside that Task's checkout</td><td class="ok">Direct, <code>SessionStart</code> only ("2a").</td></tr>
-<tr><td><code>echo | lf : "from a pipe"</code></td><td class="ok">Keeps an owner (<code>session serve</code>) and runs Claude headless (<code>-p … stream-json</code>), as for an agent's Bash tool.</td></tr>
-<tr><td>Bare Codex <code>lf -a codex : "Reply only with QA_OK"</code></td><td class="ok">Plain <code>codex -c tui.terminal_title=[] -c developer_instructions=… -c hooks={SessionStart startup|resume|clear, compact} -- &lt;prompt&gt;</code>.
-There is no app-server, no <code>--remote</code> and no <code>__codex-observe</code>. Codex leads the foreground and shows its sign-in screen.
-Running the configured hook command with Codex's SessionStart input wrote the id to <code>&lt;delivery&gt;.thread</code>.
-After quitting, <code>lf resume</code> ran <code>codex … resume -- 019a7e2c-…</code> direct.</td></tr>
-<tr><td>…and that resume's argv</td><td><span class="bad">Before:</span> <code>resume -- 019a7e2c-… &lt;lf:message&gt;Reply only with QA_OK&lt;/lf:message&gt;</code>: every resume re-sent the first message.
-<span class="ok">Fixed:</span> it ends at the thread id.</td></tr>
-<tr><td>Bare Pi <code>lf -a pi : …</code></td><td class="ok">Direct, foreground leader, argv <code>pi --extension … --append-system-prompt … --session-id 46afe9a6-… -- &lt;prompt&gt;</code>.
-Pi says "No API key found" (no credentials here). No session file was written.
-<code>lf resume</code> refuses: <code>Pi conversation file is missing: 46afe9a6-…; restore it before resuming</code>.</td></tr>
-<tr><td>Bare Graph <code>lf qa-bare</code> (<code>cmd: help</code>, <code>interactive: qa-talk</code>)</td><td class="ok">The tree is <code>lf qa-bare</code> → <code>lf --skill-input … skill qa-talk</code> → <code>claude</code>, direct, with the skill as the first turn.
-After quit, the Graph is <code>Completed</code> in <code>lf graph list --processes</code> and its temp input is gone.</td></tr>
-<tr><td>Returning user: Session made by installed <code>lf</code></td><td>The installed lf held it with an owner. The branch build then refuses that store: <code>migration complete_finished_headless_sessions is unknown to lf 0.15.3+bcbd5c093.dirty … run `lf install`</code>. The installed build is ahead of this stack, so this direction can't run here.</td></tr>
+<tr><td>Fresh <code>lf : "say hi"</code></td><td class="ok">PTY → <code>lf : say hi</code> → <code>claude</code>, with no
+<code>session serve</code>. Claude's pgid 62073 equals the tty's tpgid. Typing reached it (<code>you said: hello there</code>).</td></tr>
+<tr><td>Provider exits 7</td><td class="ok">The shell gets 7. lf prints one line, <code>claude exited with exit status: 7</code>, and
+no longer prints the "another client" hint. The record says failed.</td></tr>
+<tr><td><code>quit</code> (exit 0)</td><td class="ok">The shell gets 0 and the record says completed.</td></tr>
+<tr><td>Ctrl+C (byte 0x03 on the PTY)</td><td>The shell gets 130 and lf prints nothing.
+<span class="bad">Before the fix the record said <b>failed</b>; resuming the same Session and pressing Ctrl+C said completed.</span>
+<span class="ok">After the fix, completed.</span></td></tr>
+<tr><td><code>kill -TERM &lt;claude&gt;</code></td><td>The shell gets 143. <span class="bad">Before: recorded failed.</span> <span class="ok">After: completed.</span></td></tr>
+<tr><td>Terminal closed (PTY driver killed with SIGKILL)</td><td class="ok">lf and claude both end and no process is left.
+The agent row is <code>exited</code> with <code>completed_at</code> set, which fixes the first pass's worst item. The lf row reads 143: lf's
+<code>end_leader</code> SIGTERMs the provider first. <span class="bad">Before the fix the record said failed;</span> after it, completed.</td></tr>
+<tr><td><code>lf resume &lt;session&gt;</code></td><td class="ok">Direct again: <code>parent: lf resume session_0424…</code>, the same
+<code>--session-id</code> thread, no first turn. Ctrl+C gives 130 and the record says completed (this path was already right).</td></tr>
+<tr><td>Bare Codex <code>lf -a codex : "Reply only with QA_OK"</code></td><td class="ok">The tree is PTY → lf → <code>codex -c tui.terminal_title=[] …</code>, and Codex leads the
+foreground. It has no children: no app-server, no <code>--remote</code>, no <code>__codex-observe</code>. Its hooks hold only
+<code>SessionStart</code>, and it shows its sign-in screen. Codex handles Ctrl+C itself, so lf exits 0 and the record says completed.
+<code>kill -TERM</code> gives 143 and the record says completed.</td></tr>
+<tr><td>Bare Pi, then <code>lf resume</code> with no reply recorded</td><td class="ok">The fresh launch runs <code>pi … --session-id 676847ab-… -- &lt;prompt&gt;</code>.
+Resume runs <code>pi … --session-id 676847ab-…</code> with no first turn. Pi prints its own "No project session found with id …;
+creating a new session with that id." and opens. lf's old "restore it before resuming" refusal is gone.</td></tr>
+<tr><td>Bare Graph <code>lf qa-bare</code> (<code>cmd: help</code>, <code>interactive: qa-talk</code>)</td><td>Direct, with the skill as the first turn.
+Ctrl+C in the interactive step records the step's Session as completed. The Graph is <code>Stopped</code>, and lf exits 3 with
+"Graph stopped before its last step; inspect its history and effects". That is accurate, though it reads loud for a person who chose to stop.</td></tr>
+<tr><td>Managed <code>lf resume --task b42c24</code></td><td class="ok">Still held: <code>server run</code> → <code>holder run</code> → claude, with a
+<code>session attach</code> viewer and all six hooks (PostToolUse, PostToolUseFailure, SessionStart, Stop, StopFailure, UserPromptSubmit).</td></tr>
+<tr><td><code>echo … | lf : piped</code></td><td>Keeps an owner (<code>session serve</code>) and runs <code>claude -p … stream-json</code>, as designed.
+The stand-in then waits for stdin EOF and hangs. That is a limit of the stand-in, and I stopped it by PID.</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<ul>
-<li><code>lf/commands/util.rs</code>: when lf handed the terminal to the provider (<code>foreground</code>), a provider ended by SIGINT, SIGHUP or SIGTERM counts as interrupted. The signal went to the provider rather than lf, so the owner's store-based rule never saw it.</li>
-<li><code>lf/commands/util.rs</code> <code>resume_session_with_env</code>: only a held Codex keeps the saved first turn on resume, because its app-server path sends it only to a thread with no turns. Bare Codex now clears it, as Claude and Pi do. Test: <code>bare_codex_resume_does_not_resend_its_first_turn</code>, which fails on the old condition.</li>
-</ul>
+<p>A fresh bare Claude, Codex or OpenCode launch that ended on Ctrl+C, SIGTERM or a hang-up was recorded as failed. The cause:
+<code>run.rs::run_prompt</code> settled the capture from <code>launch_session</code>'s <code>Result&lt;()&gt;</code>. Since
+<code>43f0928185</code> a bare launch returns <code>Err(CommandExit(130))</code> for an interrupt, so every interrupt read as a failure.
+Resume already used <code>SessionCommandOutcome::capture_outcome</code>. Now <code>launch_session</code> returns the
+<code>SessionCommandOutcome</code> (<code>run_session_command_with_env</code>; <code>spawn_session_command_with_env</code> wraps it
+with <code>.result(…)</code>). <code>run_prompt</code> settles with <code>capture_outcome</code> and then returns <code>outcome.result(…)</code>,
+so fresh launches and resume follow one rule.</p>
+<p>Test: <code>session_cli_tests::a_hung_up_bare_provider_exits_lf_with_its_own_status</code> now also asserts the Session is completed
+after the fresh launch and after resume. With the old rule restored it fails ("fresh launch recorded a failure"); with the fix it passes.</p>
+<p>I also tried carrying the interrupt on <code>AgentProcessResult</code> for <code>agent::run_admitted_agent</code>'s outcome. With it reverted,
+a bare Graph's interactive step still recorded completed, so I removed it.</p>
 
 <h2>Checks</h2>
 <ul>
-<li><code>cargo test -p loopflow --lib -- lf::commands::util:: agent::session:: ops::human_session::</code>: 64 passed, including the existing "unexplained SIGTERM must remain an error" (no terminal there, so no foreground).</li>
+<li><code>cargo test -p loopflow --lib -- lf::commands::util:: lf::commands::run:: agent::</code>: 78 passed, run with <code>LF_*</code> unset
+through the inline <code>env $(…)</code> form. My first run used <code>env $U</code>, which zsh does not split; it inherited <code>LF_*</code> and failed 5 tests with CannotOpen.</li>
+<li><code>cargo test -p loopflow --lib -- lf::commands::util:: lf::commands::run::</code> after the final diff: 28 passed.</li>
+<li><code>cargo test --test integration -- session_cli_tests::a_</code>: 2 passed (closed terminal, hung-up).</li>
 <li><code>cargo clippy --all-targets -- -D warnings</code>, <code>cargo fmt</code>: clean.</li>
+<li>Gate still owns <code>transport_tests</code>, <code>binary(lf)</code>, <code>lf::tests::</code> and the full <code>session_cli_tests::</code>.</li>
 </ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>Authenticated Codex and Pi replies. With no credentials in the private homes, the real Codex SessionStart hook firing on its own was not seen; the hook was run by hand with Codex's input shape. A Pi session file from a real reply was not seen either (the Pi probe in <code>questions.md</code> covers <code>--session-id</code>).</li>
-<li>Returning-user upgrade (installed → branch): blocked by migration skew, as above.</li>
-<li>Exit-time usage rows: <code>lf session usage</code> shows <code>-</code> for every bare Session. LOO-822's transcript facts reader (<code>transcript/facts.rs</code>) is on origin/main (<code>649f11db4b</code>), not yet in this stack. Owner-held TUI Claude recorded no usage either.</li>
-<li>Desktop shells and Rex: not exercised. No window.</li>
+<li>Authenticated Codex and Pi replies. With no credentials, the real Codex SessionStart hook never fired, so the hook → <code>.thread</code>
+→ <code>lf resume</code> path is still unseen end to end.</li>
+<li>Exit-time usage rows. LOO-822's transcript reader (#1880) is on main and not in this stack, so that waits for the sync.</li>
+<li>Returning-user upgrade from installed lf: the first pass was blocked by migration skew, and I did not retry it.</li>
+<li>Desktop shells and Rex: no window.</li>
 </ul>
 
-<h2>Still wrong, worst first</h2>
-<ol>
-<li>A closed terminal leaves the agent row open (<code>completed_at</code> NULL, <code>spawn_requested</code>): lf dies of SIGHUP with its provider before <code>record_native_agent_exit</code>. Readers treat the dead pid as gone, but the row stays unfinished.</li>
-<li>A provider's nonzero exit becomes status 1 with "If another client still owns this session, close it and run `lf resume` again." That holds even for a fresh launch, and bare Sessions allow a second client by design. Plain <code>claude</code> would return its own status with no message.</li>
-<li>Pi's "restore it before resuming" for a conversation that never got a reply.</li>
-<li>Stray processes from this checkout's <code>target/debug/lf</code> (<code>lf -i --agent codex : Original input</code> with <code>__codex-observe</code> children, parent 1) were running before this QA. They look like leftovers from an earlier fixture run. Left alone.</li>
-</ol>
+<h2>Still open, worst first</h2>
+<ul>
+<li>A bare provider's own failure still gets a line from lf: <code>claude exited with exit status: 7</code>. The design says so
+(<code>bare_exit_code</code>), but plain <code>claude</code> alone would print nothing extra. It sits against "for a bare session, it jsut
+does whatever claude or codex would do". Noted in <code>questions.md</code>.</li>
+<li>Ctrl+C in a bare Graph's last interactive step exits 3 with "Graph stopped before its last step". It is accurate, but loud for a deliberate stop.</li>
+<li>A closed terminal gives lf's row 143, not 129. lf's SIGHUP handler SIGTERMs the provider before the kernel's hang-up reaches it.
+Nobody is left to see the code, so this matters only to someone reading the row.</li>
+</ul>
+<p>Cleanup: the held Task conversation, the piped owner and its children were stopped by PID. The private server kept restarting
+under launchd (<code>com.loopflow.server.5fa4069a747859fd</code> from <code>/tmp/lf-qa-820/lf/server.plist</code>), so I booted out that one label.
+No <code>/tmp/lf-qa-820</code> process is left.</p>
+</body></html>

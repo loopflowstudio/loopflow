@@ -52,7 +52,7 @@ pub(crate) fn launch_session(
     agent_session: Option<&AgentSessionId>,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
-) -> Result<()> {
+) -> Result<SessionCommandOutcome> {
     let command = build_session_command(
         config,
         ProviderInvocation::Terminal {
@@ -61,7 +61,7 @@ pub(crate) fn launch_session(
         context_file,
     )?;
     let environment = session_environment(config, context_file)?;
-    spawn_session_command_with_env(
+    run_session_command_with_env(
         &command,
         &environment,
         agent_session,
@@ -183,6 +183,25 @@ fn spawn_session_command_with_env(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<()> {
+    run_session_command_with_env(
+        command,
+        environment,
+        agent_session,
+        exact_account_id,
+        launch_lock,
+        capture,
+    )?
+    .result(&command.program, agent_session.is_some(), command.holder)
+}
+
+fn run_session_command_with_env(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+    exact_account_id: Option<&crate::store::ProviderAccountId>,
+    launch_lock: Option<File>,
+    capture: Option<&LfProcessRuntime>,
+) -> Result<SessionCommandOutcome> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
     let outcome = session_command_status_with_env(
@@ -196,7 +215,7 @@ fn spawn_session_command_with_env(
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
     }
-    outcome.result(&command.program, agent_session.is_some(), command.holder)
+    Ok(outcome)
 }
 
 pub(crate) fn departure_notice(

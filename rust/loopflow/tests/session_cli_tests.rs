@@ -2232,12 +2232,23 @@ fn a_hung_up_bare_provider_exits_lf_with_its_own_status() {
             String::from_utf8_lossy(&output).into_owned(),
         )
     };
+    // A hang-up ends the conversation as the person meant it: the record
+    // says completed even though the shell sees the provider's status.
+    let ended = || -> (String, bool) {
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT id, completed_at IS NOT NULL FROM agent_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
     let (fresh, output) = run(&["-a", "claude", ":", "Hang up"]);
     assert_eq!(fresh, Some(129), "fresh launch: {output}");
-    let id: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
-        .unwrap()
-        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
-        .unwrap();
+    let (id, completed) = ended();
+    assert!(completed, "fresh launch recorded a failure: {output}");
     let (resumed, output) = run(&["session", "resume", &id]);
     assert_eq!(resumed, Some(129), "resume: {output}");
+    assert!(ended().1, "resume recorded a failure: {output}");
 }

@@ -95,3 +95,11 @@ LOO-820's design and launch reduction plan.
 changed no code (the only diff from `4f9b7796ff` is scratch), so the failure
 was already on the branch, or comes from running without a controlling
 terminal. Gate reruns it from a terminal.
+
+## QA 2, November 11: lf's line on a bare provider failure
+
+A bare provider exiting 7 gives the shell 7 and lf prints
+`claude exited with exit status: 7` (`SessionCommandOutcome::bare_exit_code`).
+Plain `claude` alone would print nothing extra ("for a bare session, it jsut
+does whatever claude or codex would do"). Left as designed; dropping the line
+is a one-line change in `bare_exit_code`.

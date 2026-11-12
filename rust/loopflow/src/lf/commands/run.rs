@@ -6,7 +6,7 @@ use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
 use crate::graph::Skill;
 use crate::lf::commands::context::preview::PromptPreview;
-use crate::lf::commands::util::launch_session;
+use crate::lf::commands::util::{launch_session, SessionCommandOutcome};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use crate::process::LfProcessRuntime;
@@ -724,12 +724,20 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
                 provider_session.account_id,
             );
         }
-        runtime.finish(if result.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        })?;
-        return result.map(|_| None);
+        runtime.finish(
+            result
+                .as_ref()
+                .map_or("failed", SessionCommandOutcome::capture_outcome),
+        )?;
+        return result
+            .and_then(|outcome| {
+                outcome.result(
+                    &built.harness,
+                    agent_session.is_some(),
+                    built.agent_config.holder,
+                )
+            })
+            .map(|()| None);
     }
 
     // Native terminals own their turn status. A separate lf record would remain

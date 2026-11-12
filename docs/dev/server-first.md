@@ -83,8 +83,11 @@ Rex shows `lf` there, not the agent.
   token or Move here.
 - **Joining late.** The server keeps the terminal emulator and paints a
   joining view from it. The holder keeps only recent raw bytes. After a server
-  restart the emulator is rebuilt from those bytes, or the agent is asked to
-  repaint by a size nudge; scrollback from before the restart may be absent.
+  restart the emulator is rebuilt from those bytes and a size nudge asking the
+  agent to repaint; scrollback from before the kept bytes may then be absent.
+- **Staying open.** A view's place in the stream is a PTY byte position the
+  holder can serve, so a view that is open across a server restart continues
+  without a repaint.
 - **Attach never creates.** A view of a Session whose process is gone says so
   and offers resume.
 
@@ -259,8 +262,8 @@ deleted when the server's emulator reads status itself.
 | OpenCode and Pi ask the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-ask-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
-| Holder: PTYs move from per-Session owners to a holder beside the server | Per-Session owners | The managed rule below |
-| Every view types; size follows the newest view | Takeover tokens, Move here | Holder |
+| Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |
+| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, Move here | Holder |
 | Observers become server registrations ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)) | `__codex-observe`, Task-update watchers | Hooks call the server |
 | CLI cleanup: `session serve`, `session attach`, the detach key | The owner's surface | Bare direct, holder |
 
@@ -270,18 +273,20 @@ one each.
 
 ## The managed rule
 
-A launch is managed when it comes through a Task or Wave command, which is
-how Desktop opens a Task's or a Wave's conversation. A bare `lf` typed inside
+A launch is managed when it comes through a Task, Wave or repository
+conversation command, including those opened by Desktop. A bare `lf` typed inside
 a Task's checkout stays bare and records the Task as its ancestry. The
-command decides, not the Session row: `Cli::names_work` is true for
-`--task`, `--wave` (a Task or Wave conversation passes them), `lf resume
---task`/`--wave` and a step of `lf task run`, and the launch carries it as
-`AgentConfig::managed`. Beside a Session id, `--task`/`--wave` make the
-resume managed and the id still selects: Desktop's Task and Wave workspaces
-prepare with `lf session resume [ID] --task X --prepare`, and the `open_argv`
-it gets back is `lf session resume ID --task X`. A Session link names no
-Work and opens bare. A child run started by a Session's agent, which that
-agent steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
+command decides: `Cli::names_work` is true for `--task`, `--wave` (a Task or
+Wave conversation passes them), `lf resume --task`/`--wave` and a step of
+`lf task run`, and the launch carries it as `AgentConfig::managed`. Beside a
+Session id, `--task`/`--wave` make the resume managed and the id still
+selects: Desktop's Task and Wave workspaces prepare with `lf session resume
+[ID] --task X --prepare`, and the `open_argv` it gets back is `lf session
+resume ID --task X`. Reopening a recorded conversation by id alone names no
+Work, so there the Session row decides holding and the server check:
+`WorkSource::is_managed` (`declared` or `bound`; a Task, Wave or repository
+conversation). A child run started by a Session's agent, which that agent
+steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
 started from a Desktop shell is bare.
 
 Any `lf` run in a Task's checkout counts toward that Task: its usage and time
@@ -292,7 +297,6 @@ run ends with its parent.
 
 ## Open
 
-- Whether Claude and Codex repaint fully on a size nudge.
 - When a run's checkout and its calling Session belong to different Tasks,
   which one its cost counts toward.
 - Whether a bare run outside every Task and Wave checkout gets usage rows.
@@ -306,6 +310,9 @@ run ends with its parent.
 - Whether the server becomes the only process that opens the store. Hooks and
   views already stop opening it under this plan; Graph runners and one-shot
   commands still do.
+- Whether Claude or Codex re-send terminal modes (bracketed paste, focus,
+  Kitty keyboard) on resize, which decides what a crashed server's rebuilt
+  emulator gets wrong.
 - How the server holds its store. Each `session.boundary` opens a connection,
   and each open validates the whole migration history: 5 ms alone, and about
   85% of a boundary's time when 50 Sessions take boundaries at once (p50
@@ -316,5 +323,15 @@ run ends with its parent.
   hook and answers `invalid {kind}`. Negotiation reuses the `hello`/`welcome`
   exchange (`revision`, `min_revision`) Desktop already sends; no second
   handshake. Until then, upgrade the server.
-- How the holder is started on macOS and Linux so the service manager leaves
-  it alone when the server's service is replaced.
+
+## Answered
+
+- **Size nudge.** Measured November 10, 2026 (Claude Code 2.1.322,
+  codex-cli 0.167.0, idle and after a 30-line answer): resizing one column
+  or row and back repainted every non-blank row of the visible screen and the
+  cursor from about 1.5–4 KB of output. Scrollback above the screen is not
+  repainted.
+- **Holder start.** A `setsid` child of a launchd agent survived
+  `launchctl bootout` with and without `AbandonProcessGroup`; the server's
+  plist sets it and its systemd unit uses `KillMode=process`. The server
+  spawns the holder with `setsid`; no separate service.

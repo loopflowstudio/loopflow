@@ -1014,9 +1014,10 @@ with (home / 'session-children.jsonl').open('a') as output:
     first.env("SETTINGS_TASK", task);
     success(first);
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // The Task's own conversation, started beside its checkout, is Claude too.
     let session: String = db
         .query_row(
-            "SELECT id FROM agent_sessions WHERE provider='claude'",
+            "SELECT id FROM agent_sessions WHERE provider='claude' AND model='sonnet'",
             [],
             |row| row.get(0),
         )

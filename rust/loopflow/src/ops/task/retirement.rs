@@ -11,6 +11,7 @@ use crate::store::{
     sqlite::{SqliteStore, TaskRetirement, ViewerHold},
     SharedStore,
 };
+use crate::transport::Host;
 use crate::work::task::Task;
 use fs2::FileExt;
 
@@ -48,8 +49,9 @@ fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option
             ViewerHold::Viewed(at) => {
                 if !owner.ended
                     && now < at + VIEWER_OBSERVATION_GRACE
-                    && crate::journal::lf_evidence(store, &owner.owner)
-                        != ProcessIdentityEvidence::Dead
+                    && owner.owner.owner().is_none_or(|owner| {
+                        crate::journal::lf_evidence(store, owner) != ProcessIdentityEvidence::Dead
+                    })
                 {
                     return Ok(Some(ViewerHold::Viewed(at)));
                 }
@@ -73,33 +75,36 @@ fn reconcile(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<TaskRetirem
 /// Task cleanup owns closure, including Tasks without a checkout and resumed
 /// conversations whose checkout was already retired.
 pub(crate) fn close_conversations(store: &SqliteStore, task: &TaskId) -> OpsResult<()> {
-    for (owner, abandoned) in conversation_closes(store, task)? {
-        end_owner(
-            store,
-            &owner,
-            if abandoned {
-                "Task abandoned"
-            } else {
-                "Task completed"
-            },
-        )?;
+    for (host, abandoned) in conversation_closes(store, task)? {
+        let notice = if abandoned {
+            "Task abandoned"
+        } else {
+            "Task completed"
+        };
+        match &host {
+            Host::Owner(owner) => end_owner(store, owner, notice)?,
+            // A held terminal has no process to signal: the server ends it on
+            // its notice. One the server cannot reach is a candidate next pass.
+            Host::Terminal(_) => {
+                if let Err(error) = crate::transport::close_notice(&host, notice) {
+                    tracing::warn!(%host, %error, "held terminal close unavailable");
+                }
+            }
+        }
     }
     Ok(())
 }
 
-fn conversation_closes(
-    store: &SqliteStore,
-    task: &TaskId,
-) -> OpsResult<Vec<(crate::id::LfProcessId, bool)>> {
+fn conversation_closes(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<(Host, bool)>> {
     let now = now();
-    let mut owners = store.task_close_candidates(task, now).map_err(task_error)?;
-    let Some((_, abandoned)) = owners.first() else {
-        return Ok(owners);
+    let mut hosts = store.task_close_candidates(task, now).map_err(task_error)?;
+    let Some((_, abandoned)) = hosts.first() else {
+        return Ok(hosts);
     };
     if *abandoned {
         let holds = store.task_viewer_holds(task).map_err(task_error)?;
-        owners.retain(|(owner, _)| {
-            !holds.iter().any(|hold| &hold.owner == owner
+        hosts.retain(|(host, _)| {
+            !holds.iter().any(|hold| &hold.owner == host
             && matches!(hold.hold, ViewerHold::Viewed(at) if now < at + VIEWER_OBSERVATION_GRACE))
         });
     } else {
@@ -114,7 +119,7 @@ fn conversation_closes(
             return Ok(Vec::new());
         }
     }
-    Ok(owners)
+    Ok(hosts)
 }
 
 fn end_owner(store: &SqliteStore, owner: &crate::id::LfProcessId, notice: &str) -> OpsResult<()> {
@@ -122,7 +127,7 @@ fn end_owner(store: &SqliteStore, owner: &crate::id::LfProcessId, notice: &str) 
         return Ok(());
     };
     // Older owners may not understand the notice; the verified signal still ends them.
-    if let Err(error) = crate::transport::close_notice(owner, notice) {
+    if let Err(error) = crate::transport::close_notice(&Host::Owner(owner.clone()), notice) {
         tracing::debug!(%owner, %error, "Owner close notice unavailable");
     }
     crate::ops::human_session::end_owner(store, owner, pid).map_err(task_error)
@@ -312,17 +317,36 @@ async fn prepare_deletion(
 fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
     let shells = crate::desktop::shells::owners(store, task).map_err(task_error)?;
     let mut allowed: HashSet<_> = shells.into_iter().collect();
-    for owner in store.task_session_owners(task).map_err(task_error)? {
-        if crate::journal::lf_evidence(store, &owner) == ProcessIdentityEvidence::Dead {
+    for host in store.task_session_hosts(task).map_err(task_error)? {
+        if host.owner().is_some_and(|owner| {
+            crate::journal::lf_evidence(store, owner) == ProcessIdentityEvidence::Dead
+        }) {
             continue;
         }
-        if store.owner_retention(&owner).map_err(task_error)?.is_some() {
+        if store
+            .owner_retention(host.transport())
+            .map_err(task_error)?
+            .is_some()
+        {
             return Ok(Some(
                 "Requested work or a pending request still holds this Task".into(),
             ));
         }
-        allowed.extend(store.owner_session_launchers(&owner).map_err(task_error)?);
-        allowed.insert(owner);
+        // A held terminal is no process: the lf processes that started inside
+        // it stand where an owner would.
+        match host {
+            Host::Owner(owner) => {
+                allowed.extend(store.owner_session_launchers(&owner).map_err(task_error)?);
+                allowed.insert(owner);
+            }
+            Host::Terminal(terminal) => {
+                allowed.extend(
+                    store
+                        .held_terminal_processes(&terminal)
+                        .map_err(task_error)?,
+                );
+            }
+        }
     }
     let processes = store.task_open_processes(task).map_err(task_error)?;
     for (process, _) in crate::ops::task_execution::unresolved_processes(store, &processes)? {

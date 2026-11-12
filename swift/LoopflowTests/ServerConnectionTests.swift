@@ -25,6 +25,7 @@ struct ServerConnectionTests {
         #expect(connection.reading.attachment == .usable)
         try relay.publish(generation: 2, state: "reconnecting", input: false)
         try await wait { connection.reading.state == .reconnecting }
+        #expect(connection.reading.title == "Reconnecting… Input paused; last screen may be stale.")
         #expect(!connection.reading.acceptsInput)
         try relay.publish(generation: 2, state: "connected", input: false)
         try await wait { connection.reading.canMoveHere }

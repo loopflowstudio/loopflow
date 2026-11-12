@@ -137,6 +137,23 @@ pub(crate) fn require_server() -> Result<()> {
     )
 }
 
+/// `require_server` for a native launch that is managed: its command named a
+/// Task or Wave (`managed`), or it reopens a conversation recorded as one
+/// (`WorkSource::is_managed`), which is also what holds it. Anything else
+/// starts without the server.
+pub(crate) fn require_server_for(owner: &AttachmentOwner, managed: bool) -> Result<()> {
+    let (store, session, _) = owner;
+    if managed
+        || store
+            .session(session)?
+            .and_then(|record| record.work_source)
+            .is_some_and(crate::session::WorkSource::is_managed)
+    {
+        require_server()?;
+    }
+    Ok(())
+}
+
 /// Capture identity in the launch's delivery file. A managed launch (a Task or
 /// Wave command's, `AgentConfig::managed`) starts
 /// beside the Machine server and carries a steer capability, which its hooks

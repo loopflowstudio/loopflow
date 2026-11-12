@@ -249,8 +249,13 @@ impl SessionCommandOutcome {
         }
     }
 
+    /// Whether the launch failed: an interrupt or a mover ends it as a success.
+    pub(crate) fn failed(&self) -> bool {
+        self.moved.is_none() && !self.interrupted && !self.status.success()
+    }
+
     pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
-        if self.moved.is_some() || self.status.success() || self.interrupted {
+        if !self.failed() {
             Ok(())
         } else if resuming {
             Err(anyhow!(
@@ -403,7 +408,7 @@ fn session_command_status_with_env(
                 crate::process::resume_session_agent_process(&store, &session.id, &process)?;
             store.make_session_interactive(&session.id, &attachment)?;
             if let Some(owner) = crate::transport::current() {
-                store.bind_session_transport(&session.id, &attachment, owner)?;
+                store.bind_session_transport(&session.id, &attachment, owner.transport())?;
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
@@ -592,11 +597,16 @@ fn run_native_session(
             crate::agent::configure_native_input(&mut process, input)?;
         }
     }
+    // Only an explicit remote connection is a client of a surviving AgentProcess.
+    let owned = command.remote.is_none().then_some(&attachment);
+    // Refused before the provider conversation is recorded, so the next launch
+    // starts it fresh instead of resuming one that never ran.
+    if let Some(owner) = owned {
+        crate::harness::agent_process::require_server_for(owner, command.managed)?;
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
     }
-    // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
@@ -615,7 +625,6 @@ fn run_native_session(
             attachment: attachment.2.clone(),
             provider: command.program.clone(),
             client: owned.is_none(),
-            resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),
             capture: capture.map(LfProcessRuntime::hand_off),
             capture_key: environment

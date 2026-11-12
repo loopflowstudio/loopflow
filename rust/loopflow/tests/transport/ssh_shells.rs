@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{desktop_shell_bootstrap, wait_hold, Fixture};
+use super::{desktop_shell_bootstrap, Fixture};
 use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
@@ -612,8 +612,33 @@ fn ssh_shell_failures_never_fall_back_or_recreate_ended_execution() {
     target_os = "macos",
     ignore = "sshd sandbox cannot nest inside test_network.py; run directly with --ignored"
 )]
-fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave() {
+fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on_leave() {
     let fixture = Ssh::new();
+    // The checkout's conversation is the Task's: the destination's server
+    // starts it in a holder's terminal.
+    let _server = fixture.destination.machine_server();
+    let hold = |terminal: &str| -> Option<String> {
+        fixture
+            .destination
+            .sql()
+            .query_row(
+                "SELECT viewer_hold FROM held_terminals WHERE id=?1",
+                [terminal],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let wait_hold = |terminal: &str, expected: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while hold(terminal).as_deref() != Some(expected) {
+            assert!(
+                Instant::now() < deadline,
+                "viewer hold stayed {:?}, expected {expected:?}",
+                hold(terminal)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
     script(&fixture.destination.home.path().join(".cargo/bin/claude"),
         "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.302'; exit; fi\nprintf 'provider-ready\\n'\nexec /bin/bash --noprofile --norc -i < /dev/tty\n");
     let record: serde_json::Value = serde_json::from_str(&success(fixture.source_command(&[
@@ -639,25 +664,32 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
     assert_eq!(record["workspace"]["machine_id"], fixture.machine);
     let mut pane = Pane::spawn(fixture.source_command(&argv[1..]));
     pane.until("provider-ready");
-    let owner = fixture.destination.owner_of(session);
-    fixture.destination.wait_controlled(&owner);
+    let terminal = fixture.destination.terminal_of(session);
+    fixture.destination.wait_held_controlled(&terminal);
     pane.input("export RETAINED=original; printf '%s' $$ > \"$HOME/shell-pid\"; printf 'ready:%s\\n' \"$RETAINED\"\r");
     pane.until("ready:original");
     let shell_pid: i32 = fixture.destination.wait_file("shell-pid").parse().unwrap();
-    let owner_pid: i32 = fixture
-        .destination
-        .sql()
-        .query_row("SELECT pid FROM processes WHERE id=?1", [&owner], |r| {
-            r.get(0)
-        })
-        .unwrap();
+    // The shell's terminal is the holder's; the holder outlives this Session.
+    let mut ancestors = Vec::new();
+    let mut pid = shell_pid;
+    while pid > 1 && ancestors.len() < 8 {
+        let (parent, command) = super::command_line(pid);
+        ancestors.push(command);
+        pid = parent;
+    }
+    assert!(
+        ancestors
+            .iter()
+            .any(|command| command.contains("holder run")),
+        "{ancestors:?}"
+    );
     let mut owned = fixture.descendants(&[
         fixture.daemon.id() as i32,
         pane.child.id() as i32,
-        owner_pid,
+        shell_pid,
     ]);
     // Only live processes can own a terminal; zombies can retain its name in ps.
-    // The only remote controlling terminal belongs to the execution shell.
+    // Nothing SSH started holds a terminal: the agent's is the holder's.
     let inventory = fixture.census();
     let remote = fixture.descendants(&[fixture.daemon.id() as i32]);
     let terminals: Vec<_> = inventory
@@ -666,10 +698,7 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
             !state.starts_with('Z') && remote.contains(pid) && tty != "??" && tty != "?"
         })
         .collect();
-    assert!(
-        terminals.iter().all(|(pid, _, _, _)| *pid == shell_pid),
-        "extra SSH PTY: {terminals:?}"
-    );
+    assert!(terminals.is_empty(), "extra SSH PTY: {terminals:?}");
 
     // A quiet viewer stays connected beyond the expiry bound with no keystrokes.
     let until = Instant::now() + Duration::from_secs(32);
@@ -678,7 +707,7 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
         assert!(pane.child.try_wait().unwrap().is_none());
         std::thread::sleep(Duration::from_millis(100));
     }
-    wait_hold(&fixture.destination, &owner, Some("viewed"));
+    wait_hold(&terminal, "viewed");
     // Initial dimensions, then a real local resize, both traverse the same stream.
     pane.input("stty size\r");
     pane.until("24 80");
@@ -705,8 +734,8 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
     pane.input("\x1d");
     assert!(pane.exit().success());
     pane.assert_modes_restored();
-    wait_hold(&fixture.destination, &owner, Some("absent"));
-    assert!(fixture.destination.running(&owner));
+    wait_hold(&terminal, "absent");
+    fixture.destination.assert_held_hosted(&terminal);
 
     let mut returning = Pane::spawn(fixture.source_command(&[
         "--machine",
@@ -715,14 +744,10 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
         session,
         "--json",
     ]));
-    fixture.destination.wait_controlled(&owner);
+    fixture.destination.wait_held_controlled(&terminal);
     returning.input("printf 'retained:%s:%s\\n' \"$RETAINED\" $$\r");
     returning.until(&format!("retained:original:{shell_pid}"));
-    owned.extend(fixture.descendants(&[
-        fixture.daemon.id() as i32,
-        returning.child.id() as i32,
-        owner_pid,
-    ]));
+    owned.extend(fixture.descendants(&[fixture.daemon.id() as i32, returning.child.id() as i32]));
     returning.input("exit 0\r");
     assert_eq!(
         returning.exit().code(),
@@ -739,8 +764,8 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
         .expect("Session JSON follows the returned viewer");
     let returned: serde_json::Value = serde_json::from_str(returned[json..].trim()).unwrap();
     assert_eq!(returned["id"], session);
-    assert_eq!(fixture.destination.owner_of(session), owner);
-    fixture.destination.ends(&owner);
+    assert_eq!(fixture.destination.terminal_of(session), terminal);
+    fixture.destination.held_ends(&terminal);
     owned.extend(fixture.masters());
     fixture.disconnect();
     fixture.assert_baseline(&owned);

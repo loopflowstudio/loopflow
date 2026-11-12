@@ -408,7 +408,9 @@ impl Terminal {
     /// Kitty keyboard flags, charsets, palette, modes (alternate screen, mouse,
     /// bracketed paste), scrolling region, tabstops and pwd.
     pub fn repaint_screen(&self) -> Result<Vec<u8>, Error> {
-        self.format(ffi::FORMAT_VT, Range::Active, true)
+        let mut repaint = self.format(ffi::FORMAT_VT, Range::Active, true)?;
+        drop_pwd_nul(&mut repaint);
+        Ok(repaint)
     }
 
     /// VT bytes that print the newest `rows` scrollback rows of the active
@@ -632,6 +634,21 @@ enum Range {
         first: usize,
         last: usize,
     },
+}
+
+/// Ghostty's formatter ends the pwd it restores with its C string's NUL, inside
+/// the OSC 7 before ST, where a terminal reads it as part of the path.
+fn drop_pwd_nul(repaint: &mut Vec<u8>) {
+    let Some(start) = repaint.windows(4).position(|w| w == b"\x1b]7;") else {
+        return;
+    };
+    let Some(end) = repaint[start..].windows(2).position(|w| w == b"\x1b\\") else {
+        return;
+    };
+    let before = start + end - 1;
+    if repaint[before] == 0 {
+        repaint.remove(before);
+    }
 }
 
 /// The subset of `include/ghostty/vt/*.h` the owner uses. Enums are `int`
@@ -926,6 +943,18 @@ mod tests {
         let repaint = String::from_utf8_lossy(&owner.repaint_screen().unwrap()).into_owned();
         assert!(repaint.contains("\x1b[?2004h"), "{repaint:?}");
         assert!(repaint.contains("\x1b[?1000h"), "{repaint:?}");
+    }
+
+    #[test]
+    fn repaint_reports_the_directory_without_a_nul() {
+        let mut owner = Terminal::new(80, 24).unwrap();
+        owner.write(b"\x1b]7;file://host/work/repo/\x1b\\prompt");
+        let repaint = owner.repaint_screen().unwrap();
+        let repaint = String::from_utf8_lossy(&repaint);
+        assert!(
+            repaint.contains("\x1b]7;file://host/work/repo/\x1b\\"),
+            "{repaint:?}"
+        );
     }
 
     #[test]

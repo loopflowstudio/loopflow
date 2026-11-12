@@ -585,19 +585,36 @@ fn members(
 }
 
 impl SqliteStore {
-    /// Owners of unfinished member Sessions, without loading retained history.
-    pub(crate) fn task_session_owners(&self, task: &TaskId) -> StoreResult<Vec<LfProcessId>> {
+    /// Owners and held terminals of unfinished member Sessions, without
+    /// loading retained history.
+    pub(crate) fn task_session_hosts(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::transport::Host>> {
+        use crate::transport::Host;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT DISTINCT s.transport_lf_process_id FROM agent_sessions s
+            "SELECT DISTINCT s.transport_lf_process_id,s.held_terminal_id FROM agent_sessions s
              WHERE s.id IN ({}) AND s.completed_at IS NULL
-                 AND s.transport_lf_process_id IS NOT NULL",
+                 AND (s.transport_lf_process_id IS NOT NULL OR s.held_terminal_id IS NOT NULL)",
             session_ids("?1")
         ))?;
-        let owners = query
-            .query_map([task.as_str()], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(owners)
+        let rows = query.query_map([task.as_str()], |row| {
+            Ok((
+                row.get::<_, Option<LfProcessId>>(0)?,
+                row.get::<_, Option<crate::id::TerminalId>>(1)?,
+            ))
+        })?;
+        rows.map(|row| {
+            // A held Session also names the launcher that started it; the
+            // terminal is what hosts it.
+            Ok(match row? {
+                (_, Some(terminal)) => Host::Terminal(terminal),
+                (Some(owner), None) => Host::Owner(owner),
+                (None, None) => unreachable!("the query selects hosted Sessions"),
+            })
+        })
+        .collect()
     }
 
     pub(crate) fn task_ids_in_wave(

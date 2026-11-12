@@ -704,7 +704,8 @@ async fn admit(
             _ => None,
         },
         graph_lf_process_id: None,
-        work_source: task.map(|_| WorkSource::Declared),
+        // Task, Wave and repository conversations are managed wherever they move.
+        work_source: (task.is_some() || moved.primary.is_some()).then_some(WorkSource::Declared),
         bound_at: None,
         interactive: true,
         repo: Some(repo.to_string()),

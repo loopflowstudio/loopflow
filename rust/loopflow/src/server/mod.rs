@@ -2,6 +2,7 @@
 pub(crate) mod boundary;
 pub mod client;
 pub(crate) mod events;
+pub mod holder;
 mod outbox;
 pub mod schema;
 mod service;

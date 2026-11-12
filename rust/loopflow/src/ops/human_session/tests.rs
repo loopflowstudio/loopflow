@@ -151,6 +151,7 @@ fn session_metadata_keeps_unknown_position_visible() {
         available: false,
         terminal_id: None,
         unviewed: false,
+        held: false,
         task_terminal: false,
         task_primary: false,
         task_ids: vec![task.clone()],
@@ -562,7 +563,7 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         super::session_work_path(&store, &session(Some(missing.clone())))
             .await
             .unwrap(),
-        Some(format!("Task {missing} (unavailable)"))
+        Some(format!("product / Task {missing} (unavailable)"))
     );
 }
 
@@ -1714,6 +1715,56 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
             .unwrap()
             .is_none());
     });
+}
+
+/// A held Task conversation nobody views is the Task's, and any terminal
+/// attaches to it: there is no other terminal's input to take back.
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn a_held_task_conversation_without_a_view_offers_attach() {
+    let _lock = crate::journal::test_env_lock();
+    let logins = Logins::new().await;
+    let work = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
+    let session = logins.codex_session("held", None, &work);
+    let _agent = logins.run(&session);
+    let task = TaskId::new();
+    let created = logins
+        .store
+        .sqlite
+        .create_task(&crate::work::task::NewTask {
+            repository_id: logins.store.sqlite.ensure_repository("/fixture").unwrap(),
+            id: task.clone(),
+            project_id: None,
+            title: "Held".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let terminal = crate::id::TerminalId::new();
+    rusqlite::Connection::open(&logins.database)
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO held_terminals(id,holder_build,created_at,viewer_hold,viewer_hold_at,viewed)
+                 VALUES('{terminal}','fixture',1,'absent',1,0);
+             UPDATE agent_sessions SET task_id='{task}',held_terminal_id='{terminal}' WHERE id='held';"
+        ))
+        .unwrap();
+
+    let rows = super::list(&logins.store, &crate::session::SessionFilter::default())
+        .await
+        .unwrap();
+    let row = rows.iter().find(|row| row.id == session.id).unwrap();
+    assert_eq!(row.state, super::SessionState::Detached);
+    assert_eq!(row.work_path.as_deref(), Some(created.identifier.as_str()));
+    let offered: Vec<_> = row
+        .actions
+        .iter()
+        .map(|action| (action.label.as_str(), action.unavailable_reason.as_deref()))
+        .collect();
+    assert_eq!(offered, [("Reconnect", None)]);
+    assert!(row.actions[0]
+        .help
+        .ends_with(&format!("lf resume {}", session.id)));
 }
 
 struct ListFilters {

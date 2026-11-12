@@ -70,19 +70,22 @@ Leaving a terminal relay restores keyboard and drawing modes at the current
 cursor position. Returning to the shell must not home the cursor or overwrite
 the command's output.
 
-Conversations stay running while their scope is open. Completed Tasks end their
-conversations after the viewing grace, with or without a checkout; abandonment
-ends unviewed Task conversations, even during a turn. Wave and repository
-conversations run until their agent quits.
+Conversations stay running while their scope is open, whether an owner or a
+held terminal hosts them. Completed Tasks end their conversations after the
+viewing grace, with or without a checkout; abandonment ends unviewed Task
+conversations, even during a turn. Wave and repository conversations run
+until their agent quits. Task cleanup signals an owner after its notice; a held
+terminal has no process to signal, so the server ends it on the notice.
 
-Only a scope's ongoing conversation has an owner. A bare one, typed at a
-terminal (`lf`, `lf <skill>`, or `lf resume` of a Session that is no scope's
-ongoing conversation), starts none: its provider runs as the terminal's
+Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of
+an unmanaged Session) start no owner: the provider runs as the terminal's
 foreground process-group leader with only the context hooks, and closing the
 terminal ends it. `os_process::foreground` hands the terminal over before exec
 and takes it back after; a provider stopped with Ctrl+Z stops lf too, and `fg`
-continues both. Headless runs, Graphs, and Desktop surfaces waiting for a relay
-keep their owner.
+continues both. Commands naming Work and reopens of managed Sessions keep the
+holder. Headless runs, bare Graphs, and Desktop surfaces waiting for a relay
+keep their host.
+
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
 launch it. Background starts require a configured, installed agent; there is no
@@ -198,6 +201,8 @@ message is a frame: `tag u8 · len u32 BE · payload`. Stream frames carry at mo
 | `0x02` snapshot | owner → viewer | the terminal snapshot a fresh stream begins with |
 | `0x03` out | owner → viewer | stream 1: PTY output, or stdout of a piped command |
 | `0x04` err | owner → viewer | stream 2: stderr of a piped command |
+| `0x05` position | server → viewer | a held terminal's PTY position the stream stands at, u64 BE |
+| `0x06` aside | server → viewer | lf's reports and events for a held terminal's view; not PTY bytes |
 | `0x11` request | viewer → owner | JSON with `id` and `kind` |
 | `0x12` input | viewer → owner | keystrokes from the connection holding input control |
 
@@ -223,7 +228,7 @@ per viewer, and every reply carries the `seq` of the last event queued when it
 was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
 `owner {viewer,name,held}`, `control {held,notice}` (input control left this
 connection), `child_exited {code}`, `detached`, `hint {text}` and
-`return {detach}`. A viewer that receives `control` with `held: false` restores
+`return {detach}` and `live`. A viewer that receives `control` with `held: false` restores
 its terminal, prints the notice and leaves.
 
 A connection that ends without a `leave` request keeps its stream for 60 s.
@@ -315,6 +320,223 @@ Desktop terminal placement is validated on the launching viewer’s PTY, then ca
 across the owner’s private PTY before native admission. Stale inherited placement
 is discarded. The first Session reading can publish reports already restored on
 its surface; replacement providers begin with an empty observation.
+
+## Held terminals
+
+```sh
+lf resume --task LOO-12     # a view of a terminal the holder keeps
+ps -axo command | grep '^lf '
+# lf server run
+# lf holder run
+```
+
+A managed launch has no owner process. The Machine server asks a holder to
+start the agent on a PTY and keeps everything else: the terminal registry,
+one libghostty-vt terminal per held terminal, viewers, viewing records, queued
+input, the child's control requests and exit settlement. Everything above
+about viewers, control, ownership, lifetime and repainting holds for a held
+terminal with "the server" in place of "the owner", except where this section
+says otherwise. Owners remain for bare launches, piped and `-b` executions
+and Desktop Task shells.
+
+`transport::managed` is the one place that decides:
+
+| Launch | Managed |
+|---|---|
+| `lf task run`, an interactive `lf ship` step, `lf resume --task`, a Task's primary conversation, Wave session commands | yes |
+| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | yes |
+| `lf resume SESSION` of a Session bound to a Task or Wave | yes |
+| A repository conversation recorded before it was managed (no `work_source`) | no |
+| `lf <skill>`, `lf graph …`, `lf -i`, any `-b` or piped execution | no |
+| Desktop Task shells | no: they run without a server on headless Linux |
+
+A managed launch calls `session.start` and becomes a view of the returned
+terminal. With the server unreachable it fails with `Loopflow server is not
+running; run lf server status`. It never falls back to a local owner. The
+one launch nobody views, a Task's background conversation, goes unstarted
+instead and its Graph runs on.
+
+### Identity
+
+A held terminal is a `TerminalId`, not an LfProcess: Session → TerminalId →
+holder (build, pid) + PTY + child AgentProcess. A holder is one LfProcess
+however many terminals it holds, and `lf process list` shows it once. Launcher
+LfProcess rows and capture attachment keep describing the processes that
+really ran. The registry is live state the server rebuilds from holder
+inventory, the per-terminal files below and the store; it is not a second
+record of Work.
+
+### Holder
+
+`lf holder run` is hidden and started only by the server. It opens no store,
+runs no async runtime and knows nothing about Sessions.
+
+- **One per build.** Keyed by the executable's SHA-256: socket
+  `<private dir>/holder-<sha12>.sock`, a lock file beside it, state under
+  `<Machine home>/holders/<sha12>/<terminal>/`. The server sends starts only
+  to the holder of its own build and speaks to every older one it finds.
+- **Claim.** The holder takes an exclusive lock for life and only then
+  unlinks and binds its socket. A second `lf holder run` of the same build
+  fails the lock and exits 0. A holder that is slow to answer still holds the
+  lock, so the server waits for it and never starts another in its place.
+- **Start.** The server spawns it with `setsid` and reads one ready line.
+  launchd (`AbandonProcessGroup`) and systemd (`KillMode=process`) leave it
+  running when the server's service stops or is replaced.
+- **Lifetime.** It exits 60 seconds after its last child, if no start
+  arrives. Logout and reboot end it. Nothing restarts a holder, and a holder
+  that dies takes its agents with it.
+- **Ring.** The newest 2 MiB of raw output per PTY, addressed by absolute
+  byte count since the child started. The holder drains every PTY whether or
+  not a server is connected, so a stopped server never blocks an agent.
+- **Exit.** When a child exits the holder reads what it left on the PTY,
+  closes the PTY, and writes `<terminal>/exit.json` (code or signal, final
+  byte count) before reporting it. It keeps the ring for readers until the
+  server sends `forget`.
+
+Requests and answers are one JSON object per line on a Unix socket
+(`server/holder/wire.rs`). The protocol is small so that a newer server can speak to
+any older holder, and no field has a default:
+
+| Request | Answer |
+|---|---|
+| `hello {revision}` | `welcome {revision, build, pid}`, or `incompatible {revision}` to an older asker |
+| `list` | `terminals [{terminal, request, pid, rows, cols, written, ring_start, exit}]` |
+| `start {terminal, request, argv, cwd, env, rows, cols}` | `started {pid}`. `env` is complete; nothing is inherited from the holder. Repeating a `terminal` with the same `request` answers the existing child; with another `request` it is an error |
+| `read {terminal, from}` | `reading`, then the connection is that terminal's output as frames |
+| `write {terminal}` | `writing`, then the connection is that terminal's input as raw bytes |
+| `resize {terminal, rows, cols}` | `done`. The foreground program is signalled even when the size is unchanged |
+| `restore {terminal}` | `done`. The PTY returns to the modes it had before its child ran |
+| `forget {terminal}` | `done`. An exited terminal's ring is dropped; a running one is an error |
+
+Anything else answers `error {message}` and the connection keeps taking
+requests. A `TerminalId` names one PTY and is never reused: a `read` of a
+terminal the holder does not hold, or from a position past what that
+terminal has written, is an error and never an answer from byte 0.
+
+Output frames are `tag u8 · length u32 BE · payload`:
+
+| Tag | Payload |
+|---|---|
+| `o` | Raw PTY bytes continuing the reader's position |
+| `g` | `{ring_start}`: the ring passed the reader; the stream continues there |
+| `m` | `{raw}`: whether the PTY had line editing off when the following bytes were read. The server tells a provider's screen from its exit text by it, as an owner does with `tcgetattr` |
+| `x` | `{code, signal, at, written}`: the child's exit, last frame of the stream |
+
+There is no signal request. The server signals a child's process group itself
+(same user, pid from `list`).
+
+A dropped holder connection says nothing about its agents. The server reads
+again from its last position with backoff; a terminal ends only on an `x`
+frame or an `exit.json`. A `start` whose answer was lost is reconciled with
+`list` before anything is retried, so one request starts one child. A
+terminal missing from `list` with no `exit.json` has an unknown outcome and is
+reported as such, never given an invented exit code.
+
+### Views
+
+Every connection to a held terminal enters the server at
+`<private dir>/held.sock`: a first line `{"terminal":ID,"revision":N}`, the
+answer `{"answer":"hosted","revision":N}`, then the viewer protocol above,
+unchanged. That first exchange is the one thing every build reads the same
+way; `revision` covers everything after it. A server of another revision
+answers and admits nothing. A view in a terminal that reads another revision
+becomes the installed `lf` (`lf session attach --terminal`, the same Session)
+as a fresh view, which repaints from the server's screen; no position crosses
+builds. A view that already did so, or cannot, ends with one line and the
+agent keeps running. A child's control request that reads another revision
+is a recording gap in `logs/lf.log`; the agent and its turn go on.
+`"waiting"` means the
+terminal's holder has not answered this server yet: one that keeps its lock
+and does not list in time at startup is pending, asked again with backoff, and
+taken up when it answers; the view keeps reconnecting. A refused connection
+does not end it (a stopped holder refuses once its socket's queue is full);
+a holder whose lock is free is gone, and its terminals and its LfProcess row
+settle with what its records say, else an unknown outcome. `"ended"` means no
+live or pending holder could hold that terminal: it ended or never started,
+and the connection is refused as `not_found`. Attaching never starts anything. The
+child's own control requests (`status`, `directory`, `exit_record`, …) use the
+same entrance; `LF_TRANSPORT_HELD` names its terminal the way
+`LF_TRANSPORT_OWNER` names an owner. A terminal is no process, so the lf
+process that takes up that handoff records it as `processes.held_terminal_id`.
+Rules scoped to an owner's descendants start from those processes instead:
+Task retirement excuses the work beneath it.
+
+`lf session attach --terminal TERMINAL` is the relay for a held terminal.
+When its connection drops it connects again on its own, with backoff, until a
+server hosts the terminal or says it has ended. It draws nothing while it
+waits; typing is discarded and Ctrl+] closes the view. Clients that speak
+only the server protocol reach the same terminals with a `session.attach`
+ticket (`server/README.md`).
+
+A held terminal's view counts PTY bytes, not bytes sent to it. Its `out`
+frames are exactly the PTY's output; a `position` frame follows a snapshot
+and any stretch it skipped (output the ring dropped before the server read
+it, or a native client's exit text lf replaced); lf's reports and events
+travel in `aside` frames, which it writes and does not count. The server
+keeps no spool for it.
+
+A view that reconnects attaches with `from`, the position its screen shows:
+
+```json
+{"id":1,"kind":"attach","control":true,"replace":false,"own":"request","rows":40,"cols":120,"name":null,"moved":null,"from":48213}
+```
+
+The server answers a new viewer identity, reads the PTY bytes from `from`
+out of the holder's ring on a connection of its own, and sends them as `out`
+frames until the view reaches the live stream; this works after a server
+restart too, since nothing about the view is kept in the server. Then it
+sends the current state again (size, owner, theme, directory, title and
+program status, a child exit) and a `live` event. A `from` the ring no
+longer holds, or past what the PTY printed, gets a snapshot and `position`
+instead, then `live`. Until it has caught up the view receives no reports or
+events, and its terminal's answers do not count as the controller's: the
+retained screen answers the agent's live queries meanwhile.
+
+The replayed bytes contain queries the agent asked long ago, and the view's
+terminal answers them again. The relay discards everything it reads from
+its terminal until the stream is live, then writes a status report query
+(`CSI 5 n`) and keeps discarding until the terminal's answer to it: answers
+come in order, so every late one has arrived by then (one second at most if
+a terminal never answers). Anything the relay itself prints into the screen
+(a reconnect notice, an input hint, an ownership change) makes its next
+reconnect a fresh attach that repaints instead. The replayed stretch is the
+raw PTY output, including a native client's exit text that live views see
+replaced.
+
+### Server restart
+
+Before `start` the server writes `<terminal>/meta.json`: the Session, the
+start's `request`, and the control key the child's requests are checked
+against. That is what lets another server instance answer the same child.
+An exit record the launcher hands over is kept beside it in
+`exit-record.json` until it is settled, and its native client's announcement
+in `native-client.json` until that client ends. A launcher that execs its
+provider never announces it again, so a server that takes the terminal up
+reads it there; without it a Desktop pane would stay **Opening…** after a
+restart.
+
+On startup the server greets every `holder-*.sock`, lists it, and hosts each
+running terminal under its existing `TerminalId`. The screen is rebuilt by
+replaying the holder's ring from its start, then one size nudge (one column
+narrower for 0.4 s, and back) asks the agent to repaint what the ring no
+longer holds. The same nudge follows a gap, when the ring passed output the
+server had not read. Scrollback reaches only as far back as the ring, and a
+terminal mode set before the ring's start is known only if the agent sets it
+again when resized. Replayed output answers none of its queries: they were
+answered when it was printed, or went unanswered while no server ran.
+
+### Exit and settlement
+
+When a terminal's `exit` arrives the server records it (`native_exit::settle`
+with a record the launcher handed over, and the terminal's end in
+`held_terminals`), asks the holder to `forget` the ring and deletes the
+terminal's directory. The directory is the receipt: it is deleted only after
+the store has the exit, so a store outage leaves it and settlement is tried
+again every two seconds. A server that starts after a child exited finds the
+exit in the holder's `list`, or in `exit.json` when the holder is gone too,
+and records it the same way, settling the kept `exit-record.json` first; an
+end nobody saw settles it as killed. A server that takes up a running
+terminal takes up its kept record too.
 
 ## Task shells and completed workspaces
 

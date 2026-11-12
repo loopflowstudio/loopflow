@@ -1554,6 +1554,7 @@ mod tests {
             ("same", "codex", "own-thread"),
             ("ambiguous", "claude", "shared-thread"),
             ("unrecorded", "claude", "unknown-thread"),
+            ("unaccounted", "claude", "manifest-thread"),
         ] {
             conn.execute(
                 "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,
@@ -1577,6 +1578,16 @@ mod tests {
             .unwrap();
         }
 
+        // Without an account record, the current input's manifest names its harness.
+        conn.execute_batch(
+            r#"INSERT INTO session_events(seq,session_id,kind,receipt_key,observed_at,payload)
+             VALUES(100,'unaccounted','captured','input',10,'{}'),
+                (101,'unaccounted','observed','input:manifest.json',10,
+                 '{"evidence":{"harness":"codex","model":"gpt-5"}}');
+             UPDATE agent_sessions SET current_capture=100 WHERE id='unaccounted';"#,
+        )
+        .unwrap();
+
         upgrade_from_migration(&conn, "resume_on_latest_input_provider");
 
         let sessions = conn
@@ -1599,6 +1610,7 @@ mod tests {
                 ("ambiguous".into(), "claude".into(), opus.clone()),
                 ("same".into(), "codex".into(), opus.clone()),
                 ("switched".into(), "codex".into(), None),
+                ("unaccounted".into(), "codex".into(), Some("gpt-5".into())),
                 ("unrecorded".into(), "claude".into(), opus),
             ]
         );

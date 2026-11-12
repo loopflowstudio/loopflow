@@ -390,7 +390,7 @@ runs no async runtime and knows nothing about Sessions.
   server sends `forget`.
 
 Requests and answers are one JSON object per line on a Unix socket
-(`holder/wire.rs`). The protocol is small so that a newer server can speak to
+(`server/holder/wire.rs`). The protocol is small so that a newer server can speak to
 any older holder, and no field has a default:
 
 | Request | Answer |

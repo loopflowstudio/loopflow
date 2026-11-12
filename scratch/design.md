@@ -7,10 +7,12 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 02:37 UTC, GitHub's PR metadata still reported #1812 open and
+At November 12 02:42 and 03:19 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`.
-Fetching `origin/main` returned `baa09168df59ae063d737a31f0e36b07e15c91d9`,
-without `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
+The 03:19 fetch advanced `origin/main` from
+`baa09168df59ae063d737a31f0e36b07e15c91d9` to
+`4dc15b730205b121d5e0bf482676c8a6610b2c15`; neither contains
+`server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
 Inspection of that head found
@@ -21,7 +23,7 @@ Inspection of that head found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 02:01 UTC `lf task status LOO-718 --json` inspection reported
+The November 12 02:42–02:43 and 03:19 UTC `lf task status LOO-718 --json` reads reported
 `feature` / `demo`, with PR #1812 open and settlement not armed. LOO-809's
 status read timed out after 25 seconds; its Graph position remains unverified.
 Earlier observations and history references are in
@@ -54,8 +56,8 @@ advance representing host sleep, expired-ticket sweeping, and unchanged bulk
 redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
-Keep attachment, retry and recovery rules in their shared sections; both local
-and remote bridges can lose the acknowledgement after consuming a ticket.
+Keep redemption, retry and recovery rules in their shared sections: failed
+redemption consumes either kind of ticket, and either bridge can lose its acknowledgement.
 The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.

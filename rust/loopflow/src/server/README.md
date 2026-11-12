@@ -368,7 +368,7 @@ JSON message. After `bridged {owner_lf_process_id}`, it speaks the
 [binary owner protocol](../transport/README.md). A ticket is 16 random bytes
 as 22 base64url characters, opens one bridge and lasts 60 seconds; expiry does
 not close an open bridge. Local tickets bind to the requesting client's Unix
-peer UID. Every redemption attempt consumes the ticket, including a UID mismatch.
+peer UID. Every redemption attempt consumes the ticket, whether it succeeds or fails.
 An unknown, spent, expired or foreign ticket is `not_found` with a null `id`
 and closes the connection. Bridges do not occupy the 64 client slots.
 
@@ -419,8 +419,7 @@ device on the same account cannot redeem them. Tickets, client-supplied identity
 and a proxy's Unix UID cannot substitute for authentication. Local and remote
 tickets are not interchangeable.
 
-The 60-second lifetime includes host sleep. Every admitted terminal redemption
-attempt consumes the ticket, including identity and local/remote mismatches.
+The 60-second lifetime includes host sleep.
 
 ## Turn and tool boundaries
 

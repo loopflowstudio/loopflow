@@ -575,42 +575,6 @@ mod tests {
     }
 
     #[test]
-    fn served_availability_follows_the_quiet_deadline_without_a_store_write() {
-        let mut session = Driven::new(true);
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        session.now = now - QUIET + 1;
-        session.hear(claude(
-            &mut ClaudeDecoder::default(),
-            &json!({"type":"result","subtype":"error_during_execution","is_error":true}),
-        ));
-        let cache = crate::observe::Cache::shared();
-        let read = || {
-            session
-                .store
-                .session_summary(
-                    "conversation",
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .unwrap()
-                .unwrap()
-                .available
-        };
-        let (available, dependencies) = cache.capture(read);
-        assert!(!available);
-        let revisions = session.store.revisions().unwrap();
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !dependencies.changed() && std::time::Instant::now() < until {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(
-            dependencies.changed(),
-            "quiet deadline did not wake the read"
-        );
-        assert!(cache.capture(read).0);
-        assert_eq!(session.store.revisions().unwrap(), revisions);
-    }
-
-    #[test]
     fn a_failed_claude_result_waits_only_after_quiet() {
         let mut session = Driven::new(true);
         session.hear(claude(

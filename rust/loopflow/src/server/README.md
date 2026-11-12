@@ -395,44 +395,6 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
   with no environment to send (the phone). It answers and repeats like
   `session.start`; a Session `run_refusal` refuses is `conflict`.
-- `session.attach {session}` prefers the Session's held terminal to an owner,
-  and `{session, terminal_id}` attaches only to that terminal. Either answers
-  a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
-  and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
-  The bridged connection speaks the viewer protocol with the server's
-  terminal registry. A terminal that has ended answers `not_found` with
-  `terminal_id` and `current_terminal_id` (null when the Session has none).
-  A terminal whose holder has not answered this server since it started
-  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
-  agent keeps running, and the same request attaches once the holder answers.
-  A ticket presented after its terminal ended, or while its holder is not
-  answering, gets the same two errors with a null `id` in place of `bridged`.
-  The owner form below serves owners only, with `terminal_id` null in its
-  ticket and its `bridged`; an owner ID is never a terminal ID.
-- `session.attach {session, owner_lf_process_id}` resolves the Session's current
-  owner and answers `{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`. Resolution
-  never starts a provider. A non-null owner ID requires that exact owner;
-  with a null one and no held terminal, the Session's current owner after
-  replacement is reached.
-  The terminal opens a separate connection and sends `attach {ticket}` as its
-  first message. It reads `bridged {owner_lf_process_id, terminal_id: null}`, then carries the
-  unchanged binary owner protocol in `transport/README.md`: raw bytes locally,
-  binary frames remotely. An owner whose endpoint refuses at redemption is
-  `not_found {owner_lf_process_id}`. Tickets (`ticket.rs`) are single use, expire
-  after 60 s, and bind to the same local user or remote Tailscale node and user.
-  Terminal bridges and bulk transfers do not consume control-connection slots. Any other
-  ticket is `not_found {ticket}`. Each terminal has its own connection, so
-  readings never wait behind terminal bytes, a control failure never closes a
-  bridged terminal, and the bridge reads no Work. The owner alone grants input/geometry,
-  handles bounded output continuation and revokes stale control. No automatic
-  owner replacement or raw-input replay. Desktop automatically reconnects the
-  exact owner with bounded backoff, keeping connection status in native chrome
-  outside terminal bytes. Recovery uses Resume for byte streams or a fresh
-  terminal screen and requests free claims without replacement. Newer viewers
-  retain input and geometry. Unavailable keeps the last screen marked stale;
-  Retry reconnects without preparing or resuming a provider. A connection
-  failure alone never means the Session ended.
-
 - Bulk. An answer or reading larger than `limits.max_message` never travels on
   the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
   the ticket on a second connection, and reads `admitted` followed by the original
@@ -444,11 +406,94 @@ the phone's `view.select` Task list and its creation destinations all read it.
   are refused with `unavailable`. Clients fetch spills off their reader so other
   request IDs never wait. Within one ID, the ticket keeps its place: deliver its
   payload before later readings, errors or `ended`, and advance the resume
-  checkpoint only with the delivered reading. Swift clients bound deferred
+  checkpoint only with the delivered reading. For that reason another
+  admission's attempt leaves a bulk ticket redeemable: its payload cannot be
+  requested again in its place, while a terminal ticket, which a fresh
+  `session.attach` replaces, is spent by any attempt. Swift clients bound deferred
   messages to 64 frames and 32 MiB; falling behind requires reconnecting.
   A control line over the limit is answered
   `error {id: null, invalid}` whose data names `max_message`, and the connection
   closes. Nothing is paged.
+
+## Terminal attachment
+
+`session.attach` answers a ticket on an ordinary client connection. A separate
+bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only JSON message
+and is answered `bridged`. A ticket (`ticket.rs`) is 16 random bytes as 22 base64url
+characters and lasts 60 seconds by the wall clock, so host sleep counts; expiry
+does not close an open bridge. A ticket binds to the admission that requested
+it: the Machine's own user on the local socket, or one Tailscale node and user
+remotely. Since a new ticket is one `session.attach` away, every redemption
+attempt spends a terminal ticket, successful or not:
+an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
+`id` and closes the connection. After a failure or a disconnect before
+`bridged`, request a new ticket and bridge. Bridges read no Work and do not
+occupy the 64 client slots.
+
+`session.attach {session}` prefers the Session's held terminal to an owner,
+and `{session, terminal_id}` attaches only to that terminal. Either answers
+a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
+and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
+The bridged connection speaks the viewer protocol with the server's
+terminal registry. A terminal that has ended answers `not_found` with
+`terminal_id` and `current_terminal_id` (null when the Session has none).
+A terminal whose holder has not answered this server since it started
+answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+agent keeps running, and the same request attaches once the holder answers.
+A ticket presented while its holder is not answering gets the same
+`unavailable` with a null `id` in place of `bridged`. One presented after its
+terminal ended gets `not_found {terminal_id, exit_code, provider}`, with
+`exit_code` and `provider` null when no exit was recorded.
+
+`session.attach {session, owner_lf_process_id}` serves owners only and answers
+`{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`; its bridge
+answers `bridged {owner_lf_process_id, terminal_id: null}` and then speaks the
+[binary owner protocol](../transport/README.md): raw bytes locally, binary
+frames remotely. A non-null owner ID requires that exact owner; with a null
+one and no held terminal, the Session's current owner after replacement is
+reached. An owner ID is never a terminal ID.
+
+The owner is the LfProcess holding the Session's terminal (`lf session serve`),
+never the provider's AgentProcess beneath it. The server resolves the Session's
+current owner when it issues the ticket, without starting or resuming a provider.
+No running owner returns `not_found {session}`; a missing owner endpoint at
+issue or redemption returns `not_found {owner_lf_process_id}`.
+When the owner ends, the bridge closes.
+`lf session resume` and `server::client::attach` perform both ticket steps.
+
+Each terminal has its own connection, so readings never wait behind terminal
+bytes and a control failure never closes a bridged terminal. Follow
+[terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
+
+### Remote attach contract
+
+The [attachment contract above](#terminal-attachment) applies over the remote
+carrier (`lf server mobile`), with these transport differences.
+
+Connect to the host's `/v1/machine` WebSocket, complete
+[`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
+with a Session ID from `session.list`:
+
+```text
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","owner_lf_process_id":null,"terminal_id":null},"select":null}
+← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":null,"terminal_id":"<terminal ID>","expires_in_ms":60000}}
+```
+
+Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
+`attach` first, without `hello`; `/v1/machine` keeps carrying requests and
+live Work updates:
+
+```text
+→ {"type":"attach","ticket":"<ticket>"}
+← {"type":"bridged","owner_lf_process_id":null,"terminal_id":"<terminal ID>"}
+```
+
+Both WebSocket endpoints authenticate before upgrade and admit only the host
+owner's Tailscale user; a rejected connection cannot present a ticket. Tickets
+bind both connections to the same Tailscale node stable ID and user ID; another
+device on the same account cannot redeem them. Client-supplied identity and a
+proxy's Unix UID cannot substitute for authentication. Local and remote
+tickets are not interchangeable. The 60-second lifetime includes host sleep.
 
 ## Turn and tool boundaries
 
@@ -1033,21 +1078,27 @@ outbox nor offline creation, cross-device submission sync or generic replay.
 ### Terminal and provider recovery
 
 Terminal continuation addresses the exact owner or held terminal, separately
-from Work reads. A view of a held terminal resumes from its PTY byte position,
+from Work reads. The owner alone grants input and geometry and revokes stale
+control. A view of a held terminal resumes from its PTY byte position,
 served from the holder's 2 MiB ring; a server restart does not invalidate the
 position, and one older than the ring falls back to a fresh screen. For
-owners, byte-stream viewers use a bounded output spool of 1 MiB with a 60-second
-reconnect grace; expired continuation falls back to a fresh screen from that
+owners, byte-stream viewers use Resume with a bounded output spool of 1 MiB
+and a 60-second reconnect grace; expired continuation falls back to a fresh screen from that
 owner. Terminal-mode viewers request a fresh screen. Uncertain input is
 never replayed. Recovery takes only free claims or those held by the viewer's
 own stale connection; a newer viewer keeps input and geometry. Replacing that
 stale socket cannot let its later close revoke the replacement's claims.
 A stalled bridge cannot block another viewer or Work control traffic.
 
-If the Session has a new owner, exact-owner attachment returns `not_found` with
-`owner_lf_process_id` and `current_lf_process_id`. Attaching by Session can reach
-the current owner; neither attachment starts or resumes a provider. A lost
-connection alone does not establish process death.
+Pass `owner_lf_process_id` to `session.attach` to reconnect only to that owner.
+If the Session has a new owner, attachment returns `not_found` with
+`owner_lf_process_id` and `current_lf_process_id`. Passing null reaches the
+Session's current owner. A lost connection alone does not establish process
+death.
+
+Desktop reconnects to the exact owner with bounded backoff. See
+[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and viewer's
 control claims are distinct. `SessionRecord.transition` reports the latest

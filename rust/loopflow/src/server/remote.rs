@@ -510,12 +510,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{bridge, connection};
+    use crate::engine::ErrorCode;
     use crate::server::service::Clients;
     use crate::server::ticket::{Admission, Purpose, Tickets};
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation,
         MAX_MESSAGE, MIN_REVISION, REVISION,
     };
+    use crate::transport::Host;
     use futures_util::{SinkExt, StreamExt};
     use std::sync::Arc;
     use std::time::Duration;
@@ -650,6 +652,7 @@ mod tests {
         let tickets = Arc::new(Tickets::default());
         for (permitted, path, origin) in [
             (false, "/v1/machine", false),
+            (false, "/v1/ticket", false),
             (true, "/v1/pair", false),
             (true, "/v1/machine?token=old", false),
             (true, "/v1/machine", true),
@@ -782,5 +785,66 @@ mod tests {
             ServerMessage::Error { id: None, .. }
         ));
         assert!(receive(&mut refused).await.is_none());
+    }
+
+    #[test]
+    fn ticket_endpoint_bridges_one_terminal_and_any_foreign_attempt_spends_it() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let tickets = Arc::new(Tickets::default());
+                let phone = Admission::Remote {
+                    node: "phone".into(),
+                    user: 1,
+                };
+                let owner = crate::id::LfProcessId::new();
+                let listener =
+                    tokio::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
+                        .unwrap();
+                let attach = |ticket: String| text(&ClientMessage::Attach { ticket });
+                let ticket =
+                    tickets.issue(phone.clone(), Purpose::Terminal(Host::Owner(owner.clone())));
+                let mut terminal = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+                terminal.send(attach(ticket.clone())).await.unwrap();
+                assert!(matches!(
+                    receive(&mut terminal).await.unwrap(),
+                    ServerMessage::Bridged { owner_lf_process_id: Some(of), .. } if of == owner
+                ));
+                let _owned = listener.accept().await.unwrap();
+                // Replay, another node and a local ticket are refused and spent.
+                let laptop = Admission::Remote {
+                    node: "laptop".into(),
+                    user: 1,
+                };
+                let foreign = tickets.issue(
+                    laptop.clone(),
+                    Purpose::Terminal(Host::Owner(owner.clone())),
+                );
+                let local = tickets.issue(
+                    Admission::Local,
+                    Purpose::Terminal(Host::Owner(owner.clone())),
+                );
+                for presented in [ticket, foreign.clone(), local.clone()] {
+                    let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+                    refused.send(attach(presented)).await.unwrap();
+                    assert!(matches!(
+                        receive(&mut refused).await.unwrap(),
+                        ServerMessage::Error {
+                            id: None,
+                            code: ErrorCode::NotFound,
+                            ..
+                        }
+                    ));
+                    assert!(receive(&mut refused).await.is_none());
+                }
+                assert!(tickets.redeem(&foreign, &laptop).is_none());
+                assert!(tickets.redeem(&local, &Admission::Local).is_none());
+            });
     }
 }

@@ -14,3 +14,9 @@
 - Compress: `new_thread` and `append_input` share `switch_agent` for the provider/model rewrite. `cargo test -p loopflow --lib ops::human_session::`: 51 pass.
 
 Checks: `cargo test -p loopflow --lib` for `ops::human_session::` (51), `agent::session::` (9), `store::migrations::` (132): pass. New regression test fails with the `append_input` fix removed. Gate still owns `documented_commands::`, clippy and the affected-suite run.
+
+# Concept review (2026-11-12)
+
+Model: an input launches on the provider it recorded; an invocation that selects another harness appends its own input, and the Session row follows it. `agent_sessions.provider` stays a stored mirror of the latest input's harness (deriving it would read a manifest file per listed Session).
+
+Next implement direction: `open_waiting_locked` calls `resume_native_session` before its `handoff_agent` check, so `lf -a claude resume` on a Codex bootstrap with no provider history still reopens Codex. Skip `resume_native_session` when `handoff_agent(&session)` is set, so the case falls through to `append_input`. Extend the regression test or add one: a Codex Session with a process manifest and no provider session, opened with `agent: claude`, appends a Claude input.

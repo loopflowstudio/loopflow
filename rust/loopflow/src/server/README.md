@@ -415,8 +415,8 @@ Keep `/v1/machine` for requests and live Work updates.
 Both WebSocket endpoints authenticate before upgrade and admit only the host
 owner's Tailscale user; a rejected connection cannot present a ticket. Tickets
 bind both connections to the same Tailscale node stable ID and user ID; another
-device on the same account cannot redeem them. Tickets, client-supplied identity
-and a proxy's Unix UID cannot substitute for authentication. Local and remote
+device on the same account cannot redeem them. Client-supplied identity and a
+proxy's Unix UID cannot substitute for authentication. Local and remote
 tickets are not interchangeable. The 60-second lifetime includes host sleep.
 
 ## Turn and tool boundaries

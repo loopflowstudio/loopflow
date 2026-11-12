@@ -7,11 +7,11 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 02:42 and 03:19 UTC, GitHub's PR metadata reported #1812 open and
+At November 12 03:23 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `4e0ccacdb3cb74212e0bdaacd1fc2ccf786cec43`.
-The 03:19 fetch advanced `origin/main` from
-`baa09168df59ae063d737a31f0e36b07e15c91d9` to
-`4dc15b730205b121d5e0bf482676c8a6610b2c15`; neither contains
+The fetch left `origin/main` at
+`4dc15b730205b121d5e0bf482676c8a6610b2c15`, already merged into this checkout.
+Neither contains
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
@@ -23,11 +23,11 @@ Inspection of that head found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 02:42–02:43 and 03:19 UTC `lf task status LOO-718 --json` reads reported
+The November 12 03:23 UTC `lf task status LOO-718 --json` read reported
 `feature` / `demo`, with PR #1812 open and settlement not armed. LOO-809's
 status read timed out after 25 seconds; its Graph position remains unverified.
 Earlier observations and history references are in
-`62b54e2153d74cdb5de68e8c81bc693cda85a94e:scratch/design.md`.
+`23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.
 
 ## Delete — do not maintain
@@ -57,7 +57,8 @@ redemption behavior, including release of abandoned bulk reservations without
 another request. Leave unrelated throttles on `Instant` and retain watch resumption.
 
 Keep redemption, retry and recovery rules in their shared sections: failed
-redemption consumes either kind of ticket, and either bridge can lose its acknowledgement.
+redemption consumes local and remote terminal tickets, and either bridge can
+lose its acknowledgement. Bulk tickets retain their existing foreign-attempt behavior.
 The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.

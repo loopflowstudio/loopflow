@@ -95,11 +95,11 @@ public enum WaveOrigin {
 
     private static func git(_ args: [String], at path: String) -> String? {
         let process = Process()
-        let stdout = Pipe()
+        let stdout = Pipe.uninherited()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", path] + args
         process.standardOutput = stdout
-        process.standardError = Pipe()
+        process.standardError = Pipe.uninherited()
         do {
             try process.run()
         } catch {

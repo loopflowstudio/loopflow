@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{desktop_shell_bootstrap, wait_hold, Fixture, ShellOwnerGuard};
+use super::{desktop_shell_bootstrap, wait_hold, Fixture};
 use loopflow::store::sqlite::SqliteStore;
 
 const TASK: &str = "task_5e55105e000040008000000000000007";
@@ -281,27 +281,11 @@ impl Drop for Ssh {
         for socket in self.sockets() {
             let _ = self.control(&socket, "exit").output();
         }
-        // Startup can fail before the shell's per-test guard is constructed.
-        // Stop its owner while the receipt store still exists, then let it settle
-        // its terminal jobs before TempDir removes the store.
-        if let Ok(sql) =
-            rusqlite::Connection::open(self.destination.home.path().join("loopflow.db"))
-        {
-            let _ = sql.execute("UPDATE desktop_shells SET close_requested=1", []);
-            if let Ok(mut query) = sql.prepare("SELECT p.pid FROM processes p WHERE p.id IN (SELECT owner FROM desktop_shells UNION SELECT transport_lf_process_id FROM agent_sessions) AND p.completed_at IS NULL AND p.pid IS NOT NULL") {
-                let owners: Vec<i32> = query.query_map([], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
-                for pid in &owners {
-                    // SAFETY: these are the owners launched in this fixture's store.
-                    unsafe { libc::kill(*pid, libc::SIGTERM) };
-                }
-                let deadline = Instant::now() + Duration::from_secs(10);
-                while !owners.is_empty() && Instant::now() < deadline {
-                    let live = self.census().into_iter().any(|(pid, _, state, _)| owners.contains(&pid) && !state.starts_with('Z'));
-                    if !live { break; }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-            }
-        }
+        // Join detached owners before the destination store and SSH server go away.
+        loopflow_test_support::end_recorded_processes(
+            self.destination.home.path(),
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+        );
         for pid in self.descendants(&[self.daemon.id() as i32]) {
             // SAFETY: only this fixture's server descendants are selected.
             unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -454,7 +438,6 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         let mut pane = Pane::spawn(command);
         pane.until("remote-ready");
         let owner = fixture.destination.shell_owner(&id);
-        let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
         pane.input("export RETAINED=destination; sleep 300 & printf '%s %s\\n' $$ $! > \"$HOME/pids\"; printf 'where:%s\\n' \"$PWD\"; tty\r");
         pane.until(&format!(
             "where:{}",
@@ -605,7 +588,6 @@ fn ssh_shell_failures_never_fall_back_or_recreate_ended_execution() {
     let mut pane = Pane::spawn(command);
     pane.until("ready-to-exit");
     let owner = fixture.destination.shell_owner("exit");
-    let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
     pane.input("exit 7\r");
     assert_eq!(pane.exit().code(), Some(7));
     fixture.destination.ends(&owner);
@@ -658,7 +640,6 @@ fn ssh_prepared_viewer_reuses_owner_without_an_extra_pty_and_releases_on_leave()
     let mut pane = Pane::spawn(fixture.source_command(&argv[1..]));
     pane.until("provider-ready");
     let owner = fixture.destination.owner_of(session);
-    let _stop = ShellOwnerGuard(&fixture.destination, owner.clone());
     fixture.destination.wait_controlled(&owner);
     pane.input("export RETAINED=original; printf '%s' $$ > \"$HOME/shell-pid\"; printf 'ready:%s\\n' \"$RETAINED\"\r");
     pane.until("ready:original");

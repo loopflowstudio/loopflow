@@ -97,10 +97,6 @@ pub(crate) async fn ensure_task(
     Ok((prepare(store, &session.id).await?, started))
 }
 
-/// Background Task conversations stop starting at this many running ones;
-/// Desktop keeps the same number of Tasks warm.
-pub(crate) const BACKGROUND_TASK_CONVERSATIONS: usize = 16;
-
 /// Start a newly checked-out Task's conversation beside its Graph, so `lf
 /// resume` reattaches instead of creating it. Best-effort: a failure is logged
 /// and `lf resume` creates the conversation as before.
@@ -120,11 +116,6 @@ async fn start_in_background(
     store: &SharedStore,
     task: &crate::work::task::Task,
 ) -> Result<Option<String>> {
-    let running = store.sqlite.running_task_conversations()?;
-    if running >= BACKGROUND_TASK_CONVERSATIONS {
-        tracing::info!(task = %task.identifier, running, "background Task conversation skipped");
-        return Ok(None);
-    }
     let worktree = task.worktree()?.clone();
     let wave = match &task.wave_id {
         Some(id) => store.get_wave(id).await?,

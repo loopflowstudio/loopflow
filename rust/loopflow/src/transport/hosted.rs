@@ -725,8 +725,8 @@ impl Hosted {
                 end_viewers(&mut self.viewers, Event::ChildExited { code });
                 self.announced = true;
             }
-            // Once viewers have received the final output, release execution
-            // locks with the owner. Only never-viewed starts need a replay window.
+            // Once viewers have received the final output, end the held
+            // terminal and release its execution locks. Only never-viewed starts need a replay window.
             if self.announced
                 && (at.elapsed() > Duration::from_secs(2)
                     || (self.attached

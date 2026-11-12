@@ -139,7 +139,11 @@ build is an owner process. The renames are in the tree, no behavior change:
 `shell_command`) replaces `start_lf_session`; host-as-owner wording in
 `transport/{terminal,output,snapshot,hosted,wire}.rs`, `os_process/foreground.rs`,
 `engine/launch.rs`, `session.rs` and `bin/lf.rs` says held terminal or detached
-process. `Controlled.ready` stays optional: a viewer can meet a holder from an
+process; compress finished the sweep in `transport/{native,input,stream}.rs`,
+`ghostty_vt.rs`, `context_block.rs`, `server/{remote,service}.rs`,
+`ops/human_session.rs`. "Owner protocol"/"owner stream" (the wire Swift's
+`OwnerProtocol` speaks) and `desktop_shells.owner` (a real earlier-build
+column) keep the word. `Controlled.ready` stays optional: a viewer can meet a holder from an
 earlier build.
 
 Stays as is: viewer *ownership* (`Ownership`, `Event::Owner`, size/colour
@@ -152,3 +156,5 @@ owner" module doc (a type rename, not wording), CI repair "owner" in
 Checks (2026-11-12): clippy `--all-targets` clean; `--lib transport::
 os_process:: engine::launch::` 114 passed; `transport_tests` 42 passed, 5
 ignored; `server::schema::tests::` 7 passed. Gate owns the rest.
+Compress: clippy `--all-targets` clean; `--lib transport::` 70 passed;
+`transport_tests` 42 passed, 5 ignored.

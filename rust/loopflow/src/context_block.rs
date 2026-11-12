@@ -286,10 +286,9 @@ impl ContextDelivery {
     }
 
     /// The provider hooks of one launch. Every launch prints its context
-    /// block at session start and after a compaction. A launch an owner or
-    /// the Machine server holds (`Holder::reports_turns`) also reports its
-    /// turn and tool boundaries, whose answers carry its steers and Task
-    /// updates.
+    /// block at session start and after a compaction. A launch the Machine
+    /// server holds (`Holder::reports_turns`) also reports its turn and tool
+    /// boundaries, whose answers carry its steers and Task updates.
     pub fn hook_settings(
         &self,
         holder: crate::session::Holder,

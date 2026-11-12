@@ -969,8 +969,8 @@ fn ticket_response(id: String, ticket: String) -> ServerMessage {
     }
 }
 
-/// Redeem a ticketed connection's ticket. A terminal ticket returns the owner
-/// to bridge to once `admitted` was sent; the other purposes complete here.
+/// Redeem a ticketed connection's ticket. A terminal ticket returns the held
+/// terminal to bridge to once `admitted` was sent; the other purposes complete here.
 pub(super) async fn ticketed<C: Carrier>(
     carrier: &mut C,
     ticket: &str,

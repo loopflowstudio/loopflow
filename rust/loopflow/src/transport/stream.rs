@@ -181,28 +181,28 @@ pub(super) fn bridge(id: &crate::id::TerminalId) -> Result<()> {
     let _output_flags = BorrowedFlags::new(1)?;
     let mut input = duplicate(0)?;
     let mut output = duplicate(1)?;
-    let mut to_owner = VecDeque::new();
+    let mut to_terminal = VecDeque::new();
     let mut to_viewer = VecDeque::new();
     let mut input_open = true;
-    let mut owner_open = true;
+    let mut terminal_open = true;
     let mut drain_until = None;
     loop {
-        if input_open && owner_open {
-            input_open = receive(&mut input, &mut to_owner)?;
+        if input_open && terminal_open {
+            input_open = receive(&mut input, &mut to_terminal)?;
         }
-        if owner_open {
-            flush(&mut socket, &mut to_owner)?;
-            owner_open = receive(&mut socket, &mut to_viewer)?;
-            if !owner_open {
+        if terminal_open {
+            flush(&mut socket, &mut to_terminal)?;
+            terminal_open = receive(&mut socket, &mut to_viewer)?;
+            if !terminal_open {
                 drain_until = Some(Instant::now() + Duration::from_secs(2));
             }
         }
         flush(&mut output, &mut to_viewer)?;
         anyhow::ensure!(
-            to_owner.len() < LIMIT && to_viewer.len() < LIMIT,
+            to_terminal.len() < LIMIT && to_viewer.len() < LIMIT,
             "Viewer fell behind its stream queue limit"
         );
-        if (!input_open && to_owner.is_empty()) || (!owner_open && to_viewer.is_empty()) {
+        if (!input_open && to_terminal.is_empty()) || (!terminal_open && to_viewer.is_empty()) {
             return Ok(());
         }
         anyhow::ensure!(
@@ -211,11 +211,18 @@ pub(super) fn bridge(id: &crate::id::TerminalId) -> Result<()> {
         );
         // Full queues returned above; poll only for open endpoints and pending writes.
         poll(&mut [
-            interest(if input_open && owner_open { 0 } else { -1 }, libc::POLLIN),
             interest(
-                if owner_open { socket.as_raw_fd() } else { -1 },
+                if input_open && terminal_open { 0 } else { -1 },
+                libc::POLLIN,
+            ),
+            interest(
+                if terminal_open {
+                    socket.as_raw_fd()
+                } else {
+                    -1
+                },
                 libc::POLLIN
-                    | if to_owner.is_empty() {
+                    | if to_terminal.is_empty() {
                         0
                     } else {
                         libc::POLLOUT

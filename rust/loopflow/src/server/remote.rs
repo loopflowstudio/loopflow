@@ -458,7 +458,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
     type Failure = anyhow::Error;
 }
 
-/// A plain byte copy between the owner and the WebSocket's binary frames.
+/// A plain byte copy between the held terminal and the WebSocket's binary frames.
 /// Closing either side releases the owner claim.
 async fn bridge<S>(socket: WebSocketStream<S>, mut destination: UnixStream) -> Result<()>
 where
@@ -549,7 +549,7 @@ mod tests {
             "An idle stream must answer liveness checks"
         );
         machine.write_all(b"last screen").await.unwrap();
-        // The Machine may keep its read half alive while the owner has ended.
+        // The Machine may keep its read half alive while the held terminal has ended.
         machine.shutdown().await.unwrap();
         let last = client.next().await.unwrap().unwrap();
         assert_eq!(last.into_data(), b"last screen"[..]);
@@ -702,7 +702,7 @@ mod tests {
                 "{answer:?}"
             );
         }
-        // A Session without an owner is refused without starting a provider.
+        // A Session without a held terminal is refused without starting a provider.
         client
             .send(text(&ClientMessage::Request {
                 select: None,

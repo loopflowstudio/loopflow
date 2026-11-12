@@ -1401,7 +1401,7 @@ async fn fork(
 }
 
 /// Preparation has already mutated the Session. Only its resulting identity
-/// crosses to the owner; opening it reacquires the lock and reads current state.
+/// crosses to the launch; opening it reacquires the lock and reads current state.
 /// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
     if !crate::transport::delegate_prepared_session(id, json)? {

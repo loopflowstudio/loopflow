@@ -138,7 +138,7 @@ turn as a launch argument.
 | Piece | Task | Size |
 |---|---|---|
 | Opportunity 2 for bare: delete `bare_conversation`/`opens_bare`/`runs_in_terminal`; context hooks only for `Terminal`; drop the bare steer and exit-record handoff | LOO-820 | M |
-| `Holder` from `PrimaryScope`; delete `names_work`/`resumes_work`/`task_run_step`/`managed`; server check on `Server` | new Task, after LOO-820, before LOO-824 | S–M |
+| `Holder` from `PrimaryScope`; delete `names_work`/`resumes_work`/`task_run_step`/`managed`; server check on `Server` | LOO-820 ("fold it in here"); `managed` fields done | S–M |
 | Opportunity 1: holder spawns the provider from a prepared Session | LOO-824 (its holder is the receiver) | part of LOO-824 |
-| Opportunity 3 for Codex: bare runs plain `codex`, rollout read at exit | new Task, needs transcript telemetry | M |
+| Opportunity 3 for Codex: bare runs plain `codex`, rollout read at exit | LOO-820 ("fold it in here") | M |
 | Observers only for `Server` | one-line follow-up after LOO-826 ships | XS |

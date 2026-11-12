@@ -15,6 +15,8 @@ Answered, Jack Heart, November 11:
    open against main and CLEAN; LOO-824 has no PR yet, is in QA, about 10k
    added lines. So LOO-824 lands second: wait for #1879 to merge and LOO-824
    to sync onto it, then stack on LOO-824.
+   Later on November 11: #1879 merged and is in this branch through
+   LOO-824 (#1887, based on LOO-823's #1877).
 
 ## Pi probe, November 11 (pi 1.3.0)
 

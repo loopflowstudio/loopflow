@@ -6,7 +6,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 
@@ -395,7 +395,6 @@ mod tests {
         std::thread::sleep(Duration::from_millis(1500));
         assert!(!flag.exists(), "grandchild outlived its group");
     }
-
 }
 
 /// Ordinary jobs belong to the fresh OS session created for a terminal child.

@@ -219,7 +219,7 @@ pub(super) enum Request {
     /// On an attached connection this also refreshes the viewer's liveness.
     Controlled {
         /// A viewer acknowledges Return on its existing heartbeat protocol.
-        /// Retained owners from before this field ignore it across helper upgrades.
+        /// A holder from an earlier build ignores it.
         #[serde(skip_serializing_if = "Option::is_none")]
         ready: Option<String>,
     },
@@ -259,7 +259,7 @@ pub(super) enum Reply {
     Busy,
     Controlled {
         held: bool,
-        /// None means the retained owner cannot report native readiness.
+        /// None means a holder from an earlier build cannot report native readiness.
         ready: Option<bool>,
     },
     NativeEnded,

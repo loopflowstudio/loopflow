@@ -27,27 +27,27 @@ fn path(session: &str) -> PathBuf {
 
 /// Write the terminal for whoever reopens its Session before the provider is
 /// back. A terminal with no Session or shell leaves nothing.
-pub(super) fn leave(owner: &TerminalId, output: &Output) {
-    let Some(terminal) = output.terminal() else {
+pub(super) fn leave(terminal: &TerminalId, output: &Output) {
+    let Some(screen) = output.terminal() else {
         return;
     };
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
-        let session = if store.is_shell_terminal(owner)? {
-            owner.to_string()
-        } else if let Some(session) = store.terminal_session(owner)? {
+        let session = if store.is_shell_terminal(terminal)? {
+            terminal.to_string()
+        } else if let Some(session) = store.terminal_session(terminal)? {
             session
         } else {
             return Ok(None);
         };
-        write(&session, terminal).map(Some)
+        write(&session, screen).map(Some)
     };
     match written() {
         Ok(Some(path)) => {
-            tracing::info!(%owner, path = %path.display(), "Terminal snapshot written")
+            tracing::info!(%terminal, path = %path.display(), "Terminal snapshot written")
         }
-        Ok(None) => tracing::debug!(%owner, "No Session to leave a terminal snapshot for"),
-        Err(error) => tracing::warn!(%error, %owner, "Terminal snapshot not written"),
+        Ok(None) => tracing::debug!(%terminal, "No Session to leave a terminal snapshot for"),
+        Err(error) => tracing::warn!(%error, %terminal, "Terminal snapshot not written"),
     }
 }
 
@@ -64,7 +64,7 @@ fn write(session: &str, terminal: &Terminal) -> Result<PathBuf> {
 }
 
 /// Bytes that show the Session's last screen in the terminal running this
-/// command, if its owner left a snapshot this lf can decode.
+/// command, if its held terminal left a snapshot this lf can decode.
 pub(super) fn last_screen(session: &str) -> Option<Vec<u8>> {
     let path = path(session);
     let bytes = std::fs::read(&path).ok()?;

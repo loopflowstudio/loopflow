@@ -641,7 +641,7 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
 }
 
 /// Bare `lf` behaves as its provider would started from the shell: the
-/// provider leads the terminal's foreground group, no owner holds it, and
+/// provider leads the terminal's foreground group, no held terminal sits between, and
 /// closing the terminal ends it.
 #[test]
 fn bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal() {

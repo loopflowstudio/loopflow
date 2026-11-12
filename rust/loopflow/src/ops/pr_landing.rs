@@ -356,7 +356,7 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        let owner = crate::os_process::detached::start_lf(
+        let worker = crate::os_process::detached::start_lf(
             &landing.worktree,
             &argv,
             &environment,
@@ -370,7 +370,7 @@ fn admit_ci_fix(
         .map_err(repair_error)?;
         if !store
             .sqlite
-            .handoff_repair(&incident.identity, &launcher, &owner)
+            .handoff_repair(&incident.identity, &launcher, &worker)
             .map_err(repair_error)?
         {
             return Err(repair_error("repair reservation changed during startup"));

@@ -298,11 +298,7 @@ fn launch_environment(
         .collect()
 }
 
-fn shell_command(
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> String {
+fn shell_command(cwd: &Path, argv: &[String], env: &[(&str, &str)]) -> String {
     let command = argv
         .iter()
         .map(|arg| shell_escape(arg))
@@ -446,8 +442,7 @@ mod tests {
             "task".to_string(),
             "tsk_123".to_string(),
         ];
-        let command =
-            shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
+        let command = shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
         assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));

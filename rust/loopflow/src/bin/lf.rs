@@ -2495,7 +2495,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     {
         return Ok(());
     }
-    // Only the operation a launcher started reports; an execution owner in
+    // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
     if matches!(
         cli.command,

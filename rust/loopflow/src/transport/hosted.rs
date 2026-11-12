@@ -907,7 +907,9 @@ impl Hosted {
 
 fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
     crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
-        .inspect_err(|error| tracing::warn!(%error, "planning sync unavailable to this owner"))
+        .inspect_err(
+            |error| tracing::warn!(%error, "planning sync unavailable to this held terminal"),
+        )
         .ok()
 }
 

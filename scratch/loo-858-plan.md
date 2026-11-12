@@ -131,36 +131,24 @@ The owner-protocol docs above now match the tree (no `owner_lf_process_id`,
 spool or `resume {received}` left in docs). `rust/loopflow/tests/README.md`'s
 Client API server list names held tests in place of the deleted owner ones.
 
-## Concept review (2026-11-12): next implement direction
+## Concept review (2026-11-12): renames, done
 
-The model holds: a launch runs Here, Held or Detached (`transport::Place`),
-and nothing in this build is an owner process. What is left are names that
-still say "owner" or "session" where the thing is a held terminal or a plain
-detached lf. Rename, no behavior change:
-
-- `os_process::start_lf_session` starts no Session: it is the detached
-  launcher. Move it into `os_process::detached` as `start_lf` (with
-  `session_environment` and `lf_session_shell_command`, renamed for what they
-  build). Callers: `engine/launch.rs`, `ops/pr_landing.rs` (its `let owner =`
-  becomes the launched Process), `ops/task/ship.rs`.
-- Host-as-owner wording where the host is a held terminal:
-  `transport/terminal.rs` module doc and tests ("the owner's terminal" → the
-  held terminal), `transport/snapshot.rs` (`owner: &TerminalId` →
-  `terminal`), `os_process/foreground.rs` ("when an owner holds the launch"
-  → inside a held terminal), `transport/hosted.rs` log "planning sync
-  unavailable to this owner".
-- `transport/wire.rs` `Controlled.ready` / `Reply::Controlled.ready` stay
-  optional (a viewer can meet a holder an earlier build started, since held
-  terminals survive server replacement), but the comments say "a holder from
-  an earlier build", not "retained owners".
+A launch runs Here, Held or Detached (`transport::Place`); nothing in this
+build is an owner process. The renames are in the tree, no behavior change:
+`os_process::detached::start_lf` (with `launch_environment` and
+`shell_command`) replaces `start_lf_session`; host-as-owner wording in
+`transport/{terminal,output,snapshot,hosted,wire}.rs`, `os_process/foreground.rs`,
+`engine/launch.rs`, `session.rs` and `bin/lf.rs` says held terminal or detached
+process. `Controlled.ready` stays optional: a viewer can meet a holder from an
+earlier build.
 
 Stays as is: viewer *ownership* (`Ownership`, `Event::Owner`, size/colour
-owner, input token) is the control model, a different concept that goes with
-the control-model Task, and so do Swift `OwnerProtocol`/`OwnerStream` and the
-`tests/fixtures/dto/owner/` directory Swift reads. The `lf session serve`
-mentions that remain all name an earlier build's process (restart path,
-inventory, troubleshooting, shell store); they are correct.
+owner, input token) is the control model and goes with the control-model Task,
+as do Swift `OwnerProtocol`/`OwnerStream` and `tests/fixtures/dto/owner/`.
+Also left: `harness/native_exit.rs`'s `AttachmentOwner` and its "execution
+owner" module doc (a type rename, not wording), CI repair "owner" in
+`ops/pr_landing.rs`, and `lf open`'s Machine "execution owner".
 
-No new product choice. `scratch/questions.md` assumptions stand: Desktop
-control is macOS-only, so held shells needing the Machine server matter only
-for remote Linux shells, which already run managed launches there.
+Checks (2026-11-12): clippy `--all-targets` clean; `--lib transport::
+os_process:: engine::launch::` 114 passed; `transport_tests` 42 passed, 5
+ignored; `server::schema::tests::` 7 passed. Gate owns the rest.

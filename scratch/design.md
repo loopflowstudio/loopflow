@@ -1,33 +1,20 @@
 # LOO-809: remote attach tickets
 
 Implement the [remote attach contract](../rust/loopflow/src/server/README.md#remote-attach-contract)
-on the shared transport. The listener, mobile settings and bulk protocol are
-outside this Task.
-
-## Transport dependency
-
-#1812 (LOO-718's transport) merged November 12 15:54 UTC; this branch merged
-`origin/main` `3f3153d95c`, which contains `server/{mobile,remote,ticket}.rs`.
-
-## Delete — do not maintain
-
-`server/service.rs::{Ticket, Tickets}` is gone on main, replaced by
-`server/ticket.rs`; nothing of the UID-only store remains. Local admission is
-`Admission::Local` (peer UID matched the server's); no per-ticket UID field.
+on the shared transport from #1812 (merged into this branch at `3f3153d95c`).
+The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Status
 
-Implemented Nov 12:
+Built: `ticket.rs` expires by `SystemTime`, any attempt spends a terminal
+ticket, a bulk ticket survives another device's attempt. Tests cover the store
+(5), remote `/v1/ticket` (replay, another node, a local ticket, unadmitted
+peers refused before upgrade) and the local service (replay, a phone's
+ticket). README contract and `docs/server.md` phone access are no longer
+marked planned.
 
-- `ticket.rs`: `SystemTime` expiry; any attempt spends a terminal ticket; bulk
-  tickets survive another device's attempt.
-- Store tests: one bridge per ticket, foreign node/user/local↔remote spend,
-  expiry and sweep, bulk foreign attempt, abandoned download release.
-- Remote `/v1/ticket`: bridges one owner, refuses and spends replay, another
-  node and a local ticket; unadmitted peers refused before upgrade on both paths.
-- Local service: replay and a phone's ticket refused and spent.
-- README contract and `docs/server.md` phone access no longer marked planned.
+Checks Nov 12 after compress: `cargo test -p loopflow --lib` for
+`server::ticket::`, `server::remote::tests::` and service tests passed
+(ticket 5, remote 4, service 24); `documented_commands::` passed; clippy clean.
 
-Checks Nov 12: `cargo test -p loopflow --lib` (server::ticket::, server::remote::tests::,
-service tests) passed after compress: ticket 5, remote 4, service 24; `documented_commands::` passed; clippy clean.
-Gate runs the affected suites.
+Remaining: gate runs the affected suites; QA inspects the docs visually.

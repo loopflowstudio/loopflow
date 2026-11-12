@@ -59,7 +59,6 @@ Keep redemption, retry and recovery rules in their shared sections: failed
 redemption consumes local and remote terminal tickets, and either bridge can
 lose its acknowledgement. Bulk tickets retain their existing foreign-attempt behavior.
 The remote contract adds only transport differences. Keep it and
-[phone access](../docs/server.md#phone-access) marked planned until integration,
-then update the contract's revision 4 anchor to the transport's revision 5 section.
+[phone access](../docs/server.md#phone-access) marked planned until integration.
 
-`git diff --check` — passed Nov 12 after compress (prose only; no build or test run).
+`git diff --check` and README anchor check — passed Nov 12 after compress (prose only; no build or test run).

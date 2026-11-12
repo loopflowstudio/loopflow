@@ -420,7 +420,7 @@ build. The [attachment contract above](#terminal-attachment) applies, with
 these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
-[`hello`/`welcome`](#local-protocol-revision-4), and request `session.attach`
+[`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
 with a Session ID from `session.list`:
 
 ```text

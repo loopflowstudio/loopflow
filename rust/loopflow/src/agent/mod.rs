@@ -3251,6 +3251,46 @@ trust_level = "trusted"
         assert_eq!(attempted, ["claude:opus", "codex"]);
     }
 
+    #[test]
+    fn a_lone_bare_claude_tries_its_other_models() {
+        // `agents: [claude]` leaves nothing behind the first entry.
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            claude_model: Some("fable".into()),
+            ..default_launch()
+        };
+        let mut attempted = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.resolved_agent().unwrap();
+                attempted.push(agent.clone());
+                Ok(if agent == "claude:haiku" {
+                    done()
+                } else {
+                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                })
+            },
+            |_| panic!("Haiku still has capacity"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            attempted,
+            [
+                "claude:fable",
+                "claude:opus",
+                "claude:sonnet",
+                "claude:haiku"
+            ]
+        );
+    }
+
     /// November 12: compress on Codex was refused at launch with no routed
     /// account, and three Graph retries each relaunched the same agent.
     #[test]

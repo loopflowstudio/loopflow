@@ -526,7 +526,7 @@ impl Config {
     }
 }
 
-/// The entries of the retired `default_agent: claude,codex` spelling.
+/// The entries of a comma-separated agent list, such as `claude,codex`.
 pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(',')

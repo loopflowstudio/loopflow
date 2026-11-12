@@ -358,7 +358,7 @@ lf task status LOO-1
 Only accounts in the resolved route take a step on. An explicit `harness:model`
 stays on its model and changes only accounts; a bare harness with no order
 behind it may change model; only [`agents`](config.md#keep-going-when-a-provider-runs-out)
-(`lf set --global agents '[claude, codex]'`, no explicit `agent` or `-a`) lets a
+(`lf set --global agents claude,codex`, no explicit `agent` or `-a`) lets a
 step change provider, and it tries each entry as written. A step that started
 on its `default_agent` moves through the rest of the list in order. A launch
 refused on a login Loopflow does not route fails with its limit once the last

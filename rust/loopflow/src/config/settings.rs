@@ -165,9 +165,20 @@ pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b 
 pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     let path = preference_path(key)?;
     let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    let value: Value = serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
+    let mut value: Value =
+        serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
+    if path[0] == "agents" {
+        _list_agents(&mut value);
+    }
     validate_value(&path, &value)?;
     Ok(value)
+}
+
+/// `agents: claude,codex` is the list `[claude, codex]`.
+fn _list_agents(value: &mut Value) {
+    if let Some(list) = value.as_str() {
+        *value = Value::Sequence(super::agent_list(list).map(Value::from).collect());
+    }
 }
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
@@ -191,10 +202,12 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             validate_agent_policy(agent)?;
         }
     }
+    let mut value = value.clone();
     if path[0] == "agents" {
+        _list_agents(&mut value);
         let entries = value
             .as_sequence()
-            .ok_or_else(|| invalid("agents needs a list, such as [claude, codex]"))?;
+            .ok_or_else(|| invalid("agents needs a list, such as claude,codex"))?;
         for entry in entries {
             validate_agent_policy(
                 entry
@@ -593,6 +606,17 @@ fn _filter_file_settings(
     });
 }
 
+/// What to write instead of the retired `default_agent: claude,codex`, when
+/// `value` is that spelling. LOO-875 deletes this with the spelling.
+pub(crate) fn old_default_agent_warning(value: &str) -> Option<String> {
+    let entries: Vec<&str> = super::agent_list(value).collect();
+    let first = entries.first().filter(|_| value.contains(','))?;
+    Some(format!(
+        "default_agent: {value} is the old spelling; write agents: [{}] and default_agent: {first}",
+        entries.join(", ")
+    ))
+}
+
 /// Read the retired `default_agent: claude,codex` as `agents: [claude, codex]`
 /// with `default_agent: claude`, and say where to write the replacement.
 /// LOO-875 deletes this once `agents` has shipped.
@@ -610,14 +634,9 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
         values.remove("default_agent");
         return;
     };
-    super::reader::warn(
-        std::path::Path::new(locator),
-        None,
-        &format!(
-            "default_agent: {list} is the old spelling; write agents: [{}] and default_agent: {first}",
-            entries.join(", ")
-        ),
-    );
+    if let Some(warning) = old_default_agent_warning(&list) {
+        super::reader::warn(std::path::Path::new(locator), None, &warning);
+    }
     values.insert("default_agent".into(), (*first).into());
     if !values.contains_key("agents") {
         values.insert(
@@ -780,6 +799,9 @@ pub fn resolve_layers(
                         && super::catalog::definition(key).is_some()
                 })
             });
+            if let Some(agents) = map.get_mut("agents") {
+                _list_agents(agents);
+            }
             _split_agent_list(map, &candidate.locator);
         }
         let mut flat = Vec::new();
@@ -1191,6 +1213,41 @@ mod tests {
             resolved.settings["agent"].selected().unwrap().key,
             "default_agent"
         );
+    }
+
+    #[test]
+    fn a_comma_string_is_the_agents_list() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let saved = super::parse_value("agents", "claude:opus, codex").unwrap();
+        assert_eq!(
+            saved,
+            serde_yaml_ng::from_str::<Value>("[claude:opus, codex]").unwrap()
+        );
+        assert!(super::parse_value("skill.review.agents", "codex").is_ok());
+        assert!(super::parse_value("agents", "claude,not a harness").is_err());
+        let file = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: codex,claude\nskills: {implement: {agents: claude}}",
+        );
+        assert!(super::validate_preferences(&file.value, false, true).is_ok());
+        let order = |skill: Option<&Skill>| {
+            resolve_layers(std::slice::from_ref(&file), skill)
+                .unwrap()
+                .config
+                .agent_order()
+        };
+        assert_eq!(order(None), ["codex", "claude"]);
+        assert_eq!(order(Some(&Skill::named("implement"))), ["claude"]);
+    }
+
+    #[test]
+    fn saving_the_comma_spelling_of_default_agent_names_the_replacement() {
+        assert_eq!(
+            super::old_default_agent_warning("claude,codex").unwrap(),
+            "default_agent: claude,codex is the old spelling; write agents: [claude, codex] and default_agent: claude"
+        );
+        assert_eq!(super::old_default_agent_warning("claude"), None);
     }
 
     fn occurrence() -> Skill {

@@ -16,28 +16,22 @@
 - "not too worried about occasionally duplicative trying of same harness": only
   an exactly equal entry is dropped behind `default_agent`.
 
-## Next implement (concept review, 2026-11-12)
+## Built from the concept review (2026-11-12)
 
-1. `agents` reads a comma string as the list, in files and in `lf set`
-   (`agents: claude,codex`, `lf set --global agents claude,codex`). The request
-   spelled it that way: "we should just be doing agents: a,b". Run on this
-   branch's build, in a throwaway home:
-   - file `agents: claude,codex` printed `warning: …/config.yaml:1: skipping
-     agents: invalid value` and then `agent    Not selected`; the warning does
-     not name the list form.
-   - `lf set --global agents claude,codex` printed `Error: invalid graph:
-     agents needs a list, such as [claude, codex]`.
-   Docs then lead with the short command and keep `[claude, codex]` for YAML.
-   `config::agent_list` stays for this; LOO-875's notes list it for deletion.
-2. `lf set --global default_agent claude,codex` printed `default_agent saved`
-   with no warning, and the next read warned. Print the old-spelling warning
-   when `lf set` saves it.
-3. `docs/config.md` says "Each entry is tried as written; nothing the list
-   lacks is tried." A one-entry order breaks that: `agents: [claude]` leaves
-   `fallback_agents` empty, so `_fallthrough_rungs` adds Opus, Sonnet and
-   Haiku. Say so there (as `docs/subscriptions.md` already does), and cover
-   `agents: [claude]` in `an_order_is_tried_as_written…` or beside it. Which
-   rule is right is open choice 1 below; the docs describe what is built.
+The request spelled the list "we should just be doing agents: a,b".
+
+- `agents` reads a comma string as the list in files, `lf set` and
+  `--setting`; `lf set` saves it as a YAML list. `config::agent_list` splits
+  it and stays after LOO-875, whose notes list it for deletion.
+- `lf set … default_agent claude,codex` warns with the replacement as it saves.
+- `docs/config.md` says a lone bare `claude` tries Opus, Sonnet, Haiku; which
+  rule is right is still open choice 1.
+
+Run in a throwaway home: `lf set --global agents claude,codex` wrote
+`agents: [claude, codex]`; a file `agents: codex,claude` showed `agent  codex,
+then claude` with no warning; `lf set --global default_agent claude,codex`
+printed `warning: …/config.yaml: default_agent: claude,codex is the old
+spelling; write agents: [claude, codex] and default_agent: claude`.
 
 ## Settled without a new answer
 
@@ -76,11 +70,9 @@ Each has a default built; none stops the work.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: pass, except `config::files::tests::relocating_wave_preferences_preserves_conflicts_and_concurrent_edits` failed once in the parallel run and passes alone.
+- `cargo test -p loopflow --lib -- config:: agent::tests:: lf::commands::config engine::config`: 143 pass.
 - `cargo test -p loopflow --test integration documented_commands::`: pass.
-- `cargo test -p loopflow --test integration settings_launch_tests::`: pass.
 - `cargo clippy --all-targets -- -D warnings`: clean.
-- Compress: `cargo test -p loopflow --lib -- agent::tests:: config:: lf::commands::config`: 140 pass; clippy clean.
 - Gate: `(test(config::) | test(agent::tests::) | test(ops::task_execution::) | test(settings_launch_tests::) | test(documented_commands::) | test(configuration_changes_reach_an_existing_subscription) | test(graph_defaults_follow_task_wave_and_repository) | test(wave_setup_tests::)) | binary(two_people)`.
 - Not run: a real Graph step refused by a provider limit. Demo: set
   `agents`, run a step on an exhausted Codex login, read `lf task status`.

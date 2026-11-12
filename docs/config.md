@@ -29,7 +29,7 @@ are separate setups; combine the pieces that fit your work.
 ## Keep going when a provider runs out
 
 ```bash
-lf set --global agents '[claude, codex]'
+lf set --global agents claude,codex
 lf set --global skill.compress.default_agent codex
 ```
 
@@ -42,7 +42,8 @@ skill:
 ```
 
 `agents` is one ordered list: the providers Loopflow may use, and the order it
-tries them in. Work starts on Claude. `default_agent` names one entry and moves
+tries them in. `claude,codex` and `[claude, codex]` are the same list, on the
+command line and in a file. Work starts on Claude. `default_agent` names one entry and moves
 it to the top where it applies, so compress tries Codex first and keeps Claude
 behind it.
 
@@ -53,8 +54,10 @@ agents: [claude:opus, codex, claude:fable]   # Opus, then Codex, then Fable
 ```
 
 A bare entry (`codex`) runs that provider's configured model and is a different
-entry from `codex:o3`. Each entry is tried as written; nothing the list lacks
-is tried.
+entry from `codex:o3`. With more than one entry, each is tried as written and
+nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
+next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
+Haiku.
 
 When a usage limit refuses a headless step, the step moves on instead of
 failing: to your next login for that provider, then to the next entry in
@@ -81,9 +84,9 @@ A narrower `agents` replaces the wider one whole, so a repository, Wave or
 skill can shorten or reorder it:
 
 ```bash
-lf set agents '[codex, claude]'                      # this repository: Codex first
-lf --wave frontend set agents '[claude]'             # this Wave: Claude only
-lf set --global skill.review.agents '[codex]'        # review: Codex only, everywhere
+lf set agents codex,claude                   # this repository: Codex first
+lf --wave frontend set agents claude         # this Wave: Claude only
+lf set --global skill.review.agents codex    # review: Codex only, everywhere
 ```
 
 A `default_agent` the list lacks is added in front, for the scope it applies
@@ -95,8 +98,8 @@ to and nowhere else:
 | `[claude, codex]` | `codex:o3` | Codex o3, Claude, Codex |
 | `[claude, codex]` | `pi` | Pi, Claude, Codex |
 
-With no `agents` at all, `default_agent: claude` runs Claude alone, with nothing
-behind it.
+With no `agents` at all, `default_agent: claude` runs Claude alone, moving
+through its models like a one-entry list.
 
 The older comma list, `default_agent: claude,codex`, still reads as
 `agents: [claude, codex]` with `default_agent: claude`, and warns with the
@@ -792,7 +795,7 @@ Built-in skills recommend no harness. With no authored choice, fallback or
 `agents` list, Loopflow selects automatically only when exactly one supported
 harness is installed. With multiple harnesses, save your choice with
 `lf set --global default_agent claude`, or your order with
-`lf set --global agents '[claude, codex]'`, or select one command with `-a claude`. Start setup with `lf -a claude init` to
+`lf set --global agents claude,codex`, or select one command with `-a claude`. Start setup with `lf -a claude init` to
 choose and save a personal default. Installation order and remaining usage do not
 choose a harness.
 Inspection still works without a choice; a new launch explains how to select one.

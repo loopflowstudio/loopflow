@@ -244,8 +244,22 @@ async fn advance(store: &SharedStore, task: &Task) -> OpsResult<()> {
     {
         return Ok(());
     }
-    for owner in crate::desktop::shells::owners(&store.sqlite, &task.id).map_err(task_error)? {
-        end_owner(&store.sqlite, &owner, "Task completed")?;
+    for (host, _) in crate::desktop::shells::hosts(&store.sqlite, &task.id).map_err(task_error)? {
+        match &host {
+            Host::Owner(owner) => end_owner(&store.sqlite, owner, "Task completed")?,
+            Host::Terminal(terminal) => {
+                // An ended shell has nothing to hear the notice.
+                if store
+                    .sqlite
+                    .terminal_running(terminal)
+                    .map_err(task_error)?
+                {
+                    if let Err(error) = crate::transport::close_notice(&host, "Task completed") {
+                        tracing::warn!(%host, %error, "held shell close unavailable");
+                    }
+                }
+            }
+        }
     }
     store
         .sqlite
@@ -315,8 +329,13 @@ async fn prepare_deletion(
 }
 
 fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
-    let shells = crate::desktop::shells::owners(store, task).map_err(task_error)?;
-    let mut allowed: HashSet<_> = shells.into_iter().collect();
+    // What runs in a shell descends from its owner, or from the `lf` that
+    // created its held terminal; ending the shell ends it.
+    let shells = crate::desktop::shells::hosts(store, task).map_err(task_error)?;
+    let mut allowed: HashSet<_> = shells
+        .into_iter()
+        .filter_map(|(host, launcher)| host.owner().cloned().or(launcher))
+        .collect();
     for host in store.task_session_hosts(task).map_err(task_error)? {
         if host.owner().is_some_and(|owner| {
             crate::journal::lf_evidence(store, owner) == ProcessIdentityEvidence::Dead

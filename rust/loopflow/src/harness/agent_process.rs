@@ -138,12 +138,10 @@ pub(crate) fn require_server() -> Result<()> {
     )
 }
 
-/// Capture identity in the launch's delivery file. A launch the Machine
-/// server holds starts beside it and carries a steer
-/// capability, which its hooks present to that server. So does a conversation
-/// an owner holds, without the server check: its hooks say when it can take a
-/// reply and acknowledge typed input. A bare launch carries none: its two
-/// context hooks reach no server.
+/// Capture identity in the launch's delivery file. A launch for Work starts
+/// beside the Machine server and carries a steer capability, which its hooks
+/// present to that server. A bare launch carries none: its two context hooks
+/// reach no server.
 fn context_environment(
     command: &mut std::process::Command,
     owner: &AttachmentOwner,
@@ -162,7 +160,6 @@ fn context_environment(
     }
     match holder {
         Holder::Caller => return Ok(()),
-        Holder::Owner => {}
         Holder::Server => require_server()?,
     }
     let capability = store.reserve_steer_adapter(session, attachment)?;
@@ -1548,10 +1545,9 @@ mod tests {
         );
     }
 
-    /// A bare conversation in its terminal takes no steers; one an owner
-    /// holds carries the capability its hooks present.
+    /// A bare conversation takes no steers, wherever it runs.
     #[test]
-    fn only_a_held_interactive_launch_carries_a_steer_capability() {
+    fn a_bare_launch_carries_no_steer_capability() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let capability = |holder: crate::session::Holder| {
@@ -1578,7 +1574,6 @@ mod tests {
             std::fs::read_to_string(seen).unwrap()
         };
         assert_eq!(capability(Holder::Caller), "");
-        assert!(capability(Holder::Owner).contains("agent_process_id"));
     }
 
     #[test]

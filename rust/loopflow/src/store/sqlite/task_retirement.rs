@@ -417,9 +417,10 @@ mod tests {
         for hold in [ViewerHold::Viewed(1200), ViewerHold::Absent(1201)] {
             let (_home, store, task) = fixture();
             let viewer = session_owner(&store, &task, "passive");
-            let shell = store.test_lf_process();
+            let shell = crate::id::TerminalId::new();
+            store.create_terminal(&shell, "build").unwrap();
             store
-                .create_desktop_shell("explicit", &task, "/repo.task")
+                .create_desktop_shell("explicit", &task, "/repo.task", None)
                 .unwrap();
             store.bind_desktop_shell("explicit", &shell).unwrap();
             let intent = store
@@ -452,7 +453,6 @@ mod tests {
                 ),
                 (None, None, 0)
             );
-            assert!(store.shell_should_close(&shell).unwrap());
             store
                 .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(1201)))
                 .unwrap();

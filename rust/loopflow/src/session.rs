@@ -234,10 +234,6 @@ pub enum Holder {
     /// context hooks, no server and no steers.
     #[default]
     Caller,
-    /// A bare conversation a per-Session owner holds (a Desktop shell's
-    /// relay, a framed `lf ssh` viewer). Its hooks say when it can take a
-    /// reply, so it gets every hook and steers, without the server check.
-    Owner,
     /// Task, Wave or repository work: every hook and steers, beside a
     /// Machine server that must be up before the agent starts.
     Server,
@@ -246,11 +242,9 @@ pub enum Holder {
 impl Holder {
     /// `work`: the launch's Work was selected with `--task` or `--wave`, or
     /// the Session it reopens is not bare (`SqliteStore::is_bare`).
-    pub(crate) fn of(work: bool, interactive: bool) -> Self {
+    pub(crate) fn of(work: bool) -> Self {
         if work {
             Self::Server
-        } else if interactive && crate::transport::current().is_some() {
-            Self::Owner
         } else {
             Self::Caller
         }

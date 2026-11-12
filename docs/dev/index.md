@@ -7,7 +7,10 @@ title: Architecture
 
 Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
-and the step processes it starts.
+and the step processes it starts. An agent runs in one of three places: in the
+command that launched it, in a terminal the Machine server's holder keeps, or
+under a detached Graph process. [What runs on a Machine](#what-runs-on-a-machine)
+is the whole process model.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](reference-cutover.md#cutover-status), the remaining work
@@ -95,6 +98,7 @@ one Skill run
 | Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](delivery.md) |
 | Machines | Execution destinations, Task ownership and SSH routing | [Machines and processes](machines.md) |
+| Terminals | Where an agent runs, held terminals, views, headless work | [Transport](../../rust/loopflow/src/transport/README.md) |
 | Client access and installation | Server admission, registration/update and continuity across replacement | [Client API server](server.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](codebase.md) |
@@ -141,6 +145,88 @@ after that point publish the same bytes under the same tag.
 Each area page starts with a real command or artifact, follows its request or
 data flow, and ends with the contracts that neighboring areas may rely on.
 
+## What runs on a Machine
+
+```bash
+lf implement                 # the agent is this command's child
+lf resume --task LOO-12      # a view of a terminal the holder keeps
+lf task run LOO-12           # starts a Graph process and returns
+ps -axo command | grep '^lf '
+# lf server run
+# lf holder run
+# lf --task task_… graph run
+```
+
+Three processes stay up: one Machine server, a holder for each build that
+still has agents, and a Graph process for each running Graph. Every other `lf`
+is a command that ends.
+
+```text
+your terminal            lf <skill> ──────────────────────────► agent        here
+
+your terminal ─ view ─┐
+Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   held
+phone         ─ view ─┘         │
+                                └─ store, hooks, steers, Work reads and writes
+
+lf task run / lf ship / landing ─► Graph process ─► step lf ─► agent          detached
+        │                                │
+        └─ one startup line, then gone   └─ logs/graph-<id>.log
+```
+
+A launch runs in exactly one of three places, chosen once in
+`transport::delegate`:
+
+| | Here | Held | Detached |
+| --- | --- | --- | --- |
+| What | `lf <skill>`, `lf graph …`, any bare `-b` or piped run, every headless Graph step | Task, Wave and repository conversations; Desktop shells | Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command |
+| Parent of the agent | The launching `lf`, in its caller's terminal or pipe | The holder, on a PTY | A step `lf` under the Graph process |
+| Ends with | Its caller | Its agent quitting, or its Task closing | Its Graph |
+| Seen through | The terminal it runs in | Any number of views, all live | Its log, `lf task status`, the Session's history |
+| Needs the server | No | Yes; it fails rather than fall back | To start, no |
+
+Work decides between Here and the other two: a command that names a Task or
+Wave, or reopens a Session bound to one, is Work, and a plain `lf` typed in a
+Task's checkout is not. A terminal decides between Held and Detached: Work
+someone views is held, Work nobody views is detached. Nothing wraps a headless
+run in a terminal, and nothing hosts a conversation in a process of its own.
+
+Hooks follow Work, not the place. A bare agent gets two, which print the
+context block at start and after compaction from files in the checkout. An
+agent launched for a Task or Wave (a held conversation, or a Graph step, which
+`lf task run` starts with `--task`) also reports turn and tool boundaries to
+the server and takes steers from it, so its launch starts the server first.
+
+| Process | One per | Holds | Restarts |
+| --- | --- | --- | --- |
+| Machine server (`lf server run`) | Machine | Client connections, hook boundaries, the registry of held terminals with one terminal emulator each, views, exit settlement | On every install; the OS supervisor keeps it up |
+| Holder (`lf holder run`) | Build with live terminals | PTYs, their children, a ring of recent output per PTY. No store, no Sessions | Never; it exits when its last terminal ends |
+| Graph process (`lf … graph run`) | Running Graph | The graph, its cursor and its step children | Never; a stopped Graph is history and `lf task run` starts a fresh one |
+
+What survives what follows from that table. Closing a view ends nothing.
+Restarting or upgrading the server ends nothing: it greets the holders it
+finds, rebuilds each screen from the holder's ring and carries on, and views
+reconnect at the PTY byte they had reached. An install replaces the server and
+leaves holders on the build that started them, so a conversation keeps its
+build until it is quit and resumed. Killing the `lf task run` that started a
+Graph leaves the Graph running. Logout and reboot end every process; Sessions
+and Graph history remain, and `lf resume` or `lf task run` starts new ones.
+
+The server is in no agent's byte path except as the relay between a held PTY
+and its views. A hook that cannot reach it logs a gap and the turn continues;
+a holder that loses it keeps its agents and says nothing about them. The
+store is opened by whichever process is writing: commands, Graph processes
+and the server. The holder never opens it.
+
+Conversations started by a build from before held terminals run under an
+`lf session serve` process of their own until their agent quits. Nothing
+starts one now.
+
+The [transport README](../../rust/loopflow/src/transport/README.md) owns the
+holder and view protocols; the
+[server README](../../rust/loopflow/src/server/README.md) owns client
+operations and hook boundaries.
+
 ## The whole system
 
 ```text
@@ -175,9 +261,9 @@ user / agent --> lf CLI --------+----------+-----------+
 another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
-Each host can expose a [client API server](server.md) to Desktop and
-future mobile clients; remote admission is separate work. It does not centralize
-execution across Machines. Machine routing selects
+Each Machine's server also admits clients: Desktop over a private socket, and
+a paired phone over an authenticated connection ([client API server](server.md)).
+It does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -334,6 +420,8 @@ the behavior.
 | Graph semantics, Work state, Steer, questions, review GraphSteps and Task advancement | [Planning](planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](delivery.md) |
 | remote execution, Task ownership, process control, promotion | [Machines and processes](machines.md) |
+| where an agent runs, held terminals, views, headless launches | [Transport](../../rust/loopflow/src/transport/README.md) |
+| client operations, hook boundaries, subscriptions | [Server](../../rust/loopflow/src/server/README.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](codebase.md) |
 

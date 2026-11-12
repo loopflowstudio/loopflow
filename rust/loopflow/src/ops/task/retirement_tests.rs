@@ -140,7 +140,8 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Workspace::new().await;
-        let shell = fixture.store.sqlite.test_lf_process();
+        let shell = crate::id::TerminalId::new();
+        fixture.store.sqlite.create_terminal(&shell, "build").unwrap();
         fixture
             .store
             .sqlite
@@ -148,6 +149,7 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
                 "shell",
                 &fixture.task.id,
                 fixture.checkout.to_str().unwrap(),
+                None,
             )
             .unwrap();
         fixture
@@ -155,10 +157,8 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
             .sqlite
             .bind_desktop_shell("shell", &shell)
             .unwrap();
-        fixture
-            .sql()
-            .execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&shell])
-            .unwrap();
+        // The shell's terminal ended; its jobs are not yet confirmed gone.
+        fixture.store.sqlite.end_terminal(&shell, Some(0)).unwrap();
         fixture.due();
         // The agent's own exit says nothing about viewers: it simply holds no viewer.
         let agent = fixture.session_owner("final-turn", None);

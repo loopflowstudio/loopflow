@@ -1003,7 +1003,6 @@ impl Entry {
         let mut hosted = Hosted::new(
             Host::Terminal(terminal.clone()),
             true,
-            None,
             control_key,
             waker.try_clone()?,
             watchers,

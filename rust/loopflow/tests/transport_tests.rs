@@ -397,6 +397,24 @@ read -r answer < /dev/tty
         assert_eq!(answer["revision"], HELD_REVISION, "{answer}");
         (socket, answer["answer"].clone())
     }
+    /// A view of a held terminal, through the server's entrance.
+    #[track_caller]
+    fn held_viewer(&self, terminal: &str, control: bool) -> Viewer {
+        let (socket, answer) = self.held_entrance(terminal);
+        assert_eq!(answer, "hosted", "{terminal} is not hosted");
+        Viewer::new(socket).attach(json!({"kind":"attach","control":control,"replace":true,
+            "own":control.then_some("take"),"rows":24,"cols":80}))
+    }
+    /// Whether a holder still runs `terminal`, as recorded.
+    fn held_running(&self, terminal: &str) -> bool {
+        self.sql()
+            .query_row(
+                "SELECT ended_at IS NULL FROM held_terminals WHERE id=?1",
+                [terminal],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
     /// Wait until a viewer holds input control of a held terminal.
     fn wait_held_controlled(&self, terminal: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -558,6 +576,10 @@ const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;
 const ERR: u8 = 0x04;
+/// A held terminal's PTY byte position, sent beside its output.
+const POSITION: u8 = 0x05;
+/// lf's own events and reports to a held terminal's viewer.
+const ASIDE: u8 = 0x06;
 const REQUEST: u8 = 0x11;
 const INPUT: u8 = 0x12;
 
@@ -648,7 +670,10 @@ impl Viewer {
     /// The next item, or `None` once the owner closes this connection.
     #[track_caller]
     fn next(&mut self) -> Option<Item> {
-        let (tag, payload) = read_frame(&mut self.socket)?;
+        let (mut tag, mut payload) = read_frame(&mut self.socket)?;
+        while tag == POSITION {
+            (tag, payload) = read_frame(&mut self.socket)?;
+        }
         self.wire += 5 + payload.len() as u64;
         if tag != REPLY {
             self.received += payload.len() as u64;
@@ -657,7 +682,7 @@ impl Viewer {
             REPLY => Item::Reply(serde_json::from_slice(&payload).unwrap()),
             SNAPSHOT => Item::Snapshot(payload),
             ERR => Item::Err(payload),
-            OUT => {
+            OUT | ASIDE => {
                 let prefix = format!("\x1b_lf1;{};", self.nonce).into_bytes();
                 match payload.strip_prefix(prefix.as_slice()) {
                     Some(body) if body.ends_with(b"\x1b\\") => {
@@ -5218,8 +5243,9 @@ fn viewer_input_survives_its_disconnect() {
 }
 
 #[test]
-fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
+fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000007";
     fixture.shell_task(task);
     let mut launch = fixture
@@ -5243,10 +5269,10 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
         .spawn()
         .unwrap();
     fixture.wait_file("ready");
-    let owner = fixture.shell_owner("cleanup-shell");
+    let owner = fixture.shell_terminal("cleanup-shell");
     // The launch attaches after the shell starts; take over only from it.
-    fixture.wait_controlled(&owner);
-    let mut viewer = fixture.viewer(&owner, true);
+    fixture.wait_held_controlled(&owner);
+    let mut viewer = fixture.held_viewer(&owner, true);
     launch.wait().unwrap();
     viewer.input("sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
     let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
@@ -5270,11 +5296,12 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
     assert!(events(&ended, "control")
         .iter()
         .any(|event| event["notice"] == "Task completed"));
-    fixture.ends(&owner);
+    fixture.held_ends(&owner);
+    fixture.shell_settles(&owner);
     let (settled, requested): (bool, i64) = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled,close_requested FROM desktop_shells WHERE owner=?1",
+            "SELECT jobs_settled,close_requested FROM desktop_shells WHERE terminal_id=?1",
             [&owner],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -5300,6 +5327,7 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
 #[test]
 fn returning_task_viewer_resets_cleanup_without_another_sweep() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
     let base = [
@@ -5326,9 +5354,9 @@ fn returning_task_viewer_resets_cleanup_without_another_sweep() {
         .spawn()
         .unwrap();
     fixture.wait_file("ready");
-    let shell = fixture.shell_owner("desktop-shell");
-    fixture.wait_controlled(&shell);
-    let mut terminal = fixture.viewer(&shell, true);
+    let shell = fixture.shell_terminal("desktop-shell");
+    fixture.wait_held_controlled(&shell);
+    let mut terminal = fixture.held_viewer(&shell, true);
     launch.wait().unwrap();
     terminal.input("export RETAINED=still-here; sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
     let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
@@ -5379,7 +5407,7 @@ fn returning_task_viewer_resets_cleanup_without_another_sweep() {
             wait_hold(&fixture, &session_owner, Some("absent"));
         }
         // No sweep occurs between return and these assertions.
-        assert!(fixture.running(&shell));
+        assert!(fixture.held_running(&shell));
         terminal.input("printf 'value:%s\\n' \"$RETAINED\"\r");
         until_out(&mut terminal, "value:still-here");
         let job_state = Command::new("ps")
@@ -5405,11 +5433,12 @@ fn returning_task_viewer_resets_cleanup_without_another_sweep() {
         .unwrap()
         .status
         .success());
-    fixture.ends(&shell);
+    fixture.held_ends(&shell);
+    fixture.shell_settles(&shell);
     let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE terminal_id=?1",
             [&shell],
             |r| r.get(0),
         )
@@ -5436,12 +5465,31 @@ impl Fixture {
         machine
     }
 
-    fn shell_owner(&self, id: &str) -> String {
+    fn shell_terminal(&self, id: &str) -> String {
         self.sql()
-            .query_row("SELECT owner FROM desktop_shells WHERE id=?1", [id], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT terminal_id FROM desktop_shells WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
             .unwrap()
+    }
+
+    /// Wait until the server confirms an ended shell left no jobs.
+    fn shell_settles(&self, terminal: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !self
+            .sql()
+            .query_row(
+                "SELECT jobs_settled FROM desktop_shells WHERE terminal_id=?1",
+                [terminal],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            assert!(Instant::now() < deadline, "{terminal} jobs never settled");
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     fn shell_count(&self) -> u32 {
@@ -5499,6 +5547,7 @@ fn desktop_shell_reconnects_without_replay_and_close_settles_its_jobs() {
 
 fn shell_reconnects_and_settles(integrated: bool) {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000005";
     fixture.shell_task(task);
     let base = [
@@ -5534,9 +5583,9 @@ fn shell_reconnects_and_settles(integrated: bool) {
         fixture.wait_file("launches").trim(),
         "$(literal); spaced argument"
     );
-    let owner = fixture.shell_owner("desktop-shell");
-    fixture.wait_controlled(&owner);
-    let mut viewer = fixture.viewer(&owner, true);
+    let owner = fixture.shell_terminal("desktop-shell");
+    fixture.wait_held_controlled(&owner);
+    let mut viewer = fixture.held_viewer(&owner, true);
     launch.wait().unwrap();
     viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
     until_out(&mut viewer, "state-ready");
@@ -5564,17 +5613,9 @@ fn shell_reconnects_and_settles(integrated: bool) {
         .parse::<u32>()
         .unwrap();
     drop(viewer);
-    // Simulate a completed nested conversation; shell purpose stays immutable.
-    let session = fixture.session(&owner);
-    fixture
-        .sql()
-        .execute(
-            "UPDATE agent_sessions SET interactive=1,completed_at=unixepoch() WHERE id=?1",
-            [&session],
-        )
-        .unwrap();
+    // Nobody viewing it ends nothing.
     std::thread::sleep(Duration::from_secs(4));
-    assert!(fixture.running(&owner));
+    assert!(fixture.held_running(&owner));
     let mut retry = fixture
         .command(&base)
         .arg("--create")
@@ -5583,8 +5624,8 @@ fn shell_reconnects_and_settles(integrated: bool) {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    fixture.wait_controlled(&owner);
-    let mut returning = fixture.viewer(&owner, true);
+    fixture.wait_held_controlled(&owner);
+    let mut returning = fixture.held_viewer(&owner, true);
     retry.wait().unwrap();
     returning.input("printf 'value:%s\\n' \"$RETAINED\"\r");
     until_out(&mut returning, "value:still-here");
@@ -5595,11 +5636,12 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "{}",
         String::from_utf8_lossy(&close.stderr)
     );
-    fixture.ends(&owner);
+    fixture.held_ends(&owner);
+    fixture.shell_settles(&owner);
     let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled FROM desktop_shells WHERE owner=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE terminal_id=?1",
             [&owner],
             |r| r.get(0),
         )
@@ -5634,12 +5676,12 @@ fn shell_reconnects_and_settles(integrated: bool) {
     assert!(!ended.status.success());
     assert!(String::from_utf8_lossy(&ended.stderr).contains("Shell ended"));
     assert_eq!(fixture.wait_file("launches").lines().count(), 1);
-    assert!(!fixture.endpoint(&owner).exists());
 }
 
 #[test]
-fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
+fn desktop_shell_twenty_lifecycles_leave_no_jobs() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
     for cycle in 0..20 {
@@ -5671,9 +5713,9 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             .spawn()
             .unwrap();
         fixture.wait_file("cycle-ready");
-        let owner = fixture.shell_owner(&id);
-        fixture.wait_controlled(&owner);
-        let mut viewer = fixture.viewer(&owner, true);
+        let owner = fixture.shell_terminal(&id);
+        fixture.wait_held_controlled(&owner);
+        let mut viewer = fixture.held_viewer(&owner, true);
         launch.wait().unwrap();
         viewer
             .input("sleep 30 & printf '%s\\n' $$ > \"$HOME/shell-pid\"; printf 'cycle-ready\\n'\r");
@@ -5691,8 +5733,8 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             .unwrap()
             .status
             .success());
-        fixture.ends(&owner);
-        assert!(!fixture.endpoint(&owner).exists(), "cycle {cycle}");
+        fixture.held_ends(&owner);
+        fixture.shell_settles(&owner);
         let inventory = Command::new("ps")
             .args(["-axo", "pid=,stat="])
             .output()

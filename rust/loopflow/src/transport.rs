@@ -19,8 +19,8 @@ mod wire;
 
 use std::collections::VecDeque;
 use std::ffi::CStr;
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
+use std::fs::File;
+use std::io::{self, IsTerminal, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -281,9 +281,11 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
     }
 }
 
-/// Whether a Desktop surface waits for a relay to acknowledge this launch.
-fn desktop_relay() -> bool {
-    std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some()
+/// Where a delegated launch runs; running here needs no delegation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Held,
+    Detached,
 }
 
 /// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
@@ -346,12 +348,13 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
     )
 }
 
-/// The one place a launch's host is chosen. A Work launch a terminal views
-/// runs in a terminal the Machine server's holder keeps, so it outlives every
-/// lf process that views it. Other Work runs as a plain detached process that
-/// this one prints until it exits or lets go. A bare launch runs here: as the
-/// terminal's foreground program, or headless as its caller's child. Only a
-/// Desktop surface waiting for a relay still gets its own owner.
+/// The one place a launch's place is chosen
+/// ([What runs on a Machine](../../../docs/dev/index.md#what-runs-on-a-machine)).
+/// A launch something views (a terminal for Work, or a Desktop or framed
+/// relay for any conversation) runs in a terminal the Machine server's holder
+/// keeps. Other Work runs as a plain detached process that this one prints
+/// until it exits or lets go. Everything else runs here: as the terminal's
+/// foreground program, as a Graph's step, or headless as its caller's child.
 fn delegate(
     batch: bool,
     json_session: Option<&str>,
@@ -365,17 +368,20 @@ fn delegate(
         return Ok(false);
     }
     let work = works(named_work, preview_session.or(json_session));
-    let desktop = desktop_relay();
+    // A Desktop pane or a framed `lf --machine` view relays this launch.
+    let relayed =
+        std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some();
     // `lf -b … > file` typed at a terminal writes only the answer, never a
     // relayed screen; an interactive run keeps the terminal it reads from.
-    let terminal = std::env::var_os(STREAM_ENV).is_some()
-        || io::stdout().is_terminal()
-        || (!batch && io::stdin().is_terminal());
-    let held = terminal && !batch && work;
+    let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
+    let place = if !batch && (relayed || (work && terminal)) {
+        Place::Held
     // A Graph waits on its step; the step has no caller to outlive.
-    if !desktop && (!work || (!held && crate::journal::graph_step())) {
+    } else if work && !crate::journal::graph_step() {
+        Place::Detached
+    } else {
         return Ok(false);
-    }
+    };
     crate::journal::admit_process(
         &std::env::current_dir()?,
         &std::env::args().collect::<Vec<_>>(),
@@ -384,8 +390,8 @@ fn delegate(
         "Execution requires an admitted invocation; check the process ledger and caller provenance",
     )?;
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-    if !held && !desktop {
-        let cwd = std::env::current_dir()?;
+    let cwd = std::env::current_dir()?;
+    if place == Place::Detached {
         let code = crate::os_process::detached::run(&argv, &cwd, &|command| {
             // No terminal shows detached work; it claims none.
             command
@@ -408,14 +414,9 @@ fn delegate(
         ViewerTerminal::preview(preview_session)?
     };
     let session = preview_session.map(LfSessionId::from);
-    let cwd = std::env::current_dir()?;
-    let owner = if held {
-        Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
-    } else {
-        Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
-    };
+    let terminal = Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?);
     relay_with_preview(
-        &owner,
+        &terminal,
         session.as_ref(),
         None,
         json_session,
@@ -464,71 +465,6 @@ pub(crate) fn start_held(
     let started: SessionStarted = serde_json::from_value(answer.result)
         .context("Loopflow server answered session.start without a terminal")?;
     Ok(started.terminal_id)
-}
-
-pub(crate) fn start(
-    argv: &[String],
-    terminal: bool,
-    cwd: &Path,
-    inherit: &dyn Fn(&mut Command),
-) -> Result<LfProcessId> {
-    let logs = crate::store::lf_home_dir().join("logs");
-    std::fs::create_dir_all(&logs)
-        .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
-    let log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join("transport.log"))
-        .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
-    let mut command = Command::new(std::env::current_exe()?);
-    command
-        .args(["session", "serve"])
-        .env_remove("LF_SERVER_STATUS")
-        .env_remove(STREAM_ENV)
-        // It names a descriptor the owner does not inherit.
-        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
-    if terminal {
-        command.arg("--terminal");
-    }
-    command
-        .arg("--")
-        .args(argv)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(log);
-    // Validate placement on the viewer's PTY before handing it to the owner,
-    // whose stdin is deliberately detached.
-    command.env_remove(TERMINAL_ENV);
-    if let Some(terminal) = crate::session_record::current_terminal_id() {
-        command.env(TERMINAL_ENV, terminal);
-    }
-    let descriptors = crate::os_process::detached::inherited_descriptors();
-    // SAFETY: only async-signal-safe syscalls are used between fork and exec.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::setsid() < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            for fd in &descriptors {
-                libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
-            }
-            Ok(())
-        });
-    }
-    // After the sweep, so descriptors the caller hands on stay open.
-    inherit(&mut command);
-    let mut child = command.spawn()?;
-    let output = child.stdout.take().expect("startup pipe configured");
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    let mut line = String::new();
-    BufReader::new(output)
-        .read_line(&mut line)
-        .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
-    LfProcessId::parse(line.trim())
-        .context("Owner exited before acknowledging execution; inspect transport.log")
 }
 
 pub(crate) fn directory(home: &Path) -> Result<PathBuf> {
@@ -1097,11 +1033,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     std::env::remove_var(TERMINAL_ENV);
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
-    let shell = std::env::var("LF_DESKTOP_SHELL").ok();
-    std::env::remove_var("LF_DESKTOP_SHELL");
-    if let Some(shell) = &shell {
-        crate::journal::process_ledger()?.bind_desktop_shell(shell, &id)?;
-    }
     let path = endpoint(&id).context("Prepare transport socket")?;
     let listener = UnixListener::bind(&path)
         .with_context(|| format!("Bind transport socket {}", path.display()))?;
@@ -1165,35 +1096,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             .stderr(Stdio::piped());
         command.process_group(0);
     }
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            if shell.is_some() {
-                crate::journal::process_ledger()?.settle_shell_jobs(&id)?;
-            }
-            return Err(error.into());
-        }
-    };
+    let mut child = command.spawn()?;
     // Command retains its configured slave descriptors after spawn. Close them
     // so Linux reports PTY EOF when the execution closes its own descriptors.
     drop(command);
     let group = crate::os_process::ProcessGroupGuard::new(child.id());
-    let shell_jobs = shell
-        .as_ref()
-        .map(|_| crate::os_process::TerminalJobs::new(child.id()));
-    if let Some(jobs) = &shell_jobs {
-        let jobs = jobs.clone();
-        let owner = id.clone();
-        crate::agent::register_interrupt_cleanup(move || {
-            let settled = jobs
-                .terminate()
-                .map_err(anyhow::Error::from)
-                .and_then(|()| Ok(crate::journal::process_ledger()?.settle_shell_jobs(&owner)?));
-            if let Err(error) = settled {
-                tracing::error!(%owner,%error,"Shell job cleanup remains pending");
-            }
-        });
-    }
     let mut readers: Vec<(u8, File)> = Vec::new();
     let input: File;
     if let Some((master, slave)) = pair {
@@ -1226,7 +1133,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hosted = hosted::Hosted::new(
         Host::Owner(id),
         terminal,
-        shell,
         control_key,
         waker.try_clone()?,
         &hosted::Watchers::spawn(),
@@ -1243,7 +1149,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         cooked,
         exit,
         pid,
-        shell_jobs,
     });
     loop {
         while let Ok((socket, _)) = listener.accept() {
@@ -1762,8 +1667,8 @@ pub fn relay_args(args: &[String]) -> Option<Relay> {
 }
 
 /// Paint an ended Desktop shell's retained screen without starting execution.
-pub(crate) fn shell_history(owner: &LfProcessId) -> Result<()> {
-    if let Some(screen) = snapshot::last_screen(owner.as_str()) {
+pub(crate) fn shell_history(host: &Host) -> Result<()> {
+    if let Some(screen) = snapshot::last_screen(&host.to_string()) {
         if std::env::var_os(STREAM_ENV).is_some() {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
         } else {

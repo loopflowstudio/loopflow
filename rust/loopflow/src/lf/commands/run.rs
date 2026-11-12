@@ -51,7 +51,6 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
             .work
             .as_ref()
             .is_some_and(|work| work.source.is_managed()),
-        !cli.batch,
     );
 
     print_context_header(&built, cli);
@@ -184,7 +183,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        holder: crate::session::Holder::of(named_work, false),
+        holder: crate::session::Holder::of(named_work),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
@@ -261,7 +260,7 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed(), !cli.batch);
+    built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed());
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),

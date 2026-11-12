@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Reply, Request, Tag};
-use super::{attach_with_terminal, endpoint, start, terminal_pair, ViewerTerminal};
+use super::{attach_with_terminal, endpoint, terminal_pair, ViewerTerminal};
 use crate::ghostty_vt::{Terminal, REVISION};
 use crate::id::LfProcessId;
 
@@ -40,14 +40,6 @@ fn snapshot_preview_fixture() {
     }
     let preview = ViewerTerminal::preview(Some(SESSION)).unwrap();
     assert!(preview.is_some());
-    if case == "startup_failure" {
-        // The fixture test executable cannot serve an owner: startup exits
-        // before acknowledgement, exercising the real startup failure path.
-        let result = start(&["/missing-provider".into()], true, &home, &|_| {});
-        assert!(result.is_err());
-        drop(preview);
-        return;
-    }
     let owner = LfProcessId::new();
     let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
     let execution = home.join("execution");
@@ -441,18 +433,10 @@ fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
     assert!(output
         .windows(b"saved preview".len())
         .any(|w| w == b"saved preview"));
-    assert!(
-        matches!(case, "startup_failure" | "provider_failure" | "completed")
-            || cancelled
-            || inspected
-    );
+    assert!(matches!(case, "provider_failure" | "completed") || cancelled || inspected);
     (home, output)
 }
 
-#[test]
-fn snapshot_preview_startup_failure_restores_terminal() {
-    preview_case("startup_failure");
-}
 #[test]
 fn snapshot_preview_cancellation_before_acknowledgement_restores_terminal() {
     preview_case("cancel");

@@ -50,7 +50,6 @@ pub(super) struct Local {
     pub cooked: Option<libc::termios>,
     pub exit: mpsc::Receiver<io::Result<ExitStatus>>,
     pub pid: u32,
-    pub shell_jobs: Option<crate::os_process::TerminalJobs>,
 }
 
 impl Child {
@@ -196,17 +195,31 @@ impl Child {
         }
     }
 
-    /// End what the execution left running in its terminal.
-    fn end_jobs(&self, owner: &Host) -> Result<()> {
-        match self {
-            Self::Local(local) => {
-                if let (Some(jobs), Some(owner)) = (&local.shell_jobs, owner.owner()) {
-                    jobs.terminate()?;
-                    crate::journal::process_ledger()?.settle_shell_jobs(owner)?;
+    /// End what a Desktop shell left running in its terminal's session, off
+    /// the host's loop: stragglers get up to three seconds.
+    fn end_jobs(&self, host: &Host) -> Result<()> {
+        match (self, host) {
+            (Self::Held(source), Host::Terminal(terminal)) => {
+                if !crate::journal::process_ledger()?.is_shell_terminal(terminal)? {
+                    return Ok(());
                 }
+                // The holder made the shell its session's leader.
+                let jobs = crate::os_process::TerminalJobs::new(source.pid());
+                let terminal = terminal.clone();
+                std::thread::spawn(move || {
+                    let settled = jobs
+                        .terminate()
+                        .map_err(anyhow::Error::from)
+                        .and_then(|()| {
+                            Ok(crate::journal::process_ledger()?.settle_shell_jobs(&terminal)?)
+                        });
+                    if let Err(error) = settled {
+                        tracing::error!(%terminal, %error, "Shell job cleanup remains pending");
+                    }
+                });
                 Ok(())
             }
-            Self::Held(_) => Ok(()),
+            _ => Ok(()),
         }
     }
 
@@ -277,8 +290,6 @@ pub(super) struct Hosted {
     announced: bool,
     attached: bool,
     viewing: lifetime::Viewing,
-    /// A Desktop shell's explicit Close.
-    closing: mpsc::Receiver<()>,
     /// Task cleanup's notice: the viewer that asked, its request and the text.
     close_notice: Option<(String, u64, String)>,
     /// Wakes the host's descriptor wait from another thread.
@@ -323,22 +334,19 @@ impl Watchers {
 
 impl Hosted {
     /// Host the execution known as `id`. `waker` wakes the host's wait when
-    /// a shell's Close or a settlement has something for it.
+    /// a settlement or a moved client has something for it.
     pub fn new(
         id: Host,
         terminal: bool,
-        shell: Option<String>,
         control_key: String,
         waker: UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
         let attachment = Arc::new(lifetime::Client::default());
-        let (viewing, closing) = watchers.lifetime.watch(
-            id.clone(),
-            shell.is_some(),
-            waker.try_clone()?,
-            Arc::clone(&attachment),
-        );
+        let viewing =
+            watchers
+                .lifetime
+                .watch(id.clone(), waker.try_clone()?, Arc::clone(&attachment));
         Ok(Self {
             terminal,
             control_key,
@@ -357,7 +365,6 @@ impl Hosted {
             announced: false,
             attached: false,
             viewing,
-            closing,
             close_notice: None,
             waker,
             settling: None,
@@ -1056,19 +1063,6 @@ impl Hosted {
                 release_viewer_hold(&self.id, self.observed_hold);
                 child.retire();
             }
-        }
-        if self.closing.try_recv().is_ok() {
-            child.end_jobs(&self.id)?;
-            end_viewers(
-                &mut self.viewers,
-                Event::Control {
-                    held: false,
-                    notice: Some("Shell closed".into()),
-                },
-            );
-            release_viewer_hold(&self.id, self.observed_hold);
-            snapshot::leave(&self.id, &self.output);
-            child.retire();
         }
         Ok(Pass::Continue)
     }

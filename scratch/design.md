@@ -7,10 +7,9 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 10:30 UTC, GitHub's PR metadata reported #1812 open and
-unmerged, at head `dc055a5ae57c67caf4c696a1bb77a3f578004c69`, which contains
-`origin/main` `eb2b0726bfc4ee9373e7aea6e57c2c1d58f19fc3`; this checkout has
-merged that main. `ticket.rs` is unchanged since head `28e2321c`. `origin/main` does not contain
+At November 12 11:25 UTC, GitHub's PR metadata reported #1812 open and
+unmerged, at head `dc055a5ae57c67caf4c696a1bb77a3f578004c69`, which does not
+contain `origin/main` `45a0eecc94` (#1887); this checkout has merged that main. `ticket.rs` is unchanged since head `28e2321c`. `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
@@ -22,8 +21,8 @@ Inspection of #1812 found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 10:30 UTC `lf task status LOO-718 --json` read reported
-`active`, `feature` / `demo`, with PR #1812 open.
+The November 12 11:25 UTC `lf task status LOO-718 --json` read reported
+`active`: "PR is published but settlement is not armed with `lf pr land -c`".
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.
@@ -61,4 +60,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed after Nov 12 compress (scratch only; no build or test rerun).
+`git diff --check` — passed after Nov 12 11:25 realign (scratch only; no build or test rerun).

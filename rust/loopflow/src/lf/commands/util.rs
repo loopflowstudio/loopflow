@@ -109,7 +109,11 @@ pub(crate) fn resume_session_with_env(
         config.agent()?,
         config.agent()?,
     );
-    if provider_session.is_some() && session.provider.as_deref() != Some("codex") {
+    // A held Codex sends its first turn only to a thread with none; any other
+    // resumed thread already has it.
+    let held_codex = session.provider.as_deref() == Some("codex")
+        && config.holder != crate::session::Holder::Caller;
+    if provider_session.is_some() && !held_codex {
         config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
@@ -726,6 +730,14 @@ fn run_native_session(
         }),
         None => false,
     };
+    // A provider leading the terminal gets Ctrl+C, a closed terminal or a
+    // `kill` instead of lf, and ends as it would started alone.
+    let interrupted = interrupted
+        || (foreground.is_some()
+            && matches!(
+                std::os::unix::process::ExitStatusExt::signal(&status),
+                Some(libc::SIGINT | libc::SIGHUP | libc::SIGTERM)
+            ));
     // A mover ended this attachment; the conversation's home is now its business.
     let lost = attachment_lost(&attachment).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
@@ -1465,6 +1477,69 @@ mod tests {
                 session
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bare_codex_resume_does_not_resend_its_first_turn() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let temp = tempfile::tempdir().unwrap();
+        ledger.set_db_path(temp.path().join("loopflow.db"));
+        let _restore = EnvRestore::capture(&["LF_HOME", "PATH"]);
+        std::env::set_var("LF_HOME", temp.path());
+        let provider = fake_provider(&temp, "printf '%s\\0' \"$@\" > received");
+        std::fs::rename(provider, temp.path().join("codex")).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(temp.path().to_path_buf()).chain(std::env::split_paths(&path)),
+            )
+            .unwrap(),
+        );
+        let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
+            agent: Some("codex".into()),
+            task_prompt: "the first turn".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let capture = crate::session_record::SessionRecorder::begin_at_with_request(
+            temp.path(),
+            crate::session_record::SessionCaptureSpec {
+                harness: "codex".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                graph: crate::session_record::SessionGraphMembership::Independent,
+                work: None,
+            },
+            request,
+        )
+        .unwrap();
+        let capture_dir = capture.artifact_dir();
+        crate::session_record::write_provider_session(&capture_dir, &"thread-1".into(), None)
+            .unwrap();
+        let session = crate::session_record::read_provider_session(&capture_dir)
+            .unwrap()
+            .unwrap();
+
+        resume_session_with_env(
+            &capture.artifact_key(),
+            Some(&session),
+            &BTreeMap::new(),
+            None,
+            false,
+        )
+        .unwrap();
+
+        let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
+        let arguments = received.split_terminator('\0').collect::<Vec<_>>();
+        assert!(arguments.ends_with(&["resume", "--", "thread-1"]));
+        assert!(!received.contains("the first turn"));
     }
 
     #[test]

@@ -7,12 +7,11 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 07:16 UTC, GitHub's PR metadata reported #1812 open and
-unmerged, at head `28e2321c8e2ea0ca8d8ecb199f31c5bb1a0e844f`.
-`origin/main` was at `eb2b0726bfc4ee9373e7aea6e57c2c1d58f19fc3`, which this
-checkout has merged. Between heads `4e0ccacd` and `28e2321c`, #1812 changed
-`mobile.rs`, `boundary.rs` and added `wake.rs`; `ticket.rs` is unchanged.
-`origin/main` does not contain
+At November 12 10:30 UTC, GitHub's PR metadata reported #1812 open and
+unmerged, at head `dc055a5ae57c67caf4c696a1bb77a3f578004c69`, which contains
+`origin/main` `eb2b0726bfc4ee9373e7aea6e57c2c1d58f19fc3`; this checkout has
+merged that main. Since head `28e2321c`, #1812's only server change removed 10
+lines from `boundary.rs`; `ticket.rs` is unchanged. `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
@@ -24,8 +23,8 @@ Inspection of #1812 found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 07:16 UTC `lf task status LOO-718 --json` read reported
-`feature` / `demo`, with PR #1812 open and settlement not armed.
+The November 12 10:30 UTC `lf task status LOO-718 --json` read reported
+`active`, `feature` / `demo`, with PR #1812 open.
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
 Desktop QA remains deferred in `questions.md`.

@@ -453,8 +453,11 @@ lf task sync LOO-403 --retry-updates
 Linear can change an issue or a Project without moving its `updatedAt` (it
 re-renders branch names, for one). When its copy disagrees with lf's saved copy
 at the same `updatedAt`, the sync keeps what it just read and carries on, for
-Tasks and Projects alike; your saved local edits stay queued. When an error has a fix, it names the command:
-`lf task sync <issue>` for a Task, `lf wave sync` for a Project.
+Tasks and Projects alike; your saved local edits stay queued. A Project's
+Teams follow Linear the same way. Moving a Project to another Initiative is
+held instead, because the Initiative decides which Wave plans it: move it back
+in Linear, then run `lf wave sync`. When an error has a fix, it names the
+command: `lf task sync <issue>` for a Task, `lf wave sync` for a Project.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

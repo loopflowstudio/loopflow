@@ -102,8 +102,6 @@ pub enum StoreError {
     InvalidData(String),
     #[error("competing planning {effect} receipts")]
     PlanningReceiptConflict { effect: &'static str },
-    #[error("Project {project_id} membership changed without relationship ordering evidence")]
-    ProjectMembershipConflict { project_id: String },
     #[error("invalid control authority: {0}")]
     InvalidAuthority(String),
 }

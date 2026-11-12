@@ -328,39 +328,28 @@ fn validate_project_membership(
     // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous = conn
         .query_row(
-            "SELECT revision,initiative_ids,
-                    team_ids
-             FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT revision,initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, "linear", project.id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
-    let Some((previous_revision, initiatives, teams)) = previous else {
+    let Some((previous_revision, initiatives)) = previous else {
         return Ok(());
     };
     let revision = revision_nanos(project.revision.as_deref())?;
     if revision.is_some() && revision < revision_nanos(previous_revision.as_deref())? {
         return Ok(());
     }
-    // A Project revision does not order its separate Initiative/Team relationships.
-    // Preserve the facts, but do not let managed readers use disputed ownership.
+    // Teams follow the later read in `put_project`. The Initiative decides which
+    // Wave plans the Project, so a move is held until Linear moves it back.
     if !same_ids(
         &project.initiative_ids,
         &serde_json::from_str::<Vec<String>>(&initiatives)?,
-    ) || !same_ids(
-        &project.team_ids,
-        &serde_json::from_str::<Vec<String>>(&teams)?,
     ) {
         conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, "linear", project.id])?;
         return Err(StoreError::InvalidData(format!(
-            "Project {} membership changed without relationship ordering evidence",
+            "Project {} moved to another Initiative in Linear; move it back, then run `lf wave sync`",
             project.id
         )));
     }
@@ -407,6 +396,8 @@ fn put_project(
             },
         )
         .optional()?;
+    // A write here passed `validate_project_membership`, so the stored
+    // Initiative matches and any held membership is resolved.
     if let Some((previous, acquired, archived)) = previous {
         // Reads order like issues: by revision, then by read time. A read
         // without a revision sorts below one that has it.
@@ -420,7 +411,7 @@ fn put_project(
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
          ON CONFLICT(repo,provider,id) DO UPDATE SET
-         observed_at=excluded.observed_at,revision=excluded.revision,
+         observed_at=excluded.observed_at,revision=excluded.revision,membership_unresolved=0,
          slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
          description=COALESCE(excluded.description,pm_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
@@ -1279,6 +1270,68 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn team_change_at_the_stored_revision_follows_linear() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let mut project = snapshot.projects[0].clone();
+        let issue = snapshot.items[0].clone();
+        store
+            .seed_inventory(&crate::test_linear_input::InventoryFixture {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: project.initiative_ids[0].clone(),
+                synced_at: 42,
+                snapshot,
+            })
+            .unwrap();
+        let task = store.task_by_issue(&issue.id).unwrap().unwrap();
+        let state = || store.task_acquisition(&task.id).unwrap().state;
+        let teams = || -> String {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT team_ids FROM pm_projects", [], |row| row.get(0))
+                .unwrap()
+        };
+
+        // Linear adds a Team without moving the Project's `updatedAt`.
+        project.team_ids.push("another-team".into());
+        super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 43, None).unwrap();
+        assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
+        assert_eq!(state(), PlanningState::Available);
+
+        // An Initiative move is held, and released once Linear moves it back.
+        let initiative = project.initiative_ids[0].clone();
+        project.initiative_ids = vec!["another-initiative".into()];
+        let error =
+            super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 44, None)
+                .unwrap_err()
+                .to_string();
+        assert!(
+            error.contains(
+                "moved to another Initiative in Linear; move it back, then run `lf wave sync`"
+            ),
+            "{error}"
+        );
+        assert_eq!(state(), PlanningState::Invalid);
+        project.initiative_ids = vec![initiative];
+        super::accept_linear_issue_in(&store, "/repo", &issue, Some(&project), 45, None).unwrap();
+        assert_eq!(state(), PlanningState::Available);
     }
 
     #[test]

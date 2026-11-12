@@ -1845,8 +1845,10 @@ async fn snapshot_task_detail(
                     crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
                 )
                 .then(|| {
-                    "Task planning has invalidation or removal evidence; refresh its planning"
-                        .to_string()
+                    format!(
+                        "Task planning has invalidation or removal evidence; run `lf task sync {}`",
+                        task.identifier
+                    )
                 })
             },
         )

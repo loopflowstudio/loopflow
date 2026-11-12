@@ -5387,7 +5387,7 @@ fn planning_export_captures_shared_task_fields_without_local_execution() {
 
 #[test]
 fn project_field_delivery_requires_revision_accepted_into_work() {
-    for rejection in ["stale", "foreign", "archived", "unresolved", "unversioned"] {
+    for rejection in ["stale", "foreign", "archived", "unversioned"] {
         with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
@@ -5426,24 +5426,6 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                             "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider='linear' AND id=?2",
                             rusqlite::params![repo.to_string_lossy(), observed.id],
                         ).unwrap();
-                    }
-                    "unresolved" => {
-                        let client = super::linear_client(repo).await.unwrap();
-                        let (mut observed, _) = client
-                            .project_content_observation("project-1")
-                            .await
-                            .unwrap();
-                        observed.team_ids = vec!["another-team".into()];
-                        assert!(crate::linear::acceptance::accept_linear_project_in(
-                            &fixture.store.sqlite,
-                            task.wave_id.as_ref().unwrap(),
-                            "initiative-1",
-                            &observed,
-                            now(),
-                        )
-                        .is_err());
-                        // Re-reading the original entity revision cannot order the
-                        // disputed Team relation or authorize delivery.
                     }
                     "unversioned" => provider["updatedAt"] = json!(null),
                     _ => unreachable!(),

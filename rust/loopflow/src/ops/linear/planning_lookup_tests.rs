@@ -952,7 +952,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
 }
 
 #[tokio::test]
-async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unresolved() {
+async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unresolved() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;

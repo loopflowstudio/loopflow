@@ -156,3 +156,4 @@ compaction), which loses nothing.
 - compress 4: the direction's three items were already in `8a516adad2`; this pass only imports `Holder` in `agent_process` tests (18+/40−). clippy clean; `--lib harness::agent_process::` 19 passed.
 - concept review 2: no tests; design-only (two `docs/sessions.md` rows, one troubleshooting line).
 - realign 4: no tests; grep confirms one `is_work` (transport, `util::resume_session_with_env`), no `managed` flag in `human_session`/`commands::session`/`util`, no `"managed"` hook spec key.
+- realign 5: no tests; the three docs items were already in `4f9b7796ff` (sessions.md list and table, troubleshooting `lf session serve`), matching `transport::runs_in_terminal` (`LF_SERVER_STATUS`, `-b`, no tty keep an owner).

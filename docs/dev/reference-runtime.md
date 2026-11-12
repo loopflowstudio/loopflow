@@ -153,7 +153,7 @@ These examples use current command spellings; the lifecycle contract is above.
 
 ```bash
 lf -b implement
-lf session list --interactive false --task INF-123 --json
+lf session list --headless --task INF-123 --json
 lf resume SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123

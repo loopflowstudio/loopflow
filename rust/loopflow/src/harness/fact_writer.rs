@@ -175,9 +175,6 @@ impl FactWriter {
             ProviderFact::Output { turn, answer } => {
                 event(turn, SessionEventKind::Output, answer)?;
             }
-            ProviderFact::Usage { turn, receipt } => {
-                event(turn, SessionEventKind::Usage, receipt)?;
-            }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
                 // A replayed completion keeps its receipt and leaves the live
                 // turn's tally alone.
@@ -882,6 +879,7 @@ mod tests {
         assert_eq!(
             events[2].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
+                "total_cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
@@ -1194,11 +1192,16 @@ mod tests {
                 hear(&mut decoder, &mut writer_for(&current), message);
             }
             assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
-            hear(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"late","tokenUsage":{"total":{"inputTokens":12},"last":{"inputTokens":12}}}}),
-            );
+            // The turn's usage row comes from its rollout, under the same id.
+            store
+                .record_turn_usage(
+                    "conversation",
+                    &"thread".into(),
+                    "late",
+                    0,
+                    &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
+                )
+                .unwrap();
             hear(
                 &mut decoder,
                 &mut writer_for(&first),
@@ -1324,13 +1327,6 @@ mod tests {
     #[test]
     fn opencode_steers_share_execution_but_keep_the_initiating_capture_after_handoff() {
         let (home, store, attachment) = attached(false);
-        let input = store
-            .session("conversation")
-            .unwrap()
-            .unwrap()
-            .input_key()
-            .unwrap()
-            .clone();
         let sql = rusqlite::Connection::open(home.path().join("facts.db")).unwrap();
         let mut writer = writer(&store, &attachment);
         let mut decoder = OpenCodeDecoder::new("native".into(), None);
@@ -1373,16 +1369,5 @@ mod tests {
         let completion: Value = serde_json::from_str(&completion).unwrap();
         assert_eq!(completion["status"], "completed");
         assert!(completion["error"].is_null());
-        let usage = store.input_history(input.as_str()).unwrap().usage;
-        assert_eq!(usage.input_tokens, Some(30));
-        assert_eq!(usage.output_tokens, Some(10));
-        assert_eq!(
-            store
-                .input_history(next.input_key().unwrap().as_str())
-                .unwrap()
-                .usage
-                .input_tokens,
-            None
-        );
     }
 }

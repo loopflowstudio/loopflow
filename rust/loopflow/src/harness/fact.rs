@@ -75,11 +75,6 @@ pub(crate) enum ProviderFact {
         turn: ProviderTurn,
         answer: Value,
     },
-    /// The provider's own usage payload, unchanged.
-    Usage {
-        turn: ProviderTurn,
-        receipt: Value,
-    },
     /// A provider turn ended. `turn` is absent when Loopflow cannot tell which
     /// native turn it was; `detail` is the retained completion payload.
     TurnCompleted {
@@ -174,7 +169,6 @@ pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
                 "AvailabilityReading tools={open_tools} input={pending_input} yielded={yielded} settled={settled}"
             ),
             ProviderFact::Output { turn: t, answer } => format!("Output {} {answer}", turn(t)),
-            ProviderFact::Usage { turn: t, .. } => format!("Usage {}", turn(t)),
             ProviderFact::TurnCompleted { turn: t, status, .. } => format!(
                 "TurnCompleted {} {status:?}",
                 t.as_ref().map_or("-".to_owned(), turn)

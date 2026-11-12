@@ -204,9 +204,10 @@ provider generation in caller provenance, turn origin and Program Status.
 ### Conversation and attachment lifetime
 
 Every agent conversation is an LfSession: skills, inline prompts, helpers,
-reviews, interactive and headless work. Default views select interactive
-conversations. `lf session list --available` selects conversations Available for a
-person, using the same Rust projection as Desktop. `session_activity` holds both
+reviews, interactive and headless work. Default views select unfinished interactive
+conversations. `lf session list --headless` adds unfinished headless Sessions;
+`lf history` owns finished conversations. `lf session list --available` selects
+conversations Available for a person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
 Its optional preview carries bounded provider text, native thread/turn identity,
 source and observation time. Only the current live AgentProcess and attachment
@@ -242,9 +243,8 @@ reading's AgentProcess, on the connection Desktop already holds. No process
 runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
 An unchanged provider keeps reports across attachment handoff. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
-Graph or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and
-completed history; `--all`
-continues to mean all repositories. Interactive mode grants neither review
+Graph or completion authority. Detached relay observation remains unimplemented.
+`--headless` includes headless Sessions; `--all` means all repositories. Interactive mode grants neither review
 completion nor Graph authority.
 
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
@@ -468,7 +468,7 @@ A Session's permanent assignment is write-once: null to a Task, validating any
 explicit Wave against its membership. Reassignment and clearing are unavailable.
 Public binding also selects that unfinished interactive Session as primary and
 immediately sets its cwd to the Task's worktree; repeating binding reselects it.
-Closed Sessions and headless Runs cannot become primary. Done/landed Tasks remain
+Closed or headless Sessions cannot become primary. Done/landed Tasks remain
 valid without reopening them. CLI states the permanent target; Desktop confirms
 the exact target before writing. CLI adds no confirmation prompt. The writer
 commits assignment, primary choice and cwd atomically, preserving live input and

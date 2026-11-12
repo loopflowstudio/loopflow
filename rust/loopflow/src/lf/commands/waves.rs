@@ -1014,13 +1014,16 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
+    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
     let mut sessions = Vec::new();
     for session in status
         .overview
         .map(|overview| overview.sessions)
         .unwrap_or_default()
     {
-        if let Some(record) = crate::ops::human_session::listed(store, session.id.as_str())? {
+        if let Some(record) =
+            crate::ops::human_session::listed(store, session.id.as_str(), &capacity)?
+        {
             sessions.push(SessionFacts::of(record));
         }
     }

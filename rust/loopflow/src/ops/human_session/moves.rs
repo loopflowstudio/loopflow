@@ -493,7 +493,7 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
         crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
             .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
     let base = match provider {
-        Provider::Claude => home.join("projects").join(claude_project(&cwd)),
+        Provider::Claude => crate::transcript::live::claude_project(&home, &cwd),
         _ => home,
     };
     for file in &history.files {
@@ -617,15 +617,6 @@ fn readable(harness: HarnessKind, base: &Path, files: &[MovedFile]) -> bool {
     })
 }
 
-/// Claude names a project directory for its absolute path, every character
-/// other than a letter or digit replaced by `-`.
-fn claude_project(cwd: &Path) -> String {
-    cwd.to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
-}
-
 fn write_file(base: &Path, file: &MovedFile) -> Result<()> {
     let relative = Path::new(&file.path);
     anyhow::ensure!(
@@ -744,8 +735,7 @@ async fn admit(
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_project, Move};
-    use std::path::Path;
+    use super::Move;
 
     #[test]
     fn a_move_round_trips_and_requires_its_source() {
@@ -759,13 +749,5 @@ mod tests {
         let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
         missing.as_object_mut().unwrap().remove("from_machine_id");
         assert!(serde_json::from_value::<Move>(missing).is_err());
-    }
-
-    #[test]
-    fn claude_names_a_project_for_its_path() {
-        assert_eq!(
-            claude_project(Path::new("/Users/jack/src/loopflow.loo-628")),
-            "-Users-jack-src-loopflow-loo-628"
-        );
     }
 }

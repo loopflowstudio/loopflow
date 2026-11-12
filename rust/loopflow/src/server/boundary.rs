@@ -141,6 +141,13 @@ pub(super) fn answer(
         }
     }
     if *moment == BoundaryMoment::Stop {
+        // The transcript is the only writer of usage rows; the exit read
+        // catches turns it does not show yet. Pi and OpenCode have no hook name.
+        crate::transcript::facts::record_session(
+            store,
+            &adapter.session,
+            crate::transcript::facts::Moment::TurnEnd,
+        );
         // A turn end delivers nothing, so what it returns to pending waits
         // for the next prompt, whose hook always asks.
         store.confirm_session_steers(adapter, printed, HOOK_DEADLINE.as_secs())?;
@@ -799,6 +806,57 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gaps, 1);
+    }
+
+    #[test]
+    fn a_turn_end_records_transcript_usage_once_without_a_hook_name() {
+        let (home, store, adapter, delivery) = fixture();
+        let path = home.path().join("pi.jsonl");
+        let entries = [
+            serde_json::json!({"type":"session","version":3,"id":"s","cwd":"/work"}),
+            serde_json::json!({"type":"message","id":"u1","parentId":"s","timestamp":"2026-11-10T16:25:00Z",
+                "message":{"role":"user","content":"List files"}}),
+            serde_json::json!({"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-10T16:25:09Z",
+                "message":{"role":"assistant","model":"gemini-4-argon","stopReason":"stop",
+                    "usage":{"input":10,"output":5,"cacheRead":90,"cacheWrite":0,"cost":{"total":0.25}},
+                    "content":[{"type":"text","text":"Two files."}]}}),
+        ];
+        std::fs::write(
+            &path,
+            entries
+                .iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='pi',provider_thread=?1 WHERE id='session'",
+                [path.to_str().unwrap()],
+            )
+            .unwrap();
+        let stop = boundary(
+            BoundaryMoment::Stop,
+            &adapter,
+            &delivery,
+            serde_json::json!({}),
+        );
+        answer(&store, &stop).unwrap();
+        answer(&store, &stop).unwrap();
+        let usage = store
+            .session_history("session", 0, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == crate::session::SessionEventKind::Usage)
+            .collect::<Vec<_>>();
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].provider_turn.as_deref(), Some("u1"));
+        assert_eq!(usage[0].payload["usage"]["total_input_tokens"], 100);
+        assert_eq!(usage[0].payload["usage"]["output_tokens"], 5);
+        assert_eq!(usage[0].payload["usage"]["cost_usd"], 0.25);
     }
 
     /// OpenCode reports a managed turn end with no callback body.

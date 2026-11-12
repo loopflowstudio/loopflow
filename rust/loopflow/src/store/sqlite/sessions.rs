@@ -179,20 +179,14 @@ fn inventory_query(
     live_agents: &str,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
-    let mut sql = format!("{select} WHERE 1");
+    let mut sql = format!("{select} WHERE s.completed_at IS NULL");
     let mut values = Vec::new();
     let mut bind = |value| {
         values.push(value);
         format!("?{}", values.len())
     };
-    if let Some(interactive) = filter.interactive {
-        sql.push_str(&format!(
-            " AND s.interactive={}",
-            bind(Value::Integer(i64::from(interactive)))
-        ));
-    }
-    if !filter.history {
-        sql.push_str(" AND s.completed_at IS NULL");
+    if !filter.headless {
+        sql.push_str(" AND s.interactive=1");
     }
     if filter.available {
         sql.push_str(&format!(
@@ -214,9 +208,21 @@ fn inventory_query(
             super::task_work::session_ids(&task)
         ));
     }
+    if let Some(primary) = filter.primary {
+        use crate::session::SessionPrimary;
+        let task = "EXISTS (SELECT 1 FROM tasks t WHERE t.primary_session_id=s.id)";
+        sql.push_str(&match primary {
+            SessionPrimary::All => {
+                format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
+            }
+            SessionPrimary::Task => format!(" AND {task}"),
+            SessionPrimary::Wave => " AND s.primary_scope='wave'".into(),
+            SessionPrimary::Repository => " AND s.primary_scope='repository'".into(),
+        });
+    }
     if filter.orphan {
         sql.push_str(&format!(
-            " AND NOT EXISTS ({})",
+            " AND s.wave_id IS NULL AND NOT EXISTS ({})",
             super::task_work::session_tasks("s")
         ));
     }
@@ -236,12 +242,7 @@ fn inventory_query(
         let after = bind(Value::Text(after.clone()));
         sql.push_str(&format!(" AND s.id>{after} ORDER BY s.id LIMIT {limit}"));
     } else {
-        let offset = bind(Value::Integer(
-            i64::try_from(filter.offset).map_err(invalid)?,
-        ));
-        sql.push_str(&format!(
-            " ORDER BY s.title, s.id LIMIT {limit} OFFSET {offset}"
-        ));
+        sql.push_str(&format!(" ORDER BY s.title, s.id LIMIT {limit}"));
     }
     Ok((sql, values))
 }
@@ -914,6 +915,19 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         session_summaries_in(&conn, filter, now, &live_agents)
+    }
+
+    /// Whether `session`'s current AgentProcess has reported what it is doing:
+    /// a hook, its live stream or its terminal's status.
+    pub(crate) fn session_reports_status(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_activity act
+                JOIN agent_sessions s ON s.id=act.session_id
+                WHERE s.id=?1 AND act.agent_process_id IS s.agent_process_id)",
+            [session],
+            |row| row.get(0),
+        )?)
     }
 
     pub(crate) fn session_summary(
@@ -2451,6 +2465,8 @@ mod metadata_tests {
                 ("a", "Alpha%", true, "/repo", Some("independent")),
                 ("b", "Beta", true, "/repo", None),
                 ("headless", "Headless", false, "/repo", None),
+                ("closed", "Closed", true, "/repo", None),
+                ("closed-headless", "Closed headless", false, "/repo", None),
                 ("foreign", "Foreign", true, "/other", None),
                 ("later", "Zulu", true, "/repo", None),
             ] {
@@ -2472,6 +2488,15 @@ mod metadata_tests {
                 }
             }
         }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=2 WHERE id IN ('closed','closed-headless')",
+                [],
+            )
+            .unwrap();
         let mut filter = SessionFilter {
             repo: Some("/repo".into()),
             limit: 2,
@@ -2493,15 +2518,19 @@ mod metadata_tests {
         filter.search = Some("ALPHA".into());
         assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "a");
         filter.search = None;
-        filter.interactive = Some(false);
+        filter.headless = true;
+        filter.limit = 0;
         assert_eq!(
-            store.session_summaries(&filter, 0).unwrap()[0].id,
-            "headless"
+            store
+                .session_summaries(&filter, 0)
+                .unwrap()
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "headless", "later"]
         );
-        filter.interactive = Some(true);
-        filter.offset = 1;
+        filter.headless = false;
         filter.limit = 1;
-        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "b");
         filter.after = Some(String::new());
         let first = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(first[0].id, "a");

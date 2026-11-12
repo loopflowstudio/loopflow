@@ -369,9 +369,10 @@ fn opencode_display(
 }
 
 // Synthetic native message shapes follow the isolated OpenCode 2.0.32 proof.
-// Status/SSE alone supplies neither a native completion nor measured usage.
+// Status/SSE alone supplies no native completion. Usage rows come from the
+// transcript reader (`transcript::opencode`), so the stream writes none.
 #[test]
-fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
+fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
     use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
 
@@ -385,69 +386,67 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         [process.as_str()],
     )
     .unwrap();
-    for measured in [None, Some(0), Some(40)] {
-        let input = crate::session_record::new_artifact_key();
-        let session = format!("session-{measured:?}");
-        store.test_session(&session, &input);
-        let attachment = store
-            .claim_session_attachment(&session, None, &process, false)
-            .unwrap();
-        let mut writer = FactWriter::new(
-            store.clone(),
-            session.clone(),
-            Some(attachment),
-            None,
-            Default::default(),
-        );
-        let agent_session = AgentSessionId::from(session.as_str());
-        let mut decoder = OpenCodeDecoder::new(agent_session.clone(), None);
-        let request = decoder.request(false);
-        writer.outbound(&request).unwrap();
-        let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
-        let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
-            "content":[{"id":"tool","type":"tool","name":"shell",
-                "state":{"status":"running","input":{"command":"echo ok"}}}]});
-        let started = opencode_display(&mut decoder, &mut writer, &[user.clone(), message.clone()]);
-        assert!(matches!(&started[..], [
-                ConversationEvent::TurnStarted { turn_id },
-                ConversationEvent::ItemStarted {turn_id: tool_turn, item: ConversationItem::Command {status: Lifecycle::Running, ..}},
-            ] if turn_id == &request && tool_turn == &request));
+    let input = crate::session_record::new_artifact_key();
+    let session = "session".to_owned();
+    store.test_session(&session, &input);
+    let attachment = store
+        .claim_session_attachment(&session, None, &process, false)
+        .unwrap();
+    let mut writer = FactWriter::new(
+        store.clone(),
+        session.clone(),
+        Some(attachment),
+        None,
+        Default::default(),
+    );
+    let agent_session = AgentSessionId::from(session.as_str());
+    let mut decoder = OpenCodeDecoder::new(agent_session.clone(), None);
+    let request = decoder.request(false);
+    writer.outbound(&request).unwrap();
+    let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
+    let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
+        "content":[{"id":"tool","type":"tool","name":"shell",
+            "state":{"status":"running","input":{"command":"echo ok"}}}]});
+    let started = opencode_display(&mut decoder, &mut writer, &[user.clone(), message.clone()]);
+    assert!(matches!(&started[..], [
+            ConversationEvent::TurnStarted { turn_id },
+            ConversationEvent::ItemStarted {turn_id: tool_turn, item: ConversationItem::Command {status: Lifecycle::Running, ..}},
+        ] if turn_id == &request && tool_turn == &request));
 
-        assert!(store
-            .session_history(&session, 0, 0)
-            .unwrap()
-            .iter()
-            .all(|row| row.kind != crate::session::SessionEventKind::Completed));
+    assert!(store
+        .session_history(&session, 0, 0)
+        .unwrap()
+        .iter()
+        .all(|row| row.kind != crate::session::SessionEventKind::Completed));
 
-        message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
-        message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
-        message["finish"] = json!("stop");
-        message["time"]["completed"] = json!(3);
-        if let Some(input) = measured {
-            message["tokens"] =
-                json!({"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}});
-            message["cost"] = json!(0.5);
-        }
-        let messages = [user.clone(), message.clone()];
-        let output = opencode_display(&mut decoder, &mut writer, &messages);
-        assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
-        assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
-        assert!(opencode_display(&mut decoder, &mut writer, &messages).is_empty());
-        let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
-        let completion = opencode_display(
-            &mut decoder,
-            &mut writer,
-            &[user.clone(), message.clone(), idle.clone()],
-        );
-        assert!(
-            matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
-        );
-        assert!(opencode_display(&mut decoder, &mut writer, &[user, message, idle]).is_empty());
-        let usage = store.input_history(input.as_str()).unwrap().usage;
-        assert_eq!(usage.input_tokens, measured);
-        assert_eq!(usage.output_tokens, measured.map(|_| 5));
-        assert_eq!(usage.cost_usd, measured.map(|_| 0.5));
-    }
+    message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
+    message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
+    message["finish"] = json!("stop");
+    message["time"]["completed"] = json!(3);
+    message["tokens"] = json!({"input":40,"output":5,"reasoning":0,"cache":{"read":0,"write":0}});
+    message["cost"] = json!(0.5);
+    let messages = [user.clone(), message.clone()];
+    let output = opencode_display(&mut decoder, &mut writer, &messages);
+    assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
+    assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
+    assert!(opencode_display(&mut decoder, &mut writer, &messages).is_empty());
+    let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
+    let completion = opencode_display(
+        &mut decoder,
+        &mut writer,
+        &[user.clone(), message.clone(), idle.clone()],
+    );
+    assert!(
+        matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
+    );
+    assert!(opencode_display(&mut decoder, &mut writer, &[user, message, idle]).is_empty());
+    assert!(store
+        .session_history(&session, 0, 0)
+        .unwrap()
+        .iter()
+        .all(|row| row.kind != crate::session::SessionEventKind::Usage));
+    let usage = store.input_history(input.as_str()).unwrap().usage;
+    assert_eq!(usage.input_tokens, None);
 }
 
 #[test]

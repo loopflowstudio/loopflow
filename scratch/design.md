@@ -13,11 +13,10 @@ unmerged, at head `28e2321c8e2ea0ca8d8ecb199f31c5bb1a0e844f`.
 this checkout. Between heads `4e0ccacd` and `28e2321c`, #1812 changed
 `mobile.rs`, `boundary.rs` and added `wake.rs`; `ticket.rs` is unchanged.
 `origin/main` does not contain
-Neither contains
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
 Reinspect when the shared transport lands; landing its PR is outside this Task.
 
-Inspection of that head found
+Inspection of #1812 found
 `remote.rs::connection` rejects unadmitted peers before either WebSocket upgrade.
 `mobile.rs::permits_peer` binds admission to node/user identity;
 `mobile-same-device` permits the host's own node without changing that identity.

@@ -220,6 +220,19 @@ from the ownership `tasks_held_in` read (no entry naming the Machine is
 Second pass (2026-11-12): its one fix, `lf task move`'s stale `after_help`, is
 built (781e2509d0).
 
+Third pass (2026-11-12): item 8, "Back is the same act", has no test, though the
+Task's case ("comes back the same way") and `docs/dev/machines.md` ("run from
+either Machine") claim it. Every `task move` test runs on the laptop while the
+laptop owns the Task, so `relay_task`'s other branch (owner elsewhere: ssh
+`session send` to the owner, then a `StoppedRun` resumed on this Machine) never
+runs. Next implement: `a_moved_task_comes_back_with_the_same_command` in
+`machine_commands.rs`. Move a Task with a live Graph to mini (as
+`task_move_leaves_a_live_graph_running_on_mini`), then from the laptop
+`lf task move X --machine laptop`; assert the stage lines, that the laptop's
+Graph process runs at the step mini was on, and that `lf --machine mini task
+status X` says `Runs on laptop since …`. Fix whatever it shows. Same fixture
+rules: a `MachineServer` per home, `EndRecorded`.
+
 ## Live check (for a person, both Machines on this build)
 
 ```sh

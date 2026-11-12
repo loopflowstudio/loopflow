@@ -371,9 +371,8 @@ not close an open bridge. Local tickets bind to the requesting client's Unix
 peer UID. An unknown, spent, expired or foreign ticket is `not_found` with a
 null `id` and closes the connection. Bridges do not occupy the 64 client slots.
 
-Every redemption attempt consumes the ticket, whether it succeeds or fails, so
-after a ticket failure or a disconnect before `bridged`, request a fresh ticket
-and bridge.
+Every redemption attempt spends the ticket, successful or not; after a failure
+or a disconnect before `bridged`, request a new ticket and bridge.
 
 The owner is the LfProcess holding the Session's terminal (`lf session serve`),
 never the provider's AgentProcess beneath it. The server resolves the Session's
@@ -1002,8 +1001,8 @@ A stalled bridge cannot block another viewer or Work control traffic.
 Pass `owner_lf_process_id` to `session.attach` to reconnect only to that owner.
 If the Session has a new owner, attachment returns `not_found` with
 `owner_lf_process_id` and `current_lf_process_id`. Passing null reaches the
-Session's current owner; neither attachment starts or resumes a provider.
-A lost connection alone does not establish process death.
+Session's current owner. A lost connection alone does not establish process
+death.
 
 Desktop reconnects to the exact owner with bounded backoff. See
 [connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)

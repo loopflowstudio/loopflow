@@ -98,6 +98,25 @@ their owner: `-b` runs and Graph steps rely on it to outlive their caller
 - A bare Codex launch with no `conversation_context` installs no hooks, so
   it records no thread; reading the rollout at exit would cover it.
 
+## Next implement: one exit status for bare launches (concept review 4)
+
+"for a bare session, it jsut does whatever claude or codex would do" covers
+the exit status. Today a provider that dies of a signal at the terminal
+exits lf three different ways:
+
+- fresh `run_interactive` (`agent/mod.rs`): `status.code().unwrap_or(1)`, so 1;
+- fresh `run_native_agent` (`util.rs`): `outcome.interrupted` makes it 0;
+- resume, `SessionCommandOutcome::result`: SIGINT/SIGHUP/SIGTERM count as
+  interrupted, so `Ok` (0); any other signal or code is the provider's own.
+
+Started alone, the shell would see 130/129/143. For `Holder::Caller` every
+path returns `transport::provider_exit_code(status)`: 0 stays `Ok`, anything
+else is `CommandExit`. `interrupted` keeps deciding only the record
+(`capture_outcome` "completed") and whether lf prints "<program> exited with
+…" (not after an interrupt). Held launches keep today's rules (a stop or a
+mover still ends them cleanly). One test: a bare provider killed by SIGHUP
+returns 129 on a fresh launch and on resume.
+
 ## LOO-823 review, moved here (Jack Heart, November 11, "let 820 own it")
 
 - "for a bare session, it jsut does whatever claude or codex would do"
@@ -171,3 +190,4 @@ compaction), which loses nothing.
 - implement 6 (QA's three): `--lib lf::commands::util::` 13 passed (new `a_bare_launch_returns_its_providers_own_status`; the SIGTERM test now expects 143); `--test integration session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed, and failed (agent row open) with `end_leader` disabled; `--lib pi_` 32 passed; clippy, fmt clean. Gate: `transport_tests`, `binary(lf)`, `lf::tests::`, `session_cli_tests::`.
 - compress 5: the bare exit code reuses `transport::provider_exit_code`; `Foreground` clears the leader on drop (the `Leading` guard is gone); Pi `resume_args` reads one `conversation_file`. `--lib lf::commands::util:: pi_` 44 passed; `session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent` passed; clippy, fmt clean.
 - realign 6: no tests; QA's three items are in `2d972e033d`/`79b456f453` (grep: the "another client" hint only on the held arm of `util.rs`, `end_leader`, both new tests). The parent's merge (holder moved under `server/`) changes nothing here.
+- concept review 4: no tests; design-only (one bare exit status, above). The steer question and pre-LOO-824 primaries stay as written in Open.

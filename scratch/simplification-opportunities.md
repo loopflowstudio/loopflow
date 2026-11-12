@@ -1,102 +1,83 @@
 # Simplification Opportunities
 
-Area: LOO-824's diff against LOO-821 (held terminals, the registry, the
-holder, their store rows). About 9,000 lines added and 1,300 deleted.
+Question: what code can LOO-824 delete?
 
 ## Product intent
 
-A managed conversation, whether Task, Wave or repository, runs in a PTY that
-outlives every lf process. An install or a server restart pauses its views and
-they continue. lf records the conversation beside it and is never what keeps
-it alive.
+A managed conversation (Task, Wave or repository) runs in a PTY the holder
+keeps, and it outlives every lf process. lf records the conversation beside
+it and is never what keeps it alive.
 
-## Opportunity 1: take LOO-823's lifetime rule (done)
+## Already deleted, or no longer reached
 
-Built in the LOO-823 merge; see `holder.md` "Stack merges".
+- LOO-823's idle ending: `end_detached_after`, `DetachedLimit`, idle retention
+  and the native-input ledger. They are gone on this branch, and held
+  terminals take the shared rule (`holder.md` "Stack merges").
+- `ServerMissing` and `open_server`, replaced by LOO-821's `require_server`.
+- Background Task-conversation starts (`primary.rs::start_in_background`) and
+  restores (`restore.rs`) now go through `start_held`. No managed
+  conversation starts on an owner any more.
 
-## Opportunity 2: one kind of execution owner
+## Opportunity 1: the owner serves only bare conversations, so delete it with LOO-820
 
-**Misalignment**: A conversation's agent runs under either an owner process
-(`lf session serve`) or a held terminal, and every layer carries both:
+**Misalignment**: After this change, `lf session serve` owns only bare
+interactive launches: `lf -i`, and `lf implement` typed at a terminal.
+Everything the owner does to keep a conversation alive across terminal loss
+and installs now exists twice. The holder does it for managed conversations.
+The owner does it for bare ones, which per LOO-820 should run directly in the
+person's terminal with no lf in between.
 
-| Layer | Two-way split |
-|---|---|
-| Execution | `hosted::Child::{Local, Held}` |
-| Host identity | `Host::{Process, Terminal}` |
-| Store owner | `store::sqlite::Transport::{Owner, Terminal}`, with `session_column()` and `table()` |
-| Sessions and retirement queries | `COALESCE`/`EXISTS` pairs over `processes` and `held_terminals` (`sessions.rs:280`, `:293`, `:664`, `:764`; `task_retirement.rs:100`) |
-| Attach | `bridged`, carrying `owner_lf_process_id` or `terminal_id` with the other null |
+**Symptom**: These all exist only for owners. A rough count is about 3,000
+lines, plus the arms that read the owner in shared code:
 
-`held_terminals` repeats the owner's viewing columns (`viewer_hold`,
-`viewer_hold_at`, `viewed`) so the shared queries can read either table.
+- `lf process rollover` and the resume takeover judgment
+  (`lf/commands/rollover.rs`, 885 lines). They exist for owners left behind
+  by an install.
+- The owner viewer socket's reconnect spool and grace (`transport/stream.rs`,
+  and the `resume`/`reconnect` messages).
+- The `.ghostsnp` exit snapshot (`transport/snapshot.rs`) and `lf resume`
+  painting it.
+- `Child::Local`, `Host::Owner` and `store::sqlite::Transport::Owner`, with
+  the `processes` arm of each paired Session and retirement query
+  (`sessions.rs:280`, `:293`, `:664`, `:764`; `task_retirement.rs:100`).
+- The Desktop owner bridge: `LF_SERVER` (`transport.rs:1977`), the
+  `owner_lf_process_id` half of `session.attach` and `bridged`, and owner
+  `Tickets`. Today it is reached only when Desktop shows a bare conversation
+  that is still running in someone's terminal.
 
-**Symptom**: Each new question about a conversation's liveness is asked
-twice, once per table. "Detached", "retains the workspace" and "can be
-taken over" mean different code for the two owners.
+**Realignment**: LOO-820's direct bare launch takes the owner's last
+conversation, so the owner process goes entirely rather than staying as an
+owner with fewer features.
 
-**Realignment**: Every interactive conversation's agent is a held terminal.
-Bare launches run direct (LOO-820). Desktop shells are held but not managed,
-and the owner process goes (LOO-830). `Child`, `Host` and `Transport` then
-have one arm, and the store queries read one table. That is sequenced work,
-not a change for this branch. Inside LOO-824 the rule is to keep the split
-in those three enums: new code takes a `TerminalId` or a `Host` and never
-matches on both owners.
+**Cascade**:
+- `transport/README.md` shrinks to its held-terminal sections.
+- `Hosted` loses its `Local` branches.
+- `lf session list` no longer shows `detached` for bare runs.
 
-**Cascade**: Once the owner is gone, these go with it:
-- the per-owner viewer socket and its reconnect spool;
-- `lf process rollover` and the takeover judgment (README "Nothing else ends
-  an owner…" through the rollover paragraph);
-- the `.ghostsnp` exit snapshot, which the ring replay replaces;
-- the `owner_lf_process_id` half of `bridged`;
-- `transport_lf_process_id` on `agent_sessions`.
+## Opportunity 2: hold Desktop shells, then delete the shell runtime (LOO-830)
 
-## Opportunity 3: managed is decided once, by the command
+**Misalignment**: Desktop Task shells keep their own runtime
+(`desktop::shells`: execution receipts, reconnect, saved screens). That makes
+a third owner of PTYs, beside the owner process and the holder.
 
-**Misalignment**: LOO-821 decides managed by the command
-(`Cli::names_work`). This branch also decides it by the recorded row
-(`work_source ∈ {declared, bound}`) in two places: `transport::held` and
-`agent_process::require_server_for`. That second rule exists because Desktop
-reopens a pane by Session id (`session resume --start-if-free session_…`),
-which names no Work.
+**Realignment**: Shells become held terminals with no Session. They are held
+but not managed, as already decided.
 
-**Symptom**:
-- `WorkSource::is_managed` survives only for this read.
-- The launch path opens the store to decide whether to hold. When the store
-  can't be read, the launch is unheld.
+**Cascade**:
+- Desktop's `session.status` path for Program Status goes. The server
+  already reads OSC 7501 for every held terminal.
+- Shell viewing moves from `processes.viewer_hold` to `held_terminals`.
 
-**Realignment**: The reopen names its Work. Desktop already knows a pane's
-Task, and the repository conversation is reached by `--repo`. With Desktop
-sending `--task`/`--wave` on every reopen, the row read and `is_managed` are
-deleted and held means `managed`. A typed `lf resume <id>` of a Task
-conversation then runs bare, which matches "the cli comamnd used should
-direct down different codepaths". This is question 1 on
-`concept-review.html`. Answered 1a, "double coverage for now" (see
-`questions.md`): the row read stays until a later cut.
+## Not deletable yet
 
-**Cascade**: `held(viewed, managed, session)` becomes `viewed && managed`,
-and `require_server_for` becomes `require_server` behind `managed`.
-
-## Not cut: `Hosted::pass`
-
-`transport/hosted.rs` `pass` is ~600 lines, the owner's loop moved whole;
-the per-viewer frame handling (its first ~250 lines) is the natural first
-extraction. Left alone while both owners drive it; reshape when
-opportunity 2 removes `Child::Local`.
+The row read for a conversation reopened by id (`transport::held`,
+`require_server_for`, `WorkSource::is_managed`) stays, as "double coverage
+for now" (Jack Heart). Desktop panes name their Work; a Session link does not.
 
 ## Aligned areas
 
-- **The terminal's directory as the receipt.** `meta.json`,
-  `exit-record.json`, `native-client.json` and the holder's `exit.json` sit
-  under one directory. That directory is deleted only after the store has
-  the exit. It works when the store, the server or the holder is gone, which
-  is the recording-gap rule applied to exits. Moving any of it into holder
-  memory would lose the holder-gone case.
-- **The `Hosted` extraction.** The owner's per-execution logic moved into one
-  type that both owners drive, instead of being copied into the registry.
-  When `Local` goes, it deletes cleanly.
-- **The holder's protocol.** It has eight verbs and knows nothing about
-  Sessions. That is the right size for the one process that has to outlive
-  every build.
-- **`held_terminals` as its own table.** A terminal is not a Process, and
-  after LOO-830 a held shell has no Session, so neither `processes` nor
-  `agent_sessions` could hold it.
+- The terminal's directory as the exit receipt. It works with the store,
+  server or holder gone.
+- `Hosted`, the per-execution logic shared rather than copied. When `Local`
+  goes, it deletes cleanly.
+- The holder's eight-verb protocol, which knows nothing about Sessions.

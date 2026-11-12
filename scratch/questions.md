@@ -69,3 +69,7 @@ Keep LOO-824’s review and open choices; LOO-823’s historical notes remain in
 `ed74fefaa:scratch/process-leaks.md`. Bare-direct applies only when neither
 the command nor the reopened Session names managed work. Existing ongoing
 conversations still keep their host when their older row has no WorkSource.
+
+## Demo (November 11)
+
+Jack Heart: "i dont need to demo", then "2c, then maybe 2b" (walk through `scratch/qa.html`, then maybe an isolated `LF_HOME` run).

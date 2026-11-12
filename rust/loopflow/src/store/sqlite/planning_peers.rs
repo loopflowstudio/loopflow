@@ -320,7 +320,12 @@ impl SqliteStore {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )?;
             let task = crate::durable::TaskId::from_raw(task);
-            super::task_ownership::ingest_marker_in(&tx, &task, &body, created_at.as_deref())?;
+            super::task_ownership::ingest_marker_in(
+                &tx,
+                &task,
+                &body,
+                super::task_ownership::provider_order(created_at.as_deref()),
+            )?;
             if inserted.contains(&(table, target)) {
                 let comment = crate::work::task::comment::TaskComment {
                     id: target.to_string(),

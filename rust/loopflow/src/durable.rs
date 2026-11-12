@@ -247,6 +247,17 @@ pub struct MachineRef {
     pub label: Option<String>,
 }
 
+impl MachineRef {
+    /// Its label, else its id.
+    pub fn name(&self) -> String {
+        match (&self.label, &self.id) {
+            (Some(label), _) => label.clone(),
+            (None, Some(id)) => id.to_string(),
+            (None, None) => "Machine unknown".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwner {
     pub person: Option<String>,
@@ -297,6 +308,27 @@ pub struct TaskOwnership {
     pub owner: Option<TaskOwner>,
     pub superseded_by: Option<TaskOwner>,
     pub log: Vec<TaskOwnershipEntry>,
+}
+
+impl TaskOwnership {
+    /// The Machine that owns the Task when it is not `local`.
+    pub fn owner_elsewhere(&self, local: &MachineId) -> Option<&MachineRef> {
+        let machine = &self.owner.as_ref()?.machine;
+        machine
+            .id
+            .as_ref()
+            .is_some_and(|id| id != local)
+            .then_some(machine)
+    }
+
+    /// When the latest entry naming `machine` was written.
+    pub fn since(&self, machine: &MachineId) -> Option<i64> {
+        self.log
+            .iter()
+            .rev()
+            .find(|entry| entry.machine_id.as_ref() == Some(machine))
+            .map(|entry| entry.at)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

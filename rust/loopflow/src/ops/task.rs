@@ -897,6 +897,26 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
+/// Take a Task this Machine has not saved from the repository's planning.
+pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
+    match crate::config::load_config(Some(main))
+        .map_err(task_error)?
+        .unwrap_or_default()
+        .planning_transport()
+    {
+        crate::config::PlanningConfig::Linear { .. } => {
+            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+        }
+        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in selected Git planning"
+        ))),
+        remote => Err(task_error(format!(
+            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+            remote.remote_name().unwrap_or("provider")
+        ))),
+    }
+}
+
 /// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
@@ -916,27 +936,7 @@ fn prepare_task(
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => match crate::config::load_config(Some(&main))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::PlanningConfig::Linear { .. } => {
-                    super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
-                        .await?
-                }
-                crate::config::PlanningConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )));
-                }
-                remote => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                        remote.remote_name().unwrap_or("provider")
-                    )));
-                }
-            },
+            None => acquire_from_planning(&main, issue).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -1388,19 +1388,25 @@ fn prepare_placement(
             base_commit
         }
     };
-    let github = if observe_pr {
-        super::pr::branch_pr(main_repo, &plan.branch)?
-            .map(|pr| {
-                Ok::<_, OpsError>(GithubPr {
-                    number: u32::try_from(pr.number).map_err(task_error)?,
-                    url: pr.url,
-                    head_sha: pr.head_sha,
-                })
+    // An unreadable PR (no GitHub login on this Machine, an origin GitHub
+    // does not host) leaves the checkout without one; a later sync finds it.
+    let found = observe_pr
+        .then(|| {
+            super::pr::branch_pr(main_repo, &plan.branch).unwrap_or_else(|error| {
+                tracing::warn!(branch = %plan.branch, %error, "PR unread for the Task checkout");
+                None
             })
-            .transpose()?
-    } else {
-        None
-    };
+        })
+        .flatten();
+    let github = found
+        .map(|pr| {
+            Ok::<_, OpsError>(GithubPr {
+                number: u32::try_from(pr.number).map_err(task_error)?,
+                url: pr.url,
+                head_sha: pr.head_sha,
+            })
+        })
+        .transpose()?;
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)

@@ -40,7 +40,7 @@ pub(super) fn ingest_task_comment(
         conn,
         task,
         &comment.body,
-        comment.created_at.as_deref(),
+        super::task_ownership::provider_order(comment.created_at.as_deref()),
     )?;
     let existing: Option<(String, Option<String>)> = conn
         .query_row(

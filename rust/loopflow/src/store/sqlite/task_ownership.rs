@@ -352,6 +352,31 @@ fn my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<(MachineI
     }
 }
 
+fn handoff_in(
+    conn: &Connection,
+    task: &TaskId,
+    target: &MachineId,
+) -> StoreResult<TaskOwnershipEntry> {
+    let Some((local, holder)) = my_claim_in(conn, task)? else {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Task {task} is unowned"
+        )));
+    };
+    if *target == local {
+        return Err(StoreError::InvalidData(format!(
+            "Task {task} is already owned on this Machine"
+        )));
+    }
+    append_in(
+        conn,
+        task,
+        OwnershipKind::Handoff,
+        holder.person,
+        holder.person_key,
+        target,
+    )
+}
+
 fn person() -> StoreResult<Option<String>> {
     crate::config::participant_name().map_err(|error| StoreError::InvalidData(error.to_string()))
 }
@@ -407,20 +432,8 @@ fn append_in(
         },
         at: time::OffsetDateTime::now_utc().unix_timestamp(),
     };
-    let repo = task_repo_in(conn, task)?;
-    let remote = crate::ops::planning_client::connected(&repo);
-    // Without a remote provider, the planning journal is the provider and this write is its
-    // order: after every entry this Machine has seen, whatever their clocks said.
-    let ordered_at: Option<i64> = if remote {
-        None
-    } else {
-        Some(conn.query_row(
-            "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(ordered_at)+1,0))
-             FROM task_ownership WHERE task_id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
-    };
+    let remote = remote_planning_in(conn, task)?;
+    let ordered_at = journal_order_in(conn, task, remote)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
              at,ordered_at,written_here)
@@ -515,13 +528,43 @@ pub(super) fn claim_in(
     .map(Some)
 }
 
+fn remote_planning_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(crate::ops::planning_client::connected(&task_repo_in(
+        conn, task,
+    )?))
+}
+
+/// Without a remote provider, the planning journal is the provider and an
+/// entry this Machine takes in is ordered when it does: after every entry it
+/// has seen, whatever their clocks said.
+fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResult<Option<i64>> {
+    if remote {
+        return Ok(None);
+    }
+    Ok(Some(conn.query_row(
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(ordered_at)+1,0))
+         FROM task_ownership WHERE task_id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?))
+}
+
+/// The provider's order for an entry its comment carries: the comment's time.
+pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
+    created_at
+        .and_then(|at| {
+            time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64)
+}
+
 /// Parse a marked ownership comment into the log. Repeats are ignored; the
 /// provider's order is stamped once, the first time it is reported.
 pub(super) fn ingest_marker_in(
     conn: &Connection,
     task: &TaskId,
     body: &str,
-    ordered_at: Option<&str>,
+    ordered_at: Option<i64>,
 ) -> StoreResult<bool> {
     let Some(start) = body.find(MARKER) else {
         return Ok(false);
@@ -537,11 +580,6 @@ pub(super) fn ingest_marker_in(
     {
         return Ok(false);
     }
-    let ordered_at = ordered_at
-        .and_then(|at| {
-            time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64);
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_ownership(id,task_id,kind,person,person_key,machine_id,
              machine_label,at,ordered_at,written_here)
@@ -630,21 +668,22 @@ pub(super) fn reassert_in(
 pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
     let local = local_machine_in(conn)?;
     let held = super::rentals::tasks_held_in(conn, machine)?;
-    for task in &held {
-        let (person, person_key) = reading_in(conn, task)?
-            .1
+    let mut tasks = Vec::with_capacity(held.len());
+    for (task, ownership) in held {
+        let (person, person_key) = ownership
             .owner
             .map_or((None, None), |owner| (owner.person, owner.person_key));
         append_in(
             conn,
-            task,
+            &task,
             OwnershipKind::Handoff,
             person,
             person_key,
             &local,
         )?;
+        tasks.push(task);
     }
-    Ok(held)
+    Ok(tasks)
 }
 
 impl SqliteStore {
@@ -681,6 +720,7 @@ impl SqliteStore {
 
     /// Move your claim to another Machine. The Task's primary Session here is
     /// completed; the target admits its own on first connect.
+    /// Hand the Task to `target`; its primary conversation here ends.
     pub fn handoff_task(
         &self,
         task: &TaskId,
@@ -688,24 +728,7 @@ impl SqliteStore {
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some((local, holder)) = my_claim_in(&tx, task)? else {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Task {task} is unowned"
-            )));
-        };
-        if *target == local {
-            return Err(StoreError::InvalidData(format!(
-                "Task {task} is already owned on this Machine"
-            )));
-        }
-        let entry = append_in(
-            &tx,
-            task,
-            OwnershipKind::Handoff,
-            holder.person,
-            holder.person_key,
-            target,
-        )?;
+        let entry = handoff_in(&tx, task, target)?;
         super::sessions::complete_primary_session_in(
             &tx,
             &crate::session::PrimaryScope::Task(task.clone()),
@@ -714,11 +737,57 @@ impl SqliteStore {
         Ok(entry)
     }
 
-    /// Take in an entry another Machine wrote, before planning delivers its comment.
+    /// A move's handoff, written before the move stops anything: the Task's
+    /// conversation travels with it, and the move completes it once taken.
+    pub(crate) fn handoff_moving_task(
+        &self,
+        task: &TaskId,
+        target: &MachineId,
+    ) -> StoreResult<TaskOwnershipEntry> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let entry = handoff_in(&tx, task, target)?;
+        tx.commit()?;
+        Ok(entry)
+    }
+
+    /// Take back `sent`, the handoff this Machine just wrote, when the move it
+    /// began could not leave. Nothing may follow it in the log: until it is
+    /// received, its target has not taken the Task. The log keeps both entries.
+    pub(crate) fn hand_back(
+        &self,
+        task: &TaskId,
+        sent: &TaskOwnershipEntry,
+    ) -> StoreResult<TaskOwnershipEntry> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (rows, _) = reading_in(&tx, task)?;
+        if rows.last().map(|row| &row.entry.id) != Some(&sent.id) {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task} changed hands after its handoff {}; it stays where that left it",
+                sent.id
+            )));
+        }
+        let entry = append_in(
+            &tx,
+            task,
+            OwnershipKind::Handoff,
+            sent.person.clone(),
+            sent.person_key.clone(),
+            &local_machine_in(&tx)?,
+        )?;
+        tx.commit()?;
+        Ok(entry)
+    }
+
+    /// Take in an entry another Machine wrote, before planning delivers its
+    /// comment. In the planning journal it follows every entry seen here, so
+    /// a handoff that arrives with a move outranks this Machine's earlier ones.
     pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let inserted = ingest_marker_in(&tx, task, marker, None)?;
+        let order = journal_order_in(&tx, task, remote_planning_in(&tx, task)?)?;
+        let inserted = ingest_marker_in(&tx, task, marker, order)?;
         tx.commit()?;
         Ok(inserted)
     }

@@ -48,17 +48,29 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
-    Ok(machines
-        .into_iter()
-        .map(|machine| MachineListing {
+    let mut listed = Vec::new();
+    for machine in machines {
+        let mut tasks = Vec::new();
+        for (task, since) in store.sqlite.tasks_held_by(&machine.id)? {
+            if let Some(saved) = store.sqlite.task(&task)? {
+                tasks.push(HeldTask {
+                    id: task,
+                    identifier: saved.identifier,
+                    since,
+                });
+            }
+        }
+        listed.push(MachineListing {
             defaults: defaults
                 .iter()
                 .filter(|d| d.machine_id == machine.id)
                 .cloned()
                 .collect(),
+            tasks,
             machine,
-        })
-        .collect())
+        });
+    }
+    Ok(listed)
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
@@ -186,6 +198,13 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                         };
                         println!("  {scope} {} {part}", default.name);
                     }
+                    for task in &listing.tasks {
+                        println!(
+                            "  {} since {}",
+                            task.identifier,
+                            crate::lf::output::format_time(task.since)
+                        );
+                    }
                 }
             }
         }
@@ -307,6 +326,16 @@ pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
+    /// Unfinished Tasks it owns, as this Machine reads their ownership.
+    tasks: Vec<HeldTask>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct HeldTask {
+    id: crate::durable::TaskId,
+    identifier: String,
+    /// Unix seconds when the Task's claim reached the Machine.
+    since: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -430,7 +459,12 @@ pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<P
     }
     let text = String::from_utf8(output.stdout)?;
     let mut lines = text.lines();
-    let version = lines.next().and_then(|line| line.strip_prefix("lf "));
+    // `lf --version` prints the build version, then a label such as
+    // `(build 3f3153d95 on v0.15.3)`; only the version compares.
+    let version = lines
+        .next()
+        .and_then(|line| line.strip_prefix("lf "))
+        .and_then(|line| line.split_whitespace().next());
     if text.trim() == "lf-not-installed" && output.status.code() == Some(127) {
         return Err(connection_failure(
             target,

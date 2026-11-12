@@ -77,6 +77,43 @@ still shows compress as `codex` alone; after `lf set --global agents
 claude,codex` it shows `codex, then claude`, and everything else `claude,
 then codex`.
 
+## Next implement direction: a limit with nowhere to go stops once and says why (concept review 4, 2026-11-12)
+
+The incident's own config, unchanged, still fails the way the incident did.
+`default_agent: claude` with `skill.compress.default_agent: codex` and no
+`agents` resolves compress to Codex alone. A launch refused on an unrouted
+login returns the limit after one attempt
+(`a_pinned_agent_refused_at_launch_fails_with_its_limit`), the Graph exits 1,
+and `lf task run` starts it again up to `TASK_RUN_ATTEMPTS` (3): no reset time
+is recorded for an unrouted login, so `waiting_on_limit` does not stop the
+loop (`lf/commands/graph.rs`). Read from the code, not run against a provider.
+The Task asks for a step that moves "instead of retrying the same exhausted
+agent"; with nothing to move to it is still relaunched twice, and with a list
+whose last entry refuses, each relaunch walks the whole list again.
+
+Run in a throwaway home with that config:
+`lf config settings --skill compress --explain` showed `agent  codex` and the
+two `default_agent` candidates, and nothing about there being no list. A
+person meets `agents` only in `docs/troubleshooting.md`.
+
+Build:
+
+- A Graph run whose failure cause is a usage limit is not started again by the
+  `lf task run` retry loop. It stops on the first failure.
+- Its stop line says what would let it move: an `agent` choice or `-a` pins
+  the provider, or there is no `agents` list, with
+  `lf set --global agents <this>,<another>` as the example. Same wording in
+  `lf task status` for that step.
+- `docs/subscriptions.md` "No account will free up" row says it stops once.
+
+Not proposed: reading "try again at 5:43 PM" out of the provider's text to
+wait for the reset.
+
+Not established: why the incident's launch had `account_id: null` while
+`lf account` showed four connected Codex logins, one at 84% "active and
+held". An unrouted launch cannot change login, so "moves to the next login"
+did not apply to it and still would not.
+
 ## Settled without a new answer
 
 - `-a` is not checked against `agents`: the Task says "An explicit one-off

@@ -131,9 +131,10 @@ have to replay the comments to know what's being built.
 
 Write for someone coming back after time away. Lead with what's better now:
 "Switch Tasks without losing unfinished input", not "Persist terminal state per
-Task". Then what changed, briefly. Test results go in Checks or CI, never in
-the walkthrough. A report says what changed, what needs attention and the next
-decision.
+Task". Then what changed, briefly. Test, lint and QA results never go in a PR
+body; CI shows them on the PR. A check that can only run after merge stays:
+what is untried, the environment it needs and what to look for. A report says
+what changed, what needs attention and the next decision.
 
 ## Wave goals
 

@@ -612,6 +612,7 @@ mod tests {
             (
                 "pursue",
                 &[
+                    "kickoff",
                     "write-docs",
                     "implement",
                     "compress",
@@ -694,6 +695,7 @@ mod tests {
         assert_eq!(
             labels,
             [
+                "kickoff",
                 "write-docs",
                 "implement",
                 "compress",
@@ -707,7 +709,7 @@ mod tests {
                 "pr-publish",
             ]
         );
-        let implement = compiled.steps[1].key;
+        let implement = compiled.steps[2].key;
         let returns: Vec<_> = compiled
             .steps
             .iter()
@@ -716,9 +718,9 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[5].key, &implement),
-                (compiled.steps[7].key, &implement),
-                (compiled.steps[9].key, &implement)
+                (compiled.steps[6].key, &implement),
+                (compiled.steps[8].key, &implement),
+                (compiled.steps[10].key, &implement)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
@@ -727,7 +729,7 @@ mod tests {
             .steps
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
-        assert_eq!(compiled.steps[4].sources, ["pursue", "refresh"]);
+        assert_eq!(compiled.steps[5].sources, ["pursue", "refresh"]);
     }
 
     #[test]

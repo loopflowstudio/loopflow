@@ -44,6 +44,14 @@ Built:
   "unresolved" Team case (a re-read at the original Initiative now heals it;
   "foreign" covers a move that persists).
 
+- QA (2026-11-12, `scratch/qa.html`): field delivery's read can come back
+  older than the write just made (Linear answered 0.5 s after `SetIssueState`
+  with its previous copy). `observe` returns `None` for a kept-but-unaccepted
+  read, and delivery refuses only when field changes, Project order or a
+  deletion are queued. Test: `older_read_with_nothing_queued_is_not_a_delivery_failure`.
+
 Checks:
 - `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::planning_lookup_tests:: project_field_delivery_requires_revision_accepted_into_work` — pass (implement; compress made no code edits).
 - `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::` — pass (implement). Gate runs affected suites.
+- `cargo test -p loopflow --lib -- ops::linear::task_planning_tests:: linear::acceptance::` — 97 pass (qa).
+- Real store: branch `lf task sync` delivered LOO-714 (completion) and LOO-724 (assignee) that the installed lf refused (qa).

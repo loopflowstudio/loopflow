@@ -70,7 +70,22 @@ pub(crate) async fn deliver_fields(
             return sync_deletion(store, repo, owner, &client, change).await;
         }
         // Also reconcile an older attempted receipt whose successor is no longer pending.
-        let mut observation = observe(store, repo, owner, &client).await?;
+        let Some(mut observation) = observe(store, repo, owner, &client).await? else {
+            // The read was kept but not accepted (Linear can answer just after a
+            // write with its previous copy). That holds back only queued changes.
+            let order = match owner {
+                PlanningChanges::Project(id) => store
+                    .sqlite
+                    .project_order_delivery(id)
+                    .map_err(message)?
+                    .is_some(),
+                PlanningChanges::Task(_) => false,
+            };
+            if changes.is_empty() && !order {
+                return Ok(());
+            }
+            return Err(deferred(owner));
+        };
         for change in &changes {
             if let Err(error) =
                 sync_field(store, repo, owner, &client, change, &mut observation, retry).await
@@ -157,7 +172,10 @@ async fn sync_deletion(
     }
     // Complete active-issue ingestion adopts conflicting provider edits through
     // the common writer before attempting the saved removal.
-    let revision = observe(store, repo, owner, client).await?.revision;
+    let revision = observe(store, repo, owner, client)
+        .await?
+        .ok_or_else(|| deferred(owner))?
+        .revision;
     if revision.as_deref() != Some(trash_revision.as_str()) {
         return Err(message(
             "Provider deletion observations disagree; saved removal retained",
@@ -364,12 +382,24 @@ struct FieldObservation {
     revision: Option<String>,
 }
 
+fn deferred(owner: PlanningChanges<'_>) -> OpsError {
+    message(match owner {
+        PlanningChanges::Task(_) => {
+            "Newer or unresolved provider planning retained; field delivery deferred"
+        }
+        PlanningChanges::Project(_) => {
+            "Newer or unresolved Linear Project planning retained; field delivery deferred"
+        }
+    })
+}
+
+/// `None`: the read was retained but not accepted into Work.
 async fn observe(
     store: &Store,
     repo: &Path,
     owner: PlanningChanges<'_>,
     client: &PlanningClient,
-) -> OpsResult<FieldObservation> {
+) -> OpsResult<Option<FieldObservation>> {
     match owner {
         PlanningChanges::Task(id) => {
             let task = store
@@ -397,15 +427,13 @@ async fn observe(
                 .accepted_task_revision(id, &external, revision.as_deref())
                 .map_err(message)?
             {
-                return Err(message(
-                    "Newer or unresolved provider planning retained; field delivery deferred",
-                ));
+                return Ok(None);
             }
-            Ok(FieldObservation {
+            Ok(Some(FieldObservation {
                 external,
                 content: String::new(),
                 revision,
-            })
+            }))
         }
         PlanningChanges::Project(id) => {
             let project = store
@@ -439,15 +467,13 @@ async fn observe(
                 .accepted_project_revision(id, &external, observed.revision.as_deref())
                 .map_err(message)?
             {
-                return Err(message(
-                    "Newer or unresolved Linear Project planning retained; field delivery deferred",
-                ));
+                return Ok(None);
             }
-            Ok(FieldObservation {
+            Ok(Some(FieldObservation {
                 external,
                 content,
                 revision: observed.revision,
-            })
+            }))
         }
     }
 }

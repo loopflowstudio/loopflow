@@ -5679,6 +5679,29 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
 }
 
 #[test]
+fn older_read_with_nothing_queued_is_not_a_delivery_failure() {
+    // Linear can answer a read just after a write with its previous copy.
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let issue = task.linear_id.as_ref().unwrap().as_str();
+            let original = state.lock().await.issues[0].clone();
+            mark_issue_updated(&mut state.lock().await.issues[0]);
+            super::test_fixture::refresh_task_input(repo, issue, LinearRefresh::Force)
+                .await
+                .unwrap();
+            let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+            state.lock().await.issues[0] = original;
+            let work = crate::durable::WorkRef::Task(task.id.clone());
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), saved);
+            assert_eq!(state.lock().await.field_writes, 0);
+        });
+    });
+}
+
+#[test]
 fn task_field_delivery_requires_revision_accepted_into_work() {
     for foreign in [false, true] {
         with_planning_task(|runtime, fixture, repo, task, state| {

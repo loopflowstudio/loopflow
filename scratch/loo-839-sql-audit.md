@@ -52,7 +52,7 @@ processes_attachment_exit. Server: `server::statistics` (start + ~24 h,
 SystemTime). Guard: `store::query_plans` (boundary test now uses it; widening
 its tables to `processes` found the FK scan above).
 
-## Remaining findings (not fixed here)
+## Remaining (in the brief's scope, not yet fixed)
 
 - `task_ownership` `claim_task`/`handoff_task`/`unassign_task`: `git config`
   spawned under the write lock via `my_key_in`/`person()`; resolve identity

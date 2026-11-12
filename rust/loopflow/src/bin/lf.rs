@@ -423,7 +423,7 @@ fn definition_invocation(cli: &Cli) -> anyhow::Result<Option<DefinitionInvocatio
 /// no owner. Graphs keep the owner that holds their steps; a name that does not
 /// resolve keeps it too, and reports its error after delegation as before.
 fn bare_conversation(cli: &Cli) -> bool {
-    if !loopflow::transport::runs_in_terminal(cli.batch) {
+    if cli.names_work() || !loopflow::transport::runs_in_terminal(cli.batch) {
         return false;
     }
     match &cli.command {
@@ -1383,6 +1383,17 @@ fn print_thread(
 
 fn main() -> std::process::ExitCode {
     loopflow::transport::initialize();
+    // The holder outlives servers and installs. It records no Process itself
+    // and opens no store, so it runs before any of that is set up.
+    if std::env::args().skip(1).eq(["holder", "run"]) {
+        return match loopflow::server::holder::run() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("lf holder: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
         let result = run();
@@ -1495,6 +1506,16 @@ fn run() -> anyhow::Result<()> {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
+    }
+    // Clap has no `session attach`: a relay that names no valid host stops here.
+    if raw_args
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
+    {
+        anyhow::bail!(
+            "lf session attach names an owner LfProcess id or `--terminal TERMINAL_ID`; got {:?}",
+            &raw_args[3..]
+        );
     }
     if !raw_args
         .iter()
@@ -2480,7 +2501,16 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    if execution && !bare_conversation(&cli) && loopflow::transport::delegate_current(cli.batch)? {
+    let task_run = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        })
+    );
+    if execution
+        && !bare_conversation(&cli)
+        && loopflow::transport::delegate_current(cli.batch, task_run || cli.names_work())?
+    {
         return Ok(());
     }
     // Only the operation a launcher started reports; an execution owner in
@@ -2997,6 +3027,7 @@ fn execute_command(
         Some(Commands::ContextBlock {
             delivery, moment, ..
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
+        Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {

@@ -286,8 +286,10 @@ pub(crate) struct SessionSummary {
     pub transition: Option<crate::store::sqlite::provider_transitions::ProviderTransition>,
     pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
-    /// Its execution owner runs with no viewer attached.
+    /// Its execution owner or held terminal runs with no viewer attached.
     pub unviewed: bool,
+    /// Its agent runs in a terminal a holder keeps; any number of views attach.
+    pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
     /// Available for a person, as of the read's clock.

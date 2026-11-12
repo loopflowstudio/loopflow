@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 4: one connection per client,
+//! Carrier-independent server protocol, revision 5: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only. Each carrier delimits messages its own way; the Unix socket
 //! carries one JSON object per line.
@@ -10,9 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 4;
+pub const REVISION: u32 = 5;
 /// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 4;
+pub const MIN_REVISION: u32 = 5;
 pub const MAX_MESSAGE: usize = 32 * 1024 * 1024;
 /// Welcomed client connections; terminal bridges are not among them.
 pub const MAX_CONNECTIONS: usize = 64;
@@ -92,11 +92,12 @@ pub enum Operation {
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum ServerOperation {
     /// A ticket for the Session's terminal: the server resolves the Session's
-    /// current owner LfProcess and answers `{ticket, owner_lf_process_id,
-    /// expires_in_ms}`. A new connection presents the ticket as its first
-    /// message (`attach`) and becomes the bridge; this connection stays a
-    /// client. When the owner ends, the bridge closes; attaching again by the
-    /// same Session reaches its next owner. With `owner_lf_process_id`, the
+    /// held terminal, else its current owner LfProcess, and answers `{ticket,
+    /// owner_lf_process_id, terminal_id, expires_in_ms}` with one ID null. A
+    /// new connection presents the ticket as its first message (`attach`) and
+    /// becomes the bridge; this connection stays a client. When the terminal
+    /// or owner ends, the bridge closes; attaching again by the same Session
+    /// reaches its next one. With `owner_lf_process_id`, the
     /// Session must still be owned by exactly that LfProcess, for a client that
     /// reconnects only to the owner it had.
     #[serde(rename = "session.attach")]
@@ -104,6 +105,29 @@ pub enum ServerOperation {
     SessionAttach {
         session: crate::id::LfSessionId,
         owner_lf_process_id: Option<LfProcessId>,
+        /// Attach only to this held terminal. Without either ID, a Session's
+        /// held terminal is preferred to an owner.
+        terminal_id: Option<crate::id::TerminalId>,
+    },
+    /// Start the Session's agent in this build's holder and answer
+    /// `{terminal_id}`. `env` is the caller's whole environment; the server's
+    /// is not used. Repeating `request` answers the terminal it started.
+    /// This is the only operation here that creates a process.
+    #[serde(rename = "session.start")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    SessionStart {
+        session: Option<crate::id::LfSessionId>,
+        request: String,
+        argv: Vec<String>,
+        cwd: std::path::PathBuf,
+        env: Vec<(String, String)>,
+        rows: u16,
+        cols: u16,
+        /// The Desktop pane (`LF_TERMINAL_ID`) the caller's own terminal was
+        /// validated as; the held child continues it on its PTY. Null outside
+        /// a pane.
+        #[serde(deserialize_with = "Option::deserialize")]
+        placement: Option<String>,
     },
     /// A provider hook at a turn or tool boundary. The server records what the
     /// boundary says (the native turn, the acknowledged input, `gap`) and
@@ -192,13 +216,25 @@ pub struct SteerBatch {
     pub text: String,
 }
 
+/// What `session.start` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStarted {
+    pub terminal_id: crate::id::TerminalId,
+}
+
 /// What `session.attach` answers: a ticket that opens one bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionAttached {
     /// 16 random bytes as 22 base64url characters; single use.
     pub ticket: String,
-    pub owner_lf_process_id: LfProcessId,
+    /// The owner the bridge reaches; null for a held terminal.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub owner_lf_process_id: Option<LfProcessId>,
+    /// The held terminal the bridge reaches; null for an owner.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub terminal_id: Option<crate::id::TerminalId>,
     /// How long the ticket opens a bridge, from when it was issued.
     pub expires_in_ms: u64,
 }
@@ -249,10 +285,14 @@ pub enum ServerMessage {
         trace_id: crate::id::TraceId,
         result: serde_json::Value,
     },
-    /// The answer to `attach`: the connection now speaks the owner protocol
-    /// with this LfProcess, and nothing more arrives from the server.
+    /// The answer to `attach`: the connection now speaks the viewer protocol
+    /// with this owner LfProcess or this held terminal, whichever is not null,
+    /// and nothing more arrives from the server.
     Bridged {
-        owner_lf_process_id: LfProcessId,
+        #[serde(deserialize_with = "Option::deserialize")]
+        owner_lf_process_id: Option<LfProcessId>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        terminal_id: Option<crate::id::TerminalId>,
     },
     /// One subscription line; its `body` has the shape of the read's `x-result`.
     Reading {
@@ -370,6 +410,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/cancel.json"),
             include_str!("../../tests/fixtures/dto/server/attach.json"),
             include_str!("../../tests/fixtures/dto/server/attach_ticket.json"),
+            include_str!("../../tests/fixtures/dto/server/session_start.json"),
             include_str!("../../tests/fixtures/dto/server/view_plan.json"),
             include_str!("../../tests/fixtures/dto/server/configuration.json"),
             include_str!("../../tests/fixtures/dto/server/task_from_session.json"),
@@ -426,6 +467,8 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/response.json"),
             include_str!("../../tests/fixtures/dto/server/attached.json"),
             include_str!("../../tests/fixtures/dto/server/bridged.json"),
+            include_str!("../../tests/fixtures/dto/server/bridged_terminal.json"),
+            include_str!("../../tests/fixtures/dto/server/session_started.json"),
             include_str!("../../tests/fixtures/dto/server/reading.json"),
             include_str!("../../tests/fixtures/dto/server/event_shipped.json"),
             include_str!("../../tests/fixtures/dto/server/event_steer.json"),
@@ -467,7 +510,7 @@ mod tests {
         }
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<ClientMessage>(
-            r#"{"type":"hello","revision":4,"min_revision":4}"#
+            r#"{"type":"hello","revision":5,"min_revision":5}"#
         )
         .is_err());
         assert!(

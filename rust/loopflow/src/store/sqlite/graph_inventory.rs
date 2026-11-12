@@ -446,6 +446,25 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// The first Graph process `parent` started after `mark`. Other children
+    /// it started meanwhile, such as a Task conversation started beside its
+    /// run, may be recorded before or after it.
+    pub(crate) fn graph_child_after(
+        &self,
+        parent: &LfProcessId,
+        mark: i64,
+    ) -> StoreResult<Option<LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT e.id FROM processes e JOIN graph_processes g ON g.lf_process_id=e.id
+                 WHERE e.parent_lf_process_id=?1 AND e.rowid>?2 ORDER BY e.rowid LIMIT 1",
+                params![parent, mark],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The conversation, captured input and its event a process opened last.
     pub(crate) fn process_input(
         &self,
@@ -673,6 +692,36 @@ mod tests {
         assert_eq!(
             store.child_process_after(&graph.id, mark).unwrap(),
             Some(step.id)
+        );
+    }
+
+    #[test]
+    fn a_task_run_finds_its_graph_after_a_conversation_started_beside_it() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let [carrier, conversation, graph] = std::array::from_fn(|_| crate::id::LfProcessId::new());
+        let execute = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
+            store.conn.lock().unwrap().execute(sql, params).unwrap();
+        };
+        let process = |id: &crate::id::LfProcessId, parent: Option<&crate::id::LfProcessId>| {
+            execute(
+                "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at) VALUES(?1,'fixture',?2,1)",
+                rusqlite::params![id, parent],
+            );
+        };
+        process(&carrier, None);
+        let mark = store.process_mark(&carrier).unwrap();
+        // The conversation started beside the run registers before its Graph.
+        process(&conversation, Some(&carrier));
+        process(&graph, Some(&carrier));
+        assert_eq!(store.graph_child_after(&carrier, mark).unwrap(), None);
+        execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
+            rusqlite::params![graph],
+        );
+        assert_eq!(
+            store.graph_child_after(&carrier, mark).unwrap(),
+            Some(graph)
         );
     }
 

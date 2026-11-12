@@ -1,5 +1,9 @@
-//! Record viewing off the byte path; only an explicit shell Close and an
-//! exec'd native client's attachment are polled.
+//! Record viewing off the byte path; only an explicit shell Close is polled.
+//!
+//! Nothing here ends a conversation for want of viewers. Task cleanup ends a
+//! done or abandoned Task's conversations (`ops::task::retirement`); a Desktop
+//! shell ends on its explicit Close.
+use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::sync::{mpsc, Arc, Mutex};
@@ -7,16 +11,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use super::Host;
 use crate::harness::native_exit::{NativeExit, Settled};
-use crate::id::LfProcessId;
 use crate::process::SessionAttachment;
 use crate::store::sqlite::{SqliteStore, ViewerHold};
 use crate::store::RecordingGap;
 
-const POLL: Duration = Duration::from_secs(2);
+pub(super) const POLL: Duration = Duration::from_secs(2);
 
-/// The exec'd native client whose attachment the existing lifecycle worker
-/// checks. Store reads never run in the terminal's descriptor loop.
+/// The exec'd native client whose attachment the watcher checks. Store reads
+/// never run in the terminal's descriptor loop.
 #[derive(Debug, Default)]
 pub(super) struct Client(Mutex<ClientState>);
 
@@ -24,6 +28,8 @@ pub(super) struct Client(Mutex<ClientState>);
 struct ClientState {
     attached: Option<(String, SessionAttachment)>,
     departure: Option<Settled>,
+    /// Wakes the watcher's wait, which blocks while nothing is attached.
+    wake: Option<mpsc::Sender<Message>>,
 }
 
 impl Client {
@@ -33,6 +39,9 @@ impl Client {
             .filter(|record| record.client)
             .map(|record| (record.session.clone(), record.attachment.clone()));
         state.departure = None;
+        if let (Some(_), Some(wake)) = (&state.attached, &state.wake) {
+            let _ = wake.send(Message::Wake);
+        }
     }
 
     pub fn take_departure(&self) -> Option<Settled> {
@@ -43,7 +52,7 @@ impl Client {
             .take()
     }
 
-    fn watching(&self) -> bool {
+    fn attached(&self) -> bool {
         self.0
             .lock()
             .expect("client attachment lock poisoned")
@@ -82,51 +91,187 @@ impl Client {
     }
 }
 
-pub(super) fn spawn(
-    owner: LfProcessId,
-    shell: bool,
-    waker: UnixStream,
-    client: Arc<Client>,
-) -> (mpsc::Sender<Option<ViewerHold>>, mpsc::Receiver<()>) {
-    let (viewing, changes) = mpsc::channel();
-    let (close, closing) = mpsc::channel();
-    std::thread::spawn(move || watch(&owner, shell, &changes, &close, &waker, &client));
-    (viewing, closing)
+/// One thread recording viewing for every execution a host serves: the
+/// Machine server's held terminals share one, a Session owner process has its
+/// own. It ends once its handle and every watched execution are gone.
+#[derive(Debug)]
+pub(super) struct Watcher {
+    messages: mpsc::Sender<Message>,
+    next: std::sync::atomic::AtomicU64,
 }
 
-fn watch(
-    owner: &LfProcessId,
+/// Where one execution sends its viewing; dropping it stops the watch.
+#[derive(Debug)]
+pub(super) struct Viewing {
+    key: u64,
+    messages: mpsc::Sender<Message>,
+}
+
+impl Viewing {
+    pub fn send(&self, hold: Option<ViewerHold>) {
+        let _ = self.messages.send(Message::Hold(self.key, hold));
+    }
+}
+
+impl Drop for Viewing {
+    fn drop(&mut self) {
+        let _ = self.messages.send(Message::Gone(self.key));
+    }
+}
+
+#[derive(Debug)]
+enum Message {
+    Watch(u64, Box<Watch>),
+    Hold(u64, Option<ViewerHold>),
+    Gone(u64),
+    /// A native client attached: look again without a viewing change.
+    Wake,
+}
+
+impl Watcher {
+    pub fn spawn() -> Self {
+        let (messages, received) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("lifetime".into())
+            .spawn(move || record(&received))
+            .expect("spawn the lifetime thread");
+        Self {
+            messages,
+            next: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Record `host`'s viewing sent through the returned handle. A Desktop
+    /// shell's owner (`shell`) also learns of its explicit Close on the
+    /// receiver, after `waker` wakes its wait; so does any host whose
+    /// `client` moved to another attachment, through `client` itself.
+    pub fn watch(
+        &self,
+        host: Host,
+        shell: bool,
+        waker: UnixStream,
+        client: Arc<Client>,
+    ) -> (Viewing, mpsc::Receiver<()>) {
+        let key = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (close, closing) = mpsc::channel();
+        client
+            .0
+            .lock()
+            .expect("client attachment lock poisoned")
+            .wake = Some(self.messages.clone());
+        let watch = Watch {
+            host,
+            shell,
+            close,
+            waker,
+            client,
+            hold: None,
+            recorded: None,
+            hold_failure: RecordingGap::default(),
+            close_failure: RecordingGap::default(),
+            client_failure: RecordingGap::default(),
+        };
+        let _ = self.messages.send(Message::Watch(key, Box::new(watch)));
+        let viewing = Viewing {
+            key,
+            messages: self.messages.clone(),
+        };
+        (viewing, closing)
+    }
+}
+
+#[derive(Debug)]
+struct Watch {
+    host: Host,
     shell: bool,
-    changes: &mpsc::Receiver<Option<ViewerHold>>,
-    close: &mpsc::Sender<()>,
-    mut waker: &UnixStream,
-    client: &Client,
-) {
+    close: mpsc::Sender<()>,
+    waker: UnixStream,
+    client: Arc<Client>,
+    hold: Option<ViewerHold>,
+    /// None means no observation has been committed, including initial absence.
+    recorded: Option<Option<ViewerHold>>,
+    hold_failure: RecordingGap,
+    close_failure: RecordingGap,
+    client_failure: RecordingGap,
+}
+
+impl Watch {
+    /// Only a failed write, an explicit shell Close or an attached native
+    /// client needs another attempt without a change.
+    fn waiting(&self) -> bool {
+        self.shell || self.recorded != Some(self.hold) || self.client.attached()
+    }
+
+    /// Record what changed; false once a shell's Close has been delivered.
+    fn record(&mut self, store: &crate::store::sqlite::SqliteStore) -> bool {
+        if self.recorded != Some(self.hold)
+            && report_result(
+                &mut self.hold_failure,
+                "Session viewer hold",
+                store.record_owner_viewer_hold(self.host.transport(), self.hold),
+            )
+            .is_some()
+        {
+            self.recorded = Some(self.hold);
+        }
+        if report_result(
+            &mut self.client_failure,
+            "native client attachment",
+            self.client.check(store),
+        ) == Some(true)
+        {
+            let _ = (&self.waker).write_all(&[1]);
+        }
+        let Some(owner) = self.host.owner().filter(|_| self.shell) else {
+            return true;
+        };
+        if report_result(
+            &mut self.close_failure,
+            "Shell Close",
+            store.shell_should_close(owner),
+        ) == Some(true)
+        {
+            let _ = self.close.send(());
+            let _ = (&self.waker).write_all(&[1]);
+            return false;
+        }
+        true
+    }
+}
+
+fn record(received: &mpsc::Receiver<Message>) {
+    let mut watches: HashMap<u64, Watch> = HashMap::new();
     let mut store = None;
     let mut store_failure = RecordingGap::default();
-    let mut recorded_hold = None;
-    let mut hold_failure = RecordingGap::default();
-    let mut close_failure = RecordingGap::default();
-    let mut client_failure = RecordingGap::default();
-    let mut hold = None;
     loop {
-        // Once viewing is recorded, a conversation needs no timer. Only failed
-        // writes, explicit shell Close and an attached native client need
-        // another look without a change.
-        let change = if shell || recorded_hold != Some(hold) || client.watching() {
-            changes.recv_timeout(POLL)
+        let message = if watches.values().any(Watch::waiting) {
+            received.recv_timeout(POLL)
         } else {
-            changes
+            received
                 .recv()
                 .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
         };
-        match change {
-            Ok(changed) => hold = changed,
+        let mut apply = |message| match message {
+            Message::Watch(key, watch) => {
+                watches.insert(key, *watch);
+            }
+            Message::Hold(key, hold) => {
+                if let Some(watch) = watches.get_mut(&key) {
+                    watch.hold = hold;
+                }
+            }
+            Message::Gone(key) => {
+                watches.remove(&key);
+            }
+            Message::Wake => {}
+        };
+        match message {
+            Ok(message) => apply(message),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        for changed in changes.try_iter() {
-            hold = changed;
+        for message in received.try_iter() {
+            apply(message);
         }
         if store.is_none() {
             store = report_result(
@@ -138,38 +283,11 @@ fn watch(
         let Some(store) = store.as_ref() else {
             continue;
         };
-        if recorded_hold != Some(hold)
-            && report_result(
-                &mut hold_failure,
-                "Session viewer hold",
-                store.record_owner_viewer_hold(owner, hold),
-            )
-            .is_some()
-        {
-            recorded_hold = Some(hold);
-        }
-        if report_result(
-            &mut client_failure,
-            "native client attachment",
-            client.check(store),
-        ) == Some(true)
-        {
-            let _ = waker.write_all(&[1]);
-        }
-        if shell
-            && report_result(
-                &mut close_failure,
-                "Shell Close",
-                store.shell_should_close(owner),
-            ) == Some(true)
-        {
-            let _ = close.send(());
-            let _ = waker.write_all(&[1]);
-            return;
-        }
+        watches.retain(|_, watch| watch.record(store));
     }
 }
 
+/// Each operation keeps its own gap until that operation succeeds.
 fn report_result<T>(
     gap: &mut RecordingGap,
     what: &str,
@@ -183,12 +301,71 @@ fn report_result<T>(
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, ClientState};
+    use super::Host;
     use crate::store::sqlite::ViewerHold;
     use std::time::{Duration, Instant};
 
     #[test]
+    fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let owner = store.test_lf_process();
+        let db = guard.home().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON processes
+            BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
+        )
+        .unwrap();
+        let (messages, received) = std::sync::mpsc::channel();
+        let watcher = super::Watcher {
+            messages,
+            next: std::sync::atomic::AtomicU64::new(0),
+        };
+        let recorder = std::thread::spawn(move || {
+            crate::journal::with_test_ledger(db, || super::record(&received))
+        });
+        let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (viewing, closing) = watcher.watch(
+            Host::Owner(owner.clone()),
+            false,
+            waker,
+            std::sync::Arc::default(),
+        );
+        viewing.send(Some(ViewerHold::Viewed(123)));
+        std::thread::sleep(super::POLL * 2);
+        let read = || {
+            conn.query_row(
+                "SELECT viewer_hold_at FROM processes WHERE id=?1",
+                [&owner],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(read(), None);
+        conn.execute_batch("DROP TRIGGER reject_viewer_change")
+            .unwrap();
+        let deadline = Instant::now() + super::POLL * 3;
+        while read().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(read(), Some(123));
+        // After recovery the recorder waits for changes; departure must wake it.
+        viewing.send(Some(ViewerHold::Absent(124)));
+        let deadline = Instant::now() + super::POLL * 3;
+        while read() != Some(124) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(viewing);
+        drop(watcher);
+        recorder.join().unwrap();
+        assert_eq!(read(), Some(124));
+        assert!(closing.try_recv().is_err());
+    }
+
+    #[test]
     fn client_retirement_waits_for_a_readable_store_and_keeps_its_move_notice() {
+        use super::{Client, ClientState};
         let home = tempfile::tempdir().unwrap();
         let store =
             crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
@@ -199,6 +376,7 @@ mod tests {
         let client = Client(std::sync::Mutex::new(ClientState {
             attached: Some((session.id.to_string(), attachment.clone())),
             departure: None,
+            wake: None,
         }));
         assert!(!client.check(&store).unwrap());
         store
@@ -232,63 +410,5 @@ mod tests {
         assert!(moved.lines[0].contains("moved to tmux %9"));
         assert!(!client.check(&store).unwrap());
         assert!(client.take_departure().is_none());
-    }
-
-    #[test]
-    fn viewer_state_retries_after_a_store_failure_without_another_viewer_change() {
-        let guard = crate::journal::TestLedgerGuard::new();
-        let store = crate::journal::process_ledger().unwrap();
-        let owner = store.test_lf_process();
-        let db = guard.home().join("loopflow.db");
-        let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.execute_batch(
-            "CREATE TRIGGER reject_viewer_change BEFORE UPDATE OF viewed ON processes
-            BEGIN SELECT RAISE(FAIL, 'temporary viewer write failure'); END;",
-        )
-        .unwrap();
-        let (activity, changes) = std::sync::mpsc::channel();
-        let (close, closing) = std::sync::mpsc::channel();
-        let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
-        let watched = owner.clone();
-        let recorder = std::thread::spawn(move || {
-            crate::journal::with_test_ledger(db, || {
-                super::watch(
-                    &watched,
-                    false,
-                    &changes,
-                    &close,
-                    &waker,
-                    &super::Client::default(),
-                );
-            })
-        });
-        activity.send(Some(ViewerHold::Viewed(123))).unwrap();
-        std::thread::sleep(super::POLL * 2);
-        let read = || {
-            conn.query_row(
-                "SELECT viewer_hold_at FROM processes WHERE id=?1",
-                [&owner],
-                |r| r.get::<_, Option<i64>>(0),
-            )
-            .unwrap()
-        };
-        assert_eq!(read(), None);
-        conn.execute_batch("DROP TRIGGER reject_viewer_change")
-            .unwrap();
-        let deadline = Instant::now() + super::POLL * 3;
-        while read().is_none() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(read(), Some(123));
-        // After recovery the recorder waits for changes; departure must wake it.
-        activity.send(Some(ViewerHold::Absent(124))).unwrap();
-        let deadline = Instant::now() + super::POLL * 3;
-        while read() != Some(124) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        drop(activity);
-        recorder.join().unwrap();
-        assert_eq!(read(), Some(124));
-        assert!(closing.try_recv().is_err());
     }
 }

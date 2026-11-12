@@ -122,7 +122,15 @@ struct ServerProtocolTests {
         // The bridge presents the ticket on a connection of its own.
         #expect(try encoded(.attach(ticket: ticket)) == value("attach_ticket"))
         guard case .bridged(let owner) = try message("bridged") else { Issue.record("Missing bridge"); return }
-        #expect(owner == trace)
+        #expect(owner == .owner(lfProcessID: trace))
+        // A held terminal outlives server restarts and is named by its terminal.
+        guard case .bridged(let held) = try message("bridged_terminal") else { Issue.record("Missing held bridge"); return }
+        #expect(held == .terminal(id: "7c1d9a40-e5b2-4f6a-8d3e-2b1c0f9a8e7d"))
+        let start = ServerClientMessage.request(id: "start-1", operation: .sessionStart(
+            session: "session_5e55105e000040008000000000000001", request: "0b9c1f0e-6d1c-4a43-9f0e-2f6c8f0f5a11",
+            argv: ["/usr/local/bin/lf", "session", "resume", "session_5e55105e000040008000000000000001"], cwd: "/Users/me/src/app",
+            env: [("PATH", "/usr/bin:/bin"), ("HOME", "/Users/me")], rows: 24, cols: 80, placement: "desktop-shell"), select: nil)
+        #expect(try encoded(start) == value("session_start"))
     }
 
     @Test func hookBoundarySharesTheRustServerContract() throws {
@@ -426,10 +434,13 @@ struct ServerProtocolTests {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"reading","id":"x"}"#.utf8))
         }
         #expect(throws: (any Error).self) {
-            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":4}"#.utf8))
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"welcome","revision":5}"#.utf8))
         }
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"response","id":"x","result":{"kind":"bootstrap"}}"#.utf8))
+        }
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ServerMessage.self, from: Data(#"{"type":"bridged","owner_lf_process_id":"x"}"#.utf8))
         }
     }
 }

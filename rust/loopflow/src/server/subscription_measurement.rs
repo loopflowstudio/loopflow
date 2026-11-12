@@ -264,7 +264,7 @@ fn subscription_server() {
                     let subscriptions = subscriptions.clone();
                     connections.spawn(async move {
                         Connection { instance: "subscription-fixture", executable_sha256: "frozen-by-runner",
-                            clients: &clients, slots: &slots, tickets: &tickets, subscriptions: &subscriptions, uid: 501 }.serve(socket).await
+                            clients: &clients, slots: &slots, tickets: &tickets, subscriptions: &subscriptions, terminals: None, uid: 501 }.serve(socket).await
                     });
                 }
                 Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap().unwrap(); }

@@ -224,7 +224,7 @@ pub fn run_task_graph_for(
         }
         // Only a Graph process that failed is started again.
         let graph = match status.code() {
-            Some(1) => attempt_graph(store, &process, mark)?,
+            Some(1) => store.graph_child_after(&process, mark)?,
             _ => None,
         };
         let failed = graph.is_some();
@@ -425,17 +425,6 @@ impl PendingLog {
     }
 }
 
-/// The attempt's child once it has recorded a GraphProcess.
-fn attempt_graph(
-    store: &SqliteStore,
-    process: &LfProcessId,
-    mark: i64,
-) -> Result<Option<LfProcessId>> {
-    Ok(store
-        .child_process_after(process, mark)?
-        .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
-}
-
 /// Wait until the attempt records its GraphProcess or ends first. No deadline:
 /// the child's own exit bounds it.
 fn registration(
@@ -445,7 +434,7 @@ fn registration(
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = attempt_graph(store, process, mark)?;
+        let registered = store.graph_child_after(process, mark)?;
         if registered.is_some() {
             return Ok(registered);
         }

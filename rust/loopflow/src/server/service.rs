@@ -960,7 +960,7 @@ fn continuing(
 }
 
 /// `{ticket}`: single use, bound to this connection's admission, expiring in
-/// [`TICKET_TTL`](super::ticket::TICKET_TTL).
+/// [`TICKET_LIFETIME`].
 fn ticket_response(id: String, ticket: String) -> ServerMessage {
     ServerMessage::Response {
         id,
@@ -1755,6 +1755,29 @@ mod tests {
             });
             let held_terminal = Client::redeem(tickets.clone(), &ticket).await;
             let mut held = entrance.await.unwrap();
+            // Replaying the ticket, or presenting a phone's here, opens nothing
+            // and spends it.
+            let phone = Admission::Remote {
+                node: "phone".into(),
+                user: 1,
+            };
+            let remote = tickets.issue(phone.clone(), Purpose::Terminal(terminal.clone()));
+            for presented in [ticket, remote.clone()] {
+                let mut refused = Client::connect_with(&clients, tickets.clone());
+                refused
+                    .send(&ClientMessage::Attach { ticket: presented })
+                    .await;
+                assert!(matches!(
+                    refused.receive().await.unwrap(),
+                    ServerMessage::Error {
+                        id: None,
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+                refused.ended().await;
+            }
+            assert!(tickets.redeem(&remote, &phone).is_none());
             let Client {
                 mut reader,
                 mut writer,

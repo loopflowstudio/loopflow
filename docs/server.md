@@ -49,6 +49,7 @@ server is replaced or its connection drops. Its native status row shows
 connection is acknowledged. The pane then continues from where it stopped,
 including output printed while the server was away, without redrawing.
 Selection, copy, Find and scrolling remain available.
+If recovery fails, the last screen remains visible and is marked stale.
 
 If another viewer has control, recovery leaves that viewer in control. The
 read-only pane offers **Move here** to request control explicitly. **Retry**
@@ -120,12 +121,18 @@ helper. For a mismatched build or another startup error, read the diagnosis from
 
 ## Phone access
 
-This version provides local client access. Authenticated remote access and the
-native phone client are separate work in LOO-718; local server readiness alone
-does not mean a phone can connect. Pairing a phone will grant client access to a
-host, independently of adding a Machine as an execution destination.
+```bash
+lf server mobile            # private remote access over this host's Tailscale
+lf server mobile --status   # saved approval and live readiness
+lf server mobile --off      # stop remote access; local Sessions keep running
+```
 
-Local use needs no network listener. Keep the local socket private; remote
-clients require their own authenticated endpoint.
+A phone signed in as the host owner's Tailscale user can then
+[attach to a Session's running terminal](../rust/loopflow/src/server/README.md#remote-attach-contract)
+without starting or resuming a provider.
+Local server readiness and adding a Machine as an execution destination do not
+grant phone access.
+
+Local use needs no network listener. Keep the local socket private.
 
 Next: [Desktop and other surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect)

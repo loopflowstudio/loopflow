@@ -395,39 +395,6 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
   with no environment to send (the phone). It answers and repeats like
   `session.start`; a Session `run_refusal` refuses is `conflict`.
-- `session.attach {session}` attaches to the Session's held terminal, and
-  `{session, terminal_id}` only to that terminal. Either answers a ticket
-  `{ticket, terminal_id, expires_in_ms}`, and its bridge answers
-  `bridged {terminal_id}`.
-  The bridged connection speaks the viewer protocol with the server's
-  terminal registry. A terminal that has ended answers `not_found` with
-  `terminal_id` and `current_terminal_id` (null when the Session has none).
-  A terminal whose holder has not answered this server since it started
-  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
-  agent keeps running, and the same request attaches once the holder answers.
-  A ticket presented after its terminal ended, or while its holder is not
-  answering, gets the same two errors with a null `id` in place of `bridged`.
-  Resolution never starts a provider; a Session an earlier build left under
-  its own owner process is restarted by `lf resume`, not attached
-  ([transport README](../transport/README.md#conversations-an-earlier-build-started)).
-  The terminal opens a separate connection and sends `attach {ticket}` as its
-  first message. It reads `bridged {terminal_id}`, then carries the
-  [view protocol](../transport/README.md#view-protocol): raw bytes locally,
-  binary frames remotely. Tickets (`ticket.rs`) are single use, expire
-  after 60 s, and bind to the same local user or remote Tailscale node and user.
-  Terminal bridges and bulk transfers do not consume control-connection slots. Any other
-  ticket is `not_found {ticket}`. Each terminal has its own connection, so
-  readings never wait behind terminal bytes, a control failure never closes a
-  bridged terminal, and the bridge reads no Work. The terminal registry alone
-  grants input/geometry, continues output from a PTY position and revokes stale
-  control. No raw-input replay. Desktop automatically reconnects the same held
-  terminal with bounded backoff, keeping connection status in native chrome
-  outside terminal bytes. Recovery attaches from its PTY position or takes a
-  fresh screen and requests free claims without replacement. Newer viewers
-  retain input and geometry. Unavailable keeps the last screen marked stale;
-  Retry reconnects without preparing or resuming a provider. A connection
-  failure alone never means the Session ended.
-
 - Bulk. An answer or reading larger than `limits.max_message` never travels on
   the control connection: the client receives `bulk {id, ticket, bytes}`, redeems
   the ticket on a second connection, and reads `admitted` followed by the original
@@ -439,11 +406,80 @@ the phone's `view.select` Task list and its creation destinations all read it.
   are refused with `unavailable`. Clients fetch spills off their reader so other
   request IDs never wait. Within one ID, the ticket keeps its place: deliver its
   payload before later readings, errors or `ended`, and advance the resume
-  checkpoint only with the delivered reading. Swift clients bound deferred
+  checkpoint only with the delivered reading. For that reason another
+  admission's attempt leaves a bulk ticket redeemable: its payload cannot be
+  requested again in its place, while a terminal ticket, which a fresh
+  `session.attach` replaces, is spent by any attempt. Swift clients bound deferred
   messages to 64 frames and 32 MiB; falling behind requires reconnecting.
   A control line over the limit is answered
   `error {id: null, invalid}` whose data names `max_message`, and the connection
   closes. Nothing is paged.
+
+## Terminal attachment
+
+`session.attach` answers a ticket on an ordinary client connection. A separate
+bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only JSON message
+and is answered `bridged`. A ticket (`ticket.rs`) is 16 random bytes as 22 base64url
+characters and lasts 60 seconds by the wall clock, so host sleep counts; expiry
+does not close an open bridge. A ticket binds to the admission that requested
+it: the Machine's own user on the local socket, or one Tailscale node and user
+remotely. Since a new ticket is one `session.attach` away, every redemption
+attempt spends a terminal ticket, successful or not:
+an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
+`id` and closes the connection. After a failure or a disconnect before
+`bridged`, request a new ticket and bridge. Bridges read no Work and do not
+occupy the 64 client slots.
+
+`session.attach {session}` attaches to the Session's held terminal, and
+`{session, terminal_id}` only to that terminal. Either answers a ticket
+`{ticket, terminal_id, expires_in_ms}`, and its bridge answers
+`bridged {terminal_id}`, then carries the
+[view protocol](../transport/README.md#view-protocol): raw bytes locally,
+binary frames remotely. A terminal that has ended answers `not_found` with
+`terminal_id` and `current_terminal_id` (null when the Session has none).
+A terminal whose holder has not answered this server since it started
+answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+agent keeps running, and the same request attaches once the holder answers.
+A ticket presented after its terminal ended, or while its holder is not
+answering, gets the same two errors with a null `id` in place of `bridged`.
+Resolution never starts a provider; a Session an earlier build left under
+its own owner process is restarted by `lf resume`, not attached
+([transport README](../transport/README.md#conversations-an-earlier-build-started)).
+`lf session resume` and `server::client::attach` perform both ticket steps.
+
+Each terminal has its own connection, so readings never wait behind terminal
+bytes and a control failure never closes a bridged terminal. Follow
+[terminal and provider recovery](#terminal-and-provider-recovery) to reconnect.
+
+### Remote attach contract
+
+The [attachment contract above](#terminal-attachment) applies over the remote
+carrier (`lf server mobile`), with these transport differences.
+
+Connect to the host's `/v1/machine` WebSocket, complete
+[`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
+with a Session ID from `session.list`:
+
+```text
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null},"select":null}
+← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","terminal_id":"<terminal ID>","expires_in_ms":60000}}
+```
+
+Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
+`attach` first, without `hello`; `/v1/machine` keeps carrying requests and
+live Work updates:
+
+```text
+→ {"type":"attach","ticket":"<ticket>"}
+← {"type":"bridged","terminal_id":"<terminal ID>"}
+```
+
+Both WebSocket endpoints authenticate before upgrade and admit only the host
+owner's Tailscale user; a rejected connection cannot present a ticket. Tickets
+bind both connections to the same Tailscale node stable ID and user ID; another
+device on the same account cannot redeem them. Client-supplied identity and a
+proxy's Unix UID cannot substitute for authentication. Local and remote
+tickets are not interchangeable. The 60-second lifetime includes host sleep.
 
 ## Turn and tool boundaries
 
@@ -1039,6 +1075,10 @@ returns `not_found` with `terminal_id` and `current_terminal_id`. Attaching by
 Session reaches the current one; neither attachment starts or resumes a
 provider. A lost
 connection alone does not establish process death.
+
+Desktop reconnects to the same held terminal with bounded backoff. See
+[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and viewer's
 control claims are distinct. `SessionRecord.transition` reports the latest

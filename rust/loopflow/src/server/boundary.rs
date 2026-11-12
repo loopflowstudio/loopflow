@@ -52,7 +52,13 @@ pub(super) fn answer(
     } = boundary;
     let mut delivery = ContextDelivery::load(path)?;
     // A checkout moved since launch: the hook renders from the new place.
-    if delivery.relocate(store)? {
+    let mut changed = delivery.relocate(store)?;
+    if matches!(moment, BoundaryMoment::Start | BoundaryMoment::Compact) {
+        if let Some(adapter) = adapter {
+            changed |= delivery.identify(store, &adapter.session)?;
+        }
+    }
+    if changed {
         delivery.save(path)?;
     }
     let nothing = SessionBoundaryAnswer {
@@ -431,6 +437,7 @@ mod tests {
         std::fs::create_dir(&repo).unwrap();
         let delivery = home.path().join("delivery.json");
         ContextDelivery {
+            identity: None,
             repository: None,
             repo,
             wave: None,
@@ -459,6 +466,78 @@ mod tests {
             printed: Vec::new(),
             inbox: None,
         }
+    }
+
+    #[test]
+    fn start_and_compact_refresh_session_and_task_identity_without_steers() {
+        let (_home, store, adapter, delivery) = fixture();
+        let render = |moment, source| {
+            let request = boundary(
+                moment,
+                &adapter,
+                &delivery,
+                serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":source}),
+            );
+            assert!(answer(&store, &request).unwrap().0.steers.is_none());
+            ContextDelivery::load(&delivery).unwrap()
+        };
+        let start = render(BoundaryMoment::Start, "startup");
+        let identity = start.identity.unwrap();
+        assert_eq!(identity.session, "session");
+        assert_eq!(identity.task, None);
+
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                due_date: None,
+                id: crate::durable::TaskId::new(),
+                project_id: None,
+                title: "Keep \"$native\" <text>".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET task_id=?1 WHERE id='session'",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        let compact = render(BoundaryMoment::Compact, "compact");
+        assert_eq!(
+            compact.identity.as_ref().unwrap().task,
+            Some((task.identifier.clone(), task.title.clone()))
+        );
+        let text = compact
+            .block_with_prefix(crate::context_block::ContextMoment::Compact, "")
+            .unwrap()
+            .text;
+        assert!(
+            text.starts_with(&crate::prompt::render_reference(&format!(
+                "This Session: session\nThis Session's Task: {} {}\n",
+                task.identifier,
+                serde_json::to_string(&task.title).unwrap(),
+            ))),
+            "{text}"
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET issue_title='Renamed Task' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            render(BoundaryMoment::Compact, "compact")
+                .identity
+                .unwrap()
+                .task,
+            Some((task.identifier, "Renamed Task".into()))
+        );
     }
 
     #[test]
@@ -951,7 +1030,7 @@ mod tests {
         let printed = answer(
             &store,
             &at(
-                BoundaryMoment::Tool,
+                BoundaryMoment::Start,
                 serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
             ),
         )
@@ -967,6 +1046,14 @@ mod tests {
         );
         prompt.printed = vec![printed];
         answer(&store, &prompt).unwrap();
+        answer(
+            &store,
+            &at(
+                BoundaryMoment::Compact,
+                serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"compact"}),
+            ),
+        )
+        .unwrap();
         answer(
             &store,
             &at(

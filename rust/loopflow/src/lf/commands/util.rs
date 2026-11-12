@@ -1032,6 +1032,8 @@ async fn open_codex_native(
     if let Some(context) = &launch.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.
+        let mut context = context.clone();
+        context.identify(store, session)?;
         context.bind_codex_session(thread.as_str())?;
     }
     if turns == 0 && !launch.task_prompt.is_empty() {

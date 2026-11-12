@@ -250,9 +250,18 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
         .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
-    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    snapshot.snapshot.projects[0].name = "Conflicting name".into();
+    // Linear can rename at the same `updatedAt`; the later read wins.
+    snapshot.snapshot.projects[0].name = "Renamed in Linear".into();
     snapshot.synced_at = 2;
+    fixture
+        .store
+        .seed_inventory(snapshot.clone(), None)
+        .await
+        .unwrap();
+    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
+    assert_eq!(retained[0].name, "Renamed in Linear");
+    snapshot.snapshot.projects.clear();
+    snapshot.synced_at = 3;
     assert!(fixture.store.seed_inventory(snapshot, None).await.is_err());
     assert_eq!(
         fixture.store.list_projects(Some(wave.id())).await.unwrap(),

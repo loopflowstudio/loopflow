@@ -450,10 +450,10 @@ changes after reading the tracker again. `lf wave sync` refreshes from Linear fi
 lf task sync LOO-403 --retry-updates
 ```
 
-Linear can change an issue without moving its `updatedAt` (it re-renders
-branch names, for one). When its copy disagrees with lf's saved copy at the same
-`updatedAt`, the sync keeps what it just read and carries on; your saved local
-edits stay queued. When an error has a fix, it names the command:
+Linear can change an issue or a Project without moving its `updatedAt` (it
+re-renders branch names, for one). When its copy disagrees with lf's saved copy
+at the same `updatedAt`, the sync keeps what it just read and carries on, for
+Tasks and Projects alike; your saved local edits stay queued. When an error has a fix, it names the command:
 `lf task sync <issue>` for a Task, `lf wave sync` for a Project.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).

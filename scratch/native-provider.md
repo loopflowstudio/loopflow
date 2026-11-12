@@ -23,6 +23,16 @@ retired; it reads at `fdb457e38:scratch/native-provider.md`, with
 commit. LOO-824's scratch (`holder.md`, `explore.html`, `concept-review.html`,
 `qa.html`) is on its branch; `holder.md` reads at `d7901ea6e:scratch/holder.md`.
 
+## LOO-823 ships the launch (November 11)
+
+Jack Heart, on LOO-823: "if we already have it working we should just kee it
+here and hsip it here". LOO-823 lands bare interactive `lf` at a terminal with
+no owner and the provider as foreground process-group leader. When syncing
+onto it, its launch replaces this branch's `transport::delegate` /
+`ForegroundAgent` below; keep only what it lacks (`runs_in_its_terminal`
+resume beside a running agent, `open_without_replacing`). Item 3 under
+Remaining is LOO-823's.
+
 ## Built
 
 - `transport::delegate`: a bare interactive terminal launch (not held, not
@@ -55,6 +65,60 @@ commit. LOO-824's scratch (`holder.md`, `explore.html`, `concept-review.html`,
 2. Pi: launch bare interactive Pi with `--session-id <minted id>` (probe in
    `questions.md`) once the turn hook that reports `sessionFile` is gone;
    the thread becomes the id, resolved to `*_<id>.jsonl` by LOO-822's reader.
+
+3. The provider becomes the terminal's foreground process-group leader (own
+   group + `tcsetpgrp`, or exec), so Rex, which reads the `tcgetpgrp` leader,
+   shows Claude/Codex. Today `delegate` keeps the agent in lf's group, so lf
+   is the leader. No argv0/symlink naming. One launch path for every harness.
+   LOO-823's prototype: `59fdcdaee0` (`os_process/foreground.rs`,
+   `run_interactive`) on `jack/loo-823-find-what-leaks-lf-processes-and-fix-the-tests`.
+   With its own group the agent gets Ctrl+C/SIGHUP directly; recheck
+   `ForegroundAgent`'s signal handling against that.
+4. Desktop pane opening a bare Session still waits for the owner relay
+   handshake (`LF_SERVER_STATUS`, "Opening… Input paused"). It stays "for
+   now ... until server-first's Desktop pieces replace the handshake"; name
+   the `docs/dev/server-first.md` row that removes it.
+
+5. Bare Graph targets (`lf code`, `lf graph …`) still keep an owner. Call,
+   reversible: an interactive step of a bare Graph goes direct like a bare
+   skill (closing the terminal ends it); headless steps keep their owner,
+   which `headless_graph_settles_its_original_step_after_creator_teardown`
+   relies on.
+6. Bare Codex drops `__codex-observe`. Jack Heart, asked whether bare Codex
+   should keep starting it: "no they shoudlnt". It sits in its own
+   setsid session, outlives the terminal and writes turns live, which is
+   neither "behaves like the underlying harness" nor bare telemetry, which
+   comes from LOO-822's exit-time transcript read. Bare Codex launches like Claude:
+   no lf app-server, no `open_thread`, no observer; lf runs `codex [OPTIONS]
+   <prompt>` (resume: `codex resume <id> <prompt>`, both on 0.167.1), so the
+   first turn is argv. Jack Heart: "why cant we do something more similar to
+   what we do with claude or any other provider". Gap vs Claude/Pi: Codex has
+   no `--session-id`, so the thread id comes from the kept start context
+   hook's `session_id` (unverified) or the rollout at exit.
+   Managed Codex follows
+   LOO-826's server registration.
+
+`scratch/simplification-opportunities.md` (read at LOO-823 `8e1c71d6d5`)
+assigns LOO-820 Opportunity 2's bare half: delete `bare_conversation`,
+`opens_bare`, `runs_in_terminal` as decider; context hooks only for bare;
+drop the bare steer and exit-record handoff. Asked whether `Holder` and bare Codex fold
+into LOO-820 or become separate Tasks, Jack Heart: "fold it in here". So
+LOO-820 also builds `Holder { Terminal, Server(PrimaryScope), Run }`, decided
+once where the Session id is known, and deletes `names_work`, `resumes_work`,
+`journal::task_run_step` and both `managed` fields; harnesses read their hook
+set from `hook_settings(holder)`. Calls on the doc's open choices (reversible):
+headless `--task` runs get every hook; a `Terminal` launch on non-tty stdin
+runs on the caller's pipes, no owner PTY.
+
+## LOO-823 review, moved here (Jack Heart, November 11, "let 820 own it")
+
+- "for a bare session, it jsut does whatever claude or codex would do"
+- "agian, just behaves like the underlying harness woudl": closing the
+  terminal ends it, mid-turn included; Ctrl+] is an ordinary key.
+- "if its a managed task session, then neither ends the session"
+- Managed is only a scope's ongoing conversation (Task/Wave/repository); a
+  skill typed in a Task checkout is bare ("2a").
+- "shoudl be independent of provider too"
 
 ## Delete — do not maintain
 

@@ -54,3 +54,13 @@ Its choices and reversible assumptions are in the parent branch,
   bare launch; direct output would be unframed on its stream.
 - While lf waits on a foreground agent it ignores SIGTERM sent to it alone,
   since its one signal handler cannot tell Ctrl+C from SIGTERM.
+
+## Steering bare Sessions (open, November 11)
+
+Asked: with turn hooks gone, should `lf session steer` say a bare Session
+gets the steer only at its next start/resume/compaction, or refuse bare
+Sessions? Jack Heart: "i think maybe we should remove lf session steer and
+only allow lf task steer?", then "that is basically what our arhcitecture
+supports, right?" Gap: Wave and repository conversations are managed and are
+steered today only by `lf session steer` with no ID ("the current Wave's or
+repository's Sessions"); `lf task steer` cannot reach them.

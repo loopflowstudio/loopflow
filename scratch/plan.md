@@ -20,6 +20,17 @@
   text no longer embeds the reset epoch, so a retried delivery's saved error is
   stable.
 
+- Planning revision ignores reading times: `session_summary_indexes.sql`
+  recreates the `store_revision_*_update` triggers on `pm_items`,
+  `pm_projects`, `projects`, `tasks`, `task_changes`, `task_state_deliveries`
+  with `WHEN` clauses comparing every column. Stamps (`pm_items.observed_at`,
+  `pm_projects.observed_at`/`description_observed_at`,
+  `tasks/projects.pm_snapshot_synced_at`) count only when they go NULL ↔ value;
+  rewriting identical values (a retry saving the same error) counts as nothing.
+  `planning_update_triggers_compare_every_column` fails when a later column is
+  missing from its trigger. Concept review (2026-11-12): "A reading time is
+  not a change" applied at the store, not only at frame identity.
+
 ## Measured (2026-11-12, snapshot of ~/.lf/loopflow.db, 16,488 Sessions / 266,057 events)
 
 - Transition lookup across all Sessions: 0.323 s → 0.008 s; plan
@@ -34,6 +45,13 @@
   delivery retries rewrite `task_changes`/`task_state_deliveries` errors;
   `ci_incidents.updated_at`, `pr_landings.generation`.
 
+## Next
+
+Not in this iteration: `wave.sync` is per Wave but `refresh_repository` (Team
+delta) is per repository, so K connected Waves shown in Desktop run K
+repository refreshes each 5-minute tick. If verify still shows wave.sync
+dominating after the lock fix, one repository refresh per tick is the next cut.
+
 ## Remaining
 
 - After `lf install`: server CPU with loopflow + manabot open, `held the store
@@ -41,8 +59,6 @@
 - Config reparse per request (`settings::validate_value` in samples) not
   addressed: config reads go through `observe` for subscription dependencies,
   so a cache must still record them. Candidate follow-up Task.
-- Linear refresh restamping observation columns still bumps the planning
-  revision and rebuilds readers (frames are no longer sent for it).
 
 ## Checks
 
@@ -50,4 +66,5 @@
 - `cargo test -p loopflow --lib wave_sync_without_an_initiative` — passed
 - `cargo clippy --all-targets -- -D warnings` — clean
 - compress (doc comment fix, `has_unrouted_changes` helper): `cargo test -p loopflow --lib -- store::sqlite::planning_peers:: wave_sync_without_an_initiative` — 5 passed; clippy clean
+- planning revision triggers: `cargo test -p loopflow --lib store::sqlite::revisions::` — 9 passed; `-- store::sqlite:: linear::acceptance:: store::tests::` — 308 passed; clippy clean
 - gate: `documented_commands::`, `lf::tests::`, `wave_resolution_matrix::`, `local_planning::`, `binary(two_people)`, `binary(transport_tests)` (store trigger/schema)

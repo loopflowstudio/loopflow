@@ -180,9 +180,21 @@ impl SqliteStore {
         revision: &str,
         incoming: &PlanningSnapshot,
     ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Every running agent acquires each second and the remote rarely
+        // moves. A revision already imported with nothing left in conflict
+        // would merge to what is stored; skip it before taking the write lock.
+        let current: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
+             AND NOT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            params![repo, destination, revision],
+            |row| row.get(0),
+        )?;
+        if current {
+            return Ok(());
+        }
         let incoming = incoming.canonicalized().map_err(invalid)?;
         incoming.validate().map_err(invalid)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;

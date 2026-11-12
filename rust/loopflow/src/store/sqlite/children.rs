@@ -1598,11 +1598,12 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     if identifier != format!("lf-{hex}") {
         return Ok(Some(identifier));
     }
-    let mut query = conn.prepare(
-        "SELECT lower(substr(id,6)) FROM tasks WHERE id!=?1 AND substr(lower(id),6,6)=?2",
-    )?;
+    // Task IDs are canonical lowercase hex, so the six-character prefix is a
+    // primary-key range rather than a scan of every Task.
+    let mut query =
+        conn.prepare("SELECT substr(id,6) FROM tasks WHERE id!=?1 AND id>=?2 AND id<?2||'~'")?;
     let others = query
-        .query_map(params![id.as_str(), &hex[..6]], |row| {
+        .query_map(params![id.as_str(), format!("task_{}", &hex[..6])], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

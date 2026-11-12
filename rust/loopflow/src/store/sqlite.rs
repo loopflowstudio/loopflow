@@ -154,6 +154,18 @@ fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
 }
 
 impl SqliteStore {
+    /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
+    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
+    /// second on a store of 770 MB. The Machine server runs it at start and
+    /// about once a day; nothing else does.
+    pub(crate) fn refresh_statistics(&self) -> StoreResult<()> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+        Ok(())
+    }
+
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)

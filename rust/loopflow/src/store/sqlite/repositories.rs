@@ -213,7 +213,8 @@ impl SqliteStore {
     ) -> StoreResult<crate::durable::TaskLocationObservation> {
         use crate::durable::{TaskLocation, TaskLocationObservation};
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        // One snapshot that only reads: a savepoint, not the write lock.
+        let tx = conn.savepoint()?;
         let machine = super::durable::map_local_machine(&tx)?.id;
         let location = (|| -> StoreResult<TaskLocation> {
             let repo: String = tx.query_row(

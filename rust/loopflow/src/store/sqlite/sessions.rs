@@ -1368,10 +1368,11 @@ impl SqliteStore {
     /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
-        session: LfSession,
+        mut session: LfSession,
         caller_process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let _admission = self.lock_session_checkouts(&session)?;
+        discover_session_repo(&mut session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -1391,9 +1392,14 @@ impl SqliteStore {
     pub fn ensure_primary_session(
         &self,
         scope: &PrimaryScope,
-        session: LfSession,
+        mut session: LfSession,
         caller_process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
+        // Nearly every call finds the primary it asks for; that takes no write lock.
+        if let Some(current) = self.primary_session(scope)? {
+            return Ok(current);
+        }
+        discover_session_repo(&mut session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = ensure_primary_session_in(&tx, scope, session, caller_process)?;
@@ -1856,7 +1862,7 @@ pub(super) fn retain_history_in(
     Ok(changed)
 }
 
-/// Resolve ancestry and captured location on the conversation's admission transaction.
+/// Resolve ancestry on the conversation's admission transaction.
 pub(super) fn reserve_session_in(
     conn: &Connection,
     mut session: LfSession,
@@ -1879,6 +1885,12 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
         }
         session.wave_id = wave;
     }
+    Ok(())
+}
+
+/// Name the repository holding the Session's cwd. This runs Git, so callers
+/// do it before taking the write lock every other writer waits on.
+fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
     if session.repo.is_none() && session.cwd.is_dir() {
         session.repo = crate::repo::discover_repo_root(&session.cwd)
             .map_err(invalid)?

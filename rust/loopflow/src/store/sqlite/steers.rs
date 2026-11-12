@@ -587,6 +587,15 @@ impl SqliteStore {
         Ok(steer)
     }
 
+    /// Whether `session` has a steer to emit. The server asks for every idle
+    /// conversation whenever a revision moves; nearly always the answer is no,
+    /// and it takes no write lock.
+    pub(crate) fn has_undelivered_steers(&self, session: &str) -> StoreResult<bool> {
+        self.recover_prepared_steers(session)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        undelivered(&conn, session)
+    }
+
     pub fn session_steers(
         &self,
         session: &str,

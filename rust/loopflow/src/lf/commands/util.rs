@@ -101,10 +101,7 @@ pub(crate) fn resume_session_with_env(
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     // Reopening a conversation recorded as Task, Wave or repository work is
     // managed whatever command reopened it.
-    let work = managed
-        || session
-            .work_source
-            .is_some_and(crate::session::WorkSource::is_managed);
+    let work = managed || !store.is_bare(&session)?;
     config.holder = crate::session::Holder::of(work, true);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),

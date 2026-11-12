@@ -667,7 +667,7 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let managed = resumes_work(cli, connection);
+    let managed = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
@@ -696,12 +696,6 @@ async fn resume(
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
-}
-
-/// A resume naming its Task or Wave is managed, as `Cli::names_work` is for
-/// a launch.
-fn resumes_work(cli: &crate::lf::Cli, connection: &SessionConnectionArgs) -> bool {
-    connection.work_flag(cli).is_some() || crate::journal::task_run_step()
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -780,7 +774,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let managed = resumes_work(cli, connection);
+                let managed = connection.work_flag(cli).is_some();
                 let mut record =
                     reopen(&store, directory, target, connection, *fork, false, managed).await?;
                 // The opening terminal resumes this Session by id, managed

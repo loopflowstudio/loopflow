@@ -154,16 +154,18 @@ one each.
 A launch is managed when it comes through a Task, Wave or repository
 conversation command, including those opened by Desktop. A bare `lf` typed inside
 a Task's checkout stays bare and records the Task as its ancestry. The
-command decides: `Cli::names_work` is true for `--task`, `--wave` (a Task or
-Wave conversation passes them), `lf resume --task`/`--wave` and a step of
-`lf task run`, and the launch carries it as `Holder::Server` (`AgentConfig::holder`). Beside a
+command's Work decides: `--task` and `--wave` (a Task or Wave conversation
+passes them, and `lf task run` passes `--task` to its Graph's agent steps)
+bind it as `WorkSource::Declared`, and the launch carries that as
+`Holder::Server` (`AgentConfig::holder`). Beside a
 Session id, `--task`/`--wave` make the resume managed and the id still
 selects: Desktop's Task and Wave workspaces prepare with `lf session resume
 [ID] --task X --prepare`, and the `open_argv` it gets back is `lf session
 resume ID --task X`. Reopening a recorded conversation by id alone names no
 Work, so there the Session row decides holding and the server check:
-`WorkSource::is_managed` (`declared` or `bound`; a Task, Wave or repository
-conversation). A child run started by a Session's agent, which that agent
+`SqliteStore::is_bare` is false for `declared` or `bound` Work and for a
+scope's primary conversation. `transport::delegate` is the one place a
+launch's host is chosen from that answer. A child run started by a Session's agent, which that agent
 steers, and plain `lf <skill>` are bare. Desktop adds no mark: an agent
 started from a Desktop shell is bare.
 

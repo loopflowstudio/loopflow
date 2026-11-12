@@ -243,8 +243,8 @@ pub enum Holder {
 }
 
 impl Holder {
-    /// `work`: the command names a Task or Wave (`Cli::names_work`), or the
-    /// Session it reopens is recorded as such work (`WorkSource::is_managed`).
+    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
+    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
     pub(crate) fn of(work: bool, interactive: bool) -> Self {
         if work {
             Self::Server

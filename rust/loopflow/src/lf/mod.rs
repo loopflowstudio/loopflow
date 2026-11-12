@@ -460,14 +460,6 @@ impl Cli {
             .map(|task| format!("task:{task}"))
             .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
     }
-
-    /// Whether this is a Task or Wave command: it names its Work (`--task`,
-    /// `--wave`) or is a step of a Task's run. Its launch is managed; plain
-    /// `lf <skill>` in a Task's checkout only counts toward the Task. What
-    /// each gets is in `server/README.md` ("Turn and tool boundaries").
-    pub fn names_work(&self) -> bool {
-        self.work_subject_selector().is_some() || crate::journal::task_run_step()
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1680,8 +1672,8 @@ impl SessionConnectionArgs {
     }
 
     /// The Task or Wave this command names, as the flag and value that name
-    /// it. Naming one makes the resume managed, as `Cli::names_work` does for
-    /// a launch, also beside a Session id.
+    /// it. Naming one makes the resume managed, as `--task` or `--wave` does
+    /// for a launch, also beside a Session id.
     pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
         let task = self.task.as_deref().or(cli.task.as_deref());
         let wave = self.wave.as_deref().or(cli.wave.as_deref());

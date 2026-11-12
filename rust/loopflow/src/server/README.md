@@ -425,9 +425,10 @@ task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
 repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
 with `lf session bind`. Every other launch is bare, including
 `lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. The command decides
-(`Cli::names_work`), and reopening a recorded conversation also reads the
-Session row (`WorkSource::is_managed`). The launch carries the answer as
+checkout; that run still counts toward the Task. The launch's Work source
+decides (`WorkSource::is_managed`; `lf task run` names its Task to each agent
+step), and reopening a recorded conversation also reads the Session row
+(`SqliteStore::is_bare`). The launch carries the answer as
 `AgentConfig::holder`: `Server` for managed work, `Owner` for a bare
 conversation a per-Session owner holds, `Caller` for every other bare launch,
 which gets only the start and compaction hooks and no steer capability.

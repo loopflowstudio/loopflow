@@ -37,7 +37,6 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     }
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
-    built.agent_config.holder = crate::session::Holder::of(cli.names_work(), !cli.batch);
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
         let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
@@ -47,6 +46,10 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
             source: crate::session::WorkSource::Declared,
         })
     });
+    built.agent_config.holder = crate::session::Holder::of(
+        built.work.as_ref().is_some_and(|work| work.source.is_managed()),
+        !cli.batch,
+    );
 
     print_context_header(&built, cli);
     run_prompt(&built, cli).map(|_| ())
@@ -99,7 +102,7 @@ pub(crate) fn preview_prompt(
 
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
-/// `managed` when the resume command named a Task or Wave, or is a Task-run step.
+/// `managed` when the resume command named a Task or Wave.
 pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
     if crate::transport::delegate_current(true, managed)? {
         return Ok(());
@@ -231,7 +234,6 @@ fn build_bound_prompt(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<PromptBuild> {
-    let managed = cli.names_work();
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
     let arguments = message.unwrap_or_default();
@@ -256,7 +258,7 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.agent_config.holder = crate::session::Holder::of(managed, !cli.batch);
+    built.agent_config.holder = crate::session::Holder::of(binding.source.is_managed(), !cli.batch);
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),

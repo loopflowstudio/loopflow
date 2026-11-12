@@ -246,17 +246,17 @@ then to the next provider in `agents`. A limit that refuses the launch itself
 moves on the same way.
 
 ```bash
-lf account                               # every login, its capacity and when it resets
+lf account                         # every login, its capacity and when it resets
 lf set --global agents claude,codex # let headless steps move to Codex when Claude is out
-lf gate -a codex                         # run this one on another harness
-lf --only-account claude=work@ gate      # stay inside the logins you name
+lf gate -a codex                    # run this one on another harness
+lf --only-account claude=work@ gate # stay inside the logins you name
 ```
 
 A step with nowhere left to move stops its run once; `lf task run` does not
-start it again into the same refusal. It is pinned to its provider by an `agent`
-choice or `-a`, or has no `agents` list to move through: the stop line and
-`lf task status` say so, and `lf config settings --skill <name> --explain` shows
-which.
+start it again into the same refusal. The stop line and `lf task status` say
+whether its order ran out or it had no next entry. Use
+`lf config settings --skill <name> --explain` to inspect the order and any
+`agent` choice or `-a` that pins its provider.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.

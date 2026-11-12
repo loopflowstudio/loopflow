@@ -1275,9 +1275,16 @@ fn _run_with_transient_retries(
                 // No other login can take the step: a launch without a route,
                 // or one that refused on every login. The next agent in its
                 // order can, whether or not a turn ever ran.
-                let next = (stuck && failure == AgentFailure::AccountSubscriptionLimit)
-                    .then(|| rungs.get(rung + 1))
-                    .flatten();
+                let next = rungs
+                    .get(rung + 1)
+                    .filter(|_| stuck && failure == AgentFailure::AccountSubscriptionLimit);
+                let reason = _failure_reason(&result, failure);
+                if stuck && next.is_none() {
+                    if failure == AgentFailure::AccountSubscriptionLimit {
+                        _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
+                    }
+                    return Ok(result);
+                }
                 // The conversation moves with the step; a turn that never
                 // reached a thread still has its whole task to do.
                 match thread {
@@ -1290,14 +1297,7 @@ fn _run_with_transient_retries(
                         attempt_config.task_prompt = _with_original_task(prompt, launch);
                     }
                 }
-                let reason = _failure_reason(&result, failure);
                 match next {
-                    None if stuck => {
-                        if failure == AgentFailure::AccountSubscriptionLimit {
-                            _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
-                        }
-                        return Ok(result);
-                    }
                     None => {
                         failovers += 1;
                         account_failure = Some(result.clone());
@@ -1357,8 +1357,8 @@ fn _fallthrough_rungs(
     if !process.wait_for_capacity || launch.provider_account_authority_home.is_some() {
         return Ok(vec![first]);
     }
-    let configured = |agent: &str| match (parse_agent(agent), &launch.claude_model) {
-        ((harness, None), Some(model)) if harness == "claude" => format!("claude:{model}"),
+    let configured = |agent: &str| match (agent, &launch.claude_model) {
+        ("claude", Some(model)) => format!("claude:{model}"),
         _ => agent.to_owned(),
     };
     let mut order: Vec<String> = std::iter::once(first.as_str())
@@ -1366,7 +1366,7 @@ fn _fallthrough_rungs(
         .map(configured)
         .collect();
     // With no order to move through, a bare Claude tries its other models.
-    if launch.fallback_agents.is_empty() && parse_agent(&first) == ("claude".to_owned(), None) {
+    if launch.fallback_agents.is_empty() && first == "claude" {
         order.extend(crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("claude:{model}")));
     }
     let mut rungs: Vec<String> = Vec::new();

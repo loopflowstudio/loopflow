@@ -41,11 +41,9 @@ skill:
     default_agent: codex
 ```
 
-`agents` is one ordered list: the providers Loopflow may use, and the order it
-tries them in. `claude,codex` and `[claude, codex]` are the same list, on the
-command line and in a file. Work starts on Claude. `default_agent` names one entry and moves
-it to the top where it applies, so compress tries Codex first and keeps Claude
-behind it.
+Work starts on Claude; compress tries Codex first and keeps Claude behind it.
+`claude,codex` and `[claude, codex]` are the same ordered list, on the command
+line and in a file.
 
 Entries are `harness[:model]`, so the same list orders models:
 
@@ -59,9 +57,8 @@ nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
 next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
 Haiku.
 
-When a usage limit refuses a headless step, the step moves on instead of
-failing: to your next login for that provider, then to the next entry in
-`agents`.
+When a usage limit refuses a headless step, it tries your next login for that
+provider, then the next entry in `agents`.
 
 ```bash
 lf task status MTG-328
@@ -77,8 +74,9 @@ lf task status MTG-328
 | `lf -a codex graph code` | Codex only | Codex only |
 
 An `agent` choice or `-a` pins one provider: the step changes login, never
-provider, and waits for a reset when no login has room. Neither is checked
-against `agents`, so `-a pi` runs Pi for that command whatever the list says.
+provider. It waits for a known reset; with no reset or next entry, it stops
+once. Neither choice is checked against `agents`, so `-a pi` runs Pi for that
+command whatever the list says.
 The list covers what Loopflow picks by itself.
 
 A narrower `agents` replaces the wider one whole, so a repository, Wave or
@@ -98,8 +96,8 @@ a global `default_agent: claude`, review above still runs Codex only, while
 `default_agent`, general or per skill, does not lead a personal list, because
 personal configuration outranks the repository's.
 
-A `default_agent` the list lacks is added in front, for the scope it applies
-to and nowhere else:
+A `default_agent` moves its exact entry to the front, or adds it there if
+absent, only where its declaration applies:
 
 | `agents` | `default_agent` | Order |
 | --- | --- | --- |
@@ -416,10 +414,8 @@ Agent selection first separates **choices** from **fallbacks**: every applicable
 `agent` beats every `default_agent`. Apply source, scope and target ordering within
 each class. A command-line `default_agent` is still a fallback. `agents` then
 supplies what a fallback may move to: the applicable list, with the winning
-`default_agent` first. A list that ranks higher than that `default_agent`, by
-the same source, scope and target ordering, is the whole order, and `--explain`
-marks the `default_agent` unused. So a repository `default_agent` does not lead
-a personal list.
+`default_agent` first unless the list ranks higher by source, scope and target.
+Then the list is the whole order, and `--explain` marks `default_agent` unused.
 
 | Declarations | Selected agent |
 | --- | --- |
@@ -788,20 +784,14 @@ skill:
     agent: claude:opus
 ```
 
-```yaml
-agents: [claude, codex]   # allowed providers, in the order to try them
-default_agent: codex      # tried first here; the rest of agents stays behind it
-```
-
 | Key | What it does | When a usage limit refuses a headless step |
 | --- | --- | --- |
 | `agent`, `-a` | Pins one harness | Changes login; never changes provider |
 | `default_agent` | Names one entry, tried first when no `agent` applies | Moves through the rest of `agents` |
 | `agents` | Ordered `harness[:model]` entries Loopflow may pick | Moves through the list in order |
 
-An entry may carry a model (`agents: [claude:opus, codex, claude:fable]`), and
-a step moves through the entries as written. `agents` works everywhere `agent`
-does and [replaces as a unit](#keep-going-when-a-provider-runs-out).
+See [Keep going when a provider runs out](#keep-going-when-a-provider-runs-out)
+for model ordering, list replacement and `default_agent` precedence.
 
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 

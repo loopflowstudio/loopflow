@@ -2,8 +2,8 @@
 //! `lf -b task run` runs it: every step headless, an interactive step standing
 //! in for the person who would be there. A bare ship inside its execution owner
 //! returns once it is shipping and carries on in its log; `-b` stays until the
-//! end. It is started again if it dies while the Task is shipping, unless every
-//! attempt of its run failed with one error: then it stops shipping with it.
+//! end. It is started again if it dies while shipping, unless a usage limit or
+//! repeated identical failure stopped its run: then it stops shipping with it.
 
 use std::path::Path;
 
@@ -83,17 +83,8 @@ pub fn run(
             if let Err(error) =
                 super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))
             {
-                // Neither would end differently on a restart.
-                let cause = error
-                    .downcast_ref::<super::graph::RepeatedRunFailure>()
-                    .map(|repeated| &repeated.cause)
-                    .or_else(|| {
-                        error
-                            .downcast_ref::<super::graph::LimitStop>()
-                            .map(|stop| &stop.cause)
-                    });
-                if let Some(cause) = cause {
-                    ship_halt(&issue, cause)?;
+                if let Some(stop) = error.downcast_ref::<super::graph::TaskRunStopped>() {
+                    ship_halt(&issue, stop.cause())?;
                 }
                 return Err(error);
             }

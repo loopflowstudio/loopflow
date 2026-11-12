@@ -351,18 +351,16 @@ lf task status LOO-1
 | Every eligible account is held back and `agents` has a next entry (`agents: [claude:fable, claude:opus, codex]`) | Continues on that entry: the same conversation on another model of its provider; on another provider, seeded with the conversation so far, as `lf session new -a` does |
 | Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
 | The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. The refusal does not count as a failed run |
-| Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
+| Nothing it may use is free, and an account has a known reset | Waits, checking each minute, and continues at the first reset |
 | A usage limit refuses it and no agent it may use is left | Stops once: `lf task run` does not start the run again. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude` |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
-Only accounts in the resolved route take a step on. An explicit `harness:model`
-stays on its model and changes only accounts; a bare harness with no order
-behind it may change model; only [`agents`](config.md#keep-going-when-a-provider-runs-out)
-(`lf set --global agents claude,codex`, no explicit `agent` or `-a`) lets a
-step change provider, and it tries each entry as written. A step that started
-on its `default_agent` moves through the rest of the list in order. A launch
-refused on a login Loopflow does not route fails with its limit once the last
-entry refuses too. Nothing is written to your preferences.
+Only accounts in the resolved route take a step on. An `agent` choice or `-a`
+keeps the provider, and the model if given. Otherwise,
+[`agents`](config.md#keep-going-when-a-provider-runs-out) supplies the order:
+`lf set --global agents claude,codex` lets a step move from Claude to Codex.
+A launch refused on a login Loopflow does not route fails with its limit once
+the last entry refuses too. Nothing is written to your preferences.
 Commit messages and PR text fail at once, because someone is waiting for them.
 
 A [saved Claude model](config.md#claude-model) supplies bare `claude`'s starting
@@ -381,7 +379,8 @@ window spent holds that window's launches back until it resets.
 Running out of usage credits ("You're out of usage credits", Claude's
 `seven_day_overage_included`) holds back only the model the launch ran, until
 the reset, never the account. A bare `claude` launch runs Fable, so Fable rests
-and the step goes on with Opus on the same account, in the same conversation.
+and, with no other configured entry behind it, the step goes on with Opus on
+the same account, in the same conversation.
 
 Open Claude Sessions need nothing either. When one hits a limit, the login
 moves to the eligible account that ranks first, and every open Claude follows

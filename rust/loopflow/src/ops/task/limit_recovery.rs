@@ -8,7 +8,7 @@
 
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::task_execution::{limit_stop, task_execution_blockers};
+use crate::ops::task_execution::task_execution_blockers;
 use crate::store::sqlite::{AgentLimitRecovery, SqliteStore};
 use crate::store::StoreResult;
 
@@ -39,20 +39,9 @@ pub(crate) fn waiting_on_limit(
     }))
 }
 
-/// The step of the Task's latest Graph that a usage limit refused with no
-/// agent left to move to, and why with what would let it move. Starting the
-/// run again would only be refused again.
-pub(crate) fn stopped_on_limit(
-    store: &SqliteStore,
-    task: &TaskId,
-) -> StoreResult<Option<(String, String)>> {
-    Ok(ended_step_recovery(store, task)?
-        .and_then(|(step, recovery)| Some((step, limit_stop(&recovery)?))))
-}
-
 /// The latest step of the Task's latest Graph, once its Process has ended,
 /// and how it was getting past a limit.
-fn ended_step_recovery(
+pub(crate) fn ended_step_recovery(
     store: &SqliteStore,
     task: &TaskId,
 ) -> StoreResult<Option<(String, AgentLimitRecovery)>> {

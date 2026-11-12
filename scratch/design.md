@@ -7,10 +7,10 @@ The listener, mobile settings and bulk protocol are outside this Task.
 
 ## Transport dependency
 
-At November 12 05:10 UTC, GitHub's PR metadata reported #1812 open and
+At November 12 05:12 UTC, GitHub's PR metadata reported #1812 open and
 unmerged, at head `28e2321c8e2ea0ca8d8ecb199f31c5bb1a0e844f`.
-`origin/main` was at `d8db655b0edcb080c2fd34057caedcd988c293d0`; this checkout
-last merged `649f11db4b460fd33662d44da24ba656ea048b64`. Between heads `4e0ccacd` and `28e2321c`, #1812 changed
+`origin/main` was at `d8db655b0edcb080c2fd34057caedcd988c293d0`, merged into
+this checkout. Between heads `4e0ccacd` and `28e2321c`, #1812 changed
 `mobile.rs`, `boundary.rs` and added `wake.rs`; `ticket.rs` is unchanged.
 `origin/main` does not contain
 `server/mobile.rs`, `server/remote.rs` or `server/ticket.rs`.
@@ -24,7 +24,7 @@ Inspection of #1812 found
 attempts and uses `Instant`. Its direct tests cover only bulk purposes, including
 foreign attempts and background release of abandoned reservations.
 
-The November 12 04:35 UTC `lf task status LOO-718 --json` read reported
+The November 12 05:12 UTC `lf task status LOO-718 --json` read reported
 `feature` / `demo`, with PR #1812 open and settlement not armed.
 Earlier observations and history references are in
 `23d1372b07f5850f4f25f877cd1bcde4f82d0f86:scratch/design.md`.
@@ -63,4 +63,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed after the November 12 compress (remote contract's duplicate device/account clause dropped); prose-only, no build or test rerun.
+`git diff --check` — passed after the November 12 05:12 UTC realign; prose-only, no build or test rerun.

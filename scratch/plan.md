@@ -55,3 +55,4 @@ Checks:
 - `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --test integration documented_commands::` — pass (implement). Gate runs affected suites.
 - `cargo test -p loopflow --lib -- ops::linear::task_planning_tests:: linear::acceptance::` — 97 pass (qa).
 - Real store: branch `lf task sync` delivered LOO-714 (completion) and LOO-724 (assignee) that the installed lf refused (qa).
+- After `lf sync` onto d80cad2333: `cargo test -p loopflow --lib -- linear::acceptance:: ops::linear::` — 166 pass with `RUST_MIN_STACK=16777216`; at the default stack `task_comments_tests::task_comments_read_and_publish_without_starting_work` (untouched here) overflows locally. Gate/CI decides whether that's this branch.

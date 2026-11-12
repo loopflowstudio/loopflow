@@ -45,10 +45,11 @@ pub fn refresh(checkout: &Path) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         let repo_key = repo.to_string_lossy();
-        // Acquisition records its own failure, and proceeds while another
-        // process holds publication; publication then sends pending changes out.
+        // Acquisition records its own failure and never waits on publication.
+        // A refresh waits out another process's publication, then sends this
+        // Machine's pending changes out.
         let acquired = crate::ops::planning_sync::acquire_repository(&store, &repo_key).await;
-        crate::ops::planning_sync::publish_repository(&store, &repo_key).await?;
+        crate::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
         acquired?;
         let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {

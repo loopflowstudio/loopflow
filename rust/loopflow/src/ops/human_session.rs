@@ -1050,7 +1050,7 @@ pub(crate) async fn open(
         return self::fork(store, session, resume, json).await;
     }
     if resume {
-        end_earlier_owner(&store.sqlite, &session.id)?;
+        end_earlier_owner(&store.sqlite, &session.id, progress.as_ref())?;
     }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
@@ -1237,7 +1237,7 @@ pub(crate) async fn open_without_replacing(
     // Opening restarts what an earlier build's owner still runs; reading what
     // opening would do does not, and counts that owner as no client.
     let earlier_owner = if launch {
-        end_earlier_owner(&store.sqlite, id)?;
+        end_earlier_owner(&store.sqlite, id, None)?;
         false
     } else {
         store.sqlite.session_owner(id)?.is_some()
@@ -1694,12 +1694,17 @@ fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<
 }
 
 /// End the `lf session serve` owner an earlier build left running `session`,
-/// so the conversation restarts held from provider history. The owner is
+/// so the conversation restarts from provider history. The owner is
 /// signalled only by its verified pid and birth, and this returns once it has
 /// exited. One whose identity cannot be verified, or that outlives
 /// `STOP_TIMEOUT`, is left running and nothing starts beside it. Nothing ends
-/// these owners but a resume.
-pub(crate) fn end_earlier_owner(store: &SqliteStore, session: &str) -> Result<()> {
+/// these owners but a resume. The wait can take the whole timeout, so a
+/// terminal's `progress` says what it waits for.
+pub(crate) fn end_earlier_owner(
+    store: &SqliteStore,
+    session: &str,
+    progress: Option<&crate::startup::Startup>,
+) -> Result<()> {
     let Some(owner) = store.session_owner(session)? else {
         return Ok(());
     };
@@ -1716,6 +1721,11 @@ pub(crate) fn end_earlier_owner(store: &SqliteStore, session: &str) -> Result<()
         let recorded = store.lf_process(&owner)?.and_then(|process| process.pid);
         return Err(still_running(recorded));
     };
+    let ending = format!("Ending the earlier lf (pid {pid}) that runs this conversation");
+    match progress {
+        Some(progress) => progress.stage(ending),
+        None => crate::journal::request::diagnostic(format_args!("{ending}")),
+    }
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, &owner)? {
@@ -1724,9 +1734,6 @@ pub(crate) fn end_earlier_owner(store: &SqliteStore, session: &str) -> Result<()
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    crate::journal::request::diagnostic(format_args!(
-        "Ended the earlier lf (pid {pid}) that ran this conversation; resuming it here."
-    ));
     Ok(())
 }
 

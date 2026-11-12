@@ -2092,9 +2092,10 @@ and the server. The holder never opens it.</p>
 <code>lf session serve</code> process of their own until their agent quits. Nothing
 starts one now, and nothing sweeps them. <code>lf resume</code> of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
-waits for it to exit and resumes the thread held from provider history. One it
-cannot verify, or that does not exit, keeps running and the message names its
-pid.</p>
+waits for it to exit and resumes the thread from provider history where any
+resume of it would run: held for Work or a Desktop pane, in the terminal for a
+bare <code>lf resume</code>. One it cannot verify, or that does not exit, keeps running
+and the message names its pid.</p>
 <p>The <a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/transport/README.md">transport README</a> owns the
 holder and view protocols; the
 <a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/server/README.md">server README</a> owns client

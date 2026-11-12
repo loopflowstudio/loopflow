@@ -223,9 +223,10 @@ Conversations started by a build from before held terminals run under an
 `lf session serve` process of their own until their agent quits. Nothing
 starts one now, and nothing sweeps them. `lf resume` of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
-waits for it to exit and resumes the thread held from provider history. One it
-cannot verify, or that does not exit, keeps running and the message names its
-pid.
+waits for it to exit and resumes the thread from provider history where any
+resume of it would run: held for Work or a Desktop pane, in the terminal for a
+bare `lf resume`. One it cannot verify, or that does not exit, keeps running
+and the message names its pid.
 
 The [transport README](../../rust/loopflow/src/transport/README.md) owns the
 holder and view protocols; the

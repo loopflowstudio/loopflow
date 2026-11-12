@@ -159,8 +159,9 @@ ends every agent and Desktop shell it holds. An `lf <skill>` typed at a
 terminal or in a Desktop shell has no holder: its agent is a child of that
 terminal. An `lf session serve` process is a conversation an earlier build
 opened; it ends when its agent quits, and no current build starts one.
-`lf resume <ID>` restarts it in a holder: lf ends the old process, waits for
-it to exit and continues from provider history. If lf cannot verify that
+`lf resume <ID>` restarts it: lf ends the old process, waits for it to exit
+and continues from provider history, held for Task or Wave work and in your
+terminal otherwise. If lf cannot verify that
 process or it does not exit, nothing starts and the message names its pid;
 quit the agent there, or end that pid, and resume again.
 

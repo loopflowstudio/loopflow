@@ -248,7 +248,8 @@ going without it.
 A conversation an earlier build opened under its own `lf session serve`
 process keeps running until its agent quits. `lf resume` of it, or opening its
 Desktop pane, restarts it: lf ends that process, waits for it to exit, and
-continues the thread in the holder from provider history. If lf cannot verify
+continues the thread from provider history: in the holder for Task or Wave work
+and Desktop panes, in your terminal for a bare `lf resume`. If lf cannot verify
 the process, or it does not exit, nothing starts and the message names its
 pid.
 

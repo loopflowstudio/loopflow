@@ -168,3 +168,12 @@ history to continue, the same restart rule). `transport::Place` is
 `{Held, Detached}` plus run-here; no second launch path is left. The
 `questions.md` entries follow from the steers (shells → holder implies the
 Machine server). No open product choice.
+
+## QA (2026-11-12)
+
+Walkthrough in `scratch/qa.html`. Fixed: docs claimed a restarted earlier-build
+owner always resumes held (a bare `lf resume` runs in its terminal; see
+questions.md); `end_earlier_owner` now shows "Ending the earlier lf (pid N)…"
+as the startup stage before its up-to-10 s wait. Checks: fmt, clippy
+`--all-targets` clean; `resume_ends_an_earlier_builds_owner_and_continues_held`
+passes.

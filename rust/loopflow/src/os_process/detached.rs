@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use super::{execution_context, shell_escape, DISCORD_TOKEN_ENV};
 use crate::id::LfProcessId;
 
 const LAUNCHER_ENV: &str = "LF_LAUNCHER_FD";
@@ -235,6 +236,138 @@ pub(crate) fn inherited_descriptors() -> Vec<RawFd> {
         .collect()
 }
 
+/// Start `lf` with `argv` in `cwd` as a plain detached process that outlives
+/// this one, and return its Process once it acknowledges. Its output is
+/// appended to `logs/detached.log`.
+pub(crate) fn start_lf(
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+    inherit: &dyn Fn(&mut std::process::Command),
+) -> Result<LfProcessId> {
+    let context = execution_context()?;
+    let environment = launch_environment(env, &context);
+    let environment = environment
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect::<Vec<_>>();
+    let shell = shell_command(cwd, argv, &environment);
+    let logs = crate::store::lf_home_dir().join("logs");
+    std::fs::create_dir_all(&logs)
+        .with_context(|| format!("Cannot open the detached log in {}", logs.display()))?;
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logs.join("detached.log"))
+        .with_context(|| format!("Cannot open the detached log in {}", logs.display()))?;
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", &shell])
+        .current_dir(cwd)
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .env_remove("LF_SERVER_STATUS")
+        .env_remove(crate::transport::STREAM_ENV)
+        // It names a descriptor the child does not inherit.
+        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+    spawn(command, inherit)?.acknowledged()
+}
+
+fn launch_environment(
+    env: &[(&str, &str)],
+    context: &crate::child::ChildExecutionContext,
+) -> Vec<(String, String)> {
+    let inherited_context = [
+        crate::config::AGENT_OVERRIDE_ENV,
+        "LF_SETTINGS",
+        "LF_TRACE_ID",
+        "LF_PROCESS_ID",
+        crate::lf::WORK_DECLARATION_ENV,
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+    .chain([
+        ("LF_BIN", context.lf_bin.to_string_lossy().to_string()),
+        ("LF_HOME", context.lf_home.to_string_lossy().to_string()),
+    ])
+    .filter(|(key, _)| !env.iter().any(|(explicit, _)| explicit == key))
+    .map(|(key, value)| (key.to_string(), value));
+    env.iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .chain(inherited_context)
+        .collect()
+}
+
+fn shell_command(
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> String {
+    let command = argv
+        .iter()
+        .map(|arg| shell_escape(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let env = env
+        .iter()
+        .filter(|(key, value)| *key != crate::lf::WORK_DECLARATION_ENV || !value.is_empty())
+        .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let clear_context = format!(
+        "unset {} {}; export LF_USER_NAME=\"\"",
+        PROCESS_CONTEXT_ENV.join(" "),
+        SESSION_AUTH_ENV.join(" "),
+    );
+    // Resolve cwd in the child before executing the prepared command.
+    let enter_directory = format!("cd -- {} || exit", shell_escape(&cwd.to_string_lossy()));
+    if env.is_empty() {
+        format!("{enter_directory}; {clear_context}; exec {command}")
+    } else {
+        format!("{enter_directory}; {clear_context}; exec env {env} {command}")
+    }
+}
+
+/// What one lf process is: its Machine, binary, Process, Graph step and claims. A new
+/// session starts without any of it and receives only what its launch names.
+const PROCESS_CONTEXT_ENV: &[&str] = &[
+    crate::config::AGENT_OVERRIDE_ENV,
+    crate::lf::WORK_DECLARATION_ENV,
+    crate::ops::human_session::HUMAN_SESSION_ENV,
+    crate::ops::human_session::PREPARED_CAPTURE_ENV,
+    "LF_RUN_DIR",
+    "LF_RUN_ID",
+    "LF_HUMAN_SESSION_RUN",
+    "LF_REVIEW_RUN_RESERVATION",
+    crate::journal::LF_TRACE_ID_ENV,
+    crate::journal::LF_PROCESS_ID_ENV,
+    crate::work::wave::context::WAVE_ID_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
+    crate::process::AGENT_CALLER_ENV,
+    crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
+    crate::ops::graph_process::GRAPH_ID_ENV,
+    crate::installation::INSTALL_SWITCH_ENV,
+    crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,
+    "LF_TERMINAL_ID",
+    "LF_TERMINAL_TTY",
+    "LOOPFLOW_DIRECTIVE_FILE",
+    "LOOPFLOW_GRAPH_NAME",
+    "LF_BIN",
+    "LF_HOME",
+];
+
+/// Credentials and account choices a new Session must receive explicitly.
+const SESSION_AUTH_ENV: &[&str] = &[
+    crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
+    DISCORD_TOKEN_ENV,
+    "GH_TOKEN",
+    "OPENCODE_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "OPENAI_API_KEY",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +410,157 @@ mod tests {
         )
         .unwrap();
         assert_eq!(launched.acknowledged().unwrap(), id);
+    }
+
+    #[test]
+    fn detached_child_enters_quoted_directory_and_reports_missing_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("checkout with 'quotes'");
+        std::fs::create_dir(&cwd).unwrap();
+        let command = shell_command(&cwd, &["pwd".into(), "-P".into()], &[]);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            cwd.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir(&cwd).unwrap();
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+    }
+
+    #[test]
+    fn detached_lf_clears_parent_identity_and_exports_its_own() {
+        let argv = vec![
+            "lf".to_string(),
+            "work".to_string(),
+            "execute".to_string(),
+            "task".to_string(),
+            "tsk_123".to_string(),
+        ];
+        let command =
+            shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
+
+        assert!(command.contains("unset "));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
+        assert!(command.contains("LF_DISCORD_TOKEN"));
+        assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
+        assert!(command
+            .ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' 'work' 'execute' 'task' 'tsk_123'"));
+    }
+
+    #[test]
+    fn detached_lf_drops_a_stale_run_step_binary_and_home() {
+        let argv = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_GRAPH_ID-}${LF_BIN-}${LF_HOME-unset}\""
+                .into(),
+        ];
+        let command = shell_command(std::path::Path::new("."), &argv, &[]);
+        let output = std::process::Command::new("sh")
+            .args(["-c", &command])
+            .env("LF_RUN_ID", "run_dead")
+            .env("LF_RUN_DIR", "/dead/run")
+            .env("LF_GRAPH_ID", "stale-graph")
+            .env("LF_BIN", "/stale/lf")
+            .env("LF_HOME", "/stale/home")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "unset");
+    }
+
+    #[test]
+    fn detached_lf_without_explicit_identity_does_not_inherit_its_parent() {
+        let argv = vec!["lf".to_string(), "wave".to_string(), "child".to_string()];
+
+        let command = shell_command(std::path::Path::new("."), &argv, &[]);
+
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
+        assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
+    }
+
+    #[test]
+    fn preferred_name_in_detached_lf_requires_explicit_context() {
+        let argv = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf '%s' \"${LF_USER_NAME-unset}\"".into(),
+        ];
+        for name in [None, Some("Maya")] {
+            let env = name
+                .map(|name| vec![(crate::config::USER_NAME_ENV, name)])
+                .unwrap_or_default();
+            let command = shell_command(std::path::Path::new("."), &argv, &env);
+            let output = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .env(crate::config::USER_NAME_ENV, "Jack")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                name.unwrap_or_default()
+            );
+        }
+    }
+
+    #[test]
+    fn detached_lf_drops_parent_credentials_and_account_choices() {
+        let command = shell_command(
+            std::path::Path::new("."),
+            &[
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}\"".into(),
+            ],
+            &[],
+        );
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("LF_AGENT_OVERRIDE", "claude")
+            .env("LF_DISCORD_TOKEN", "fixture-chat-token")
+            .env("GH_TOKEN", "fixture-github-token")
+            .env("LF_ACCOUNT_SELECTION", "parent-selection")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+
+    #[test]
+    fn detached_lf_replaces_inherited_invocation_context() {
+        let argv = vec![
+            "lf".to_string(),
+            "work".to_string(),
+            "execute".to_string(),
+            "task".to_string(),
+            "tsk_123".to_string(),
+        ];
+        let command = shell_command(
+            std::path::Path::new("."),
+            &argv,
+            &[
+                ("LF_TRACE_ID", "run-1"),
+                ("LF_PROCESS_ID", "process-1"),
+                ("LF_HOME", "/tmp/lf"),
+            ],
+        );
+
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
+        assert!(command.ends_with(
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
+        ));
     }
 }

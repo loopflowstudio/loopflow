@@ -169,7 +169,7 @@ fn start_reported<T: DeserializeOwned>(
         if let Some(id) = creation {
             environment.push((CREATION_ENV, id));
         }
-        let owner = crate::os_process::start_lf_session(directory, &argv, &environment, &|_| {})?;
+        let owner = crate::os_process::detached::start_lf(directory, &argv, &environment, &|_| {})?;
         Ok((path, owner))
     })();
     let (path, owner) = launched.map_err(|error| Error::outcome_unknown(&error))?;

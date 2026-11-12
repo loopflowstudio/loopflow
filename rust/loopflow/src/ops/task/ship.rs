@@ -571,7 +571,7 @@ pub(super) fn restart_lf_in(
         (crate::config::AGENT_OVERRIDE_ENV, ""),
         ("LF_SETTINGS", "{}"),
     ];
-    crate::os_process::start_lf_session(worktree, &argv, &env, &|_| {}).map_err(task_error)?;
+    crate::os_process::detached::start_lf(worktree, &argv, &env, &|_| {}).map_err(task_error)?;
     Ok(())
 }
 

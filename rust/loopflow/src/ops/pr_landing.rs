@@ -356,7 +356,7 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        let owner = crate::os_process::start_lf_session(
+        let owner = crate::os_process::detached::start_lf(
             &landing.worktree,
             &argv,
             &environment,

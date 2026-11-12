@@ -2226,7 +2226,8 @@ pub enum TaskCommand {
 conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
 terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
 which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
-until `lf ship`."
+until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
+using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
         issue: Option<String>,
@@ -2254,6 +2255,9 @@ until `lf ship`."
         /// Print where it would run and the most it could cost; run nothing
         #[arg(long)]
         quote: bool,
+        /// Open the Task's primary conversation locally after launch returns
+        #[arg(long)]
+        open: bool,
         /// Print what the run set out to do, as `task.run` returns it
         #[arg(long)]
         json: bool,
@@ -4390,6 +4394,25 @@ mod tests {
             cmd: TaskCommand::Delete { issue }
         }) if issue == "LOO-42"));
         assert!(Cli::try_parse_from(["lf", "task", "delete"]).is_err());
+    }
+
+    #[test]
+    fn task_run_open_is_optional_and_has_no_start_alias() {
+        for (args, expected) in [
+            (vec!["lf", "task", "run", "LOO-42"], false),
+            (vec!["lf", "task", "run", "LOO-42", "--open"], true),
+            (
+                vec!["lf", "--task", "LOO-42", "task", "run", "--open"],
+                true,
+            ),
+            (vec!["lf", "task", "run", "--open"], true),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Task {
+                cmd: TaskCommand::Run { open, .. }
+            }) if open == expected));
+        }
+        assert!(Cli::try_parse_from(["lf", "task", "start", "LOO-42"]).is_err());
     }
 
     #[test]

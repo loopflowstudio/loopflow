@@ -63,4 +63,4 @@ The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration,
 then update the contract's revision 4 anchor to the transport's revision 5 section.
 
-`git diff --check` — passed after the November 12 compress (README ticket paragraphs merged); prose-only, no build or test rerun.
+`git diff --check` — passed after the November 12 compress (remote contract's duplicate device/account clause dropped); prose-only, no build or test rerun.

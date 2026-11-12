@@ -402,8 +402,8 @@ with a Session ID from `session.list`:
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","owner_lf_process_id":"<owner ID>","expires_in_ms":60000}}
 ```
 
-From the same authenticated device and account, open a separate WebSocket to
-the host's `/v1/ticket` endpoint and send `attach` first, without `hello`:
+Open a separate WebSocket to the host's `/v1/ticket` endpoint and send
+`attach` first, without `hello`:
 
 ```text
 → {"type":"attach","ticket":"<ticket>"}

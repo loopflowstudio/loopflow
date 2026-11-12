@@ -2091,8 +2091,10 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
+        // The launching lf, which stays recorded after the provider exits and
+        // its attachment is released.
         let placement: Option<String> = fixture.sql().query_row(
-            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
+            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.parent_lf_process_id WHERE s.id=?1",
             [&session], |row| row.get(0),
         ).unwrap();
         // A bare launch runs in its terminal: no owner serves it.
@@ -3455,7 +3457,47 @@ fn complete_conversation(fixture: &Fixture, owner: &str) -> String {
         rusqlite::params![task, session],
     )
     .unwrap();
-    sql.execute("UPDATE tasks SET planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [&task]).unwrap();
+    // The planning journal owns Task state, and the Machine server projects
+    // it back over the row, so complete as a journal edit over the observed one.
+    let disposition = json!({"planning_state": "completed", "planning_completed": 1,
+        "planning_completed_at": "2000-01-01T00:00:00Z"});
+    sql.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let parents: Vec<String> = sql
+        .prepare(
+            "SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field='disposition'
+             AND id IN (SELECT id FROM planning_peer_observed)",
+        )
+        .unwrap()
+        .query_map([&task], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let clock: i64 = sql
+        .query_row("SELECT max(clock)+1 FROM planning_peer_changes", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let change = uuid::Uuid::new_v4().to_string();
+    let mutation = json!({"edit": {"target": task, "change": {"field": "disposition",
+        "value": disposition}}, "clock": clock, "parents": parents});
+    sql.execute(
+        "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
+        [&change, &mutation.to_string()],
+    )
+    .unwrap();
+    sql.execute(
+        "DELETE FROM planning_peer_observed WHERE id IN
+         (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field='disposition')",
+        [&task],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO planning_peer_observed(id) VALUES(?1)",
+        [&change],
+    )
+    .unwrap();
+    sql.execute("UPDATE tasks SET planning_state='completed',planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [&task]).unwrap();
+    sql.execute_batch("COMMIT").unwrap();
     // Advance the existing absence grace without waiting fifteen minutes.
     sql.execute(
         "UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1",

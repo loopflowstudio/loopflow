@@ -318,9 +318,11 @@ mod tests {
             "an owner keeps turn hooks"
         );
         assert!(owned.get("crossSessionInbound").is_none());
-        assert!(settings(Holder::Caller)
-            .get("crossSessionInbound")
-            .is_none());
+        // No owner holds a caller's launch, so it gets only the context hooks.
+        let bare = settings(Holder::Caller);
+        assert!(bare["hooks"]["SessionStart"].is_array());
+        assert!(bare["hooks"].get("Stop").is_none());
+        assert!(bare.get("crossSessionInbound").is_none());
         assert_eq!(settings(Holder::Server)["crossSessionInbound"], "accept");
     }
 

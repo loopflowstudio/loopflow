@@ -77,34 +77,32 @@ still shows compress as `codex` alone; after `lf set --global agents
 claude,codex` it shows `codex, then claude`, and everything else `claude,
 then codex`.
 
-## Next implement direction: a limit with nowhere to go stops once and says why (concept review 4, 2026-11-12)
+## Built: a limit with nowhere to go stops once and says why (2026-11-12)
 
-The incident's own config, unchanged, still fails the way the incident did.
-`default_agent: claude` with `skill.compress.default_agent: codex` and no
-`agents` resolves compress to Codex alone. A launch refused on an unrouted
-login returns the limit after one attempt
-(`a_pinned_agent_refused_at_launch_fails_with_its_limit`), the Graph exits 1,
-and `lf task run` starts it again up to `TASK_RUN_ATTEMPTS` (3): no reset time
-is recorded for an unrouted login, so `waiting_on_limit` does not stop the
-loop (`lf/commands/graph.rs`). Read from the code, not run against a provider.
-The Task asks for a step that moves "instead of retrying the same exhausted
-agent"; with nothing to move to it is still relaunched twice, and with a list
-whose last entry refuses, each relaunch walks the whole list again.
+Concept review 4 read from the code that the incident's own config (global
+`default_agent: claude`, `skill.compress.default_agent: codex`, no `agents`)
+still failed as the incident did: the refused launch failed after one attempt
+and `lf task run` relaunched it up to `TASK_RUN_ATTEMPTS` (3), each relaunch
+walking the whole order again.
 
-Run in a throwaway home with that config:
-`lf config settings --skill compress --explain` showed `agent  codex` and the
-two `default_agent` candidates, and nothing about there being no list. A
-person meets `agents` only in `docs/troubleshooting.md`.
+Now the agent loop records the stop on the step (`agent_limit_recoveries`,
+reason ending `; stopped: <what would let it move>`), `lf task run` reads it
+and returns after the first failure, and `lf task status` shows the same
+sentence. Two wordings: no order behind the agent ("an `agent` choice or `-a`
+pins it to codex, or there is no `agents` list. `lf set --global agents
+codex,claude` lets a step move on"), or an order that ran out ("Nothing is left
+in its order after codex, claude; add another agent to `agents`").
 
-Build:
+Choices made without an answer:
 
-- A Graph run whose failure cause is a usage limit is not started again by the
-  `lf task run` retry loop. It stops on the first failure.
-- Its stop line says what would let it move: an `agent` choice or `-a` pins
-  the provider, or there is no `agents` list, with
-  `lf set --global agents <this>,<another>` as the example. Same wording in
-  `lf task status` for that step.
-- `docs/subscriptions.md` "No account will free up" row says it stops once.
+- A shipping Task stops shipping on this stop, as it already did after three
+  identical failures (`ship_halt`). The alternative, ship restarting it later
+  on its backoff, would walk the order again with no reset time to wait for.
+- The stop is recorded only for a failure classified as a usage limit. A
+  launch with no eligible account and no known reset ("failed to select
+  provider account") is still an ordinary failure and is relaunched.
+- The agent loop cannot tell `-a` or an `agent` setting from a missing list,
+  so one sentence names both.
 
 Not proposed: reading "try again at 5:43 PM" out of the provider's text to
 wait for the reset.
@@ -167,5 +165,9 @@ Each has a default built; none stops the work.
 - `cargo test -p loopflow --test integration documented_commands::`: pass.
 - `cargo clippy --all-targets -- -D warnings`: clean.
 - Gate: `(test(config::) | test(agent::tests::) | test(ops::task_execution::) | test(settings_launch_tests::) | test(documented_commands::) | test(configuration_changes_reach_an_existing_subscription) | test(graph_defaults_follow_task_wave_and_repository) | test(wave_setup_tests::)) | binary(two_people)`.
-- Not run: a real Graph step refused by a provider limit. Demo: set
-  `agents`, run a step on an exhausted Codex login, read `lf task status`.
+- `cargo test -p loopflow --lib -- config:: agent::tests:: ops::task_execution:: ops::task::limit a_run_stopped_by_a_usage_limit a_stopped_run_is_started_again task_ship_stops_shipping a_run_that_ended_waiting restarted_wait`: 152 pass; clippy clean; `documented_commands::` pass.
+- Gate also takes `test(task_graph_launch_tests::)` now: the retry loop and ship changed.
+- Not run: a real Graph step refused by a provider limit; the test's failing
+  step writes the stop record itself. Demo: with no `agents`, run a step on an
+  exhausted Codex login and read the stop line and `lf task status`; then set
+  `agents` and see it move.

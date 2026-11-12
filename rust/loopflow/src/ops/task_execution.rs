@@ -128,6 +128,17 @@ pub(crate) async fn execution_of_latest_graph(
 /// than another account; the agent follows.
 pub(crate) const MOVED_TO: &str = "; continuing on ";
 
+/// Ends a recorded limit reason when a usage limit refused the step and no
+/// agent it may use was left; what would let it move follows.
+pub(crate) const STOPPED: &str = "; stopped: ";
+
+/// The limit that stopped a step for good and what would let it move, as one
+/// sentence. `lf task run` does not start such a run again.
+pub(crate) fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
+    let (reason, advice) = recovery.reason.rsplit_once(STOPPED)?;
+    Some(format!("{reason}. {advice}"))
+}
+
 /// A step recovering from a limit says so. One that died waiting is where the
 /// next `lf task run` starts; status promises that happens by itself only when
 /// the recovery sweep would do it (`restarts_by_itself`).
@@ -164,6 +175,12 @@ fn apply_limit_recovery(
             } else {
                 format!("{label} ended while waiting for {provider} capacity until {after}; `lf task run {issue}` starts the run again at it")
             };
+        }
+        (TaskExecutionState::Blocked, None) => {
+            if let Some(stop) = limit_stop(recovery) {
+                snapshot.reason =
+                    format!("{label} stopped on a usage limit and is not started again: {stop}");
+            }
         }
         _ => {}
     }
@@ -358,6 +375,22 @@ mod tests {
         let mut failed = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
+
+        // A limit with nowhere to go says what would let the step move.
+        let mut stopped = snapshot(TaskExecutionState::Blocked);
+        let nowhere = AgentLimitRecovery {
+            reason: format!(
+                "codex_error: You've hit your usage limit{}no `agents` list is set",
+                super::STOPPED
+            ),
+            ..recovery(None)
+        };
+        apply_limit_recovery(&mut stopped, &nowhere, "LOO-1", || true);
+        assert_eq!(stopped.state, TaskExecutionState::Blocked);
+        assert_eq!(
+            stopped.reason,
+            "implement stopped on a usage limit and is not started again: codex_error: You've hit your usage limit. no `agents` list is set"
+        );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)), "LOO-1", || true);

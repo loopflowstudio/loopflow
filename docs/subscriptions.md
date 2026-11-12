@@ -352,7 +352,7 @@ lf task status LOO-1
 | Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
 | The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. The refusal does not count as a failed run |
 | Nothing it may use is free | Waits, checking each minute, and continues at the first reset |
-| No account will free up | Fails with the limit, like any other failure |
+| A usage limit refuses it and no agent it may use is left | Stops once: `lf task run` does not start the run again. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude` |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
 Only accounts in the resolved route take a step on. An explicit `harness:model`

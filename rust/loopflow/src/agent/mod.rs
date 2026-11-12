@@ -436,6 +436,34 @@ fn _record_agent_move(provider: &str, reason: &str, next: &str) {
     );
 }
 
+/// A usage limit refused the step and no agent it may use is left: the stop
+/// and what would let it move, where Task status and `lf task run` read it.
+fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried: &[String]) {
+    let advice = _limit_stop_advice(provider, launch, tried);
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
+        None,
+    );
+}
+
+fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) -> String {
+    if !launch.fallback_agents.is_empty() {
+        return format!(
+            "Nothing is left in its order after {}; add another agent to `agents`",
+            tried.join(", ")
+        );
+    }
+    let another = if provider == "claude" {
+        "codex"
+    } else {
+        "claude"
+    };
+    format!(
+        "Nothing else may take the step: an `agent` choice or `-a` pins it to {provider}, or there is no `agents` list. `lf set --global agents {provider},{another}` lets a step move on"
+    )
+}
+
 fn resolve_account_route_blocking(
     provider: Provider,
     launch: &AgentConfig,
@@ -1205,6 +1233,10 @@ fn _run_with_transient_retries(
                     error = unavailable.error,
                     "alternate provider account unavailable"
                 );
+                if result.failure == Some(AgentFailure::AccountSubscriptionLimit) {
+                    let reason = _failure_reason(result, AgentFailure::AccountSubscriptionLimit);
+                    _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
+                }
                 return Ok(result.clone());
             }
         };
@@ -1260,7 +1292,12 @@ fn _run_with_transient_retries(
                 }
                 let reason = _failure_reason(&result, failure);
                 match next {
-                    None if stuck => return Ok(result),
+                    None if stuck => {
+                        if failure == AgentFailure::AccountSubscriptionLimit {
+                            _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
+                        }
+                        return Ok(result);
+                    }
                     None => {
                         failovers += 1;
                         account_failure = Some(result.clone());
@@ -3366,5 +3403,19 @@ trust_level = "trusted"
         .unwrap();
         assert_eq!(attempts, 1);
         assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        // What it records names the way out; with an order, what was tried.
+        let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
+        assert!(
+            advice.contains("`lf set --global agents codex,claude`"),
+            "{advice}"
+        );
+        let ordered = AgentConfig {
+            fallback_agents: vec!["claude".into()],
+            ..launch
+        };
+        assert_eq!(
+            _limit_stop_advice("claude", &ordered, &["codex".into(), "claude".into()]),
+            "Nothing is left in its order after codex, claude; add another agent to `agents`"
+        );
     }
 }

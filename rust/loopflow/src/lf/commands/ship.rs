@@ -83,8 +83,17 @@ pub fn run(
             if let Err(error) =
                 super::graph::run_task_graph_for(&headless, &task, &step, false, &mut |_, _| Ok(()))
             {
-                if let Some(repeated) = error.downcast_ref::<super::graph::RepeatedRunFailure>() {
-                    ship_halt(&issue, &repeated.cause)?;
+                // Neither would end differently on a restart.
+                let cause = error
+                    .downcast_ref::<super::graph::RepeatedRunFailure>()
+                    .map(|repeated| &repeated.cause)
+                    .or_else(|| {
+                        error
+                            .downcast_ref::<super::graph::LimitStop>()
+                            .map(|stop| &stop.cause)
+                    });
+                if let Some(cause) = cause {
+                    ship_halt(&issue, cause)?;
                 }
                 return Err(error);
             }

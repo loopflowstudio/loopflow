@@ -157,8 +157,19 @@ pub struct RepeatedRunFailure {
     pub cause: String,
 }
 
+/// A Task run whose step a usage limit refused with no agent left to move to.
+/// It is not started again, and a shipped Task stops shipping on it.
+#[derive(Debug, thiserror::Error)]
+#[error("the run of {run} stopped on a usage limit at {step} and is not started again: {cause}")]
+pub struct LimitStop {
+    pub run: String,
+    pub step: String,
+    /// The provider's refusal and what would let the step move.
+    pub cause: String,
+}
+
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// start it again while a Graph process fails. Each attempt records its own
+/// start it again while a Graph process fails, unless a usage limit stopped it. Each attempt records its own
 /// GraphProcess beneath this process. A Graph held for a person or a watcher, an
 /// interrupted one, and a launch refused before any Graph started are returned
 /// as they ended. Once someone interrupts the Task, nothing is started again.
@@ -249,6 +260,20 @@ pub fn run_task_graph_for(
                 wait.step
             );
             return Err(exit_of(status).into());
+        }
+        // A limit every agent the step may use refused would refuse them again.
+        let stop = match failed {
+            true => crate::ops::task::limit_recovery::stopped_on_limit(store, &task.id)?,
+            false => None,
+        };
+        if let Some((step, cause)) = stop {
+            let stop = LimitStop {
+                run: run.to_string(),
+                step,
+                cause,
+            };
+            eprintln!("{stop}");
+            return Err(anyhow::Error::new(exit_of(status)).context(stop));
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {

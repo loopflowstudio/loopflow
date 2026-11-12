@@ -252,9 +252,11 @@ lf gate -a codex                         # run this one on another harness
 lf --only-account claude=work@ gate      # stay inside the logins you name
 ```
 
-A step that keeps failing on one provider's limit is pinned there by an `agent`
-choice or `-a`, or has no `agents` list to move through;
-`lf config settings --skill <name> --explain` shows which.
+A step with nowhere left to move stops its run once; `lf task run` does not
+start it again into the same refusal. It is pinned to its provider by an `agent`
+choice or `-a`, or has no `agents` list to move through: the stop line and
+`lf task status` say so, and `lf config settings --skill <name> --explain` shows
+which.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.

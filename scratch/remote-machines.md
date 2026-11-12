@@ -99,8 +99,8 @@ Each step is something to run and see.
 | Step | You run | You see | Needs |
 |---|---|---|---|
 | 0 | `lf task move X --machine mini` on a Task mini has never seen | It moves | This branch, installed on laptop and mini. Not yet run for real |
-| 1 | The same | The Graph is running on mini when the command returns, and this terminal shows its Session | Receive ends in `lf task run` there; the mover opens `lf resume --task`; stage lines |
-| 2 | Move mid-`implement` | The step's agent continues with what it knew | Carry the step Session's transcript like the primary's, and resume it |
+| 1 | The same | The Graph is running on mini when the command returns, one line per stage; this terminal prints `lf resume --task X` (see Decided against) | Receive ends in `lf task run` there; stage lines |
+| 2 | Move mid-`implement` | The step restarts on mini from the checkpoint commit (see Decided against) | A step continuation in `run_skill`, its own Task |
 | 3 | `lf task status X`, `lf task list`, `lf machine list` on the laptop | Where X runs and since when; no leftover worktree | Sending retires local live rows |
 | 4 | Close the lid; open the phone | The mini's Session, live | Mini as hub: Machines dial it, Desktop shows mini Tasks as ordinary rows |
 | 5 | `lf task run X --rent …`, then `lf machine end` | The conversation comes home with the Task | Rental placement and give-back become moves |
@@ -127,7 +127,7 @@ Steps 0 to 3 of the build order. Step 4 is LOO-861 (hub) and step 5 is LOO-862
 (rentals and pools move). Jack, 2026-11-12: "i think 0-3 could be this task,
 and 4 and 5 could be follow up tasks?"
 
-Built (uncommitted until the PR):
+Built (committed on this branch, e2d2246fdb and 3559e8838b):
 - Step 0: `arriving_task` / `acquire_from_planning`; `session receive --check
   --task --issue --repository`; version token comparison.
 - Step 1: the move continues a Graph it stopped (`StoppedRun::resume` →
@@ -142,6 +142,20 @@ Built (uncommitted until the PR):
   `lf wt prune` removes a checkout whose Task another Machine owns
   (`WorktreePruneReason::Moved`, "Task X runs on mini") unless it has source
   changes or a process holds it. Test:
+  `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
+
+Acceptance tests in `rust/loopflow/tests/machine_commands.rs`:
+- Item 1 (lands running, stage lines): `task_move_leaves_a_live_graph_running_on_mini`.
+- Item 2 (printed reopen command): not there. The text is checked by the unit
+  test `a_machine_move_names_the_task_that_went_with_it` (`lf/commands/util.rs`);
+  `departure_notice` only fires for a Session with a live attachment, which no
+  machine_commands fixture starts. Remaining: a fixture that holds an
+  interactive Session on the laptop, moves its Task, and reads the line the
+  holder delivers.
+- Item 3 (restart from checkpoint): `task_move_leaves_a_live_graph_running_on_mini`
+  shows the step's half-written file on the pushed branch and a live Graph on
+  mini; it doesn't assert which step mini's Graph stands at.
+- Item 4 (sending Machine's views, prune):
   `the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout`.
 
 Decided against, with the reason:

@@ -55,19 +55,19 @@ pub(super) struct Tickets(Mutex<HashMap<String, Ticket>>);
 
 impl Tickets {
     pub(super) fn issue(&self, admission: Admission, purpose: Purpose) -> String {
-        let now = SystemTime::now();
         let ticket = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(uuid::Uuid::new_v4().as_bytes());
-        let mut issued = self.0.lock().expect("ticket store is never poisoned");
-        issued.retain(|_, ticket| ticket.expires > now);
-        issued.insert(
-            ticket.clone(),
-            Ticket {
-                admission,
-                purpose,
-                expires: now + TICKET_LIFETIME,
-            },
-        );
+        self.0
+            .lock()
+            .expect("ticket store is never poisoned")
+            .insert(
+                ticket.clone(),
+                Ticket {
+                    admission,
+                    purpose,
+                    expires: SystemTime::now() + TICKET_LIFETIME,
+                },
+            );
         ticket
     }
 
@@ -173,16 +173,11 @@ mod tests {
     }
 
     #[test]
-    fn tickets_expire_and_are_swept() {
+    fn an_expired_ticket_is_refused_before_the_sweep() {
         let tickets = Tickets::default();
-        let redeemed = tickets.issue(Admission::Local, terminal());
-        let swept = tickets.issue(Admission::Local, download("body"));
-        for ticket in [&redeemed, &swept] {
-            tickets.0.lock().unwrap().get_mut(ticket).unwrap().expires = SystemTime::now();
-        }
-        assert!(tickets.redeem(&redeemed, &Admission::Local).is_none());
-        tickets.issue(Admission::Local, download("next"));
-        assert!(!tickets.0.lock().unwrap().contains_key(&swept));
+        let ticket = tickets.issue(Admission::Local, terminal());
+        tickets.0.lock().unwrap().get_mut(&ticket).unwrap().expires = SystemTime::now();
+        assert!(tickets.redeem(&ticket, &Admission::Local).is_none());
     }
 
     #[tokio::test]

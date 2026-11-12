@@ -406,7 +406,10 @@ the phone's `view.select` Task list and its creation destinations all read it.
   are refused with `unavailable`. Clients fetch spills off their reader so other
   request IDs never wait. Within one ID, the ticket keeps its place: deliver its
   payload before later readings, errors or `ended`, and advance the resume
-  checkpoint only with the delivered reading. Swift clients bound deferred
+  checkpoint only with the delivered reading. For that reason another
+  admission's attempt leaves a bulk ticket redeemable: its payload cannot be
+  requested again in its place, while a terminal ticket, which a fresh
+  `session.attach` replaces, is spent by any attempt. Swift clients bound deferred
   messages to 64 frames and 32 MiB; falling behind requires reconnecting.
   A control line over the limit is answered
   `error {id: null, invalid}` whose data names `max_message`, and the connection
@@ -420,7 +423,8 @@ and is answered `bridged`. A ticket (`ticket.rs`) is 16 random bytes as 22 base6
 characters and lasts 60 seconds by the wall clock, so host sleep counts; expiry
 does not close an open bridge. A ticket binds to the admission that requested
 it: the Machine's own user on the local socket, or one Tailscale node and user
-remotely. Every redemption attempt spends a terminal ticket, successful or not:
+remotely. Since a new ticket is one `session.attach` away, every redemption
+attempt spends a terminal ticket, successful or not:
 an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
 `id` and closes the connection. After a failure or a disconnect before
 `bridged`, request a new ticket and bridge. Bridges read no Work and do not

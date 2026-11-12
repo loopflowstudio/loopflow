@@ -183,7 +183,16 @@ fn input_and_size_reach_the_child() {
             "stty -echo; read line; echo \"got $line\"; stty size",
         ))
         .unwrap();
-    client.resize("t1", 30, 100).unwrap();
+    assert_eq!(
+        client
+            .request(&Request::Resize {
+                terminal: "t1".into(),
+                rows: 30,
+                cols: 100,
+            })
+            .unwrap(),
+        Answer::Done
+    );
 
     let mut input = Client::connect(&fixture.place)
         .unwrap()

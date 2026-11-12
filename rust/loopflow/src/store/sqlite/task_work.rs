@@ -54,9 +54,16 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
+/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
+/// that cwd or one of its ancestors as its worktree, so candidates come from
+/// `idx_tasks_worktree` rather than every Task; membership then decides.
 pub(super) fn session_tasks(session: &str) -> String {
     format!(
-        "SELECT tw.id FROM tasks tw WHERE {} ORDER BY tw.id",
+        "SELECT tw.id FROM tasks tw WHERE (tw.id={session}.task_id OR tw.worktree IN (
+         WITH RECURSIVE up(path) AS (SELECT rtrim({session}.cwd,'/')
+           UNION ALL SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT path FROM up UNION ALL SELECT path||'/' FROM up))
+         AND {} ORDER BY tw.id",
         session_membership(session)
     )
 }
@@ -556,6 +563,38 @@ fn members(
 }
 
 impl SqliteStore {
+    /// Owners and held terminals of unfinished member Sessions, without
+    /// loading retained history.
+    pub(crate) fn task_session_hosts(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::transport::Host>> {
+        use crate::transport::Host;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT DISTINCT s.transport_lf_process_id,s.held_terminal_id FROM agent_sessions s
+             WHERE s.id IN ({}) AND s.completed_at IS NULL
+                 AND (s.transport_lf_process_id IS NOT NULL OR s.held_terminal_id IS NOT NULL)",
+            session_ids("?1")
+        ))?;
+        let rows = query.query_map([task.as_str()], |row| {
+            Ok((
+                row.get::<_, Option<LfProcessId>>(0)?,
+                row.get::<_, Option<crate::id::TerminalId>>(1)?,
+            ))
+        })?;
+        rows.map(|row| {
+            // A held Session also names the launcher that started it; the
+            // terminal is what hosts it.
+            Ok(match row? {
+                (_, Some(terminal)) => Host::Terminal(terminal),
+                (Some(owner), None) => Host::Owner(owner),
+                (None, None) => unreachable!("the query selects hosted Sessions"),
+            })
+        })
+        .collect()
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

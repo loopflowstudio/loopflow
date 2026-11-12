@@ -32,13 +32,14 @@ lf session list --available        # conversations available for your next turn,
 `lf resume` reconnects to the conversation's running provider or continues its
 saved thread after safe replacement.
 
-A live turn, draft or pending request keeps its provider. If attachment fails,
+A live turn or pending request keeps its provider. Replacing an idle provider
+discards unsent input, just as quitting it does. If attachment fails,
 resume reports the failure and leaves that work intact. Returning does not
 resend input.
 
 | The conversation is… | `lf resume` |
 |---|---|
-| running with no terminal showing it (`detached`) | reattaches; nothing restarts |
+| running with no terminal showing it (`detached`) | reattaches, or continues from history if its idle owner needs replacement |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
@@ -48,18 +49,30 @@ resend input.
 Each scope (repository, Wave, Task) has one ongoing conversation, with that
 scope's operating instructions.
 
-A Task, Wave or repository conversation runs until its Task is done or
-abandoned or its agent exits; closing every view does not end it. A
-conversation started with `lf <skill>` ends with its terminal
-([Run one in your terminal](#run-one-in-your-terminal)). A conversation still
-on its own `lf session serve` process ends it after two minutes unviewed and
-settled; `session.end_detached_after` changes the grace or disables it with
-`off`.
-Returning paints its saved screen while the provider reopens its history, without
-replaying input. Active turns, subscriptions, running Graphs, drafts and pending requests
-keep their owner. Drafts remain editable and requests remain answerable there.
-Edited, pasted or unacknowledged native input can retain the owner until the
-provider exits; saved history and screens cannot restore an editor or request.
+A conversation stays running while its scope is open. Task conversations end
+when the Task closes (done or abandoned). A done Task's conversation ends after
+fifteen minutes without viewing once live work settles, on the next cleanup pass,
+whether or not the Task has a checkout. Returning before cleanup keeps it running;
+a return that races the cleanup signal sees “Task completed”. Returning afterward
+continues from saved history; it does not reopen the Task. Checkout deletion is
+separate. Abandonment ends unviewed conversations even during a turn.
+Wave and repository conversations stay running until you quit their agent.
+
+```bash
+lf                                 # a bare conversation, in this terminal
+lf implement                       # a skill typed here is bare too, even in a Task's checkout
+```
+
+Any other conversation is bare. Its agent runs in your terminal exactly as
+`claude` or `codex` would: Ctrl+C, Ctrl+Z and Ctrl+] reach the agent, the
+terminal shows the agent's own name, and closing the terminal ends it, even
+mid-turn. No lf process stays behind. `lf resume <session>` continues its
+history in whichever terminal you run it from.
+
+`lf process rollover` moves idle owners to the selected lf. It discards unsent
+input when it replaces the provider. Saved history and screens cannot restore
+an editor. Returning after an owner ends paints its saved screen while the
+provider reopens its history, without replaying input.
 
 ```bash
 lf resume <session> --fork         # leave the other client running; continue in a new conversation from it
@@ -97,8 +110,8 @@ exits, `lf` reads its transcript, records usage and completion in
 | Steers | arrive when it is next started or resumed, not mid-turn |
 | Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
 
-This covers every launch that isn't a Task, Wave or repository conversation:
-`lf <skill>`, `lf graph …`, `lf -i`, bare `lf`, and the same commands typed in
+This covers bare interactive conversations:
+`lf <skill>`, `lf -i`, bare `lf`, and the same commands typed in
 a Desktop shell. A conversation that should outlive its terminal or be open in
 several places belongs to a Task, Wave or repository; those run in a
 [holder](#keep-working-through-an-update).
@@ -115,7 +128,7 @@ discarding what is typed, while the server is replaced; a Desktop pane on the
 same conversation says **Reconnecting…**. Each then continues where it left
 off, showing what the agent printed meanwhile. Nothing is resent to the agent.
 An agent that exits meanwhile ends its view with its own exit code, as if no
-server had been away: `The agent exited with 3.`
+server had been away: `claude exited with 3.`
 
 A Task or Wave conversation's agent runs in a holder: one `lf holder run`
 process beside the server that keeps the terminals and agents of every such
@@ -129,8 +142,8 @@ holder once.
 | `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
-| `lf <skill>`, `lf graph …`, `lf -i`, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
-| anything with `-b`, a pipe or `--json` | its own process, as before |
+| `lf <skill>`, `lf -i`, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
+| bare Graphs, anything with `-b`, a pipe or `--json` | its own process, as before |
 | a Desktop Task shell | its own process, as before |
 
 A holder keeps the build it started with. After an install, conversations
@@ -159,8 +172,9 @@ exit when the server returns; until then `lf session list` shows what it last
 knew.
 
 These conversations need the server. Opening one while it is stopped starts
-the server first; if it still does not answer, lf prints
-`Loopflow server is not running; run lf server status` and starts nothing.
+the server first; if it still does not answer, lf says
+`Loopflow server is not running`, with what starting it said, and starts
+nothing.
 No private process is started in its place. A Graph already running keeps
 going without it.
 

@@ -18,6 +18,10 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
+Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
+code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
+to regenerate and review snapshots for intended prompt changes before gate.
+
 After syncing, rerun affected tests when main changed APIs they call, even if
 Git merged cleanly. A passing check from before the sync does not cover that
 combination; renamed enum variants can leave new branch tests uncompilable.
@@ -54,6 +58,12 @@ and metadata reads over historical detail all depend on it.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+
+Configuration file loading or filtering changes also run `binary(two_people)`:
+it checks that a shared Wave graph choice reaches another person's Task launch.
+Include `test(configuration_changes_reach_an_existing_subscription)`,
+`test(graph_defaults_follow_task_wave_and_repository)` and
+`test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
 
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
@@ -134,6 +144,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 
 ## macOS traps
 
+- The runner stops at sustained `syspolicyd` pressure, which can last as long
+  as other checkouts keep compiling. Run its printed Rust plan by hand (build,
+  the `nextest` line with the same `-E` filter, clippy), then each suite's
+  command, and record that the runner's pressure stop was bypassed.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it
   with a resolved `TMPDIR` (`/private/var/...`).
 - File-watch tests (`TaskFiles`, `remote_file_observer_…`) need working FSEvents.
@@ -144,6 +158,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
   and Graph fixtures see every installed harness ("No agent selected"). Rerun
   such failures from the built binary in an empty directory with a temp `HOME`
   and a PATH holding only `uv`, the Rust toolchain and `/usr/bin:/bin`.
+  Fixtures that place a Task also read the Machine's `~/.lf/config.yaml`
+  unless `LF_HOME` is set (the OS supplies the real home); one rewritten by a
+  newer `lf` fails them with "unknown or ineligible setting". Set a temp
+  `LF_HOME` too.
   The test constructor supplies its private home with a fixture Git identity;
   repository-local identities still win. Do not inject `GIT_CONFIG_GLOBAL` to
   repair a test: it hides missing setup in that private home.

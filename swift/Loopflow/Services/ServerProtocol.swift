@@ -137,7 +137,7 @@ public enum ServerOperation: Encodable, Sendable {
     /// pane (`LF_TERMINAL_ID`) the child continues.
     case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
     /// A provider hook's turn or tool boundary, answered `{steers, waiting}`.
-    /// Desktop never sends it; `lf __context-block` does.
+    /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String])
 

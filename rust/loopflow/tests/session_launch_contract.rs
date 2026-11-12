@@ -1589,17 +1589,13 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
     assert_eq!(prepare(&linked, &["resume", id])["id"], id);
+    // Beside an id, a Task or Wave only makes the resume managed: the id
+    // still selects, whatever Work the flag names.
     for argv in [
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "resume", id],
     ] {
-        assert!(!fixture
-            .command()
-            .args(argv)
-            .output()
-            .unwrap()
-            .status
-            .success());
+        success(&fixture.command().args(argv).output().unwrap());
         assert_eq!(count(), before);
     }
 }

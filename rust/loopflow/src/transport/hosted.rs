@@ -1,5 +1,5 @@
 //! One hosted execution: its viewers, who may type and who sizes it, the
-//! retained screen, input retention, the native client's return line and exit
+//! retained screen, queued input, the native client's return line and exit
 //! settlement. `serve` hosts one in an owner process; the execution itself is
 //! behind [`Child`].
 
@@ -21,8 +21,8 @@ use super::{
     deliver, dimensions, end_viewers, lifetime, native, output, place_events, provider_exit_code,
     publish_reports, release_viewer_hold, selected_directory, snapshot, survive, viewer_hold,
     Connection, Host, Ownership, Settling, Span, Viewer, GRACE, HEARTBEAT_TIMEOUT, LIMIT,
-    OUTPUT_ACTIVITY_PAUSE,
 };
+use crate::store::sqlite::ViewerHold;
 
 /// Output read from the execution, with the line discipline it was written under.
 pub(super) struct Chunk {
@@ -79,14 +79,14 @@ impl Child {
         }
     }
 
-    fn forward(&mut self, pending: &mut PendingInput, owner: &Host, record: bool) {
+    fn forward(&mut self, pending: &mut PendingInput) {
         match self {
             Self::Local(local) => {
                 if let Some(input) = local.input.as_mut() {
-                    pending.forward(input, owner, record);
+                    pending.forward(input);
                 }
             }
-            Self::Held(source) => source.forward(pending, owner, record),
+            Self::Held(source) => source.forward(pending),
         }
     }
 
@@ -259,8 +259,6 @@ pub(super) enum Pass {
 pub(super) struct Hosted {
     id: Host,
     terminal: bool,
-    /// The Desktop Task shell this execution is.
-    shell: Option<String>,
     /// What the execution's own control requests present.
     control_key: String,
     viewers: Vec<Viewer>,
@@ -270,7 +268,6 @@ pub(super) struct Hosted {
     size: (u16, u16),
     pending_input: PendingInput,
     end_input: bool,
-    ending_failure: crate::store::RecordingGap,
     output: output::Output,
     exit: Option<(u8, Instant)>,
     detach: bool,
@@ -279,13 +276,15 @@ pub(super) struct Hosted {
     hint_due: bool,
     announced: bool,
     attached: bool,
-    activity: mpsc::Sender<lifetime::Activity>,
-    ending: mpsc::Receiver<lifetime::Ending>,
+    viewing: lifetime::Viewing,
+    /// A Desktop shell's explicit Close.
+    closing: mpsc::Receiver<()>,
+    /// Task cleanup's notice: the viewer that asked, its request and the text.
+    close_notice: Option<(String, u64, String)>,
     /// Wakes the host's descriptor wait from another thread.
     waker: UnixStream,
     settling: Option<Settling>,
-    observed: lifetime::Activity,
-    output_told: Option<Instant>,
+    observed_hold: Option<ViewerHold>,
     exit_record: Option<Box<NativeExit>>,
     /// Where a held terminal keeps what its launcher handed off, so a server
     /// that takes it up later has it too.
@@ -299,7 +298,7 @@ pub(super) struct Hosted {
     replayed_through: u64,
 }
 
-/// The threads every execution a host serves shares: lifetime judgments and
+/// The threads every execution a host serves shares: viewing records and
 /// Session-name reads. The Machine server's held terminals share one set.
 #[derive(Debug)]
 pub(super) struct Watchers {
@@ -318,7 +317,7 @@ impl Watchers {
 
 impl Hosted {
     /// Host the execution known as `id`. `waker` wakes the host's wait when
-    /// the lifetime policy or a settlement has something for it.
+    /// a shell's Close or a settlement has something for it.
     pub fn new(
         id: Host,
         terminal: bool,
@@ -327,12 +326,12 @@ impl Hosted {
         waker: UnixStream,
         watchers: &Watchers,
     ) -> Result<Self> {
-        let (activity, ending) = watchers
-            .lifetime
-            .watch(id.clone(), terminal, waker.try_clone()?);
+        let (viewing, closing) =
+            watchers
+                .lifetime
+                .watch(id.clone(), shell.is_some(), waker.try_clone()?);
         Ok(Self {
             terminal,
-            shell,
             control_key,
             viewers: Vec::new(),
             control: None,
@@ -340,7 +339,6 @@ impl Hosted {
             size: (24, 80),
             pending_input: PendingInput::default(),
             end_input: false,
-            ending_failure: crate::store::RecordingGap::default(),
             output: output::Output::new(terminal)?,
             exit: None,
             detach: false,
@@ -349,12 +347,12 @@ impl Hosted {
             hint_due: false,
             announced: false,
             attached: false,
-            activity,
-            ending,
+            viewing,
+            closing,
+            close_notice: None,
             waker,
             settling: None,
-            observed: lifetime::Activity::default(),
-            output_told: None,
+            observed_hold: None,
             exit_record: None,
             kept: None,
             execution_directory_reported: false,
@@ -363,16 +361,6 @@ impl Hosted {
             replayed_through: 0,
             id,
         })
-    }
-
-    /// Let a test stage a connection or output before the host accepts and reads.
-    #[cfg(test)]
-    pub fn before_accept(&mut self, child: &mut Child) -> Result<()> {
-        super::input_retry_tests::poll();
-        let (Child::Local(local), Some(owner)) = (child, self.id.owner()) else {
-            return Ok(());
-        };
-        super::lifetime_tests::before_read(owner, &mut local.readers, &mut self.output_told)
     }
 
     /// Take up a terminal already running at `rows` by `cols` whose output
@@ -468,6 +456,7 @@ impl Hosted {
                 kept,
                 execution_directory_reported,
                 planning,
+                close_notice,
                 ..
             } = self;
             viewers.retain_mut(|viewer| {
@@ -528,6 +517,9 @@ impl Hosted {
                             }
                             Request::NativeEnded { key } if key == *control_key => {
                                 viewer.ending = Some(answers);
+                            }
+                            Request::CloseNotice { text } => {
+                                *close_notice = Some((viewer.id.clone(), answers, text));
                             }
                             Request::InputHint { key, hint } if key == *control_key => {
                                 viewer.input_hint = Some(hint);
@@ -845,21 +837,11 @@ impl Hosted {
         if let Some(name) = self.title.as_mut().and_then(|title| title.tick()) {
             self.output.title(&name);
         }
-        // Typing at an idle shell prompt is not an agent draft: retain only
-        // input that work running inside the shell could receive.
-        let record = terminal
-            && (self.shell.is_none()
-                || self.pending_input.is_empty()
-                || self
-                    .id
-                    .owner()
-                    .is_none_or(crate::desktop::shells::holds_input));
-        child.forward(&mut self.pending_input, &self.id, record);
+        child.forward(&mut self.pending_input);
         if self.end_input && self.pending_input.is_empty() {
             child.close_input();
         }
         for chunk in child.read(16)? {
-            self.observed.output += 1;
             // An exec handoff announces before exec. The provider's first
             // output establishes that it reached its configured directory.
             if !self.execution_directory_reported {
@@ -893,13 +875,6 @@ impl Hosted {
                 None => (chunk.bytes, pty.unwrap_or(aside)),
             };
             self.deliver(chunk.stream, &ready, answering, span);
-            if self
-                .output_told
-                .is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE)
-            {
-                self.output_told = Some(Instant::now());
-                let _ = self.activity.send(self.observed);
-            }
         }
         self.catch_up(child)?;
         // After the reads: a provider that prints once and waits wakes nothing further.
@@ -922,7 +897,6 @@ impl Hosted {
         if self.viewers.iter().any(|viewer| viewer.ending.is_some())
             || (status.is_some() && self.exit_record.is_some())
         {
-            self.pending_input.native_ended(&self.id);
             if let Some(ended) = self.client.take() {
                 self.forget_kept(NATIVE_CLIENT);
                 self.finish_client(ended, child, answering);
@@ -992,46 +966,57 @@ impl Hosted {
                     || (self.attached
                         && self.viewers.iter().all(|viewer| viewer.output.is_empty())))
             {
-                release_viewer_hold(&self.id, self.observed.hold);
+                release_viewer_hold(&self.id, self.observed_hold);
                 snapshot::leave(&self.id, &self.output);
                 return Ok(Pass::Ended(code, self.settling.take()));
             }
         }
-        // Ready output and viewer changes precede the final ending judgment.
-        // A throttled/unconsumed activity report also invalidates the candidate.
-        let viewed = self.observed.view(self.viewers.iter().any(|v| v.live()));
-        if self.observed.hold(viewer_hold(
+        let hold = viewer_hold(
             &self.viewers,
-            self.observed.hold,
+            self.observed_hold,
             time::OffsetDateTime::now_utc().unix_timestamp(),
-        )) | viewed
-        {
-            let _ = self.activity.send(self.observed);
+        );
+        if hold != self.observed_hold {
+            self.observed_hold = hold;
+            self.viewing.send(hold);
         }
-        #[cfg(test)]
-        super::lifetime_tests::before_judgment();
-        if let Ok(ending) = self.ending.try_recv() {
-            let event = lifetime::report_result(
-                &mut self.ending_failure,
-                "Session ending",
-                ending.confirm(&self.id, self.observed, self.pending_input.holds_owner()),
-            )
-            .flatten();
-            if let Some(event) = event {
-                child.end_jobs(&self.id)?;
-                end_viewers(&mut self.viewers, event);
-                release_viewer_hold(&self.id, self.observed.hold);
-                snapshot::leave(&self.id, &self.output);
+        if let Some((requester, answers, text)) = self.close_notice.take() {
+            end_viewers(
+                &mut self.viewers,
+                Event::Control {
+                    held: false,
+                    notice: Some(text),
+                },
+            );
+            snapshot::leave(&self.id, &self.output);
+            if let Some(viewer) = self
+                .viewers
+                .iter_mut()
+                .find(|viewer| viewer.id == requester)
+            {
+                viewer.reply(answers, Reply::Accepted);
+                let _ = viewer.flush();
+            }
+            // An owner's caller signals it next; a held terminal has no
+            // process to signal, so the notice ends it.
+            if matches!(self.id, Host::Terminal(_)) {
+                release_viewer_hold(&self.id, self.observed_hold);
                 child.retire();
             }
-            // Flush even throttled activity so the applicable quiet interval
-            // starts again and a settled owner can eventually end.
-            if ending.activity != self.observed {
-                let _ = self.activity.send(self.observed);
-            }
         }
-        #[cfg(test)]
-        super::lifetime_tests::after_judgment(&self.output, self.observed)?;
+        if self.closing.try_recv().is_ok() {
+            child.end_jobs(&self.id)?;
+            end_viewers(
+                &mut self.viewers,
+                Event::Control {
+                    held: false,
+                    notice: Some("Shell closed".into()),
+                },
+            );
+            release_viewer_hold(&self.id, self.observed_hold);
+            snapshot::leave(&self.id, &self.output);
+            child.retire();
+        }
         Ok(Pass::Continue)
     }
 
@@ -1127,8 +1112,7 @@ impl Hosted {
     }
 
     /// When this execution next needs a pass with no descriptor ready: held
-    /// output, the exit announcement, input retention or a disconnected
-    /// viewer's grace.
+    /// output, the exit announcement or a disconnected viewer's grace.
     pub fn deadline(&self, child: &Child) -> Option<Instant> {
         let deadline = match self.exit {
             Some((_, at)) if self.announced => Some(at + Duration::from_secs(2)),
@@ -1149,7 +1133,6 @@ impl Hosted {
             })
             .chain(deadline)
             .chain(Some(Instant::now() + Duration::from_secs(10)))
-            .chain(self.pending_input.retry_at())
             .chain(child.retry_at())
             .chain(self.title.as_ref().map(|title| title.deadline()))
             .chain(self.settling.as_ref().and_then(Settling::deadline))
@@ -1179,7 +1162,7 @@ impl Hosted {
                 });
             }
         }
-        child.poll(self.pending_input.needs_write(), fds);
+        child.poll(!self.pending_input.is_empty(), fds);
     }
 }
 

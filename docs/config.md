@@ -279,6 +279,16 @@ protect against concurrent edits. Hand edits invalidate the same readers. Config
 inspection and bootstrap preferences do not require a compatible database; account
 or machine availability can still require runtime observations.
 
+File readers print warnings and skip unknown keys, invalid values and malformed
+YAML entries, including settings inside skills and Graph steps. Warnings identify
+the file and entry, with line numbers when the source is available. A malformed
+entry's indented contents are skipped with it; valid neighboring settings still
+load. Comments are ignored silently. Reading does not rewrite the file.
+
+`lf set`, `--setting` and `LF_SETTINGS` validate keys and values strictly, so a
+direct edit reports a typo instead of saving it. Fix malformed YAML before using
+a setter to edit that file; setters preserve comments and unrelated content.
+
 ## Where settings live
 
 | File | Applies to | Shared through Git? |
@@ -420,7 +430,9 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Chrome automation | `--chrome on` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Review GraphStep terminal | — | global-only `session.terminal: Ghostty` |
-| End agents nobody is viewing | — | `session.end_detached_after: 2m` (or `off`) |
+
+`session.end_detached_after` is accepted for older configurations but ignored.
+Conversations remain running until you quit their agent or their Task is cleaned up.
 
 ## Scratch lifecycle
 
@@ -693,7 +705,8 @@ choice win, even if it is general. `-a` explicitly selects the invocation's agen
 Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
-Bare harness names use the model selected by that provider account. Add
+Bare `claude` uses the [saved Claude model](#claude-model) when set; otherwise,
+bare harness names use the model selected by that provider account. Add
 `harness:model` only when the invocation must pin a specific model. OpenCode
 model strings use `provider/model` form:
 
@@ -702,6 +715,31 @@ agent: opencode                          # user's OpenCode default
 agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
+
+### Claude model
+
+```bash
+lf set --global claude.model opus
+lf -a claude design                 # start this conversation on Opus
+lf -a claude:fable design           # use Fable for this conversation
+```
+
+`claude.model` supplies the model when a new Session or Graph step selects bare
+`claude`. It does not choose the harness: `default_agent: codex` still selects
+Codex unless another applicable choice selects Claude. An explicit model such
+as `claude:fable` or `claude:opus` always wins over this saved default, whether
+it comes from the command line, a skill, a Graph step or configuration.
+Existing Sessions keep their recorded model; resume with `-a claude` to use the
+current default.
+
+Omit `--global` for a private repository preference, or add `--shared` for the
+team. The setting follows [normal precedence](#which-value-wins); inspect it
+with `lf config settings --explain`. `lf unset --global claude.model` removes
+the global declaration. With no applicable value, Claude chooses its own model.
+
+Account routing checks capacity for the starting model. Bare `claude` retains
+[capacity fallthrough](subscriptions.md#when-an-account-runs-out) to other models;
+`claude:opus` pins Opus.
 
 ### Codex service tier
 
@@ -857,8 +895,9 @@ sandbox, and OpenCode denies external-directory tools, including with `yolo`.
 
 Stopped-session resume reloads Loopflow settings at the saved checkout. The
 provider's conversation identity and account stay attached; a current model
-setting for that provider applies. A configured different provider does not
-change the saved history's provider. A `default_agent` can refresh the model for
+selection for that provider applies. The [saved Claude default](#claude-model)
+does not replace a recorded Session model. A configured different provider does
+not change the saved history's provider. A `default_agent` can refresh the model for
 that provider; switching providers requires an explicit agent choice. CLI overrides
 take precedence. Connecting
 to an already running provider keeps its existing launch settings. Historical

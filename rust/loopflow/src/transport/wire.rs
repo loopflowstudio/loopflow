@@ -175,6 +175,11 @@ pub(super) enum Request {
         cols: u16,
     },
     EndInput,
+    /// Cleanup is ending this execution; deliver the reason and retain its final
+    /// screen. A held terminal ends on it; an owner is signalled next.
+    CloseNotice {
+        text: String,
+    },
     Own {
         mode: Own,
     },

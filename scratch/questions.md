@@ -46,14 +46,14 @@ Recommendation: launch bare interactive Pi with `--session-id`.
 # LOO-824
 
 Its choices and reversible assumptions are in the parent branch,
-`8bfcccdfc:scratch/questions.md` and `d7901ea6e:scratch/holder.md`.
+`e1c5b37d9:scratch/questions.md` and `e1c5b37d9:scratch/holder.md`.
 
 ## Assumptions, LOO-820, reversible
 
 - A framed remote viewer (`lf ssh`, `LF_VIEWER_STREAM`) keeps an owner for a
   bare launch; direct output would be unframed on its stream.
-- While lf waits on a foreground agent it ignores SIGTERM sent to it alone,
-  since its one signal handler cannot tell Ctrl+C from SIGTERM.
+- Superseded on sync: LOO-823 gives the provider its own foreground process
+  group; lf uses the parent's ordinary signal handler.
 
 ## Steering bare Sessions (open, November 11)
 
@@ -64,3 +64,12 @@ only allow lf task steer?", then "that is basically what our arhcitecture
 supports, right?" Gap: Wave and repository conversations are managed and are
 steered today only by `lf session steer` with no ID ("the current Wave's or
 repository's Sessions"); `lf task steer` cannot reach them.
+
+## Sync onto LOO-824, November 11
+
+Use LOO-823's foreground launch and signal handling from the parent;
+keep LOO-820's resume beside a running bare agent and lock reacquisition
+when delegation does not start a transport. Parent design and reduction
+notes remain at `e1c5b37d9:scratch/holder.md` and
+`e1c5b37d9:scratch/simplification-opportunities.md`; this checkout keeps
+LOO-820's design and launch reduction plan.

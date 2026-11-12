@@ -269,10 +269,11 @@ Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
 including captured input, native identity and historical outcomes.
 
-`lf resume` attaches to a live owner. A live turn, draft or pending request keeps
+`lf resume` attaches to a live owner. A live turn or pending request keeps
 its provider: a failed attachment reports the failure, discards no work and replays
 no input. Only a safely replaceable owner has its exact owned clients stopped and
-the same provider thread resumed, preserving sibling conversations.
+the same provider thread resumed, preserving sibling conversations. Replacing
+an idle provider discards unsent editor input.
 `--fork` leaves the holder running and starts a new Session from its log.
 There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination

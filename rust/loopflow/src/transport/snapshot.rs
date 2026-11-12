@@ -34,7 +34,7 @@ pub(super) fn leave(owner: &Host, output: &Output) {
     let written = || -> Result<Option<PathBuf>> {
         let store = crate::journal::process_ledger()?;
         let shell = match owner.owner() {
-            Some(owner) => store.shell_close_request(owner)?.is_some(),
+            Some(owner) => store.is_shell_owner(owner)?,
             None => false,
         };
         let session = if shell {

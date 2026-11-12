@@ -74,21 +74,32 @@ pub(crate) fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
+    managed: bool,
 ) -> Result<()> {
-    resume_session_with_env(artifact_key, Some(provider_session), &BTreeMap::new(), None)
+    resume_session_with_env(
+        artifact_key,
+        Some(provider_session),
+        &BTreeMap::new(),
+        None,
+        managed,
+    )
 }
 
+/// Continue a recorded conversation. `managed` is the resume command's: a
+/// Task or Wave resume starts only beside the Machine server.
 pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
+    managed: bool,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
+    config.managed = managed;
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -580,11 +591,16 @@ fn run_native_session(
             crate::agent::configure_native_input(&mut process, input)?;
         }
     }
+    // Only an explicit remote connection is a client of a surviving AgentProcess.
+    let owned = command.remote.is_none().then_some(&attachment);
+    // Refused before the provider conversation is recorded, so the next launch
+    // starts it fresh instead of resuming one that never ran.
+    if let Some(owner) = owned {
+        crate::harness::agent_process::require_server_for(owner, command.managed)?;
+    }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, account.clone())?;
     }
-    // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = command.remote.is_none().then_some(&attachment);
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
@@ -623,9 +639,12 @@ fn run_native_session(
                 let _native = native_return(&attachment);
                 drop(activation);
                 let error = match owned {
-                    Some(owner) => {
-                        crate::harness::agent_process::exec_native(process, owner, launch_lock)
-                    }
+                    Some(owner) => crate::harness::agent_process::exec_native(
+                        process,
+                        owner,
+                        command.managed,
+                        launch_lock,
+                    ),
                     None => {
                         client_opened(std::process::id());
                         crate::harness::agent_process::exec_client(process, launch_lock)
@@ -644,8 +663,9 @@ fn run_native_session(
             }
         }
     }
+    let foreground = crate::os_process::foreground::hand_to(&mut process);
     let spawned = match owned {
-        Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
+        Some(owner) => crate::harness::agent_process::spawn_native(process, owner, command.managed),
         None => {
             let (store, session, expected) = &attachment;
             store
@@ -669,10 +689,13 @@ fn run_native_session(
         client_opened(child.id());
     }
     let _native = native_return(&attachment);
-    let _foreground = crate::agent::ForegroundAgent::enter();
     // The process record now owns the launch identity.
     drop(launch_lock);
+    let pid = child.id();
     let status = crate::os_process::wait_for_exit(&mut child, None, || {
+        if let Some(foreground) = &foreground {
+            foreground.follow_stop(pid);
+        }
         if let Some(title) = &mut title {
             title.refresh();
         }
@@ -904,7 +927,6 @@ fn run_opencode_native(
                 let mut child = process.spawn()?;
                 crate::transport::report_directory(&command.cwd);
                 let _native = native_return(&owner);
-                let _foreground = crate::agent::ForegroundAgent::enter();
                 let status = (|| -> Result<_> {
                     record_interactive_opened(environment)?;
                     Ok(if let Some(title) = &mut title {
@@ -1227,6 +1249,7 @@ mod tests {
         .unwrap();
         let command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             context: None,
             attachment: None,
@@ -1356,6 +1379,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
+                    false,
                 )
             };
             if index % 2 == 0 {
@@ -1440,6 +1464,7 @@ mod tests {
         });
         let command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             context: None,
             program: "/bin/sleep".into(),
@@ -1462,6 +1487,7 @@ mod tests {
         let home = ledger.home();
         let mut command = SessionCommand {
             launch: None,
+            managed: false,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
@@ -1547,6 +1573,7 @@ mod tests {
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), original.clone()),
+                false,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1568,6 +1595,7 @@ mod tests {
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
                 launch: None,
+                managed: false,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -1650,6 +1678,7 @@ mod tests {
             )?;
             let command = SessionCommand {
                 launch: None,
+                managed: false,
                 input: None,
                 context: None,
                 attachment: capture.session_attachment(),

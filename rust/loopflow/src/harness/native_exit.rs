@@ -43,6 +43,11 @@ pub(crate) struct Settled {
     pub lines: Vec<String>,
 }
 
+/// What a view prints for a provider that failed, however it learns of the exit.
+pub(crate) fn exit_line(provider: &str, code: u8) -> String {
+    format!("{provider} exited with {code}.")
+}
+
 /// Record a handed-off provider's exit as its launcher would have. Every record
 /// is best-effort: the provider's own exit is what the person gets back, and a
 /// store that is locked, refused or missing only loses the records, logged.
@@ -114,9 +119,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         lines: command.moved.into_iter().collect(),
     };
     if failed {
-        settled
-            .lines
-            .push(format!("{} exited with {code}.", exit.provider));
+        settled.lines.push(exit_line(&exit.provider, code));
     }
     let (path, size) = &exit.diagnostics;
     if std::fs::metadata(path).is_ok_and(|info| info.len() > *size) {

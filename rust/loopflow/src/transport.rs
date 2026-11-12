@@ -5,11 +5,7 @@ mod connection;
 mod held;
 mod hosted;
 mod input;
-#[cfg(test)]
-mod input_retry_tests;
 mod lifetime;
-#[cfg(test)]
-mod lifetime_tests;
 mod native;
 mod output;
 pub(crate) mod registry;
@@ -59,8 +55,6 @@ pub(crate) const STREAM_ENV: &str = "LF_VIEWER_STREAM";
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 // SSH connection setup and destination Session resolution precede attachment.
 const COMMAND_ATTACH_TIMEOUT: Duration = Duration::from_secs(60);
-/// Continuous output tells the lifetime policy once per pause, not per read.
-const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
 
 /// How long a dropped viewer's stream waits for a byte-counted resume.
 const GRACE: Duration = Duration::from_secs(60);
@@ -278,14 +272,28 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
     }
 }
 
+/// Whether a bare conversation runs as this terminal's foreground program, as
+/// `claude` or `codex` would: no owner holds it, so closing the terminal ends
+/// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
+/// launches without a terminal on stdin, which need the owner's PTY, and a
+/// Desktop surface waiting for a relay to acknowledge it.
+pub fn runs_in_terminal(batch: bool) -> bool {
+    !batch
+        && current().is_none()
+        && io::stdin().is_terminal()
+        && std::env::var_os("LF_SERVER_STATUS").is_none()
+        && std::env::var_os(STREAM_ENV).is_none()
+}
+
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 ///
-/// `task_run` says the command starts a Task's Graph, whose conversation is
-/// held for the Machine server when a terminal views it.
-pub fn delegate_current(batch: bool, task_run: bool) -> Result<bool> {
+/// `managed` says the command is a Task or Wave command (`Cli::names_work`)
+/// or starts a Task's Graph; its conversation is held for the Machine server
+/// when a terminal views it.
+pub fn delegate_current(batch: bool, managed: bool) -> Result<bool> {
     let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, task_run)
+    delegate(batch, None, None, argv, true, managed)
 }
 
 pub(crate) fn delegate_session(
@@ -321,7 +329,7 @@ fn delegate(
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
-    task_run: bool,
+    managed: bool,
 ) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
@@ -335,7 +343,7 @@ fn delegate(
             preview_session,
             &mut argv,
             replace,
-            task_run,
+            managed,
         );
         Ok(false)
     }
@@ -350,19 +358,10 @@ fn delegate(
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
-        let stream = std::env::var_os(STREAM_ENV).is_some();
-        let terminal =
-            stream || io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-        let viewed = terminal && !batch;
-        let held = managed(viewed, task_run, preview_session.or(json_session));
-        // A bare interactive launch runs here, its agent the foreground program
-        // of the calling terminal. A headless or JSON run keeps an owner so it
-        // outlives its caller, and a framed remote viewer needs one to frame
-        // the agent's screen.
-        if !held && viewed && !stream && json_session.is_none() {
-            return Ok(false);
-        }
-        let preview = if stream {
+        let terminal = std::env::var_os(STREAM_ENV).is_some()
+            || io::stdout().is_terminal()
+            || (!batch && io::stdin().is_terminal());
+        let preview = if std::env::var_os(STREAM_ENV).is_some() {
             if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
                 io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
             }
@@ -372,7 +371,11 @@ fn delegate(
         };
         let session = preview_session.map(LfSessionId::from);
         let cwd = std::env::current_dir()?;
-        let owner = if held {
+        let owner = if held(
+            terminal && !batch,
+            managed,
+            preview_session.or(json_session),
+        ) {
             Host::Terminal(start_held(&argv, &cwd, session.as_ref(), &|_| {})?)
         } else {
             Host::Owner(start(&argv, terminal, &cwd, &|_| {})?)
@@ -391,18 +394,19 @@ fn delegate(
 
 /// Whether a launch's agent runs in a terminal a holder keeps for the Machine
 /// server, so that it outlives every lf process that views it. A held launch
-/// is a managed launch (`WorkSource::is_managed`, the rule hooks follow too:
-/// Task, Wave and repository conversations) or a Task run, with a terminal
-/// viewing it, wherever it is opened. A bare interactive launch, even in a
-/// Task's checkout or a Desktop pane, runs in the calling terminal. A piped,
-/// `-b` or JSON execution, a framed remote viewer and a Desktop Task shell
-/// keep an owner process of their own.
+/// is a managed one with a terminal viewing it: a Task or Wave command or a
+/// Task run (`managed`, the rule hooks follow), or the reopening of a
+/// conversation recorded as Task, Wave or repository work
+/// (`WorkSource::is_managed`), wherever it is opened. A bare launch, one
+/// attributed only by its checkout, a piped or `-b` execution and a Desktop
+/// Task shell do not use the holder. Bare terminal launches run directly;
+/// piped, headless and Desktop shell launches keep their own owner.
 #[cfg_attr(test, allow(dead_code))]
-fn managed(viewed: bool, task_run: bool, session: Option<&str>) -> bool {
+fn held(viewed: bool, managed: bool, session: Option<&str>) -> bool {
     if !viewed {
         return false;
     }
-    if task_run {
+    if managed {
         return true;
     }
     let Some(session) = session else {
@@ -476,7 +480,9 @@ pub(crate) fn start(
     command
         .args(["session", "serve"])
         .env_remove("LF_SERVER_STATUS")
-        .env_remove(STREAM_ENV);
+        .env_remove(STREAM_ENV)
+        // It names a descriptor the owner does not inherit.
+        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
     if terminal {
         command.arg("--terminal");
     }
@@ -494,11 +500,15 @@ pub(crate) fn start(
     if let Some(terminal) = crate::session_record::current_terminal_id() {
         command.env(TERMINAL_ENV, terminal);
     }
-    // SAFETY: only an async-signal-safe syscall is used between fork and exec.
+    let descriptors = open_descriptors();
+    // SAFETY: only async-signal-safe syscalls are used between fork and exec.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            for fd in &descriptors {
+                libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
             Ok(())
         });
@@ -514,6 +524,21 @@ pub(crate) fn start(
         .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
     LfProcessId::parse(line.trim())
         .context("Owner exited before acknowledging execution; inspect transport.log")
+}
+
+/// Descriptors above stderr, such as a terminal host's pipes to its other
+/// children that this process inherited. A detached owner outlives that host, so
+/// it must not hold them: a reader waiting for the host's end to close would
+/// wait for as long as the owner runs. Marking an already close-on-exec or
+/// closed number (the listing's own) again is harmless.
+fn open_descriptors() -> Vec<RawFd> {
+    let Ok(entries) = std::fs::read_dir("/dev/fd") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|fd| *fd > libc::STDERR_FILENO)
+        .collect()
 }
 
 pub(crate) fn directory(home: &Path) -> Result<PathBuf> {
@@ -1231,8 +1256,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         shell_jobs,
     });
     loop {
-        #[cfg(test)]
-        hosted.before_accept(&mut child)?;
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
             hosted.admit(socket);
@@ -2126,9 +2149,14 @@ fn view(
                         }
                         // An agent that exited while no server ran ends the
                         // view as its exit would have.
-                        if let Some(code) = next.as_ref().err().and_then(exit_code) {
+                        if let Some((code, provider)) = next.as_ref().err().and_then(ended_exit) {
                             drop(terminal.take());
-                            eprintln!("\nThe agent exited with {code}.");
+                            if let (Some(provider), 1..) = (provider, code) {
+                                eprintln!(
+                                    "\n{}",
+                                    crate::harness::native_exit::exit_line(&provider, code)
+                                );
+                            }
                             return if code == 0 {
                                 Ok(())
                             } else {
@@ -2194,7 +2222,9 @@ fn view(
                 revents: 0,
             },
             libc::pollfd {
-                fd: if stdin_open && (controlled || terminal.is_some()) {
+                fd: if stdin_open
+                    && (controlled || (terminal.is_some() && acknowledgement_deadline.is_none()))
+                {
                     0
                 } else {
                     -1
@@ -2703,12 +2733,15 @@ fn replace_view(
     bail!("{skew} and {failure}; the agent keeps running. Run lf install, then lf session attach --terminal {terminal}")
 }
 
-/// The code a held terminal's agent exited with, when `error` is a server's
-/// answer that the terminal ended and the store recorded its exit.
-fn exit_code(error: &anyhow::Error) -> Option<u8> {
-    let ended = error.downcast_ref::<crate::engine::Error>()?;
-    let code = ended.data.as_ref()?["exit_code"].as_u64()?;
-    u8::try_from(code).ok()
+/// The code and Session provider of a held terminal's agent, when `error` is a
+/// server's answer that the terminal ended and the store recorded its exit.
+fn ended_exit(error: &anyhow::Error) -> Option<(u8, Option<String>)> {
+    let data = error
+        .downcast_ref::<crate::engine::Error>()?
+        .data
+        .as_ref()?;
+    let code = u8::try_from(data["exit_code"].as_u64()?).ok()?;
+    Some((code, data["provider"].as_str().map(str::to_owned)))
 }
 
 /// A bridge to `host` for a view that reconnects: an owner through the
@@ -2845,6 +2878,19 @@ pub(crate) fn leaving(id: &LfProcessId) -> bool {
 /// leaves its execution running with none, ready for the next viewer.
 pub(crate) fn controlled(id: &Host) -> Result<bool> {
     attachment(id).map(|(held, _)| held)
+}
+
+/// Announce cleanup before its caller signals the owner. A held terminal,
+/// which has no process to signal, ends on the notice. No decision is stored.
+pub(crate) fn close_notice(id: &Host, text: &str) -> Result<()> {
+    let mut socket = id.connect()?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    send(&mut socket, Request::CloseNotice { text: text.into() })?;
+    match receive_reply(&mut socket)? {
+        Reply::Accepted => Ok(()),
+        other => bail!("unexpected close notice reply {other:?}"),
+    }
 }
 
 /// Input ownership and the controlling viewer's native readiness are separate.

@@ -1,7 +1,7 @@
 //! The server's side of a holder connection, and how a holder is started.
 
 use std::fs::OpenOptions;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
-use super::wire::{self, Answer, Decoder, Frame, Held, Request, Start};
+use super::wire::{self, Answer, Decoder, Held, Request, Start};
 use super::Place;
 
 /// How long one request waits for its answer line.
@@ -119,14 +119,6 @@ impl Client {
         }
     }
 
-    pub fn resize(&mut self, terminal: &str, rows: u16, cols: u16) -> Result<()> {
-        self.done(Request::Resize {
-            terminal: terminal.to_owned(),
-            rows,
-            cols,
-        })
-    }
-
     pub fn forget(&mut self, terminal: &str) -> Result<()> {
         self.done(Request::Forget {
             terminal: terminal.to_owned(),
@@ -182,10 +174,12 @@ pub struct Output {
     pub decoder: Decoder,
 }
 
+#[cfg(test)]
 impl Output {
     /// The next frame, waiting for it. End of stream without an exit frame is
     /// a lost connection, not an exit.
-    pub fn frame(&mut self) -> io::Result<Frame> {
+    pub fn frame(&mut self) -> io::Result<super::wire::Frame> {
+        use std::io::Read;
         loop {
             if let Some(frame) = self.decoder.frame()? {
                 return Ok(frame);

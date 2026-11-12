@@ -64,10 +64,10 @@ failed placement, failed shipping and a Graph held at landing.
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
 without one is a terminal's status observation, which an unviewed owner does
-not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+not read as a turn (`transport_tests::silent_native_turns_survive_until_settlement`).
 `transport_tests::silent_native_turns_survive_until_settlement` runs native
 prompt/stop callbacks from the generated hook settings, preserves silent work
-past the detached grace and executable removal, then proves ending after stop.
+past completed-Task retirement and executable removal, then proves ending after stop.
 `native_background_watches_survive_until_settlement` covers a yielded reply with
 background work, then scheduled wakeups, and ending only after both settle.
 
@@ -100,14 +100,12 @@ prepared-viewer case exercises the returned production launch command, healthy
 idle heartbeats, resize, explicit Leave and unchanged execution after reattach;
 its process inventory rejects an additional remote PTY.
 
-`transport_tests::contended_input_retention_keeps_control_and_delivers_once_after_unlock`
-holds a SQLite writer while typing and returning to the viewer. Control stays
-responsive, no unrecorded bytes reach the provider, and unlocking resumes delivery
-without replay. `transport::input_retry_tests` bounds polling through a failed
-store and verifies recovery through the real descriptor loop.
+`transport_tests::a_locked_store_does_not_delay_input_or_replay_it_on_return`
+holds a SQLite writer while typing and returning to the viewer. Input and control
+keep flowing while the store is locked; returning does not replay input.
 
 `transport_tests::unanswering_superseded_owners_preserve_*` pause superseded
-owners while resuming their Sessions. Drafts, pending requests, turns, Graph
+owners while resuming their Sessions. Pending requests, turns, Graph
 ancestry/steps and Runs retain the same provider, attachment and capture; no new
 provider launches. A completed Session is unknown, not work: its unanswering owner
 ends and resume continues on one new provider, while an answering one is attached.
@@ -116,8 +114,9 @@ movement after protected work settles.
 
 Upgrade recovery also needs `transport_tests`: retained hooks must settle through
 ContextBlock, exclude subagents and report real delivery errors. Public resume
-must retain drafts, requests, history and Session/Task/capture identity through
-build replacement and viewer return; only provider replacement changes its fence.
+must retain live turns, pending requests, history and Session/Task/capture identity
+through build replacement and viewer return. Once work settles, explicit resume
+may replace an idle provider, discarding unsent input and changing its fence.
 An unanswering protected owner survives failed attachment and completes continued
 turns after transport returns.
 `process::runtime::tests::resume_*dead_owners*` covers cross-process recovery:
@@ -126,9 +125,9 @@ signals or settlement, and both retain Task/history/steers. These stand-ins use
 candidate wire/schema; released-version, permanently broken transport and
 installed-provider recovery still need separate proof.
 Use published 0.15.1 for the released boundary: its owner speaks newline JSON
-and predates native-input tracking. Prove attachment and retention of an unsent
-draft before allowing its provider to be replaced; an absent input record does
-not establish that an older provider's editor is empty.
+and predates native-input tracking. Prove attachment retains an unsent draft;
+explicit replacement discards it while continuing recorded history. Pending
+requests still retain their provider across the older protocol.
 Build that proof with full main history or an explicit `LOOPFLOW_MIGRATION_ORDER`;
 a shallow checkout orders all slugs as drafts and can reject the released store
 before reaching the interaction under test.
@@ -776,6 +775,30 @@ harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
 Launch proofs use provider-written evidence and terminal receipts.
+
+### Leaving nothing running
+
+A detached owner calls `setsid`, so it outlives the test's process group. A
+fixture that starts owners calls `loopflow_test_support::end_recorded_processes`
+from its `Drop`, as `transport_tests`' `Fixture` does; it ends what the
+fixture's store still records as running and waits for exit, including owners
+whose completion receipt preceded their final screen write. The provider
+stand-in on the owner's terminal ends on hangup.
+
+A detached owner drops every descriptor it inherited above stderr, so a test
+that hands `lf` a pipe can wait for end of input once the viewer exits
+(`detached_owner_keeps_no_descriptor_its_terminal_inherited`).
+
+Check a suite by its binary path, never by name:
+
+```bash
+ps -axo pid,command | grep -F "$PWD/target" | grep -v grep   # nothing from this checkout's builds after the suite exits
+ps -axo pid,command | grep -F /tmp/lf-7501- | grep -v grep   # nothing from transport_tests' fixture homes
+```
+
+Stop only what the fixture started, by the handle or PID it holds. Never
+`pkill` or `killall` by command pattern: other checkouts run the same test
+binaries.
 
 ### Reproducing races without CPU load
 

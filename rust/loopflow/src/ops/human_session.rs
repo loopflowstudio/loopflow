@@ -58,17 +58,19 @@ pub enum SessionTarget<'a> {
 }
 
 impl<'a> SessionTarget<'a> {
+    /// A Session id selects that conversation even beside `--task` or
+    /// `--wave`; naming the Work there only makes the command managed.
     pub fn from_selectors(
         id: Option<&'a str>,
         task: Option<&'a str>,
         wave: Option<&'a str>,
     ) -> Result<Self> {
         match (id, task, wave) {
-            (None, None, None) => Ok(Self::Context),
-            (Some(id), None, None) => Ok(Self::Session(id)),
+            (_, Some(_), Some(_)) => bail!("select one Task or Wave"),
+            (Some(id), _, _) => Ok(Self::Session(id)),
             (None, Some(task), None) => Ok(Self::Task(task)),
             (None, None, Some(wave)) => Ok(Self::Wave(wave)),
-            _ => bail!("select one Session, Task or Wave target"),
+            (None, None, None) => Ok(Self::Context),
         }
     }
 }
@@ -325,6 +327,9 @@ pub(crate) fn session_actions(
 }
 
 fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    if session.interactive && session.held {
+        return held_actions(session);
+    }
     let occupied = session.agent_process_id.is_some()
         && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead;
     // Listing reads the marker alone: `capture_is_prepared` opens the store per Session.
@@ -348,6 +353,25 @@ fn projected_actions(session: &crate::session::SessionSummary) -> Vec<SessionAct
         name_session_holder(&mut actions, session.terminal_id.as_deref());
     }
     actions
+}
+
+/// A held terminal takes any number of views, so opening one takes no other
+/// terminal's input; Take back belongs to an execution owner.
+fn held_actions(session: &crate::session::SessionSummary) -> Vec<SessionAction> {
+    vec![SessionAction {
+        kind: SessionActionKind::Open,
+        label: if session.unviewed {
+            "Reconnect"
+        } else {
+            "Open here"
+        }
+        .to_string(),
+        help: format!(
+            "View the running conversation here: lf resume {}",
+            session.id
+        ),
+        unavailable_reason: None,
+    }]
 }
 
 fn name_session_holder(actions: &mut [SessionAction], terminal: Option<&str>) {
@@ -685,19 +709,19 @@ fn summary_surface(
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         _ => None,
     };
-    let work_path = session.wave_id.as_ref().map(|wave| {
-        let wave = session
+    let wave = session.wave_id.as_ref().map(|wave| {
+        session
             .wave_name
             .clone()
-            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"));
-        match &session.task_id {
-            None => wave,
-            Some(task) => match &session.task_identifier {
-                Some(label) => format!("{wave} / {label}"),
-                None => format!("Task {task} (unavailable)"),
-            },
-        }
+            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"))
     });
+    let task = session.task_id.as_ref().map(|task| {
+        session
+            .task_identifier
+            .clone()
+            .unwrap_or_else(|| format!("Task {task} (unavailable)"))
+    });
+    let work_path = join_work_path(wave, task);
     let graph_membership = match (&session.graph_lf_process_id, &session.graph) {
         (None, _) if session.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -840,7 +864,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
 }
 
 /// Environment naming the inherited descriptor that holds a Session launch lock.
-const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
+pub(crate) const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
 
 fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
     use std::os::fd::AsRawFd;
@@ -945,7 +969,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
 }
 
 /// Get back to a Session. A terminal showing it hands over control; a provider
-/// client lf started stops only when no live turn, draft or request needs it.
+/// client lf started stops only when no live turn or request needs it.
 /// With `fork`, the holder keeps it and a new Session continues from its log. A
 /// Run is refused; it is never taken over or resumed.
 pub(crate) async fn open(
@@ -955,6 +979,7 @@ pub(crate) async fn open(
     fork: bool,
     resume: bool,
     json: bool,
+    managed: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -1083,18 +1108,20 @@ pub(crate) async fn open(
                 }
             }
         }
-        if crate::transport::delegate_session(
-            false,
-            json.then_some(session.id.as_str()),
-            session.interactive.then_some(session.id.as_str()),
-            true,
-        )? {
+        if !opens_bare(&store.sqlite, &session.id, managed)
+            && crate::transport::delegate_session(
+                false,
+                json.then_some(session.id.as_str()),
+                session.interactive.then_some(session.id.as_str()),
+                true,
+            )?
+        {
             return surface(store, session).await;
         }
     }
     if session.captured.is_none() {
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, managed).await?;
         }
         return surface(store, session).await;
     }
@@ -1105,7 +1132,7 @@ pub(crate) async fn open(
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
         if resume {
-            open_waiting(store, &session.id).await?;
+            open_waiting(store, &session.id, managed).await?;
         }
         return Ok(surface);
     };
@@ -1124,9 +1151,29 @@ pub(crate) async fn open(
                 session.provider.as_deref().unwrap_or("provider")
             ));
         }
-        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
+        crate::lf::commands::util::resume_session(
+            session.input_key()?,
+            &provider_session,
+            managed,
+        )?;
     }
     Ok(result)
+}
+
+/// Managed commands and recorded managed Sessions keep their host on reopen.
+/// Other Sessions outside an ongoing conversation run in the terminal; failed
+/// reads keep the host.
+fn opens_bare(store: &SqliteStore, id: &str, managed: bool) -> bool {
+    !managed
+        && crate::transport::runs_in_terminal(false)
+        && store.session(id).is_ok_and(|session| {
+            session.is_some_and(|session| {
+                !session
+                    .work_source
+                    .is_some_and(crate::session::WorkSource::is_managed)
+            })
+        })
+        && store.primary_scope(id).is_ok_and(|scope| scope.is_none())
 }
 
 /// Open without replacing a client. Start may initialize a first thread, but
@@ -1139,6 +1186,7 @@ pub(crate) async fn open_without_replacing(
     intent: SessionOpenIntent,
     launch: bool,
     json: bool,
+    managed: bool,
 ) -> Result<SessionRecord> {
     let start = intent == SessionOpenIntent::Start;
     let lock_id = id.to_owned();
@@ -1207,7 +1255,7 @@ pub(crate) async fn open_without_replacing(
     }
     // A held terminal re-executes this same intent and acquires the lock
     // again; a bare conversation opens here, in this terminal.
-    let lock = if crate::transport::current().is_none() {
+    let lock = if crate::transport::current().is_none() && !opens_bare(&store.sqlite, id, managed) {
         drop(lock);
         if crate::transport::delegate_session(false, json.then_some(id), Some(id), false)? {
             return Ok(record);
@@ -1219,7 +1267,7 @@ pub(crate) async fn open_without_replacing(
     };
     let Some(native) = native else {
         // Keep the ownership read and first-thread admission under one lock.
-        return open_waiting_locked(store, session, lock)
+        return open_waiting_locked(store, session, lock, managed)
             .await
             .map(|()| record);
     };
@@ -1244,6 +1292,7 @@ pub(crate) async fn open_without_replacing(
         Some(&native),
         &environment,
         Some(lock),
+        managed,
     )?;
     Ok(record)
 }
@@ -1308,9 +1357,10 @@ async fn fork(
 
 /// Preparation has already mutated the Session. Only its resulting identity
 /// crosses to the owner; opening it reacquires the lock and reads current state.
+/// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
     if !crate::transport::delegate_prepared_session(id, json)? {
-        open_waiting(store, id).await?;
+        open_waiting(store, id, false).await?;
     }
     Ok(())
 }
@@ -1356,7 +1406,7 @@ fn departure_here() -> crate::process::Departure {
 
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+async fn open_waiting(store: &SharedStore, id: &str, managed: bool) -> Result<()> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock =
@@ -1368,13 +1418,14 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    open_waiting_locked(store, session, launch_lock).await
+    open_waiting_locked(store, session, launch_lock, managed).await
 }
 
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
+    managed: bool,
 ) -> Result<()> {
     let id = session.id.clone();
     let session = primary::admit_workspace(store, session).await?;
@@ -1385,7 +1436,13 @@ async fn open_waiting_locked(
         session
     };
     let token = session_token(&session);
-    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
+    if resume_native_session(
+        store,
+        session.input_key()?,
+        &token,
+        &mut launch_lock,
+        managed,
+    )? {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
@@ -1589,7 +1646,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// Attach to protected work even when its owner cannot answer: saved history
-/// cannot reconstruct its editor or pending requests. An idle owner that is
+/// cannot reconstruct an active turn or pending request. An idle owner that is
 /// superseded or does not answer gives way to native continuation. So does an
 /// unanswering superseded owner with no open Session: no work is known there, while
 /// an answering one may hold a turn or draft nothing records, so a viewer attaches.
@@ -1658,6 +1715,13 @@ pub(crate) fn end_owner(
     pid: u32,
 ) -> Result<()> {
     const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    if !owner_running(store, owner)? {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        crate::journal::live_process_pid(store, owner) == Some(pid),
+        "owner {owner} no longer has verified pid {pid}"
+    );
     crate::platform::kill_process(pid);
     let deadline = std::time::Instant::now() + STOP_TIMEOUT;
     while owner_running(store, owner)? {
@@ -1792,20 +1856,29 @@ fn launch_model(session: &LfSession) -> String {
 }
 
 async fn session_work_path(store: &SharedStore, session: &LfSession) -> Result<Option<String>> {
-    let Some(wave_id) = &session.wave_id else {
-        return Ok(None);
+    let wave = match &session.wave_id {
+        Some(id) => Some(match store.get_wave(id).await? {
+            Some(wave) => wave.slug().to_string(),
+            None => format!("Wave {id} (unavailable)"),
+        }),
+        None => None,
     };
-    let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.slug().to_string(),
-        None => format!("Wave {wave_id} (unavailable)"),
-    };
-    Ok(Some(match &session.task_id {
-        None => wave,
-        Some(id) => match store.get_task(id).await? {
-            Some(task) => format!("{wave} / {}", task.identifier),
+    let task = match &session.task_id {
+        Some(id) => Some(match store.get_task(id).await? {
+            Some(task) => task.identifier,
             None => format!("Task {id} (unavailable)"),
-        },
-    }))
+        }),
+        None => None,
+    };
+    Ok(join_work_path(wave, task))
+}
+
+/// "Wave / Task", either alone, or nothing for a repository conversation.
+fn join_work_path(wave: Option<String>, task: Option<String>) -> Option<String> {
+    match (wave, task) {
+        (Some(wave), Some(task)) => Some(format!("{wave} / {task}")),
+        (wave, task) => wave.or(task),
+    }
 }
 
 pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
@@ -1911,6 +1984,7 @@ pub(crate) fn resume_native_session(
     artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
+    managed: bool,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1946,6 +2020,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
+        managed,
     )?;
     Ok(true)
 }

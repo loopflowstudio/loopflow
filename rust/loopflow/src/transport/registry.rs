@@ -169,20 +169,22 @@ pub(crate) fn waiting(terminal: &TerminalId) -> crate::engine::Error {
 
 /// The refusal for a terminal no server hosts: its agent exited, or it never
 /// started. Attaching never starts one. An exit the store recorded carries its
-/// code as `exit_code`.
+/// code as `exit_code` and its Session's `provider`.
 pub(crate) fn ended(terminal: &TerminalId) -> crate::engine::Error {
-    let code = crate::journal::process_ledger()
-        .and_then(|store| store.terminal_exit_code(terminal))
+    let exit = crate::journal::process_ledger()
+        .and_then(|store| store.terminal_exit(terminal))
         .ok()
         .flatten();
-    let message = match code {
-        Some(code) => format!("the agent in terminal {terminal} exited with {code}"),
+    let message = match &exit {
+        Some((code, _)) => format!("the agent in terminal {terminal} exited with {code}"),
         None => {
             format!("terminal {terminal} is not running; nothing was started and no input replayed")
         }
     };
-    crate::engine::Error::new(crate::engine::ErrorCode::NotFound, message)
-        .with(serde_json::json!({ "terminal_id": terminal, "exit_code": code }))
+    let (code, provider) = exit.unzip();
+    crate::engine::Error::new(crate::engine::ErrorCode::NotFound, message).with(
+        serde_json::json!({ "terminal_id": terminal, "exit_code": code, "provider": provider.flatten() }),
+    )
 }
 
 /// A server of another build answered the entrance: what follows its answer

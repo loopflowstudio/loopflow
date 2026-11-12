@@ -33,7 +33,6 @@ mod subscription_events;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
-mod native_input;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;
@@ -81,10 +80,6 @@ pub(crate) use task_work::TaskShipping;
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// A provider hook at a turn or tool boundary waits this long for a locked
-/// store, then treats it as unavailable: a busy install never stalls a turn.
-pub(crate) const HOOK_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bytes of write-ahead log kept on disk after a checkpoint resets it.
 const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
@@ -519,13 +514,6 @@ impl SqliteStore {
             super::FrontierAdvance::Forbidden,
             SQLITE_WRITE_BUSY_TIMEOUT,
         )
-    }
-
-    /// Open for a provider hook at a turn or tool boundary. It waits at most
-    /// [`HOOK_BUSY_TIMEOUT`] for a locked store; the caller treats any error as
-    /// a recording gap and lets the turn continue.
-    pub(crate) fn open_for_hook(path: &Path) -> StoreResult<Self> {
-        Self::open(path, super::FrontierAdvance::Forbidden, HOOK_BUSY_TIMEOUT)
     }
 
     /// Revalidate a connection after a child executable may have upgraded it.

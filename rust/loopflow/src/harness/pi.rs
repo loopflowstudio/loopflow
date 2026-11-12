@@ -211,7 +211,7 @@ impl PiHarness {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner)
+        let mut child = super::agent_process::spawn(command, None, &owner, config.managed)
             .with_context(|| crate::agent::missing_agent_message("pi"))?;
         let (store, session, attachment) = owner;
         self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(
@@ -498,26 +498,9 @@ fn display(decoded: &[Decoded]) -> Vec<ConversationEvent> {
         .collect()
 }
 
-/// The native extension is an owned provider callback, fenced like context delivery.
-pub fn native_event() -> anyhow::Result<()> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::io::stdin()
-        .take(32 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(
-        bytes.len() <= 32 * 1024 * 1024,
-        "Pi native event exceeds 32 MiB"
-    );
-    let value: Value = serde_json::from_slice(&bytes)?;
-    let adapter: crate::steer::SteerAdapter =
-        serde_json::from_str(&std::env::var(crate::steer::PROVIDER_CONTEXT_ENV)?)?;
-    let store =
-        crate::store::sqlite::SqliteStore::open_for_hook(&crate::store::database_path_from_env()?)?;
-    observe_native(&store, &adapter, &value)
-}
-
-fn observe_native(
+/// Record one event the native extension reported over its `session.boundary`
+/// connection: Pi's identity, activity and usage.
+pub(crate) fn observe_native(
     store: &crate::store::sqlite::SqliteStore,
     adapter: &crate::steer::SteerAdapter,
     value: &Value,

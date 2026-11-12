@@ -37,17 +37,16 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     }
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
+    built.agent_config.managed = cli.names_work();
     // `--wave` resolved its Wave once for this process.
-    if let Some(wave) = cli.wave.as_ref().and_then(|_| {
+    built.work = cli.wave.as_ref().and_then(|_| {
         let id = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()?;
-        crate::id::WaveId::parse(&id).ok()
-    }) {
-        built.name_work(crate::session::SessionWork {
+        Some(crate::session::SessionWork {
             task_id: None,
-            wave_id: Some(wave),
+            wave_id: Some(crate::id::WaveId::parse(&id).ok()?),
             source: crate::session::WorkSource::Declared,
-        });
-    }
+        })
+    });
 
     print_context_header(&built, cli);
     run_prompt(&built, cli).map(|_| ())
@@ -100,8 +99,9 @@ pub(crate) fn preview_prompt(
 
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
-pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
-    if crate::transport::delegate_current(true, false)? {
+/// `managed` when the resume command named a Task or Wave, or is a Task-run step.
+pub fn resume(id: &str, message: &str, cli: &Cli, managed: bool) -> Result<()> {
+    if crate::transport::delegate_current(true, managed)? {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -178,8 +178,10 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
+        managed,
         ..resolved
     };
+    (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
     print_context_header(&built, &turn);
     run_prompt(&built, &turn).map(|_| ())
 }
@@ -229,6 +231,7 @@ fn build_bound_prompt(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<PromptBuild> {
+    let managed = cli.names_work();
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
     let arguments = message.unwrap_or_default();
@@ -253,7 +256,8 @@ fn build_bound_prompt(
             .remove(crate::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.name_work(crate::session::SessionWork {
+    built.agent_config.managed = managed;
+    built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),
             crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
@@ -311,15 +315,6 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::SessionWork>,
-}
-
-impl PromptBuild {
-    /// Record the launch's Work; how it was named decides whether the launch
-    /// is managed.
-    fn name_work(&mut self, work: crate::session::SessionWork) {
-        self.agent_config.managed = work.source.is_managed();
-        self.work = Some(work);
-    }
 }
 
 fn build_prompt(
@@ -571,11 +566,7 @@ fn build_prompt_at(
         "prepared launch prompt"
     );
     crate::agent_input_timing::record("prompt_end", subject);
-    let agent = prepared
-        .config
-        .agent
-        .clone()
-        .expect("prepare_process_prompt always sets agent");
+    let agent = prepared.config.resolved_agent()?;
     let (harness, model) = parse_agent(&agent);
 
     let skill_name = discovered_skill

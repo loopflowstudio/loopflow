@@ -262,7 +262,7 @@ impl Source {
     }
 
     /// Move queued input toward the child. A lost connection keeps the bytes.
-    pub fn forward(&mut self, pending: &mut PendingInput, owner: &super::Host, record: bool) {
+    pub fn forward(&mut self, pending: &mut PendingInput) {
         if self.input.is_none() && self.may_connect() && !pending.is_empty() {
             let opened = Client::connect_within(&self.place, CONNECT)
                 .map_err(anyhow::Error::from)
@@ -273,7 +273,7 @@ impl Source {
                 Err(_) => self.lost(),
             }
         }
-        pending.forward(&mut Input(self), owner, record);
+        pending.forward(&mut Input(self));
     }
 
     pub fn close_input(&mut self) {

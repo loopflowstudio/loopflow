@@ -61,9 +61,11 @@ holder beside the server, not in it, so a stopped or crashed server leaves
 every turn running; [Keep working through an update](sessions.md#keep-working-through-an-update)
 says what each kind of interruption costs. Closing Desktop
 leaves the server and existing execution owners independent of the window.
-Session lifetime rules still apply: drafts, pending requests, active turns and
-running Graphs retain their owners; settled, unviewed Sessions can end after
-their configured grace. See [Sessions](sessions.md#come-back-to-a-conversation).
+Conversations stay running while their scope is open, even without a viewer.
+Completed-Task cleanup waits for pending requests, active turns, running Graphs
+and the Task's viewing grace, even without a checkout. See
+[Sessions](sessions.md#come-back-to-a-conversation) for Task closure and quitting
+an agent.
 Logout or reboot ends live processes; [resume from saved history](sessions.md#after-a-crash-or-reboot)
 afterward.
 

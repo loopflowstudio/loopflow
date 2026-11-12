@@ -1,63 +1,89 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>LOO-824 QA — held terminals (second pass)</title>
+<title>LOO-824 QA — held terminals (fifth pass)</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
 td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
 table{border-collapse:collapse} .bad{color:#a12} .ok{color:#185}
 </style>
-<h1>LOO-824 QA: held terminals, November 11 2026 (second pass)</h1>
-<p>Branch <code>lf 0.15.3+5880b3eee</code> (build A), plus two simulated later builds: B with
-<code>registry::REVISION = 2</code>, and C, a re-signed copy of B (a third holder hash).
-Private Machine under <code>/tmp/lfq824</code>: <code>HOME</code>, <code>LF_HOME</code>, <code>CODEX_HOME</code>,
-<code>CLAUDE_CONFIG_DIR</code>; inherited <code>LF_*</code> and <code>REX_*</code> cleared; a Git repo with a local bare origin and
-<code>default_agent: claude</code>. The agent was a stand-in <code>claude</code> shell script on the private <code>PATH</code>
-(prints ticks, reports OSC 7501 working/blocked, reads an answer from <code>/dev/tty</code>, exits 3).
-Views were real <code>lf resume --task</code> and <code>lf session attach --terminal</code> processes on PTYs driven by
-<code>scratch/qa/pty.py</code>, which records every byte and answers <code>ESC[6n</code>.</p>
+<h1>LOO-824 QA: held terminals, November 11 2026 (fifth pass)</h1>
+
+<p>Branch lf <code>0.15.3+1905bb692</code> (after the LOO-821 landing and the LOO-823 merge),
+copied to <code>/tmp/lfq5/lf-a</code>. Private Machine under <code>/tmp/lfq5</code> (HOME,
+LF_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR; inherited <code>LF_*</code>/<code>REX_*</code> cleared),
+Git repo with a local bare origin, <code>default_agent: claude</code>, Git planning. Agent: the
+stand-in <code>claude</code> from earlier passes (ticks, OSC 7, OSC 7501, asks on a flag file,
+exits 3 on another). Views: real <code>lf resume</code> processes on PTYs
+(<code>scratch/qa/pty.py</code>). Server in the foreground. The fourth pass's report is at
+<code>1905bb692:scratch/qa.html</code>.</p>
+
+<p>This pass covers what changed since: LOO-823's lifetime rule applied to held terminals
+(Task cleanup ends them), and reopening a held conversation by Session id alone.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Ten Task Sessions via <code>lf resume --task</code></td><td class="ok">OS <code>ps</code>: one <code>lf server run</code>, one <code>lf holder run</code> (parent of all ten agents), ten <code>lf session attach</code> views, no <code>lf session serve</code>.
-<code>lf ps</code> lists one <code>lf holder</code> row (the earlier pass's worst finding, now fixed).</td></tr>
-<tr><td>A held Task Session with no view asks a question</td><td class="ok"><code>lf session list --json --all</code>: <code>availability</code> null and <code>["working"]</code> before; <code>available</code> and <code>["blocked"]</code> within 3 s of the blocked report. A new <code>session attach</code> drew the question with the title <code>eabdc7 QA ask 14 · Available</code>; typing <code>yes</code> reached the agent (<code>got:yes</code>) and the Session read working again.</td></tr>
-<tr><td>The same, first try</td><td>Read <code>working</code> after the question. The cause was the stand-in: its stdin is lf's first-turn prompt file, so <code>read</code> got <code>&lt;lf:skill:task-session&gt;</code> at once and it went back to working. Recorded in the qa skill.</td></tr>
-<tr><td>Install that changes the <code>held.sock</code> revision: SIGTERM server A, point <code>LF_BIN</code>'s symlink at B, start B</td><td class="ok">Views whose <code>LF_BIN</code> followed the symlink reopened as B's <code>session attach</code> and repainted from the snapshot; ticks 1…61 with no gap, no <code>ESC[2J</code>. Views pinned to A ended with one line:
-<pre>Error: Loopflow server speaks held-terminal revision 2; this lf speaks 1 and the installed lf is this build; the agent keeps running. Run lf install, then lf session attach --terminal 76f41812-…</pre>
-Their agents kept running under holder A.</td></tr>
-<tr><td>A Session started after that</td><td class="ok">Went to a new holder on build B; holder A kept its twelve. <code>lf ps</code> showed both holder rows.</td></tr>
-<tr><td>SIGKILL server B twice with views open</td><td class="ok">Agents kept running. View 16: ticks 1…131, no gaps, no clears. A question asked while the server was down showed up after restart, with the title <code>· Available</code>.</td></tr>
-<tr><td>Agent exits 3 while the server is killed</td><td>The view ended after restart with the launcher's own lines:
-<pre>Left “7cfbe1 QA rev 15”. Continue with: lf resume 417f962e…  (Ctrl+] steps away without stopping)
-claude exited with exit status: 3. If another client still owns this session, close it and run `lf resume` again.</pre>
-<code>held_terminals.exit_code</code> is 1, the in-terminal <code>lf</code> launcher's exit, not the agent's 3.</td></tr>
-<tr><td>Managed launch with the server stopped</td><td class="ok"><code>lf resume --task</code> ran readiness, which registered <code>com.loopflow.server.58348c61bbd43704</code> under launchd (<code>LF_BIN</code> and <code>LF_HOME</code> from the private home), then opened the Session held.</td></tr>
-<tr><td>Install under launchd: build C behind the symlink, <code>launchctl kickstart -k</code> twice</td><td class="ok">The first restart's server spawned holder C (own process group, <code>setsid</code>). The second restart killed only the server; holder C and its agent survived, reparented to launchd. Views 16 and 18 stayed contiguous with no clears.</td></tr>
-<tr><td>Bare <code>lf -i -a claude</code> typed in a Task checkout</td><td class="ok">Its own <code>lf session serve --terminal</code> owner, <code>work_source = checkout</code>, no <code>held_terminal_id</code>.</td></tr>
-<tr><td><code>lf process rollover --dry-run</code> with three builds' holders</td><td class="ok">Moves nothing: holders, held agents and views all "keep their lf until it exits".</td></tr>
-<tr><td>Everything stopped while no server ran, then one server start</td><td class="ok">15 kept <code>exit.json</code> records; the next server recorded all 21 held terminals' exits (143, 1) and removed the records. Holders exited about a minute after their last child.</td></tr>
+<tr><td>Three Task Sessions via <code>lf resume --task</code></td><td class="ok">One
+<code>lf holder run</code> (child of the server) parents all three agents; each view is an
+<code>lf session attach --terminal &lt;id&gt; --session &lt;id&gt;</code>; no <code>session serve</code>.</td></tr>
+<tr><td>Detach view 1 (Ctrl+]), then <code>lf resume 8e8d805c…</code> from
+<code>/tmp/lfq5</code>, outside the checkout, no <code>--task</code></td><td class="ok">The same
+terminal <code>a750243b…</code> came back: saved screen (ticks 1–15), then live ticks from 16. No
+new agent, no owner. The row read holds a reopen by id.</td></tr>
+<tr><td>Detach view 2; <code>lf task abandon</code> Task 2</td><td class="ok">Its agent ended
+within seconds (the server's notice); Session reads <code>closed</code>; the holder's
+<code>&lt;terminal&gt;/</code> directory is gone.</td></tr>
+<tr><td><code>lf task abandon</code> Task 3 with view 3 attached</td><td class="ok">Agent kept
+running; abandon said <code>retained checkout/PR: Process … has live or unresolved
+execution</code>. After detaching view 3, the agent kept running until
+<code>lf task retire</code>, which ended it.</td></tr>
+<tr><td><code>lf task complete</code> Task 1 with its reopened view attached, then detached</td>
+<td class="ok"><code>lf task retire &lt;task&gt;</code> 2 minutes after detaching: exit 0, agent
+kept. Again at 15 min 35 s: agent ended, Session <code>closed</code>, terminal directory gone.</td></tr>
+<tr><td>Task 4: agent asks, view answers <code>yes</code>; server SIGKILLed; agent exits 3</td>
+<td class="ok">Holder wrote <code>{"code":3,"signal":null,…,"written":444}</code>. On
+<code>lf server run</code> the view printed <code>claude exited with 3.</code> and exited 3;
+Session <code>closed</code>. While asking, the title read <code>83417f QA held 4 · Available</code>.</td></tr>
+<tr><td><code>lf resume d9f9c334…</code> (Task 4's ended Session) by id, outside the checkout</td>
+<td class="ok">A new agent on the same holder under a new terminal <code>b23c461d…</code>.
+<code>lf session attach --terminal 0020be15…</code> (the old one):
+<code>Error: the agent in terminal 0020be15… exited with 3</code>, exit 1. Never an answer from
+byte 0.</td></tr>
+<tr><td>SIGTERM the server with view 4b open, restart</td><td class="ok">View stayed open;
+ticks 1–148 contiguous, no NUL in the transcript.</td></tr>
+<tr><td><code>lf ps</code></td><td class="ok">The holder, each launcher folded over its
+<code>claude</code> row, the open view; BINARIES <code>2 lf-a 0.15.3+1905bb692 selected</code>.</td></tr>
+<tr><td>Cleanup</td><td class="ok">Agents ended by holder parent PID, server stopped; the
+holder exited on its own. Nothing from <code>/tmp/lfq5</code> runs; no private launchd label.</td></tr>
 </table>
 
 <h2>Fixed</h2>
-<p>Nothing in product code this pass. The <code>qa</code> skill gained a "Held terminals" section: clear <code>REX_*</code>, what a stand-in agent must do with stdin, and how to simulate installs (symlinked <code>LF_BIN</code>, re-signed copy, <code>launchctl kickstart -k</code>).</p>
+<p>Nothing in the product. The qa skill gained two notes: a resumed ended Session pipes the
+stand-in no prompt (send Ctrl-D through the view), and an abandoned Task's viewed conversation
+ends at the next <code>lf task retire</code> after its view leaves.</p>
+
+<h2>Checks run</h2>
+<p><code>cargo build -p loopflow --bin lf</code> only; this pass changed no code. Gate runs the
+suites.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Desktop windows and Desktop's <code>session.attach</code> bridge across a revision change: headless; the Swift suites stay with gate.</li>
-<li>Real Claude or Codex turns, and whether they repaint on the size nudge: none signed in here.</li>
-<li>The real <code>lf install</code> binary swap: simulated with a symlinked <code>LF_BIN</code> and launchd restarts.</li>
-<li>Linux/systemd.</li>
+<li>Desktop windows and its <code>session.attach</code> bridge: headless; Swift suites stay with gate.</li>
+<li>Real Claude or Codex turns: none signed in here.</li>
+<li>A real <code>lf install</code> and Linux/systemd; the second and fourth passes covered launchd
+restarts and a build swap.</li>
+<li>The installed <code>com.loopflow.cleanup</code> job: the private Machine schedules no cleanup,
+so every pass was run by hand.</li>
 </ul>
 
-<h2>Still wrong, worst first</h2>
+<h2>Still rough, worst first</h2>
 <ol>
-<li><b>Steer a6a8449e is not built.</b> "repo and wave sessions should be managed": <code>primary.rs::repository_session</code> still records no WorkSource, and <code>transport::managed</code> still holds anything with <code>LF_SERVER</code>. Nine <code>transport_tests</code> call sites set <code>LF_SERVER=1</code>; the ones that use it to get a held terminal move to a managed launch. Left for implement.</li>
-<li>When a held agent exits, the store records the launcher's exit code (1), not the agent's (3). The view's last line, "If another client still owns this session, close it and run <code>lf resume</code> again", is wrong for a held terminal: nothing else owns it.</li>
-<li><code>lf session list</code> says "This conversation is open in another terminal on this Machine; Take back transfers input here" for a held Session no terminal is viewing, and labels Task Sessions <code>Repository</code>.</li>
-<li><code>lf ps</code>/rollover name a launcher row by its exec'd agent binary (<code>lf on bash</code>, here the stand-in script), and the BINARIES footer counts them as superseded and suggests <code>lf monitor rollover</code>, which then moves nothing.</li>
-<li>The snapshot's OSC 7 carries a NUL before ST (<code>…/repo.eabdc7-qa-ask-14/\x00\x1b\\</code>). It comes from Ghostty's formatter; <code>snapshot.rs</code>'s change on this branch doesn't touch it.</li>
-<li>From the earlier pass, unchanged: <code>lf session attach --terminal &lt;malformed&gt;</code> says "unrecognized subcommand 'attach'".</li>
-<li>About 25 <code>/tmp/lf-7501-*/bin/lf-* session serve --terminal</code> owners from test fixtures (several worktrees, names like <code>lf-busy</code>, <code>lf-replaced</code>, <code>lf-editor</code>) are still running under launchd's PID 1 on this Machine. Not stopped: not this run's.</li>
+<li>An agent ended by a signal closes its view with no line (view 4b exited 143, silent). The
+same <code>interrupted</code> path ends owner-hosted views; not new here.</li>
+<li><code>lf task abandon</code> prints <code>canceled; PRs and branches removed</code> for a Task
+with no PR, where nothing was removed: Task 2's branch and checkout stay. That is main's
+<code>prepare_abandon</code>, not this branch.</li>
+<li>A malformed <code>lf session attach --terminal not-a-uuid</code> names the expected form, not
+that the id is wrong. Only reachable by copying from <code>ps</code>.</li>
 </ol>

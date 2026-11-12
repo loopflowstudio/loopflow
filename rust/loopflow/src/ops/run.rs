@@ -300,10 +300,6 @@ pub async fn resolve_execution_binding(
     } else {
         cwd.to_path_buf()
     };
-    // A Task's run starts its steps in the Task's checkout: the run named the Task.
-    if checkout && crate::journal::task_run_step() {
-        binding.source = crate::session::WorkSource::Declared;
-    }
     Ok(Some(binding))
 }
 
@@ -1079,7 +1075,13 @@ mod tests {
             // The resuming invocation and its capture share this fixture's store.
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
-                || crate::lf::commands::util::resume_session(&capture.artifact_key(), &history),
+                || {
+                    crate::lf::commands::util::resume_session(
+                        &capture.artifact_key(),
+                        &history,
+                        false,
+                    )
+                },
             );
             let error = resumed.unwrap_err().to_string();
             assert!(error.contains("was deleted"), "{error}");

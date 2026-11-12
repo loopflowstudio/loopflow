@@ -265,6 +265,11 @@ plan, code and memory and keeps open findings with the work.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns.
 
+**Load:** one Machine runs hundreds of concurrent agents over about 10,000
+recorded Tasks and every steer, turn and event they wrote. Every agent shares
+one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
+store that size.
+
 **Harness, transport and hook code (`rust/loopflow/src/harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
@@ -321,7 +326,7 @@ them.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only under `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
-- A headless fixture that expects steers, turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, no capability, no server. Interactive launches keep every hook.
+- A headless fixture that expects steers, turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, no capability, no server. Interactive launches an owner holds (`session serve` fixtures) keep every hook; a bare interactive `lf` at a terminal starts no owner and keeps two.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

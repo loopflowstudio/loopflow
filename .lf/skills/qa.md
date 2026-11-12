@@ -110,6 +110,29 @@ when WindowServer is unavailable.
 - `scripts/release-loopflow.py` parses no flags. Even `--help` starts a full
   release build.
 
+For a live window on private data, build a world and launch the Dev app on it:
+`target/debug/lf-world build one-task /tmp/lf-qa-<name>/world`, then
+`uv run python scripts/loopflow-dev.py run-debug --world <world>`. It installs
+`~/Applications/Loopflow Dev.app` and stays in the foreground until the app quits.
+Run the app's bundled `lf` with the world's `env.json` variables and
+`LF_DESKTOP=com.loopflow.mac.dev`; the control socket is under the world's
+`LF_HOME`, so `lf desktop state --json` reads only that app.
+
+- Drive it over the socket: `lf desktop ls`, `lf desktop goto 1`,
+  `lf desktop run --task <id> '<line>'`. Do not use `lf desktop view` or
+  `lf open` there: they open a `loopflow://` URL, and when
+  `/Applications/Loopflow.app` carries the same bundle ID macOS starts that app
+  on the world instead. It then owns the socket, and its panes run the installed
+  `lf`.
+- An install that fails with "Third-party inputs changed" means `Cargo.lock`
+  changed: `uv run python scripts/third_party.py refresh`, and commit the result.
+- To see what a pane inherited, compare `lsof -p <app pid>` pipe addresses with
+  those of its children and of the PIDs in the world's `processes` table.
+- Quit with `NSRunningApplication(processIdentifier:).terminate()` from a
+  `swift` script; both apps answer to one bundle ID. Then end the world's owners
+  by PID (check `LF_HOME` in `ps eww`) and boot out the label in its
+  `server.plist`.
+
 ## Fix and repeat
 
 Repair what breaks within the change's scope, then go through the experience
@@ -300,23 +323,62 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
-Only managed launches (`--task`, `--wave`, `resume` of their Sessions) get turn
-hooks and the server check; plain `lf -b <skill>` gets the start and compact
-hooks only, and plain `lf -i` keeps turn hooks without the check. Real OpenCode
+Managed is decided by the command: `--task` or `--wave` gets turn hooks and
+the server check, on a launch or a resume (`lf -i --task <id> resume`,
+`lf session resume <session> --task <id>`, and the `open_argv` that
+`lf session resume --prepare --json --task <id>` returns for Desktop). Plain
+`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and
+`lf -i resume <session>` keep turn hooks without the check, so they never
+start a stopped server. Driver scripts that delete their marker directory
+must do it before waiting on it, or a stale `provider.jsonl` releases a turn
+too early. A managed launch
+with the server down registers it before the agent starts: check
+`launchctl list | grep <label>` after launch, not only the hooks' output. Real OpenCode
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
 The model runs tools in the checkout, so keep it disposable and stop the
-`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model
-key; a private home has none.
+`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model;
+a private home has no key. Both reach a scripted local model instead: a small
+OpenAI-compatible HTTP server (streamed `chat/completions`, scripted `bash`
+calls for Pi, `shell` for OpenCode 2.x, then a reply naming what it saw) named
+in `$HOME/.pi/agent/models.json` (`api: openai-completions`, plus
+`defaultProvider`/`defaultModel` in `settings.json`) and in
+`$HOME/.config/opencode/opencode.json` (`npm: @ai-sdk/openai-compatible`).
+Logging each request body shows whether steers and the context block reached
+the model. `lf -i --task <id> -a pi` runs native Pi; `lf -b --task <id> -a pi`
+runs Pi under lf's RPC driver. Pi's `/compact` refuses a small session; give
+the scripted tool a few thousand lines of output first, and type the command
+and Enter separately or its autocomplete picks another command.
+
+To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
+that appends its argv to a file and execs the branch binary; plugins run
+`spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
+processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
+stop owners whose argv names the private Task, with their descendants, after
+every run. Freeze the private server by the PID its `nohup` recorded, never by
+`pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers
 `com.loopflow.server.<hash>` for the private home; boot it out with the label in
 `$LF_HOME/server.plist` to stop the server, and again when finished. SIGSTOP the
-server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log`;
+server's PID for the slow-server case. Gap lines are in `$LF_HOME/logs/lf.log` for hooks,
+`$LF_HOME/logs/pi-extension.log` for Pi and
+`$LF_HOME/runs/<xx>/<run>/opencode.stderr.log` for OpenCode;
 delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
+A private home that applied an earlier draft of the branch's migration refuses
+to open (checksum mismatch); move it aside and start a fresh one.
+
+Boundary query plans: copy the Machine's store with
+`sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare
+`schema_migrations` with `store/migrations/`, and apply only the branch's
+missing migration SQL to the copy with `sqlite3`. Never open the copy with
+`lf`: recovery acts on the real PIDs and worktrees it records. Dump `TRACED`
+from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
+temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
+on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
 ## Native conversation opening
 
@@ -356,7 +418,8 @@ report "open in Rex". A stand-in `claude` on the private `PATH` (answering
 `--version`) drives held Task Sessions with `lf resume --task <id>` on a PTY.
 Its stdin is lf's first-turn prompt file: drain it with `cat > /dev/null` and
 read answers from `/dev/tty`, or the agent answers its own question with the
-prompt. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
+prompt. A resume of an ended Session pipes no prompt, so that `cat` waits on
+the terminal: send Ctrl-D through the view. Emit `ESC]7501;state=blocked:app=claude-code ESC\` to check what
 `lf session list --json --all` reads (`availability`) with no view open.
 
 To exercise an install, copy each build aside and point `LF_BIN` at a symlink:
@@ -365,6 +428,49 @@ few appended bytes, re-signed with `codesign -f -s -`, runs as a distinct build
 (its own holder). A managed launch with the server stopped readies
 `com.loopflow.server.<hash>` under launchd for the private home; `launchctl
 kickstart -k gui/$UID/<label>` then restarts it the way an install does. Boot
-that label out afterwards. Kill stand-in agents by their holder parent PID;
+that label out afterwards. A managed launch is held only when a terminal
+views it: `lf resume --task … | tail` or `< /dev/null > file` runs unheld
+under its own owner. To make server readiness fail without touching launchd,
+point `LF_BIN` at a wrapper that exits 1 for `install server` and execs the
+branch `lf` otherwise. Find the private server by its store,
+`lsof -t $LF_HOME/loopflow.db`; `pgrep -f 'lf server run'` also matches the
+Machine's real servers. Kill stand-in agents by their holder parent PID;
 holders exit about a minute after their last child. Read the private store
 through a copy once the server stops: a read-only open finds no `-shm`.
+A view continuing from a PTY position after a server restart writes
+`ESC[5n` and holds input until the terminal answers `ESC[0n` (one second at
+most); a PTY driver that answers only `ESC[6n` sees that pause. After a build
+swap, `lf monitor rollover --dry-run` should list the old holder and its views
+as staying; `lf ps` BINARIES names each build with its version.
+
+## Task conversation lifetime
+
+`cargo build -p loopflow --bin lf-world`, then `lf-world build one-task <dir>`
+writes a private Machine whose `bin/claude` stand-in echoes each line; its
+printed environment holds `LF_HOME`, the provider homes and `PATH`. Under an
+isolated `HOME`, give that home a Git `user.email` first or the build fails at
+claiming. Copy `lf` and `lf-world` out of `target/` before a long walkthrough so
+a rebuild can't change the binary under its owners. `lf task checkout <task>`
+warms the Task's conversation detached; `lf session list --json` maps it to its
+Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
+Task's Session in a PTY with `lf session resume <session>`, type a line without
+Enter as a draft, and close the PTY: the owner keeps running detached. Nothing
+schedules checkout cleanup in a private home; call `lf task retire <task>` to
+exercise deletion (the installed `com.loopflow.cleanup` job runs once a minute).
+After `lf task complete`, run `lf task retire <task>` once fifteen minutes have
+passed without a viewer and live work has settled. That pass signals the verified
+conversation owner directly, even without a checkout; a held Task
+conversation ends on the server's notice instead. `lf task abandon` ends only
+unviewed conversations; one still viewed then ends at the next
+`lf task retire <task>` after its view leaves.
+
+A new conversation's stand-in reads its opening turn from stdin, then the
+terminal, as Claude does, but writes no transcript: before resuming one after
+its provider ends, write any line to
+`$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl` (the ID follows `started`). For a done Task without a checkout, prepare a repository
+conversation (`lf session resume --prepare --json` in the repository), complete
+a checkout-less Task, then `lf session bind <session> --task <task>`. Binding
+claims the Task, which reads `git config user.email` in the repository: with an
+isolated `HOME`, set a repository-local identity first. A PTY driver waiting for
+text can match the repainted saved screen before the new provider reads input;
+wait for text only the new provider prints.

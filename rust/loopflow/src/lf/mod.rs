@@ -2018,7 +2018,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
+    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,

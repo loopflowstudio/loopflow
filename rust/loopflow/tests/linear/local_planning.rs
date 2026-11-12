@@ -2571,6 +2571,52 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
+fn wave_sync_without_an_initiative_shows_local_planning() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    std::fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: fixture-team\n",
+    )
+    .unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "inbox", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Saved plan",
+            "--json",
+        ],
+    );
+    let synced = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "sync", "inbox", "--json"],
+    );
+    assert_eq!(synced["wave"]["name"], "inbox");
+    assert!(synced.to_string().contains("Saved plan"), "{synced}");
+    let Value::String(text) = lf(repo.path(), home.path(), &["wave", "sync", "inbox"]) else {
+        panic!("wave sync prints text");
+    };
+    assert!(
+        text.starts_with(
+            "inbox: no Linear Initiative; showing local planning (lf wave plan connect inbox)\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

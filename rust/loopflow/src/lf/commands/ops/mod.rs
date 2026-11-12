@@ -777,24 +777,46 @@ pub fn sync_planning(
     Ok(())
 }
 
+/// What `lf wave sync` refreshed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanningRefresh {
+    /// Git planning: the repository's whole plan.
+    Repository,
+    /// One Wave, from its Linear Initiative.
+    Wave(String),
+    /// A Wave with no Initiative has nothing to exchange; its local planning stands.
+    Unconnected(String),
+}
+
+impl PlanningRefresh {
+    pub fn wave(&self) -> Option<&str> {
+        match self {
+            Self::Repository => None,
+            Self::Wave(wave) | Self::Unconnected(wave) => Some(wave),
+        }
+    }
+}
+
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
-/// Returns the Wave a Linear refresh resolved.
-pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
+pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = crate::repo::working_directory_in(directory)?;
     if crate::lf::commands::plan::plans_through_git(&repo)? {
         crate::lf::commands::plan::refresh(&repo)?;
-        return Ok(None);
+        return Ok(PlanningRefresh::Repository);
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    if crate::ops::linear::read_initiative(&repo, &wave).is_none() {
+        return Ok(PlanningRefresh::Unconnected(wave));
+    }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
     if let Err(error) = crate::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
     tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(Some(wave))
+    Ok(PlanningRefresh::Wave(wave))
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {

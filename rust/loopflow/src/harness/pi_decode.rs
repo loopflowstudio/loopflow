@@ -94,14 +94,6 @@ impl Turn {
         facts
     }
 
-    fn usage_fact(&self, final_receipt: bool) -> Decoded {
-        ProviderFact::Usage {
-            turn: self.turn.clone(),
-            receipt: json!({"provider":"pi", "usage":self.usage, "final":final_receipt}),
-        }
-        .into()
-    }
-
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -186,7 +178,6 @@ impl Turn {
                     });
                 }
                 if self.usage.is_reported() {
-                    facts.push(self.usage_fact(false));
                     out.push(ConversationEvent::UsageCheckpoint {
                         turn_id: self.id.clone(),
                         usage: self.usage.clone(),
@@ -311,7 +302,6 @@ impl Turn {
             });
         }
         if self.usage.is_reported() {
-            facts.push(self.usage_fact(true));
             out.push(ConversationEvent::UsageCheckpoint {
                 turn_id: self.id.clone(),
                 usage: self.usage.clone(),
@@ -402,11 +392,7 @@ pub(super) fn native(thread: &AgentSessionId, value: &Value) -> Result<Vec<Decod
         out.extend(latest.into_iter().filter(|decoded| {
             matches!(
                 decoded,
-                Decoded::Fact(
-                    ProviderFact::Output { .. }
-                        | ProviderFact::Usage { .. }
-                        | ProviderFact::TurnCompleted { .. }
-                )
+                Decoded::Fact(ProviderFact::Output { .. } | ProviderFact::TurnCompleted { .. })
             )
         }));
     }

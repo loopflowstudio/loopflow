@@ -114,10 +114,17 @@ pub(crate) struct LaunchCapacity {
     now: i64,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CAPACITY_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl LaunchCapacity {
     pub(crate) fn read(
         store: &crate::store::sqlite::SqliteStore,
     ) -> crate::store::StoreResult<Self> {
+        #[cfg(test)]
+        CAPACITY_READS.set(CAPACITY_READS.get() + 1);
         let accounts = store.list_provider_accounts(None)?;
         let active = [Provider::Claude, Provider::Codex]
             .into_iter()

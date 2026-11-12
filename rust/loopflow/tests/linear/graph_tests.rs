@@ -235,12 +235,11 @@ fn mechanical_failure_retains_earlier_step_success() {
         ["sync --plan", "graph show no-such-graph"]
     );
     assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--all", "--history", "--json"],
-    );
-    assert_eq!(sessions, serde_json::json!([]));
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 #[test]
@@ -352,12 +351,11 @@ while not repo.joinpath("release").exists():
             "an effect's exit does not finish its dead Graph process"
         );
     }
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--all", "--history", "--json"],
-    );
-    assert_eq!(sessions, serde_json::json!([]));
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 fn expand_named_graph(repo: &Path, name: &str) -> Vec<ConcreteStep> {
@@ -1026,22 +1024,32 @@ fn authored_graph_records_each_skill_as_one_session() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
-    let sessions = lf_json(
-        repo.path(),
-        home.path(),
-        &[
-            "session",
-            "list",
-            "--all",
-            "--interactive",
-            "false",
-            "--history",
-            "--json",
-        ],
-    );
-    let mut titles = sessions
-        .as_array()
+    let sessions: Vec<_> = runs
+        .iter()
+        .map(|run| {
+            lf_json(
+                repo.path(),
+                home.path(),
+                &[
+                    "session",
+                    "card",
+                    run["session_id"].as_str().unwrap(),
+                    "--json",
+                ],
+            )["session"]
+                .clone()
+        })
+        .collect();
+    let count: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
+        .query_row(
+            "SELECT count(*) FROM agent_sessions WHERE interactive=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 2);
+    let mut titles = sessions
         .iter()
         .map(|session| session["title"].as_str().unwrap())
         .collect::<Vec<_>>();
@@ -1436,13 +1444,13 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
     let unbound = launch(&unrelated, &["-i", "binding-work"]);
-    let history = json(&["desktop", "sessions", "--all", "--history", "--json"]);
-    let retired = history
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["id"] == session_id_for_capture(home.path(), &unbound))
-        .unwrap();
+    let card = json(&[
+        "session",
+        "card",
+        &session_id_for_capture(home.path(), &unbound),
+        "--json",
+    ]);
+    let retired = &card["session"];
     assert_eq!(retired["work"], serde_json::Value::Null);
     assert_eq!(retired["state"], "closed");
     assert_eq!(task_runs("INF-123"), vec![bound.clone()]);

@@ -86,6 +86,7 @@ Mechanical steps ride along as commands:
 `pursue` is a Graph with a backward edge:
 
 ```yaml
+- kickoff              # plan the change, risks answered
 - write-docs           # edit the actual user docs before implementation
 - implement
 - compress
@@ -100,7 +101,7 @@ Mechanical steps ride along as commands:
 
 `write-docs` edits the actual README, guides, or reference files before code:
 examples, expected results, and what someone needs to know to use the change.
-In `feature`, this happens after exploration. An already attached Loopflow
+In `pursue`, this happens right after kickoff plans the change. An already attached Loopflow
 Desktop shows the relevant files in Files, with rendered Markdown/HTML and
 existing drafts preserved. In other hosts, or without an attached Desktop,
 the conversation reports the actual documentation paths and continues. Automatic
@@ -163,10 +164,8 @@ stands at.
 
 ```yaml
 # feature (builtin)
-- kickoff
-- loop: kickoff
-  interactive: explore      # you choose what to build; repeat or go on
-- graph: pursue
+- interactive: explore      # you choose what to build, for as many rounds as it takes
+- graph: pursue             # kickoff plans it, then docs, code and a published PR
 - loop: implement
   interactive: demo         # you try the change
 - graph: deliver            # gate, then land and stay until it merges
@@ -179,7 +178,7 @@ lf graph feature                    # explore and demo open here with you; the r
 lf -b graph feature                 # every step headless; an agent stands in at explore and demo
 lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
 lf task run LOO-12                  # after you're done there: on to demo
-lf task run LOO-12 --from kickoff   # go back a round
+lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
 lf ship LOO-12                      # the same, returning once the Task is shipping
 ```
@@ -209,7 +208,7 @@ Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
 | `shipping` | a run carries it and nothing ahead stops it |
 | `done` · `abandoned` | completed, dropped |
 
-Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
+Builtins are `feature` (explore, then pursue, demo, deliver, verify), `code` (demo, deliver,
 verify), `auto` (pursue then deliver, no interactive step: request to merged PR
 without you) and `research` (findings, no PR). To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:

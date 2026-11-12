@@ -78,7 +78,7 @@ Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
-`pursue` starts by editing the actual user docs. An attached Loopflow Desktop
+`pursue` plans the change, then edits the actual user docs. An attached Loopflow Desktop
 shows them in Files; elsewhere, the conversation lists their paths. Edit or
 discuss what's being built while work continues.
 

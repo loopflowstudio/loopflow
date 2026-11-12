@@ -61,4 +61,4 @@ lose its acknowledgement. Bulk tickets retain their existing foreign-attempt beh
 The remote contract adds only transport differences. Keep it and
 [phone access](../docs/server.md#phone-access) marked planned until integration.
 
-`git diff --check` and README anchor check — passed Nov 12 after compress (prose only; no build or test run).
+`git diff --check` and README anchor check — passed Nov 12 after compress moved both `session.attach` forms under Terminal attachment (prose only; no build or test run).

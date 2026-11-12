@@ -370,33 +370,35 @@ part of what a phone or bot client is offered.
   holder's inventory first; a start that could not be reconciled answers
   `outcome_unknown`, and repeating the same `request` settles it. It creates
   a process and is the only operation here that does; attaching never does.
-- `session.attach {session}` prefers the Session's held terminal to an owner,
-  and `{session, terminal_id}` attaches only to that terminal. Either answers
-  a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
-  and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
-  The bridged connection speaks the viewer protocol with the server's
-  terminal registry. A terminal that has ended answers `not_found` with
-  `terminal_id` and `current_terminal_id` (null when the Session has none).
-  A terminal whose holder has not answered this server since it started
-  answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
-  agent keeps running, and the same request attaches once the holder answers.
-  A ticket presented after its terminal ended, or while its holder is not
-  answering, gets the same two errors with a null `id` in place of `bridged`.
-  The owner form below serves owners only, with `terminal_id` null in its
-  ticket and its `bridged`; an owner ID is never a terminal ID.
 
 ## Terminal attachment
 
-`session.attach {session, owner_lf_process_id}` answers a ticket
-`{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}` on an
-ordinary client connection. A separate bridge sends
-`{"type":"attach","ticket":"<ticket>"}` as its only JSON message. After
-`bridged {owner_lf_process_id, terminal_id: null}`, it speaks the
-[binary owner protocol](../transport/README.md). A ticket is 16 random bytes
-as 22 base64url characters, opens one bridge and lasts 60 seconds; expiry does
-not close an open bridge. Local tickets bind to the requesting client's Unix
-peer UID. An unknown, spent, expired or foreign ticket is `not_found` with a
-null `id` and closes the connection. Bridges do not occupy the 64 client slots.
+`session.attach` answers a ticket on an ordinary client connection. A separate
+bridge sends `{"type":"attach","ticket":"<ticket>"}` as its only JSON message
+and is answered `bridged`. A ticket is 16 random bytes as 22 base64url
+characters, opens one bridge and lasts 60 seconds; expiry does not close an
+open bridge. Local tickets bind to the requesting client's Unix peer UID. An
+unknown, spent, expired or foreign ticket is `not_found` with a null `id` and
+closes the connection. Bridges do not occupy the 64 client slots.
+
+`session.attach {session}` prefers the Session's held terminal to an owner,
+and `{session, terminal_id}` attaches only to that terminal. Either answers
+a ticket `{ticket, owner_lf_process_id: null, terminal_id, expires_in_ms}`,
+and its bridge answers `bridged {owner_lf_process_id: null, terminal_id}`.
+The bridged connection speaks the viewer protocol with the server's
+terminal registry. A terminal that has ended answers `not_found` with
+`terminal_id` and `current_terminal_id` (null when the Session has none).
+A terminal whose holder has not answered this server since it started
+answers `unavailable {resource: "holder", terminal_id, retry: true}`: its
+agent keeps running, and the same request attaches once the holder answers.
+A ticket presented after its terminal ended, or while its holder is not
+answering, gets the same two errors with a null `id` in place of `bridged`.
+
+`session.attach {session, owner_lf_process_id}` serves owners only and answers
+`{ticket, owner_lf_process_id, terminal_id: null, expires_in_ms}`; its bridge
+answers `bridged {owner_lf_process_id, terminal_id: null}` and then speaks the
+[binary owner protocol](../transport/README.md). An owner ID is never a
+terminal ID.
 
 Every redemption attempt spends the ticket, successful or not; after a failure
 or a disconnect before `bridged`, request a new ticket and bridge.

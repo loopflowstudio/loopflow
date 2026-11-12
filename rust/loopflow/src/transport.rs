@@ -277,6 +277,7 @@ pub(crate) fn held_terminal() -> Option<&'static crate::id::TerminalId> {
 /// it and Ctrl+] is an ordinary key. Headless runs keep their owner, and so do
 /// launches without a terminal on stdin, which need the owner's PTY, and a
 /// Desktop surface waiting for a relay to acknowledge it.
+#[cfg_attr(test, allow(dead_code))]
 fn runs_in_terminal(batch: bool) -> bool {
     !batch
         && io::stdin().is_terminal()

@@ -150,9 +150,15 @@ pub(crate) fn build_session_command(
         }
         "pi" => {
             args.extend(crate::harness::pi::options(config, context_file)?);
-            if let ProviderInvocation::Resume { session_id } = invocation {
-                crate::harness::pi::validate_resume(session_id)?;
-                args.extend(["--session".into(), session_id.to_string()]);
+            match invocation {
+                ProviderInvocation::Resume { session_id } => {
+                    let file = crate::harness::pi::validate_resume(session_id)?;
+                    args.extend(["--session".into(), file.display().to_string()]);
+                }
+                ProviderInvocation::Terminal {
+                    session_id: Some(id),
+                } => args.extend(["--session-id".into(), id.to_string()]),
+                _ => {}
             }
             if let Some(prompt) = prompt.filter(|p| !p.is_empty()) {
                 super::validate_terminal_turn(&prompt)?;

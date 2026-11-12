@@ -678,7 +678,11 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     if !built.process.auto {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
-        let agent_session: Option<crate::id::AgentSessionId> = if built.harness == "claude" {
+        // Claude and a bare Pi take the thread id lf gives them; a held Pi
+        // reports its file through its extension.
+        let names_thread = built.harness == "claude"
+            || (built.harness == "pi" && built.agent_config.holder == crate::session::Holder::Caller);
+        let agent_session: Option<crate::id::AgentSessionId> = if names_thread {
             let artifact_key = runtime.artifact_key();
             let raw_id = artifact_key
                 .as_str()

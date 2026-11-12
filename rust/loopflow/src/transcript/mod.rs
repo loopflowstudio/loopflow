@@ -119,8 +119,9 @@ pub(crate) fn locate(
         HarnessKind::Claude => Provider::Claude,
         HarnessKind::Codex => Provider::Codex,
         HarnessKind::Pi => {
-            // Pi's conversation id is its absolute session file.
-            let path = PathBuf::from(id.as_str());
+            // A held Pi's id is its session file; a bare one's is the
+            // `--session-id` lf gave it.
+            let path = crate::harness::pi::conversation_file(id);
             return Ok(if path.is_file() {
                 Located::Found {
                     source: Source::File(path),

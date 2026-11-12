@@ -518,3 +518,49 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
     completed(&mut rx).await;
     pi.stop().await.unwrap();
 }
+
+#[test]
+fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
+    let agent_dir = tempfile::tempdir().unwrap();
+    std::env::set_var("PI_CODING_AGENT_DIR", agent_dir.path());
+    let config = AgentConfig {
+        agent: Some("pi".into()),
+        cwd: Some(agent_dir.path().into()),
+        ..Default::default()
+    };
+    let id: crate::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
+    let start = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Terminal {
+            session_id: Some(&id),
+        },
+        None,
+    )
+    .unwrap();
+    assert!(start
+        .args
+        .windows(2)
+        .any(|a| a == ["--session-id", id.as_str()]));
+
+    // Before Pi wrote the conversation, a resume refuses rather than starting fresh.
+    assert!(super::pi::validate_resume(&id)
+        .unwrap_err()
+        .to_string()
+        .contains("missing"));
+    let project = agent_dir.path().join("sessions").join("--repo--");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
+    std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
+    let resume = crate::agent::build_session_command(
+        &config,
+        crate::agent::ProviderInvocation::Resume { session_id: &id },
+        None,
+    )
+    .unwrap();
+    assert!(resume
+        .args
+        .windows(2)
+        .any(|a| a == ["--session", file.to_str().unwrap()]));
+}

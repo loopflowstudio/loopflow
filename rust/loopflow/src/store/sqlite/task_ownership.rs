@@ -630,21 +630,22 @@ pub(super) fn reassert_in(
 pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
     let local = local_machine_in(conn)?;
     let held = super::rentals::tasks_held_in(conn, machine)?;
-    for task in &held {
-        let (person, person_key) = reading_in(conn, task)?
-            .1
+    let mut tasks = Vec::with_capacity(held.len());
+    for (task, ownership) in held {
+        let (person, person_key) = ownership
             .owner
             .map_or((None, None), |owner| (owner.person, owner.person_key));
         append_in(
             conn,
-            task,
+            &task,
             OwnershipKind::Handoff,
             person,
             person_key,
             &local,
         )?;
+        tasks.push(task);
     }
-    Ok(held)
+    Ok(tasks)
 }
 
 impl SqliteStore {
@@ -720,8 +721,12 @@ impl SqliteStore {
         let snapshot = conn.savepoint()?;
         super::rentals::tasks_held_in(&snapshot, machine)?
             .into_iter()
-            .map(|task| {
-                let since = ownership_in(&snapshot, &task)?.since(machine).unwrap_or(0);
+            .map(|(task, ownership)| {
+                let since = ownership.since(machine).ok_or_else(|| {
+                    StoreError::InvalidData(format!(
+                        "Task {task} is owned on {machine} with no log entry naming it"
+                    ))
+                })?;
                 Ok((task, since))
             })
             .collect()

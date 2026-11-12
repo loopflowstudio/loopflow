@@ -4,7 +4,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{MachineId, TaskId};
+use crate::durable::{MachineId, TaskId, TaskOwnership};
 use crate::rental::{
     self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Rental, RentalId,
     RentalState, Usd,
@@ -142,8 +142,12 @@ fn rental_in(conn: &Connection, id: &RentalId) -> StoreResult<Rental> {
     .ok_or(StoreError::NotFound)?
 }
 
-/// Unfinished Tasks whose current owner is this Machine.
-pub(super) fn tasks_held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
+/// Unfinished Tasks whose current owner is this Machine, each with the
+/// ownership that says so.
+pub(super) fn tasks_held_in(
+    conn: &Connection,
+    machine: &MachineId,
+) -> StoreResult<Vec<(TaskId, TaskOwnership)>> {
     let candidates = {
         let mut statement = conn.prepare(
             "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
@@ -157,11 +161,20 @@ pub(super) fn tasks_held_in(conn: &Connection, machine: &MachineId) -> StoreResu
     for task in candidates {
         let task = TaskId::from_raw(task);
         let ownership = super::task_ownership::ownership_in(conn, &task)?;
-        if ownership.owner.and_then(|owner| owner.machine.id).as_ref() == Some(machine) {
-            held.push(task);
+        if ownership
+            .owner
+            .as_ref()
+            .and_then(|owner| owner.machine.id.as_ref())
+            == Some(machine)
+        {
+            held.push((task, ownership));
         }
     }
     Ok(held)
+}
+
+fn task_ids(held: Vec<(TaskId, TaskOwnership)>) -> Vec<TaskId> {
+    held.into_iter().map(|(task, _)| task).collect()
 }
 
 impl SqliteStore {
@@ -245,7 +258,7 @@ impl SqliteStore {
                     .ok_or(StoreError::NotFound)?;
                 Ok(PoolMachine {
                     ownership: ownership_in(&snapshot, &id)?,
-                    tasks: tasks_held_in(&snapshot, &id)?,
+                    tasks: task_ids(tasks_held_in(&snapshot, &id)?),
                     machine,
                 })
             })
@@ -340,7 +353,7 @@ impl SqliteStore {
     pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        tasks_held_in(&snapshot, machine)
+        tasks_held_in(&snapshot, machine).map(task_ids)
     }
 
     // -- On-demands ----------------------------------------------------------

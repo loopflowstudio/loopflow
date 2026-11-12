@@ -2446,6 +2446,10 @@ fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
     );
     let listed = fixture.json(&["machine", "list", "mini", "--json"]);
     assert_eq!(listed[0]["tasks"][0]["id"], task.as_str());
+    assert!(
+        listed[0]["tasks"][0]["since"].as_i64().unwrap() > 0,
+        "{listed}"
+    );
     // The branch is pushed and mini checked it out, so prune takes the checkout.
     let pruned = laptop(&["wt", "prune", "--dry-run"]);
     assert!(

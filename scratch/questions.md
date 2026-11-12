@@ -80,3 +80,12 @@ when delegation does not start a transport. Parent design and reduction
 notes remain at `62c5e537e:scratch/holder.md` and
 `62c5e537e:scratch/simplification-opportunities.md`; this checkout keeps
 LOO-820's design and launch reduction plan.
+
+## Check after syncing onto 62c5e537e, November 11
+
+`cargo test -p loopflow --lib transport::` in a headless run: the four
+`transport::viewer_tests::snapshot_preview_*` tests fail. The resumed stand-in
+`claude` reports "/dev/tty: Device not configured" and exits 1. The sync
+changed no code (the only diff from `4f9b7796ff` is scratch), so the failure
+was already on the branch, or comes from running without a controlling
+terminal. Gate reruns it from a terminal.

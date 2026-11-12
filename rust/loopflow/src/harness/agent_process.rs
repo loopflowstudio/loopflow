@@ -797,6 +797,7 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 #[cfg(test)]
 mod tests {
     use crate::id::LfProcessId;
+    use crate::session::Holder;
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -971,7 +972,7 @@ mod tests {
         let mut child = super::spawn_native(
             command,
             &(store.clone(), session.id.to_string(), attachment.clone()),
-            crate::session::Holder::Caller,
+            Holder::Caller,
         )
         .unwrap();
         child.wait().unwrap();
@@ -1073,7 +1074,7 @@ mod tests {
             let mut child = super::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), attachment.clone()),
-                crate::session::Holder::Caller,
+                Holder::Caller,
             )
             .unwrap();
             let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
@@ -1138,7 +1139,7 @@ mod tests {
         let mut child = super::spawn_native(
             command,
             &(store.clone(), session.id.to_string(), attachment.clone()),
-            crate::session::Holder::Caller,
+            Holder::Caller,
         )
         .unwrap();
         store
@@ -1306,7 +1307,7 @@ mod tests {
             let mut child = super::spawn_native(
                 command,
                 &(store.clone(), session.id.to_string(), attachment.clone()),
-                crate::session::Holder::Caller,
+                Holder::Caller,
             )
             .unwrap();
             child.wait().unwrap();
@@ -1352,8 +1353,7 @@ mod tests {
             command.env_clear().arg("60");
             command
         };
-        let mut child =
-            super::spawn_native(command(), &first_owner, crate::session::Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command(), &first_owner, Holder::Caller).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
         let exited = store
@@ -1368,15 +1368,14 @@ mod tests {
             .prepare_session_agent_process(&session.id, &first)
             .unwrap();
         let next_owner = (store.clone(), session.id.to_string(), next.clone());
-        let mut provider =
-            super::spawn_native(command(), &next_owner, crate::session::Holder::Caller).unwrap();
+        let mut provider = super::spawn_native(command(), &next_owner, Holder::Caller).unwrap();
         let recorded = store
             .agent_process(&next.agent_process_id)
             .unwrap()
             .unwrap();
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(command(), &next_owner, crate::session::Holder::Caller);
+        let duplicate = super::spawn_native(command(), &next_owner, Holder::Caller);
         assert!(duplicate.is_err());
         assert_eq!(
             store.agent_process(&next.agent_process_id).unwrap(),
@@ -1413,8 +1412,7 @@ mod tests {
         let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let mut child =
-            super::spawn_native(command, &first_owner, crate::session::Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command, &first_owner, Holder::Caller).unwrap();
         let next = store
             .claim_session_attachment(&session.id, Some(&first), &LfProcessId::new(), false)
             .unwrap();
@@ -1445,8 +1443,7 @@ mod tests {
         let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child =
-            super::spawn_native(command, &owner, crate::session::Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -1475,13 +1472,7 @@ mod tests {
         let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(
-            command,
-            None,
-            &owner(first.clone()),
-            crate::session::Holder::Caller,
-        )
-        .unwrap();
+        let mut child = super::spawn(command, None, &owner(first.clone()), Holder::Caller).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1504,13 +1495,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(
-            stale,
-            None,
-            &owner(first.clone()),
-            crate::session::Holder::Caller
-        )
-        .is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone()), Holder::Caller).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1524,13 +1509,7 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(
-            missing,
-            None,
-            &owner(next.clone()),
-            crate::session::Holder::Caller
-        )
-        .is_err());
+        assert!(super::spawn(missing, None, &owner(next.clone()), Holder::Caller).is_err());
         let failed = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1587,8 +1566,8 @@ mod tests {
                 .unwrap();
             std::fs::read_to_string(seen).unwrap()
         };
-        assert_eq!(capability(crate::session::Holder::Caller), "");
-        assert!(capability(crate::session::Holder::Owner).contains("agent_process_id"));
+        assert_eq!(capability(Holder::Caller), "");
+        assert!(capability(Holder::Owner).contains("agent_process_id"));
     }
 
     #[test]
@@ -1603,8 +1582,7 @@ mod tests {
         let owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child =
-            super::spawn_native(command, &owner, crate::session::Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1624,7 +1602,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn_native(stale, &owner, crate::session::Holder::Caller).is_err());
+        assert!(super::spawn_native(stale, &owner, Holder::Caller).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1634,7 +1612,7 @@ mod tests {
         let error = super::spawn_native(
             Command::new(home.path().join("absent")),
             &owner,
-            crate::session::Holder::Caller,
+            Holder::Caller,
         )
         .unwrap_err();
         assert_eq!(

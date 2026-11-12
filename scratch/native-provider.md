@@ -152,3 +152,4 @@ compaction), which loses nothing.
 - realign 3: no tests; grep confirms `bare_conversation`, `opens_bare`, `names_work`, `resumes_work`, `task_run_step` are gone and `runs_in_terminal` is private to transport; `simplification-opportunities.md` trimmed to what remains (Opportunity 1 → LOO-824, Server-only observers).
 - concept review: no tests; design-only (one Work predicate, `named_work`, hook spec `turns`).
 - implement 4 (those three): `cargo build --bin lf` clean; `--lib` `harness::context::` + `ops::human_session::` + `session_record::capture_tests::resume` + `bare_pi_` — 58 passed; clippy, fmt clean.
+- compress 4: the direction's three items were already in `8a516adad2`; this pass only imports `Holder` in `agent_process` tests (18+/40−). clippy clean; `--lib harness::agent_process::` 19 passed.

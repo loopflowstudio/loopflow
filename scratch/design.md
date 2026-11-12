@@ -13,9 +13,9 @@ peers refused before upgrade) and the local service (replay, a phone's
 ticket). README contract and `docs/server.md` phone access are no longer
 marked planned.
 
-Checks Nov 12 after the concept-review edits: `cargo test -p loopflow --lib`
-for `server::ticket::`, `server::remote::tests::` and service tests passed
-(33); `documented_commands::` passed; clippy clean.
+Checks Nov 12 at `faa8ad755c`: `cargo test -p loopflow --lib server::` passed
+(103, 2 ignored); clippy `--all-targets -D warnings` and `cargo fmt --check`
+clean.
 
 Remaining: gate runs the affected suites; QA inspects the docs visually.
 

@@ -96,8 +96,8 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<PathBuf> {
 /// yet never got a reply, so Pi starts it fresh under that id, as it would
 /// alone; a held launch's recorded file must still exist.
 pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
-    let file = conversation_file(token);
-    if !Path::new(token.as_str()).is_absolute() && !file.is_file() {
+    // An unfound bare id stays the relative token.
+    if conversation_file(token).is_relative() {
         return Ok(["--session-id".into(), token.to_string()]);
     }
     Ok([

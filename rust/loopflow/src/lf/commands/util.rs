@@ -273,10 +273,10 @@ impl SessionCommandOutcome {
             Ok(())
         } else if holder == crate::session::Holder::Caller {
             eprintln!("{program} exited with {}", self.status);
-            let code = self.status.code().unwrap_or_else(|| {
-                128 + std::os::unix::process::ExitStatusExt::signal(&self.status).unwrap_or(0)
-            });
-            Err(crate::process::CommandExit(u8::try_from(code).unwrap_or(1)).into())
+            Err(
+                crate::process::CommandExit(crate::transport::provider_exit_code(self.status))
+                    .into(),
+            )
         } else if resuming {
             Err(anyhow!(
                 "{program} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
@@ -716,9 +716,9 @@ fn run_native_session(
     if owned.is_none() {
         client_opened(child.id());
     }
-    let _leading = foreground
-        .as_ref()
-        .map(|foreground| foreground.lead(child.id()));
+    if let Some(foreground) = &foreground {
+        foreground.lead(child.id());
+    }
     let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);

@@ -62,10 +62,10 @@ pub(crate) fn hand_to(command: &mut Command) -> Option<Foreground> {
 }
 
 impl Foreground {
-    /// Name `child` as the provider a signal to lf ends, until the guard drops.
-    pub(crate) fn lead(&self, child: u32) -> Leading {
+    /// Name `child` as the provider a signal to lf ends, until lf takes the
+    /// terminal back.
+    pub(crate) fn lead(&self, child: u32) {
         LEADER.store(child, Ordering::Release);
-        Leading
     }
 
     /// Whether the provider ended because its terminal or lf was signaled:
@@ -99,17 +99,8 @@ impl Foreground {
 
 impl Drop for Foreground {
     fn drop(&mut self) {
-        give(self.terminal.as_raw_fd(), current_group());
-    }
-}
-
-/// Clears the leading provider when lf stops waiting for it.
-#[derive(Debug)]
-pub(crate) struct Leading;
-
-impl Drop for Leading {
-    fn drop(&mut self) {
         LEADER.store(0, Ordering::Release);
+        give(self.terminal.as_raw_fd(), current_group());
     }
 }
 

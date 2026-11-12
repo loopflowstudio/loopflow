@@ -1957,7 +1957,9 @@ fn run_interactive(
     let (mut child, attachment) = spawn_agent_child(cmd, runtime, activation, holder)?;
     let pid = child.id();
     let _pid_guard = ChildPidGuard::new(pid);
-    let _leading = foreground.as_ref().map(|foreground| foreground.lead(pid));
+    if let Some(foreground) = &foreground {
+        foreground.lead(pid);
+    }
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"

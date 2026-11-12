@@ -9,6 +9,7 @@
 - `append_input` applies `handoff_agent`; `open_waiting_locked` appends a fresh input instead of launching a prepared one when another harness is selected.
 - `resolve_session_config` takes the input's thread and account only when the input's manifest harness is the resumed provider.
 - Migration `resume_on_latest_input_provider` moves a Session to the only provider that recorded its `provider_thread` (model cleared). Dry run on a copy of ~/.lf/loopflow.db changed exactly 3 rows: f505abc0…, session_b5b0a13d…, session_c9a397ed… → codex.
+- `provider_account.rs` `select_route` needed no change: it looks up `provider_session_account(provider, thread)`, which matches once the provider and thread agree.
 - Deleted uncalled `retarget_unpublished_capture` (sqlite + async wrapper) and `capture_seq_in`.
 - Compress: `new_thread` and `append_input` share `switch_agent` for the provider/model rewrite. `cargo test -p loopflow --lib ops::human_session::`: 51 pass.
 

@@ -68,11 +68,9 @@ when hands-on work resumes.
    a terminal; "move this to my mini" in any conversation; a Move to… item on
    the Task in Desktop. All three are the same operation.
 2. **It lands running.** The Graph continues on the mini from the step it was
-   on. Today the move stops the Graph and prints "`lf task run` there runs its
-   route again".
+   on.
 3. **Your view follows.** The terminal or pane that showed the Session shows it
-   again, now from the mini. Today the Session ends here and you run
-   `lf resume --task` yourself.
+   again, now from the mini.
 4. **A running step keeps its thinking.** Today only the Task's primary
    conversation travels (`send_task`). A headless step that was mid-run, such as
    `implement`, is killed, and the step starts over on arrival from the
@@ -85,8 +83,7 @@ when hands-on work resumes.
    mini, stopped at `implement`, pushed `<branch>`, arrived, running. A failure
    before the handoff changes nothing; after it, one retry command (exists).
 7. **The laptop afterwards is clean.** `lf task status` and `lf task list` say
-   "on mini since 10:42". The worktree here is removed once the push is
-   confirmed. Today it stays, with a stopped Graph that reads as local history.
+   "on mini since 10:42"; `lf wt prune` removes the worktree here.
 8. **Back is the same act.** `lf task move MTG-321 --machine laptop`, run from
    either Machine.
 9. **You can see where things are.** `lf machine list` shows each Machine with
@@ -197,8 +194,7 @@ Decided against, with the reason:
   `Move` admitted as headless (`admit` in `moves.rs` always makes the
   Task's primary and refuses a second). (a) also fixes the same-Machine case and
   is its own Task.
-- Step 3 keeps the laptop's worktree until `lf wt prune`, in place of deleting
-  on move.
+- The laptop's worktree stays until `lf wt prune`.
 - A repeated move after a failed receive does not continue the Graph: the
   second send finds nothing running.
 - Auto-Ship approval does not travel.
@@ -221,12 +217,8 @@ against above. No open product choice. Its one fix is built: `tasks_held_by` tak
 from the ownership `tasks_held_in` read (no entry naming the Machine is
 `InvalidData`, never 0); compress folded `tasks_owned_by` into it.
 
-Second pass (2026-11-12), next implement direction: `lf task move`'s
-`after_help` (`rust/loopflow/src/lf/mod.rs`, `Move`) still says "`lf task run`
-there runs its route again", the behavior item 2 replaced. Say what the move
-does now: it continues a Graph it stopped on the new Machine at the step that
-was running, and the terminal showing the Session prints `lf resume --task X`.
-Then `documented_commands::`. Nothing else; no open product choice.
+Second pass (2026-11-12): its one fix, `lf task move`'s stale `after_help`, is
+built (781e2509d0).
 
 ## Live check (for a person, both Machines on this build)
 
@@ -256,7 +248,6 @@ lf task interrupt X && lf task abandon X     # clean up
 - 2026-11-12, `lf task move` after_help now describes the continued Graph and
   printed `lf resume --task <ID>`: `documented_commands::` 4, `lf::tests::` 43
   passed; clippy clean; no launchd job or `lf` process from this checkout left.
-- 2026-11-12, after these runs: no launchd job or `lf` process from this checkout left.
 - Gate: `test(machine_commands::) | test(documented_commands::) | test(server::schema::)`
   plus `lf::tests::` for the CLI, and clippy.
 - End-to-end laptop → mini: left to a person (Live check above).

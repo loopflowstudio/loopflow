@@ -283,7 +283,7 @@ impl Status {
                 let (terminal, session) = (terminal.clone(), session.clone());
                 let (send, receive) = mpsc::sync_channel(1);
                 std::thread::spawn(move || {
-                    let result = super::connect(&terminal);
+                    let result = super::registry::connect(&terminal);
                     // Presentation cannot prevent the terminal from reconnecting.
                     let transition = crate::store::read_existing_registry()
                         .ok()

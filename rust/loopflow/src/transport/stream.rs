@@ -175,7 +175,7 @@ fn flush(output: &mut impl Write, pending: &mut VecDeque<u8>) -> io::Result<()> 
 
 pub(super) fn bridge(id: &crate::id::TerminalId) -> Result<()> {
     let mut socket =
-        super::connect(id).context("Execution is unavailable; nothing was restarted")?;
+        super::registry::connect(id).context("Execution is unavailable; nothing was restarted")?;
     socket.set_nonblocking(true)?;
     let _input_flags = BorrowedFlags::new(0)?;
     let _output_flags = BorrowedFlags::new(1)?;

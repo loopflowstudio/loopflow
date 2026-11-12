@@ -20,8 +20,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record that a terminal's child ended; `code` is absent when the holder
-    /// died before reporting one. The first ending stands.
     /// Whether a holder still runs `terminal`'s child, as last recorded.
     pub(crate) fn terminal_running(&self, terminal: &TerminalId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -50,6 +48,8 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// Record that a terminal's child ended; `code` is absent when the holder
+    /// died before reporting one. The first ending stands.
     pub(crate) fn end_terminal(&self, terminal: &TerminalId, code: Option<u8>) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
             "UPDATE held_terminals SET ended_at=unixepoch(),exit_code=?2

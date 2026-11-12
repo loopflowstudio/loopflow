@@ -324,7 +324,7 @@ read -r answer < /dev/tty
             assert!(
                 Instant::now() < deadline,
                 "{name} missing; logs: {:?}",
-                std::fs::read_to_string(self.home.path().join("logs/transport.log"))
+                std::fs::read_to_string(self.home.path().join("logs/lf.log"))
             );
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -379,12 +379,7 @@ struct Viewer {
     socket: UnixStream,
     token: Option<String>,
     id: String,
-    reconnect: String,
     nonce: String,
-    /// Stream bytes received, as a resume reports them.
-    received: u64,
-    /// Every byte read from the socket, headers included.
-    wire: u64,
     ids: u64,
 }
 impl Viewer {
@@ -396,10 +391,7 @@ impl Viewer {
             socket,
             token: None,
             id: String::new(),
-            reconnect: String::new(),
             nonce: String::new(),
-            received: 0,
-            wire: 0,
             ids: 0,
         }
     }
@@ -424,19 +416,14 @@ impl Viewer {
     fn accept(&mut self, attached: &Value) {
         self.token = attached["token"].as_str().map(str::to_owned);
         self.id = attached["viewer"].as_str().unwrap().to_owned();
-        self.reconnect = attached["reconnect"].as_str().unwrap().to_owned();
         self.nonce = attached["nonce"].as_str().unwrap().to_owned();
     }
-    /// The next item, or `None` once the owner closes this connection.
+    /// The next item, or `None` once the server closes this connection.
     #[track_caller]
     fn next(&mut self) -> Option<Item> {
         let (mut tag, mut payload) = read_frame(&mut self.socket)?;
         while tag == POSITION {
             (tag, payload) = read_frame(&mut self.socket)?;
-        }
-        self.wire += 5 + payload.len() as u64;
-        if tag != REPLY {
-            self.received += payload.len() as u64;
         }
         Some(match tag {
             REPLY => Item::Reply(serde_json::from_slice(&payload).unwrap()),
@@ -457,7 +444,7 @@ impl Viewer {
     #[track_caller]
     fn until_reply(&mut self) -> Value {
         loop {
-            if let Item::Reply(reply) = self.next().expect("owner closed before replying") {
+            if let Item::Reply(reply) = self.next().expect("server closed before replying") {
                 return reply;
             }
         }
@@ -1268,7 +1255,7 @@ fn until(viewer: &mut Viewer, done: impl Fn(&[Item]) -> bool) -> Vec<Item> {
     loop {
         let item = viewer
             .next()
-            .unwrap_or_else(|| panic!("owner closed first: {items:?}"));
+            .unwrap_or_else(|| panic!("server closed first: {items:?}"));
         items.push(item);
         if done(&items) {
             return items;
@@ -1738,7 +1725,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
     assert!(
         settled,
         "shell job settlement was not recorded: {:?}",
-        std::fs::read_to_string(fixture.home.path().join("logs/transport.log"))
+        std::fs::read_to_string(fixture.home.path().join("logs/lf.log"))
     );
     // Zombies cannot execute or retain terminal descriptors.
     let output = Command::new("ps")

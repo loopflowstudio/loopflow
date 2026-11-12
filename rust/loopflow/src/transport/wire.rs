@@ -250,15 +250,10 @@ pub(super) struct Outgoing {
 pub(super) enum Reply {
     Attached {
         viewer: String,
-        /// Unused: views reconnect from PTY positions. Kept for clients that
-        /// decode it.
-        reconnect: String,
         nonce: String,
         /// The input claim, when this connection may type.
         token: Option<String>,
         terminal: bool,
-        /// Zero: no stream waits for a dropped view.
-        grace_ms: u64,
         owner: Option<String>,
     },
     Busy,
@@ -441,11 +436,9 @@ mod tests {
                 seq: 0,
                 reply: super::Reply::Attached {
                     viewer: "mobile-viewer".into(),
-                    reconnect: "test-reconnect".into(),
                     nonce: "fixture-nonce".into(),
                     token: None,
                     terminal: true,
-                    grace_ms: 60_000,
                     owner: Some("desktop-viewer".into()),
                 },
             })

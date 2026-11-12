@@ -748,7 +748,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         Some(0),
         "{}\nowner: {}",
         String::from_utf8_lossy(&returning.screen),
-        std::fs::read_to_string(fixture.destination.home.path().join("logs/transport.log"))
+        std::fs::read_to_string(fixture.destination.home.path().join("logs/lf.log"))
             .unwrap_or_default()
     );
     returning.assert_modes_restored();

@@ -126,8 +126,6 @@ public struct OwnerStream: Sendable {
             geometryControl = attachment.owner == attachment.viewer
         case .busy:
             events.append(.control(input: inputControl, geometry: geometryControl))
-        case .reconnectRequired:
-            throw RegistryQueryError("The Session needs a fresh attachment")
         case .accepted, .controlled, .nativeEnded:
             throw RegistryQueryError("Unexpected Session attachment response")
         }
@@ -225,22 +223,19 @@ private struct HeartbeatRequest: Encodable {
 
 private struct OwnerAttachment: Decodable {
     let viewer: String
-    let reconnect: String
     let nonce: String
     let token: String?
     let terminal: Bool
-    let graceMS: UInt64
     let owner: String?
 
     enum CodingKeys: String, CodingKey {
-        case viewer, reconnect, nonce, token, terminal, owner
-        case graceMS = "grace_ms"
+        case viewer, nonce, token, terminal, owner
     }
 }
 
 private struct OwnerReply: Decodable {
     enum Value {
-        case attached(OwnerAttachment), busy, reconnectRequired, accepted, controlled(Bool), nativeEnded
+        case attached(OwnerAttachment), busy, accepted, controlled(Bool), nativeEnded
     }
     let answers: UInt64
     let sequence: UInt64
@@ -254,7 +249,6 @@ private struct OwnerReply: Decodable {
         switch try box.decode(String.self, forKey: .kind) {
         case "attached": value = .attached(try OwnerAttachment(from: decoder))
         case "busy": value = .busy
-        case "reconnect_required": value = .reconnectRequired
         case "accepted": value = .accepted
         case "controlled": value = .controlled(try box.decode(Bool.self, forKey: .held))
         case "native_ended": value = .nativeEnded

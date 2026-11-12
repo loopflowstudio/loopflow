@@ -103,11 +103,9 @@ fn snapshot_preview_fixture() {
             seq: 0,
             reply: Reply::Attached {
                 viewer: "viewer".into(),
-                reconnect: "reconnect".into(),
                 nonce: "nonce".into(),
                 token: Some("claim".into()),
                 terminal: true,
-                grace_ms: 0,
                 owner: Some("viewer".into()),
             },
         };

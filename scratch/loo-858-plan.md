@@ -50,6 +50,13 @@ Steers (Jack Heart, 2026-11-12), word for word where it matters:
 - LOO-838: `ContextMoment::TaskUpdates` gone; a parse error in any `__` hook
   exits 0 with the "earlier lf" notice.
 
+- Compress: attach reply drops `reconnect` and `grace_ms` (Rust, Swift
+  `OwnerProtocol`, `owner/observer.bin` regenerated); Swift drops the
+  never-sent `reconnect_required`. `SessionConnectionProofTests` opens the pane
+  on `lf -i -a claude : proof` (relayed, so held) instead of the deleted
+  `session serve` owner. `.lf/wave/infrastructure/MEMORY.md` still says
+  exhaustion answers `reconnect_required` (Wave memory is read-only here).
+
 - Opportunity 1 (a host is a TerminalId): `lf session serve`, `lf session
   attach OWNER`, owner `session.attach`, `transport::Host`, `Spool`, viewer
   resume, owner reconnect, `hosted::Child`, store `Transport` and the
@@ -65,8 +72,6 @@ Steers (Jack Heart, 2026-11-12), word for word where it matters:
 
 - File the contract-migration Task for `agent_sessions.transport_lf_process_id`
   and `processes.viewer_hold*` once the staging window passes.
-- Swift still decodes `reconnect`/`grace_ms` (server sends `grace_ms` 0) and a
-  `reconnect_required` reply nothing sends; trim with the Swift build.
 - Coverage deleted with no held equivalent:
   `context_launch_tests::codex_service_tier_survives_live_reattachment` (held
   bare Codex has no app-server),
@@ -75,6 +80,10 @@ Steers (Jack Heart, 2026-11-12), word for word where it matters:
   Graph step without serve).
 
 ## Checks
+
+- Compress: clippy --all-targets clean; `--lib transport::` 70 pass;
+  transport_tests 42 pass / 5 ignored; `swift test --filter OwnerStreamTests`
+  7 pass. `SessionConnectionProofTests` (.requiresDisplay) not run: gate.
 
 - transport_tests 42 pass / 5 ignored; session_lifecycle_tests 41 pass;
   documented_commands + cli_discovery 40 pass; fmt and clippy --all-targets

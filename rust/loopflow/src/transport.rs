@@ -145,12 +145,6 @@ impl Settling {
 }
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
-/// A connection that speaks the viewer protocol with a held terminal: held
-/// terminals share the server's entrance and are named on its first line.
-fn connect(terminal: &TerminalId) -> Result<UnixStream> {
-    registry::connect(terminal)
-}
-
 #[derive(Debug)]
 struct Handoff {
     terminal: TerminalId,
@@ -184,7 +178,7 @@ impl Handoff {
     /// build is a recording gap: its reports go unrecorded and the agent goes on.
     fn connect(&self) -> Result<UnixStream> {
         static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
-        let connected = connect(&self.terminal);
+        let connected = registry::connect(&self.terminal);
         let mut gap = GAP.lock().expect("control gap lock poisoned");
         match &connected {
             Err(error) if error.is::<registry::OtherRevision>() => {
@@ -539,8 +533,6 @@ struct Viewer {
     output: VecDeque<u8>,
     /// Public identity, named to others when it takes ownership.
     id: String,
-    /// Named in every attachment reply; nothing presents it back.
-    reconnect: String,
     /// Tags this viewer's events; a program printing the same bytes lacks it.
     nonce: String,
     /// The input claim, while this connection may type.
@@ -577,7 +569,6 @@ impl Viewer {
             decoder: Decoder::default(),
             output: VecDeque::new(),
             id: token()[..12].to_owned(),
-            reconnect: token(),
             nonce: token()[..16].to_owned(),
             token: None,
             attached: false,
@@ -663,11 +654,9 @@ impl Viewer {
     fn attached_reply(&self, owner: Option<&str>, terminal: bool) -> Reply {
         Reply::Attached {
             viewer: self.id.clone(),
-            reconnect: self.reconnect.clone(),
             nonce: self.nonce.clone(),
             token: self.token.clone(),
             terminal,
-            grace_ms: 0,
             owner: owner.map(str::to_owned),
         }
     }
@@ -1470,7 +1459,7 @@ fn attach_with_terminal(
         recovery = recovered.then_some(Recovery::Reconnect);
         socket
     } else {
-        match connect(id) {
+        match registry::connect(id) {
             Ok(socket) => socket,
             Err(error) => {
                 return replace_view(id, session, &error.downcast::<registry::OtherRevision>()?)
@@ -2050,7 +2039,7 @@ fn view(
 fn reconnect_held(terminal: &TerminalId) -> Result<Option<UnixStream>> {
     let mut wait = Duration::from_millis(100);
     loop {
-        match connect(terminal) {
+        match registry::connect(terminal) {
             Ok(socket) => {
                 discard_reconnect_input()?;
                 return Ok(Some(socket));
@@ -2257,7 +2246,7 @@ pub(crate) fn controlled(id: &TerminalId) -> Result<bool> {
 
 /// End a held terminal with `text` for its viewers. No decision is stored.
 pub(crate) fn close_notice(id: &TerminalId, text: &str) -> Result<()> {
-    let mut socket = connect(id)?;
+    let mut socket = registry::connect(id)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     send(&mut socket, Request::CloseNotice { text: text.into() })?;
@@ -2269,7 +2258,7 @@ pub(crate) fn close_notice(id: &TerminalId, text: &str) -> Result<()> {
 
 /// Input ownership and the controlling viewer's native readiness are separate.
 pub(crate) fn attachment(id: &TerminalId) -> Result<(bool, bool)> {
-    let mut socket = connect(id)?;
+    let mut socket = registry::connect(id)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
     send(&mut socket, Request::Controlled { ready: None })?;

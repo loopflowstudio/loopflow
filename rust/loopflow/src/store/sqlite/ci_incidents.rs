@@ -412,29 +412,18 @@ impl super::SqliteStore {
         Ok(self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_lf_process_id=?3,responded_at=COALESCE(responded_at,?4) WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL", params![identity,launcher.as_str(),worker.as_str(),time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64])? == 1)
     }
 
-    /// Settle an exited run: the Session and input it captured, if any, and
-    /// its conclusion or the reason it reached none.
+    /// Settle an exited run: its Session, if any, and its conclusion or the
+    /// reason it reached none. The run's exit already completed the Session.
     pub(crate) fn finish_repair(
         &self,
         identity: &str,
         process: &LfProcessId,
-        captured: Option<(&str, Option<i64>)>,
+        session: Option<&str>,
         error: Option<&str>,
         conclusion: Option<&str>,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let (session, capture) = captured.unzip();
-        let capture = capture.flatten();
-        if tx.execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),now,error,conclusion,session])? == 0 {
-            // Another check already settled this run.
-            return Ok(());
-        }
-        if conclusion.is_some() {
-            tx.execute("UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2 AND completed_at IS NULL", params![session,capture,now])?;
-        }
-        tx.commit()?;
+        // A run another check already settled matches no row.
+        self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),time::OffsetDateTime::now_utc().unix_timestamp(),error,conclusion,session])?;
         Ok(())
     }
 }

@@ -327,8 +327,14 @@ OpenCode's `opencode.db-wal` writes.
 
 A Session launched in a Task's checkout is Task work. Headless (`-b`) there
 confines the agent and needs a managed login (`claude=<email>`), which a private
-home cannot get without real OAuth; launch interactively (`-i`) in a PTY
-instead. `lf account connect claude --api-key` with a placeholder
+home cannot get without real OAuth (`--import` checks the token against
+Anthropic). To drive real headless Task runs anyway, run a throwaway
+`rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
+`tests/session_steers.rs`'s `connect_fixture_account` does, against the private
+store, then delete it. Do not repeat this with release 0.15.3: its
+launch from a private home tries to write a Claude Keychain item. Dead
+AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
+Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder
 `ANTHROPIC_API_KEY` satisfies account selection for that launch. A stand-in
 `claude` on `PATH` can read `--settings` and run each hook command exactly as
 installed, with Claude's callback JSON on stdin; release its turns with marker

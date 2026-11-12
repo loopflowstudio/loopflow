@@ -517,9 +517,7 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             .finish_repair(
                 &identity,
                 &owner,
-                session
-                    .as_ref()
-                    .map(|session| (session.id.as_str(), session.captured)),
+                session.as_ref().map(|session| session.id.as_str()),
                 error.as_deref(),
                 conclusion,
             )

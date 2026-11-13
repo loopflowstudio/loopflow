@@ -173,7 +173,7 @@ Duplicates or guards for removed mechanisms; each one's rule is covered above.
 Still in `transport_tests` after slice 3:
 `desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged into the shell reconnect test in slice 4).
 Slices 1–3 deleted the rest of this list; names are in
-`git show 7acc5cea27 117378aadb da53314382 dc3d722f36 -- rust/loopflow/tests/transport_tests.rs`.
+`git show 7acc5cea27 117378aadb da53314382 dc3d722f36 79f92459fc -- rust/loopflow/tests/transport_tests.rs`.
 Unused fixture helpers go with them. `lifetime.rs` tests (14 s on `POLL` sleeps) get the same `#[cfg(test)]` timing value if it is one line; otherwise leave them.
 
 ## Forbidden

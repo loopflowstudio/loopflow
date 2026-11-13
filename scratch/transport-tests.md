@@ -122,31 +122,30 @@ socket cannot stand in without a production seam, keep the server-bridge
 heartbeat and exhaustion cases as **one** real-process test each (merged; one
 30 s window, one 12.7 s cycle) and say so here.
 
-### 3. Real-process surface tests (`tests/transport_tests.rs`, target ≤ 35)
+### 3. Real-process surface tests (`tests/transport_tests.rs`, 34 + 8 ignored)
 
-Kept because only real processes, PTYs, sockets or exec prove them (one per
-surface, merged where they share a fixture):
+What exists after slice 4 (merged legs keep their own `Fixture`):
 
-| Surface | Kept test (merged from) |
+| Surface | Kept tests |
 |---|---|
-| Owner wiring | `every_viewer_starts_with_the_snapshot_and_shares_live_output` (protocol smoke), `detached_owner_keeps_no_descriptor_its_terminal_inherited`, `owned_program_does_not_inherit_the_desktop_pane_relay` (+ held counterpart assertion), `pipe_eof_delivers_all_input_before_the_command_exits`, `viewer_stream_over_pipes_preserves_terminal_input_size_and_exit` |
-| Bare launch | `bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal`; placement: `first_native_launch_keeps_only_valid_desktop_terminal_placement` + `held_desktop_launch_links_its_session_to_the_pane` → one |
-| Launcher → provider exec | `a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit` (+ `failed_native_provider_settles_once_with_its_own_code`, parent==owner check from `opening_a_prepared_conversation_runs_one_owner_and_one_relay`, one Graph case from `native_exit_preserves_returning_launcher_results`), `native_pending_request_survives_creator_exit_without_settling_capture_or_replay`, `codex_original_request_channel_and_turn_survive_all_viewers`, `interactive_graph_settles_each_step_before_starting_the_next` (under a test PTY, no owner) |
-| Headless | `headless_graph_settles_its_original_step_after_creator_teardown` (+ `a_headless_run_survives_without_viewers`; no 4 s sleep) |
-| CLI open/JSON | `conversation_open_here_confirms_attachment_and_does_not_take_existing_input`, `prepared_start_preserves_a_claim_time_winner`, `resume_json_returns_after_relay_and_viewer_takeover`, one launch-once JSON test (`resume_fork_json…` + `session_new_json…` + `resume_json_returns_once_when_it_starts_the_owner`) |
-| Build skew / takeover | `resume_takes_over_an_owner_from_another_build`, `resume_ends_an_unanswering_superseded_owner_of_a_completed_session` (+ answering case, + takeover leg of `opening_takes_over_from_an_owner_that_never_answers`), `a_held_view_meeting_another_build_reopens_as_the_installed_lf` |
-| Local relay reconnect | `local_terminal_reconnects_without_replaying_input_or_taking_newer_claims` (one owner for its three cases) |
-| Server relay | `server_preserves_owner_and_graph_across_restart` (+ `server_move_here_preserves_draft_provider_and_graph`), `server_reconnect_preserves_newer_viewers_input_and_geometry` (terminal=false only), `a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live`, `server_startup_cancels_its_pending_installer_when_pane_closes`, `server_status_does_not_install_or_create_work` |
-| Held terminals | `a_held_pane_reads_reconnecting_until_the_next_server_answers` (+ `server_initial_connection_reports_opening_until_input_is_acknowledged`), `held_session_survives_server_restart` (trimmed to what `registry_tests` lacks), `a_held_view_waits_for_a_holder_stopped_at_server_startup` (+ `session_attach_waits_…`), `a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume`, `held_terminals_list_one_holder_process`, `server_threads_do_not_grow_with_held_terminals`, `task_cleanup_ends_an_abandoned_tasks_held_terminal`, `a_held_conversation_outlives_its_view` (no 5 s sleep; it is the coverage left after the parent deleted the detached-limit test) |
-| Desktop shell | `desktop_shell_reconnects_without_replay_and_close_settles_its_jobs` (one run, no 4 s sleep, absorbs the `getsid` sweep of `desktop_shell_repeated_lifecycles_…`), `completed_task_cleanup_signals_shell_owner_and_settles_jobs` |
-| SSH (Linux CI) | `ssh_shell_lifecycles_…` at 2 cycles; `ssh_prepared_viewer_…` without the 32 s quiet loop; `ssh_shell_failures_…` keeps the denied-key case, destination-side cases move to Desktop shell tests |
-| Ignored acceptance | Rex ×3, mobile native ×3, launchd registration ×2: stay `#[ignore]`, untouched |
+| Owner wiring | `every_viewer_starts_with_the_snapshot_and_shares_live_output` (+ directories), `detached_owner_keeps_no_descriptor_its_terminal_inherited`, `owned_program_does_not_inherit_the_desktop_pane_relay`, `pipe_viewers_deliver_input_size_and_exit` |
+| Bare launch | `bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal`, `first_native_launch_keeps_only_valid_desktop_terminal_placement` |
+| Launcher → provider | `a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit` (+ failed provider, Graph exit 1, no `lf` children), `native_pending_request_survives_creator_exit_…`, `codex_original_request_channel_and_turn_survive_all_viewers`, `interactive_graph_settles_each_step_before_starting_the_next` |
+| Headless | `headless_runs_settle_their_original_step_after_creator_teardown` (graph + skill) |
+| CLI open/JSON | `conversation_open_here_confirms_attachment_…`, `prepared_start_preserves_a_claim_time_winner`, `resume_json_returns_after_relay_and_viewer_takeover`, `json_launches_start_once_and_return_one_record` |
+| Build skew / takeover | `resume_takes_over_an_owner_from_another_build`, `resume_takes_over_only_an_owner_that_does_not_answer`, `a_held_view_meeting_another_build_reopens_as_the_installed_lf` |
+| Local relay | `local_terminal_reconnects_without_replaying_input_or_taking_newer_claims` |
+| Server relay | `server_preserves_owner_and_graph_across_restart` (+ Move here), `server_reconnect_preserves_newer_viewers_input_and_geometry`, `a_stalled_bridge_leaves_the_healthy_bridge_…`, `server_startup_cancels_its_pending_installer_…`, `server_status_does_not_install_or_create_work`, `server_mobile_changes_preserve_local_connections` |
+| Held terminals | `a_held_pane_reads_reconnecting_…`, `held_session_survives_server_restart`, `a_held_view_waits_for_a_holder_stopped_at_server_startup`, `a_launch_refused_for_a_stopped_server_…`, `held_terminals_share_one_holder_and_add_no_server_threads`, `task_cleanup_ends_an_abandoned_tasks_held_terminal`, `a_held_conversation_outlives_its_view` |
+| Desktop shell | `desktop_shell_reconnects_without_replay_and_close_settles_its_jobs`, `completed_task_cleanup_signals_shell_owner_and_settles_jobs` |
+| SSH (`transport/ssh_shells.rs`, Linux CI) | `ssh_shell_lifecycles_…` (2 cycles), `ssh_shell_authentication_failure_…`, `ssh_prepared_viewer_…` |
+| Ignored acceptance | Rex ×3, mobile native ×3, launchd registration ×2, untouched |
 
 ### Moves out of the transport suite (not transport rules)
 
 | Rule | Destination |
 |---|---|
-| superseded-owner retention (5 `unanswering_superseded_owners_preserve_*`, `unanswering_superseded_owner_preserves_pending_turn_and_queued_input`) | store `owner_retention` table test (`store/sqlite/sessions.rs:714`) + one `human_session::attaches` case |
+| superseded-owner retention (5 `unanswering_superseded_owners_preserve_*`) | store `owner_retention` table test (`steers_tests.rs`). The planned `human_session::attaches` case was never written; the turn-continuity rule is slice 5 |
 | prepare reads `detached` (`opening_reattaches_an_owner_whose_viewer_record_went_stale`, prepare half of `opening_takes_over_…`) | `human_session::viewed_summary` test with a fake socket at `transport::endpoint` |
 | native settlement vs cleanup (`silent_native_turns_survive_until_settlement`, `native_background_watches_survive_until_settlement`, hook part of `retained_hooks_survive_upgrade`) | `server/boundary.rs`, `retirement_tests`, Clap alias parse test |
 | `resume_refuses_a_graph_step_and_leaves_it_running` | `human_session::run_refusal` test |
@@ -187,10 +186,6 @@ no test that waits out a production timeout except a named fallback above.
    replace eight hand-built resume requests. `cargo nextest run -p loopflow
    --lib -E 'test(transport::hosted::host_tests::)'`: 21/21, 0.252 s.
    Left from this slice:
-   - `viewers_enter_the_execution_directory_and_later_ones_the_selected_directory`
-     stays real-process: the bench covers reported directories, but the
-     selected-directory half needs an `ExitRecord` whose Session is in the store.
-     Port it with a stored Session or keep it as the Owner wiring test.
    - Not ported: the bridge process exiting when its owner cuts it
      (`viewer_stream_backpressure_…`, a `stream.rs` rule); the hold released at
      exit (`release_viewer_hold` always computes from no viewers).
@@ -317,18 +312,32 @@ no test that waits out a production timeout except a named fallback above.
      list; five held-terminal `SessionStart` requests became
      `ServerProof::start_held`. `relay_tests::` 11/11, 2.5 s wall;
      `transport_tests -E 'test(held)'` 7/7; clippy clean.
-5. **Next.** Steer (comment 087e0ee8, 2026-11-13): coverage removed in
-   #1922 (not yet on main) "to rebuild in this suite with a controlled
-   timeout": `unanswering_superseded_owner_preserves_pending_turn_and_queued_input`
-   froze the owner (SIGSTOP), ran `lf session resume` against the replaced
-   build, and required that the failed attachment left the provider
-   attachment, capture, provider thread and Task binding unchanged, the owner
-   running, and no second turn completed. It failed in CI with "relay did not
-   exit" after its 20 s `wait_exit`; which production timeout governs the
-   give-up was not traced. The non-frozen
-   `resumed_session_completes_turns_after_build_replacement_and_viewer_return`
-   remains. Trace the give-up timeout, then put the rule in the cheapest
-   layer (relay or `human_session`) with `TEST_PACE` or a value seam.
+5. **Next.** Steer (Task comment, 2026-11-13): coverage removed in #1922
+   (open, not on main) "to rebuild in this suite with a controlled timeout".
+   On this branch slice 3 (`da53314382`) already deleted both legs of
+   `continue_session_after_upgrade`, not only the frozen one, and nothing
+   replaced them:
+   - frozen (`unanswering_superseded_owner_preserves_pending_turn_and_queued_input`):
+     owner SIGSTOPped, `lf session resume` against the replaced build fails
+     and leaves provider attachment, capture, provider thread and Task binding
+     unchanged, the owner running, no second turn completed. Failed on #1922's
+     CI with "relay did not exit" after a 20 s `wait_exit`; the give-up timeout
+     was not traced.
+   - live (`resumed_session_completes_turns_after_build_replacement_and_viewer_return`):
+     a live turn stays in the old provider, queued drafts reach it in order,
+     the superseded owner keeps running; after settlement the viewer follows
+     the new build (new agent process and token) and more turns land in the
+     same history. `resume_takes_over_an_owner_from_another_build` covers only
+     the idle reopen with `--resume`.
+   Trace the give-up timeout, then put both rules in the cheapest layer
+   (relay with `TEST_PACE`, or `human_session` with a fake owner socket as in
+   `a_stale_viewer_record_reads_unviewed_…`); a real-process leg only for what
+   needs two builds.
+6. **Open against "Done when".** Relay cases under 1 s: slice 2's quiet-window
+   and exhaustion cases take ~2 s (`Status::wait` polls in 50 ms steps), the
+   acknowledged-past-deadline case 1.1 s. Either shorten `TEST_PACE` for those
+   or accept them; not decided. `lifetime.rs` `POLL` sleeps (14 s) untouched.
+   CI sum under 400 s is unmeasured until gate.
 
 ## Checks
 

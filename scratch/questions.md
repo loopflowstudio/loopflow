@@ -365,6 +365,8 @@ which names mini from the claim on.
   names mini.
 - Checks: integration `machine_commands::a_` 11 ok, `documented_commands::` 4 ok;
   clippy `--all-targets -D warnings` clean.
+- Compress: nothing to cut; `runs_here` is one ownership check, and the two
+  forwarded-move tests share only their command line.
 
 ## Open questions (each reversible; the simpler option is built)
 

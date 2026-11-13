@@ -514,7 +514,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
     fixture.task.worktree = Some(adopted.path().into());
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-        "UPDATE tasks SET worktree=?1 WHERE id=?2",
+        "UPDATE task_checkouts SET worktree=?1 WHERE task_id=?2",
         rusqlite::params![adopted.path().to_str().unwrap(), fixture.task.id.as_str()],
     )
     .unwrap();

@@ -11,6 +11,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow_test_support::{MachineServer, TestRepo};
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 struct Fixture {
@@ -2815,6 +2816,7 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
                         [task["id"].as_str().unwrap()],
                         |row| row.get(0),
                     )
+                    .optional()
                     .unwrap();
                 assert!(
                     primary.is_none(),
@@ -3640,6 +3642,7 @@ fn promotion_shell_never_selects_a_conversation_by_recency() {
             [task],
             |row| row.get(0),
         )
+        .optional()
         .unwrap();
     assert_eq!(primary, None);
     let bound: Option<String> = fixture
@@ -3899,6 +3902,7 @@ fn promotion_background_run_does_not_claim_primary() {
             [task],
             |row| row.get(0),
         )
+        .optional()
         .unwrap();
     assert_eq!(primary, None);
     let bound: Option<String> = fixture

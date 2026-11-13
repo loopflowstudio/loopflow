@@ -71,6 +71,9 @@ Session while retaining the saved provider thread and completes again on exit.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+Task storage changes also run `binary(session_lifecycle_tests)`: creation and
+promotion cover absent checkouts and primary Sessions. When moving nullable
+columns into separate tables, update fixture reads to handle absent rows.
 Fixture database seeding changes include
 `test(concurrent_copies_share_one_initialized_machine)` and
 `test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:

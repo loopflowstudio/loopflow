@@ -51,27 +51,52 @@ impl SqliteStore {
     }
 
     /// The Task arrived on `to`: the sender's record keeps only that, and the
-    /// receiver records it too.
+    /// receiver records it too. A Task arriving here ends any move this
+    /// Machine sent of it earlier, even one whose arrival it never heard of.
     pub(crate) fn record_move_arrived(
         &self,
         task: &TaskId,
         from: &MachineId,
         to: &MachineId,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
+        let here = &self.local_machine()?.id == to;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let updated = tx.execute(
             "UPDATE task_moves SET state='arrived',at=?3,payload=NULL
              WHERE task_id=?1 AND to_machine_id=?2 AND state='sent'",
             params![task.as_str(), to.as_str(), now_unix()],
         )?;
         if updated == 0 {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at)
                  VALUES(?1,?2,?3,'arrived',?4)",
                 params![task.as_str(), from.as_str(), to.as_str(), now_unix()],
             )?;
         }
+        if here {
+            tx.execute(
+                "UPDATE task_moves SET state='arrived',payload=NULL
+                 WHERE task_id=?1 AND state='sent'",
+                [task.as_str()],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+
+    /// Whether the last move of the Task this Machine knows of arrived on `to`.
+    pub fn task_move_arrived_on(&self, task: &TaskId, to: &MachineId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT state='arrived' AND to_machine_id=?2 FROM task_moves
+                 WHERE task_id=?1 ORDER BY id DESC LIMIT 1",
+                [task.as_str(), to.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(false))
     }
 
     /// The Task's move this Machine sent that has not arrived.
@@ -140,5 +165,18 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(rows, [("arrived".to_string(), None)]);
+        drop(conn);
+        assert!(store.task_move_arrived_on(&task, &mini).unwrap());
+
+        // Sent on to a third Machine, whose arrival this one never hears of,
+        // then back here: nothing is in flight any more.
+        let third = MachineId::new();
+        store
+            .record_move_sent(&task, &laptop, &third, "{\"third\":3}")
+            .unwrap();
+        assert!(!store.task_move_arrived_on(&task, &third).unwrap());
+        store.record_move_arrived(&task, &third, &laptop).unwrap();
+        assert_eq!(store.task_move_sent(&task).unwrap(), None);
+        assert!(store.task_move_arrived_on(&task, &laptop).unwrap());
     }
 }

@@ -2464,7 +2464,7 @@ struct WorkDestinationTests {
         for index in tasks.indices {
             guard var runtime = tasks[index]["runtime"] as? [String: Any] else { continue }
             runtime["status"] = "idle"
-            runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
+            runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
                                 "machine": ["id": "machine-local", "label": "laptop"]] as [String: Any]
             tasks[index]["runtime"] = runtime
         }

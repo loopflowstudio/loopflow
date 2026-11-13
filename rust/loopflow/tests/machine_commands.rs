@@ -2457,6 +2457,81 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Runs on mini since"), "{status}");
 }
 
+/// Mini sends the Task back to the laptop, and its reply never arrives. Mini
+/// recorded what it sent, so the same command delivers the conversation
+/// that left with the first send.
+#[test]
+fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let laptop_id = plan.local.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "lost-reply");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a59");
+    let move_to = |machine: &str| {
+        fixture
+            .command(&["task", "move", task.as_str(), "--machine", machine])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap()
+    };
+    assert_success(&move_to("mini"));
+    assert!(plan
+        .remote
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+
+    // Mini sends, then its reply is lost on the way back.
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "\nexec ",
+            &format!("\ncase \"$*\" in *'session send'*--to*) case \"$*\" in *--arrived*) ;; *) '{lf}' \"$@\" >/dev/null; echo 'connection reset' >&2; exit 255;; esac;; esac\nexec "),
+            1,
+        ),
+    );
+    let laptop = gethostname::gethostname().to_string_lossy().into_owned();
+    let laptop = laptop.split('.').next().unwrap().to_string();
+    let lost = move_to(&laptop);
+    assert!(!lost.status.success());
+    let sent = plan.remote.task_move_sent(&task).unwrap().unwrap();
+    assert_eq!(sent.to_machine_id, laptop_id);
+    // The conversation left mini with that send.
+    assert!(plan
+        .remote
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_some());
+
+    executable(&remote_lf, &working);
+    let delivered = move_to(&laptop);
+    assert_success(&delivered);
+    let stderr = String::from_utf8_lossy(&delivered.stderr);
+    assert!(stderr.contains("its Session moved with it"), "{stderr}");
+    // The conversation is open here again.
+    assert!(plan
+        .local
+        .session(&session)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop_id
+    );
+    // Mini heard it arrived: nothing is in flight there any more.
+    assert!(plan.remote.task_move_sent(&task).unwrap().is_none());
+}
+
 #[test]
 fn a_machine_without_the_checkout_shows_no_path_for_it() {
     let fixture = preview_machines();
@@ -3247,6 +3322,35 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     assert_eq!(resumed["id"], session.as_str());
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
+}
+
+/// A Task with two conversations: resuming the one that is not its primary
+/// on mini moves the Task with that one, and mini resumes it.
+#[test]
+fn resuming_a_tasks_other_conversation_on_mini_carries_that_one() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "two-conversations");
+    let first = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5a");
+    let other = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5b");
+    assert_ne!(first, other);
+
+    let resumed = fixture
+        .command(&["--machine", "mini", "resume", &other, "--prepare", "--json"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], other.as_str());
+    assert_eq!(
+        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let there = plan.remote.session(&other).unwrap().unwrap();
+    assert!(there.completed_at.is_none());
+    assert_eq!(there.task_id.as_ref(), Some(&task));
 }
 
 #[test]

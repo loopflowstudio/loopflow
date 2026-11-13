@@ -17,7 +17,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
-use crate::durable::{MachineId, OwnershipKind, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
+use crate::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use crate::harness::HarnessKind;
 use crate::id::{AgentSessionId, LfSessionId, WaveId};
 use crate::journal::ProcessIdentityEvidence;
@@ -124,7 +124,7 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
         .await?
         .ok_or_else(|| session_not_found(id))?;
     if let Some(task) = conversation_task(&store.sqlite, &session.id)? {
-        return send_task(store, task.as_str(), to).await;
+        return send_task(store, task.as_str(), to, Some(session.id.as_str())).await;
     }
     let name = &session.title;
     let root = crate::git::worktree_root(&session.cwd).map_err(|_| {
@@ -166,14 +166,28 @@ pub(crate) fn conversation_task(store: &SqliteStore, session: &str) -> Result<Op
 }
 
 /// Claim the Task for `to`, then stop its Graph, commit and push its
-/// worktree and take its conversation. A failure in those steps hands it back
-/// here; repeating it after a failed receive reuses that claim.
-pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
+/// worktree and take `conversation` (the Task's own conversation when `None`).
+/// A failure in those steps hands it back here. The move is recorded as sent
+/// before it returns, so a repeat naming the same Machine returns what was
+/// sent, even when the first reply never reached the caller.
+pub(crate) async fn send_task(
+    store: &SharedStore,
+    issue: &str,
+    to: &MachineId,
+    conversation: Option<&str>,
+) -> Result<Move> {
     let task = store
         .get_task_by_issue(issue)
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
     let name = &task.identifier;
+    if let Some(sent) = store
+        .sqlite
+        .task_move_sent(&task.id)?
+        .filter(|sent| &sent.to_machine_id == to)
+    {
+        return serde_json::from_str(&sent.payload).context("read the sent move");
+    }
     let worktree = task.worktree.clone().filter(|path| path.exists());
     if let Some(root) = &worktree {
         refuse_mid_operation(root, name)?;
@@ -181,18 +195,10 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     // Owned by `to` from here, so nothing on this Machine (recovery restarting
     // a ship process, a run waiting out a limit) starts the Task again while
     // the move stops it. If it cannot leave, it is handed back.
-    let sent_before = store
-        .sqlite
-        .task_ownership(&task.id)?
-        .owner
-        .and_then(|owner| owner.machine.id)
-        .as_ref()
-        == Some(to);
-    let claim = claim_for(&store.sqlite, &task.id, to)?;
+    let claim = claim_for(&store.sqlite, &task, to)?;
     let (stopped, checkout, conversation, taken) =
-        match leave(store, &task, worktree.as_deref(), to).await {
+        match leave(store, &task, worktree.as_deref(), to, conversation).await {
             Ok(left) => left,
-            Err(error) if sent_before => return Err(error),
             Err(error) => {
                 store.sqlite.hand_back(&task.id, &claim)?;
                 return Err(error);
@@ -203,8 +209,9 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
     }
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
-    Ok(Move {
-        from_machine_id: store.sqlite.local_machine()?.id,
+    let from = store.sqlite.local_machine()?.id;
+    let moved = Move {
+        from_machine_id: from.clone(),
         session,
         checkout,
         history,
@@ -216,7 +223,25 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             stopped,
             approval: store.sqlite.task_ship_approval(&task.id)?,
         }),
-    })
+    };
+    store
+        .sqlite
+        .record_move_sent(&task.id, &from, to, &serde_json::to_string(&moved)?)?;
+    Ok(moved)
+}
+
+/// The Task this Machine sent to `to` arrived there: nothing is in flight.
+pub(crate) async fn sent_task_arrived(
+    store: &SharedStore,
+    issue: &str,
+    to: &MachineId,
+) -> Result<()> {
+    let task = store
+        .get_task_by_issue(issue)
+        .await?
+        .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
+    let here = store.sqlite.local_machine()?.id;
+    Ok(store.sqlite.record_move_arrived(&task.id, &here, to)?)
 }
 
 type Left = (
@@ -227,19 +252,27 @@ type Left = (
 );
 
 /// What leaves with the Task: its stopped Graph, its pushed checkpoint and
-/// its stopped conversation.
+/// its stopped conversation, `conversation` or else the Task's own.
 async fn leave(
     store: &SharedStore,
     task: &Task,
     worktree: Option<&Path>,
     to: &MachineId,
+    conversation: Option<&str>,
 ) -> Result<Left> {
     let name = &task.identifier;
     let stopped = stop_graphs(store, task).await?;
     let checkout = worktree
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
-    let conversation = super::primary::task_conversation(store, &task.id).await?;
+    let conversation = match conversation {
+        Some(id) => Some(
+            session_by_id(store, id)
+                .await?
+                .ok_or_else(|| session_not_found(id))?,
+        ),
+        None => super::primary::task_conversation(store, &task.id).await?,
+    };
     let taken = match conversation.as_ref() {
         Some(session) => {
             await_provider_identity(&store.sqlite, &session.id).await?;
@@ -308,27 +341,20 @@ fn take(
 }
 
 /// The claim naming `to`, written here: this Machine's claim moves there. An
-/// unowned Task is claimed first; one already moved to `to` reuses that entry.
-fn claim_for(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskOwnershipEntry> {
-    let ownership = store.task_ownership(task)?;
-    let owner = ownership
+/// unowned Task is claimed first; one `to` already owns has nothing to send.
+fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwnershipEntry> {
+    let owner = store
+        .task_ownership(&task.id)?
         .owner
-        .as_ref()
-        .and_then(|owner| owner.machine.id.as_ref());
-    if owner == Some(to) {
-        let local = store.local_machine()?.id;
-        if let Some(entry) = ownership.log.iter().rev().find(|entry| {
-            entry.kind == OwnershipKind::Claim
-                && entry.machine_id.as_ref() == Some(to)
-                && entry.writer_machine_id.as_ref() == Some(&local)
-        }) {
-            return Ok(entry.clone());
+        .and_then(|owner| owner.machine.id);
+    match owner {
+        Some(owner) if &owner == to => bail!("{} already runs on {to}", task.identifier),
+        Some(_) => {}
+        None => {
+            store.claim_task(&task.id)?;
         }
     }
-    if owner.is_none() {
-        store.claim_task(task)?;
-    }
-    Ok(store.move_claim_keeping_conversation(task, to)?)
+    Ok(store.move_claim_keeping_conversation(&task.id, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still

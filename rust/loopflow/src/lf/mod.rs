@@ -1923,8 +1923,9 @@ pub enum SessionCommand {
         after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session; run it again to deliver a Task that was sent but did not arrive. Run send and receive by hand to retry a Session whose receive failed:\n  lf session send <session> --to <machine> | lf --machine <machine> session receive"
     )]
     Send {
-        /// Session ID or provider conversation ID
-        #[arg(required_unless_present = "task", conflicts_with = "task")]
+        /// Session ID or provider conversation ID; with --task, the Task's
+        /// conversation to carry
+        #[arg(required_unless_present = "task")]
         id: Option<String>,
         /// Send this Task with its Session, as `lf task move --machine` does
         #[arg(long)]
@@ -1932,6 +1933,9 @@ pub enum SessionCommand {
         /// The Machine it moves to, by label or id
         #[arg(long)]
         to: String,
+        /// Send nothing: record that the Task this Machine sent arrived there
+        #[arg(long, hide = true, requires = "task")]
+        arrived: bool,
     },
     /// Admit a Session `lf session send` printed, read from stdin: check out its
     /// branch and place its conversation so it resumes here

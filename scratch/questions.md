@@ -165,33 +165,39 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   `relay` moves only Task-less Sessions and returns `()`. Clippy clean;
   integration `machine_commands::` resume/move tests 4 passed.
 
-## Next implement direction (concept review, 2026-11-13, second)
+## Done (2026-11-13, sixth pass): the Machine a Task leaves records the move
 
-1. **The Machine a Task leaves records the move.** Today `relay_task`
-   (`session_move.rs`) records `sent` on the Machine running the command,
-   after the send returns. When the Task is owned on a third Machine and the
-   SSH reply is lost, the source has stopped the Graph, pushed and completed
-   the conversation, and no Machine holds the payload; a repeat sends the
-   Task without its conversation. Move the record into `moves::send_task`:
-   it writes `sent` with the payload before returning, and a repeat naming
-   the same target returns that payload instead of leaving again (it
-   already reuses the claim through `sent_before`). `relay_task` drops its
-   own `resent` lookup and asks the source either way; the local case is the
-   same call. `lf task status` on the source shows `sent, not arrived`.
-   Test: a send whose reply is dropped, repeated, delivers the conversation.
-2. **Resuming a Task conversation on M carries that conversation.**
-   `move_session` runs `move_task`, which carries `task_conversation`
-   (primary, else latest input). Resuming a second open conversation of the
-   Task on M moves the Task with the other one and the forwarded resume finds
-   no such Session on M. `send_task` takes the conversation to carry
-   (`None` = `task_conversation`); `move_session` passes the named Session.
-   It arrives as the Task's primary on M through `ensure_primary_session`.
-3. **Swift mirrors `TaskOwner.person_id`.** Rust's `TaskOwner` gained a
-   required nullable `person_id` on the wire; `swift/Loopflow/Models/WaveWorkMap.swift`
-   `TaskOwner` still decodes only `person`, `person_key`, `machine`. Add
-   `personId` with `decode(String?.self, forKey:)`, extend the Swift fixture
-   test that reads `tests/fixtures/dto/` owners, and update the `personKey`
-   comment (display fallback, not the identity). Replaces Remaining item 1.
+- `moves::send_task(store, issue, to, conversation)` writes `sent` with the
+  payload before returning; a repeat naming the same `to` returns that
+  payload. `claim_for` refuses a Task `to` already owns (its claim-reuse
+  branch and `send_task`'s `sent_before` are deleted).
+- `relay_task` no longer reads its own `sent` record. When the route already
+  says `to`, the source is the writer of the move's claim (`sender`), unless
+  this Machine recorded the arrival. It asks that source, locally or over SSH,
+  and then calls `session send --task X --to M --arrived` (hidden) on a remote
+  source, best-effort, so the source stops showing `sent, not arrived`.
+  `record_move_arrived` on the receiving Machine also settles any earlier
+  move this Machine sent, so a stale row there never replays.
+- `move_session` passes the named Session: `session send <id> --task X`
+  (id no longer conflicts with `--task`) carries it, and it arrives as the
+  Task's primary on M.
+- Found while testing: a conversation moving back to the Machine it left
+  failed in `provider_conversation::select` ("conversation capture changed
+  before publication"); a reopened Session whose input was published skips
+  publishing.
+- Swift `TaskOwner.personId` (`decode(String?.self)`), `personKey` documented
+  as the display fallback; `roadmap_snapshot.json` carries one person id;
+  Swift JSON in tests and `MockWaveFixture` gained `person_id`.
+- Tests: `a_task_sent_without_its_reply_delivers_its_conversation_when_repeated`,
+  `resuming_a_tasks_other_conversation_on_mini_carries_that_one`,
+  `task_moves` unit test extended (third Machine, then back).
+- Checks (2026-11-13): integration `machine_commands::` 51, `dto_fixtures::`
+  + `documented_commands::` 55; lib `ops::human_session` + `task_moves::` +
+  `lf::tests::` 94; Swift `swift test` on the eight suites whose owner JSON
+  changed (DTOFixtureTests, WaveStandup, RegistryQuery, TaskHistoryFilter,
+  WorkCache, WorkNavigation(Proof), WorkDestination) 248; clippy clean. Gate
+  runs `server::schema::tests::` (Clap help for `session send` changed) and
+  `transport_tests`.
 
 ## Remaining
 
@@ -202,7 +208,7 @@ reader left outside the pre-`task_checkouts` fallbacks in
 `read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
 remaining mentions are pre-migration fixtures.
 
-1. Direction 3 above.
+Nothing left from the concept review's three directions.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -229,5 +235,8 @@ remaining mentions are pre-migration fixtures.
   `ensure_task` opens a Task conversation in the repository when the Task has
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
+- **Killed mid-leave.** A send killed between its claim and its `sent`
+  record leaves the Task claimed for `to` with nothing sent; a repeat says it
+  already runs there. `lf task claim` on the source recovers it.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.

@@ -15,7 +15,8 @@ use crate::work::task::Task;
 
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows
 /// it, to `target` unless it is already there. A Task's conversation moves only
-/// with its Task, as `lf task move` moves it.
+/// with its Task, as `lf task move` moves it, and is the conversation the Task
+/// carries.
 pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
     let task = tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
@@ -28,12 +29,12 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
         let target = super::ssh::resolve_target(target, forward_agent).await?;
         if let Some(task) = moves::conversation_task(&store.sqlite, &session.id)? {
             let route = store.task_execution_route(&task).await?;
-            return Ok((route.machine_id != target.id).then_some(task));
+            return Ok((route.machine_id != target.id).then_some((task, session.id)));
         }
         relay(&store, &session, &target).await.map(|()| None)
     })?;
-    if let Some(task) = task {
-        move_task(task.as_str(), target)?;
+    if let Some((task, session)) = task {
+        move_task(task.as_str(), target, Some(session.as_str()))?;
     }
     Ok(())
 }
@@ -73,15 +74,16 @@ async fn relay(store: &SharedStore, session: &LfSession, target: &Machine) -> Re
 }
 
 /// `lf task move X --machine M`. A Graph the move stopped continues where the
-/// Task arrives.
-pub fn move_task(issue: &str, target: &str) -> Result<TaskOwnership> {
+/// Task arrives. `conversation` is the Session it carries; `None` carries the
+/// Task's own conversation.
+pub fn move_task(issue: &str, target: &str, conversation: Option<&str>) -> Result<TaskOwnership> {
     let (ownership, stopped) = tokio::runtime::Runtime::new()?.block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
                 .await?
                 .ok_or_else(|| anyhow!("no Loopflow registry on this machine; run `lf doctor`"))?,
         );
-        relay_task(&store, issue, target).await
+        relay_task(&store, issue, target, conversation).await
     })?;
     if let Some(stopped) = stopped {
         stopped.resume();
@@ -149,13 +151,15 @@ impl StoppedRun {
     }
 }
 
-/// Send the Task where it is owned, receive it on `target`, and learn the
-/// move's claim here too so this Machine routes it there. The move is
-/// recorded as sent until it arrives; the same command delivers it again.
+/// Send the Task from the Machine it leaves, receive it on `target`, and learn
+/// the move's claim here too so this Machine routes it there. The Machine it
+/// leaves records the move as sent until it arrives, so the same command
+/// delivers it again.
 async fn relay_task(
     store: &SharedStore,
     issue: &str,
     target: &str,
+    conversation: Option<&str>,
 ) -> Result<(TaskOwnership, Option<StoppedRun>)> {
     let task = store
         .get_task_by_issue(issue)
@@ -174,38 +178,31 @@ async fn relay_task(
     let route = store.task_execution_route(&task.id).await?;
     let name = &task.identifier;
     let place = describe(target.as_ref());
-    // A move that was sent but did not arrive is delivered again as it was
-    // sent: nothing is stopped, committed or pushed twice.
-    let resent = store
-        .sqlite
-        .task_move_sent(&task.id)?
-        .filter(|sent| sent.to_machine_id == to);
-    let moved: Move = match &resent {
-        Some(sent) => {
-            eprintln!(
-                "Delivering {name} as it was sent to {place} at {}",
-                crate::lf::output::format_time(sent.at)
-            );
-            serde_json::from_str(&sent.payload).context("read the sent move")?
+    // Already claimed for `to` here: sent before and not arrived, so the
+    // Machine that sent it delivers it again as it was sent.
+    let resending = route.machine_id == to;
+    let source = if resending {
+        sender(&store.sqlite, &task.id, &to)?
+            .ok_or_else(|| anyhow!("{name} already runs on {place}"))?
+    } else {
+        if let Some(target) = &target {
+            ready(store, target, Some((&task, &route.repository_id)), name).await?;
+            eprintln!("Checked {place}: it can take {name}");
         }
-        None => {
-            if route.machine_id == to {
-                anyhow::bail!("{name} already runs on {place}");
-            }
-            if let Some(target) = &target {
-                ready(store, target, Some((&task, &route.repository_id)), name).await?;
-                eprintln!("Checked {place}: it can take {name}");
-            }
-            let moved = send_task(store, &task, &route, &local, &to).await?;
-            store.sqlite.record_move_sent(
-                &task.id,
-                &moved.from_machine_id,
-                &to,
-                &serde_json::to_string(&moved)?,
-            )?;
-            moved
-        }
+        route.machine_id.clone()
     };
+    if resending {
+        eprintln!("Delivering {name} as it was sent to {place}");
+    }
+    let moved = send_task(
+        store,
+        &task,
+        &route.repository_id,
+        &source,
+        &to,
+        conversation,
+    )
+    .await?;
     let moved_task = moved
         .task
         .as_ref()
@@ -219,7 +216,7 @@ async fn relay_task(
     let step = from
         .clone()
         .or_else(|| moved_task.graph.as_ref().map(|graph| graph.step.clone()));
-    if resent.is_none() {
+    if !resending {
         if moved_task.stopped.is_some() {
             match &from {
                 Some(step) => eprintln!("Stopped {name} at `{step}`"),
@@ -245,15 +242,18 @@ async fn relay_task(
             .sqlite
             .record_move_arrived(&task.id, &moved.from_machine_id, &to)?;
     }
+    if moved.from_machine_id != local {
+        tell_arrived(&moved.from_machine_id, &route.repository_id, &task, &to).await;
+    }
     let at = step
         .map(|step| format!(" (Graph at `{step}`)"))
         .unwrap_or_default();
-    let conversation = if moved.session.is_some() {
+    let carried = if moved.session.is_some() {
         "; its Session moved with it"
     } else {
         ""
     };
-    eprintln!("Arrived on {place}{at}{conversation}");
+    eprintln!("Arrived on {place}{at}{carried}");
     let stopped = moved_task.stopped.is_some().then(|| StoppedRun {
         identifier: name.clone(),
         from,
@@ -265,34 +265,83 @@ async fn relay_task(
     Ok((store.sqlite.task_ownership(&task.id)?, stopped))
 }
 
-/// Send the Task from where it is owned: here, or over SSH from the Machine
-/// holding it.
-async fn send_task(
-    store: &SharedStore,
-    task: &Task,
-    route: &crate::durable::TaskExecutionRoute,
-    local: &MachineId,
+/// The Machine a Task claimed for `to` was sent from: the writer of the
+/// move's claim. `None` once it arrived, or when `to` claimed it itself.
+fn sender(
+    store: &crate::store::sqlite::SqliteStore,
+    task: &crate::durable::TaskId,
     to: &MachineId,
-) -> Result<Move> {
-    if route.machine_id == *local {
-        return moves::send_task(store, task.id.as_str(), to).await;
+) -> Result<Option<MachineId>> {
+    if store.task_move_arrived_on(task, to)? {
+        return Ok(None);
     }
-    let source = super::ssh::resolve_target(route.machine_id.as_str(), false).await?;
-    let bytes = super::ssh::request(
-        &source,
-        &[
-            "--repo-id".into(),
-            route.repository_id.to_string(),
+    Ok(store
+        .task_ownership(task)?
+        .log
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.kind == crate::durable::OwnershipKind::Claim
+                && entry.machine_id.as_ref() == Some(to)
+        })
+        .and_then(|entry| entry.writer_machine_id)
+        .filter(|writer| writer != to))
+}
+
+/// The Machine the Task left keeps its move as sent until it hears it
+/// arrived. The move already happened, so a Machine out of reach only leaves
+/// that record stale, which its next arrival there clears.
+async fn tell_arrived(source: &MachineId, repository: &RepositoryId, task: &Task, to: &MachineId) {
+    let told = async {
+        let source = super::ssh::resolve_target(source.as_str(), false).await?;
+        let args = [
+            "--repo-id".to_string(),
+            repository.to_string(),
             "session".into(),
             "send".into(),
             "--task".into(),
             task.id.to_string(),
             "--to".into(),
             to.to_string(),
-        ],
-        None,
-    )
-    .await?;
+            "--arrived".into(),
+        ];
+        super::ssh::request(&source, &args, None).await.map(drop)
+    };
+    if let Err(error) = told.await {
+        tracing::warn!(
+            "{} arrived, but {source} still records it as sent: {error:#}",
+            task.identifier
+        );
+    }
+}
+
+/// Send the Task from `source`: here, or over SSH.
+async fn send_task(
+    store: &SharedStore,
+    task: &Task,
+    repository: &RepositoryId,
+    source: &MachineId,
+    to: &MachineId,
+    conversation: Option<&str>,
+) -> Result<Move> {
+    if *source == store.sqlite.local_machine()?.id {
+        return moves::send_task(store, task.id.as_str(), to, conversation).await;
+    }
+    let source = super::ssh::resolve_target(source.as_str(), false).await?;
+    let mut args = vec![
+        "--repo-id".to_string(),
+        repository.to_string(),
+        "session".into(),
+        "send".into(),
+    ];
+    args.extend(conversation.map(str::to_string));
+    args.extend([
+        "--task".into(),
+        task.id.to_string(),
+        "--to".into(),
+        to.to_string(),
+    ]);
+    let bytes = super::ssh::request(&source, &args, None).await?;
     serde_json::from_slice(&bytes).context("read the moved Task")
 }
 

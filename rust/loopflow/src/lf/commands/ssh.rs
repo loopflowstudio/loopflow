@@ -124,7 +124,7 @@ pub(super) fn run_with_io(
                 target.id
             ));
         };
-        super::session_move::move_task(task, target.id.as_str())?;
+        super::session_move::move_task(task, target.id.as_str(), None)?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.

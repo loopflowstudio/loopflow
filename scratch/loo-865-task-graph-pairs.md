@@ -76,10 +76,10 @@ record and never changes; the table stays append-only. Tasks are never deleted
    `graph()` (pass the `task` its caller holds), and the `test_graph` helper in
    `graph_inventory.rs`. `test_graph` resolves its Task with `task_of_process`
    under `cfg(test)`, so cwd-built fixtures keep their meaning.
-3. **Readers:** `task_graph_pairs` becomes
-   `SELECT g.task_id, g.lf_process_id AS graph FROM (tasks) tw JOIN graph_processes g ON g.task_id=tw.id`,
-   or is inlined into its three callers (`graphs_of_task`, `completed_graph_steps`,
-   `latest_task_graphs`). Rewrite the doc comments that justify "driven from the
+3. **Readers:** `task_graph_pairs(task_ids)` becomes
+   `SELECT task_id, lf_process_id AS graph FROM graph_processes WHERE task_id IN (…)`
+   for its three callers (`graphs_of_task`, `completed_graph_steps`,
+   `latest_task_graphs`); no join on `tasks`, and the partial index serves `IN`. Rewrite the doc comments that justify "driven from the
    Graphs" and "asking per Task repeats that walk".
 4. **Tests:** replace the VmStep test at `task_work.rs` ~1880–1960 (unrelated
    Processes, unrelated Sessions) with: one Task's Graph reading does not grow
@@ -146,7 +146,7 @@ test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
 indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
 recording the deepest checkout's Task. Left: the gate's store-copy comparison.
 
-- `cargo test -p loopflow --lib` (task_work::, graph_inventory::, the migration test, server::events::): compiles; not run to completion here. Load average ~240 and the test processes sat stopped (state `T`) for 10+ minutes. Gate runs them.
+- `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13). Gate runs them.
 
 ## Docs
 

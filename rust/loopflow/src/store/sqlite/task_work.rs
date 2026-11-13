@@ -132,10 +132,12 @@ pub(super) fn task_of_process(
         .optional()?)
 }
 
-/// Each Task in `tasks` paired with each Graph started for it. The Graph
+/// Each Task among `task_ids` paired with each Graph started for it. The Graph
 /// recorded its Task at launch, so the pairs come from an index probe per Task.
-fn task_graph_pairs(tasks: &str) -> String {
-    format!("SELECT tw.id AS task_id, g.lf_process_id AS graph FROM ({tasks}) tw JOIN graph_processes g ON g.task_id=tw.id")
+fn task_graph_pairs(task_ids: &str) -> String {
+    format!(
+        "SELECT task_id, lf_process_id AS graph FROM graph_processes WHERE task_id IN ({task_ids})"
+    )
 }
 
 pub(super) fn graphs_of_task(
@@ -146,7 +148,7 @@ pub(super) fn graphs_of_task(
         conn,
         &format!(
             "e.id IN (SELECT graph FROM ({}))",
-            task_graph_pairs(&tasks("?1"))
+            task_graph_pairs(&format!("SELECT id FROM ({})", tasks("?1")))
         ),
         &[&task.as_str()],
     )
@@ -163,7 +165,7 @@ fn completed_graph_steps(
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
          JOIN processes s ON s.id=gs.lf_process_id
          WHERE s.completed_at IS NOT NULL",
-        task_graph_pairs("SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?1))")
+        task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     let mut completed = HashMap::<TaskId, HashSet<LfProcessId>>::new();
@@ -190,7 +192,7 @@ fn latest_task_graphs(
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
          ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
-        task_graph_pairs("SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?1))")
+        task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     for row in query.query_map([&ids], |row| {
@@ -1858,7 +1860,7 @@ mod tests {
             params![finished, task.as_str()],
         )
         .unwrap();
-        let pairs = super::task_graph_pairs(&super::tasks("?1"));
+        let pairs = super::task_graph_pairs(&format!("SELECT id FROM ({})", super::tasks("?1")));
         let read_graphs = || {
             let mut statement = conn.prepare(&pairs).unwrap();
             let selected = statement

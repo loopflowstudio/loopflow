@@ -49,5 +49,5 @@ listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
   not run. Compiling the test binaries outlasted the 2 h limit (load 140–190,
   other checkouts compiling). No test started; CI's `rust-test` owns the result.
 - `cargo clippy --all-targets -- -D warnings`: not run (queued behind nextest); CI `rust-lint` owns it.
-- PR #1909 CI (head 9054cb90f1): every proof job skipped. `ci.yml` runs them only once `scratch/` is clear, which happens at `lf pr submit`. Until then, nothing has checked the test binaries or clippy after the merge of 4b84a0dc9e.
-- Implement and compress passes (2026-11-13): no code change, no local rerun.
+- PR #1909 CI: every proof job skipped (still so at head 3ec9fe627a). `ci.yml` runs them only once `scratch/` is clear, which happens at `lf pr submit`. Until then, nothing has checked the test binaries or clippy after the merges of 4b84a0dc9e and 87f0e3c60a (current origin/main).
+- Implement, compress and realign passes (2026-11-13): no code change, no local rerun; code still matches every claim above.

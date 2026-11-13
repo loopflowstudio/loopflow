@@ -194,7 +194,10 @@ Task state passed its focused test and real-CLI re-walk (QA §7).
 Remaining:
 - Gate: affected suites (Task controls, `task_graph_launch_tests`,
   `task_github_cache_tests`, `task_execution`, waves, shared Task-state readers,
-  `documented_commands`) plus clippy, on the current head. nextest processes on
+  `documented_commands`, `store::query_plans`) plus clippy, on the merge head
+  7ae63e616d. Main's #1916 (merged in) adds partial-index scan budgets to
+  `store/query_plans.rs`; `graph_processes_task` and `task_state_sql`'s
+  `processes_unfinished` probe have not been run against them. nextest processes on
   this Machine enter `TN` until SIGCONT; continue only this run's descendants.
 - Not this change: QA §6 "Still wrong" 2 (a signal-killed provider leaves
   `condition.unresolved_execution` true while `action` is `run`).
@@ -208,6 +211,12 @@ Compress (after 7eac8cef01): `open_graph_execution` picks its Graph in one
 SQL in `task_state_sql` and Rust in `open_graph_execution`: sharing it needs a
 second open-Process reader that still has to ask which of the two is the Graph.
 `cargo test -p loopflow --lib -- adopting_a_checkout_with_a_running_graph_prevents_another_run` — 1 pass.
+
+Since QA §7 the header path has not changed: compress touched only
+`open_graph_execution`; merging main (0afb302f52) changed `query_plans.rs`, one
+test's index name, and `foreign_key_children.sql`, which drops
+`agent_process_session` (no branch query names it). The CLI walk is not
+repeated on 7ae63e616d; gate's Task-state suites cover the merge head.
 
 ## Docs
 

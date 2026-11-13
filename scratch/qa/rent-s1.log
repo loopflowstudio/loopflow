@@ -1,0 +1,49 @@
+
+### Define an on-demand template
+$ lf machine ondemand add qa --provider daytona --vcpus 1 --memory-gb 1 --max 2 --max-usd-per-hour 1
+Added on-demand qa: 1 vCPU 1 GB on daytona at $0.06714/h; at most 2 at once, 4h each
+(exit 0)
+
+### Rent
+$ lf machine ondemand rent qa
+Renting 1 vCPU 1 GB on daytona at $0.06714/h until 12:34
+Rented qa-1: 1 vCPU 1 GB at $0.06714/h, at most $0.26856 until 12:34
+Next: `lf machine connect qa-1 github` and `lf machine connect qa-1 claude`; `lf machine end qa-1` gives it back
+(exit 0)
+
+### Machines
+$ lf machine list
+qa-1  qa@sandbox1.invalid  home_07e0fdec339eb6f9ff35d37a7b61de71
+(exit 0)
+T1=task_f715d3c7ff1e4da0b4cc091e8c0fc7a6 T2=task_3b1fd8598aee472facd3935415f6c42e
+
+### Move T1 to the rented Machine
+$ lf task move task_f715d3c7ff1e4da0b4cc091e8c0fc7a6 --machine qa-1
+Checked qa-1: it can take f715d3
+Arrived on qa-1
+(exit 0)
+
+### Move T2 to the rented Machine
+$ lf task move task_3b1fd8598aee472facd3935415f6c42e --machine qa-1
+Checked qa-1: it can take 3b1fd8
+Arrived on qa-1
+(exit 0)
+
+### T1 ownership
+$ lf task show task_f715d3c7ff1e4da0b4cc091e8c0fc7a6
+{"comments":{"comments":[{"author":{"kind":"integration"},"body":"QA Person claimed this on home_2807e0bc8b9e38da0ff179efd11a0fde\n\n<!-- loopflow-ownership:{\"id\":\"own_46a4323c5f804bde84b0ea3342cd8946\",\"task_id\":\"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6\",\"kind\":\"claim\",\"person\":\"QA Person\",\"person_key\":\"qa@example.com\",\"machine_id\":\"home_2807e0bc8b9e38da0ff179efd11a0fde\",\"machine_label\":null,\"at\":1794587679} -->","created_at":"2026-11-13T16:34:39.685Z","id":"71df24c9-fce2-4989-ad7e-3cbb0b183956"},{"author":{"kind":"integration"},"body":"QA Person handed this off to home_07e0fdec339eb6f9ff35d37a7b61de71\n\n<!-- loopflow-ownership:{\"id\":\"own_a20a670db626446a98a3acbc9365bb52\",\"task_id\":\"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6\",\"kind\":\"handoff\",\"person\":\"QA Person\",\"person_key\":\"qa@example.com\",\"machine_id\":\"home_07e0fdec339eb6f9ff35d37a7b61de71\",\"machine_label\":null,\"at\":1794587679} -->","created_at":"2026-11-13T16:34:39.719Z","id":"a09680d7-9c16-464a-87df-af9164954eb6"}],"conflicts":{},"identifier":"f715d3","pending_sync":[],"refresh_error":null},"execution":{"actions":{"reason":"run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first","recommended":"run"},"base_commit":null,"branch":null,"completion_pending":null,"created_at":"2026-11-13T16:34:37Z","execution":{"captured":null,"reason":"No Task Graph has run; independent Sessions may still be active","state":"idle","step":null},"external_project_id":null,"issue_id":null,"issue_identifier":"f715d3","latest_event":null,"machine_id":null,"observation":{"freshness":"not_required"},"pm_snapshot_synced_at":null,"pm_writeback":{"state":"current"},"pr":null,"project":null,"project_id":null,"provider":"codex","repo_id":"repo_62338250739b46af90006f745d5b7793","ship_approval":null,"ship_stop":null,"started_by":null,"status":"unstarted","task_id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6","updated_at":"2026-11-13T16:34:37Z","wave":null,"work":{"graph":null,"graph_processes":[],"processes":[],"sessions":[]},"workspace_slug":"","worktree":null},"graph_processes":[],"observed_at":null,"overview":{"graph":null,"graph_processes":[],"sessions":[]},"ownership":{"log":[{"at":1794587679,"id":"own_46a4323c5f804bde84b0ea3342cd8946","kind":"claim","machine_id":"home_2807e0bc8b9e38da0ff179efd11a0fde","machine_label":"Jacks-MacBook-Pro-2","person":"QA Person","person_key":"qa@example.com","task_id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6"},{"at":1794587679,"id":"own_a20a670db626446a98a3acbc9365bb52","kind":"handoff","machine_id":"home_07e0fdec339eb6f9ff35d37a7b61de71","machine_label":"qa-1","person":"QA Person","person_key":"qa@example.com","task_id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6"}],"owner":{"machine":{"id":"home_07e0fdec339eb6f9ff35d37a7b61de71","label":"qa-1"},"person":"QA Person","person_key":"qa@example.com"},"superseded_by":null},"plan_error":null,"plan_stale":false,"plan_state":"available","project":null,"row":{"actions":{"reason":"run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first","recommended":"run"},"condition":{"evidence_age_secs":4,"local_progress":{"authored_commits":null,"dirty":null,"reason":null,"recovery_required":null,"state":"not_applicable","unsettled":false},"observed_at":"2026-11-13T16:34:41.11568Z","reason":"ready","state":"waiting","unresolved_execution":true},"execution":{"captured":null,"reason":"No Task Graph has run; independent Sessions may still be active","state":"idle","step":null},"graph_name":"code","graph_source":"builtin","latest_graph_process":null,"next_move":{"owner":"wave","reason":"ready"},"pr":null,"reference":{"issue_url":null,"workspace":null},"run_control":{"unavailable":null},"runtime":{"completion_pending":null,"owner":{"machine":{"id":"home_07e0fdec339eb6f9ff35d37a7b61de71","label":"qa-1"},"person":"QA Person","person_key":"qa@example.com"},"provider":"codex","reason":"No Task Graph has run; independent Sessions may still be active","status":"unstarted","updated_at":"2026-11-13T16:34:37Z","work_id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6"},"section":"backlog","ship_control":{"unavailable":null},"shipping":null,"task":{"acquisition":{"observed_at":null,"state":"available"},"assignee":null,"completed_at":null,"description":"Recover a report","due_date":null,"id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6","identifier":"f715d3","linear_id":null,"name":"Recover a report","project_id":null,"rank":0,"repo":"/private/tmp/lf-qa-rent/repo","repo_id":"repo_62338250739b46af90006f745d5b7793","state":"unstarted","sync":{"changes":[],"connected":false},"wave_id":null}},"sync":{"changes":[],"connected":false},"task":{"assignee":null,"base_commit":"","branch":"","completed_at":null,"created_at":"2026-11-13T16:34:37Z","description":"Recover a report","due_date":null,"id":"task_f715d3c7ff1e4da0b4cc091e8c0fc7a6","identifier":"f715d3","linear_id":null,"parent_pr_id":null,"pm_snapshot_synced_at":null,"pm_writeback":{"state":"current"},"project_id":null,"rank":0,"repo_id":"repo_62338250739b46af90006f745d5b7793","revision":1,"state":"unstarted","title":"Recover a report","updated_at":"2026-11-13T16:34:37Z","wave_id":null,"workspace_slug":"","worktree":null}}
+(exit 0)
+
+### Calls so far
+uv create 
+ssh[1] true
+ssh[1] curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+ssh[1] export PATH="$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; if command -v npm >/dev/null 2>&
+uv get sb-qa-1
+ssh[1] pgrep -u "$(id -u)" -x lf | wc -l pgrep -u "$(id -u)" -x claude | wc -l for d in "$HOME"/src/*/; do   [ -e "$d/.git" ] |

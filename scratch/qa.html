@@ -71,16 +71,35 @@ plus owner reads with a declared Machine. Logs: <code>scratch/qa/s1.55b8.log</co
 <p><code>s4.sh</code> needed a fix: on a fresh home with no <code>config.yaml</code> its backup <code>cp</code> failed and the malformed file stayed for the
 rest of the script. It now creates an empty file first. The FIFO lock probe was not rerun: 7cde745b90 changes no read order, only which helper
 builds the same map. A declared name as a label appears only for a Task held by another Machine, which still needs a second reachable Machine.</p>
+<h2>7. Rental hand-back at HEAD 6002856dfe (retry outside the write lock, fae6f73a1a)</h2>
+<p>Earlier rounds could not reach rentals. They can be reached: renting calls the provider bridge as <code>uv run … python -c &lt;bridge&gt;</code>
+and reaches the sandbox with <code>ssh</code>, both from <code>PATH</code>. <code>qa/rent-setup.sh</code> puts stand-ins there: <code>uv</code> answers
+<code>create/get/delete</code> with numbered sandboxes, and <code>ssh</code> runs each remote command under its own private <code>HOME</code>/<code>LF_HOME</code>
+per sandbox, with the branch <code>lf</code> on its <code>PATH</code>. Everything else is the real CLI: <code>lf machine ondemand add/rent</code>,
+<code>lf task move --machine</code>, <code>lf machine end</code>. Logs: <code>qa/rent-s1.log</code> … <code>rent-s4.log</code>.</p>
+<table><tr><th>scenario</th><th>result</th></tr>
+<tr><td>Rent <code>qa-1</code>, move two Tasks to it, <code>lf machine end qa-1</code></td><td class="ok"><pre>3b1fd8 back on Jacks-MacBook-Pro-2
+f715d3 back on Jacks-MacBook-Pro-2
+Gave back qa-1 after $0.00013; 0 Session(s), 0 Process(es) copied here</pre>
+Each log reads claim → handoff qa-1 → handoff Jacks-MacBook-Pro-2; <code>lf machine ondemand list</code> shows qa-1 ended; claiming again writes nothing.</td></tr>
+<tr><td>Race: <code>repo</code>'s <code>.lf/config.yaml</code> served through a FIFO while <code>lf machine end qa-2</code> reads planning facts for T1; at the first open,
+T3 from <code>repo2</code> is moved to qa-2, then the read is answered</td><td class="ok">Move succeeds during the stall. End exits 0 and returns both Tasks
+(<code>06c20d</code>, <code>f715d3</code>). <code>repo</code>'s config opened <b>3</b> times, write lock free at each open.</td></tr>
+<tr><td>Baseline: same FIFO, rent <code>qa-3</code>, no hand-off during the stall</td><td class="ok">Config opened <b>2</b> times, lock free; one Task back.</td></tr></table>
+<p>The extra open is the retry: <code>hand_back_in</code> found T3 without planning facts, the transaction rolled back, and <code>held_planning_in</code> reread
+both Tasks' facts with no lock held. T3's own repository config is a plain file, so a hand-off landing before the preflight would not add a <code>repo</code> open.
+No private-home processes or launchd jobs remain.</p>
 <h2>What works now</h2>
 <ul>
 <li>Claim and unassign take the store's write lock only after every config load (FIFO probe, section 1).</li>
 <li>Owner resolution still follows <code>machine.tasks</code>, and labels still come from declared names. The old <code>map_machine_by_id</code> label was also the declaration name, so display is unchanged.</li>
 <li>Concurrent claims and malformed config behave as before.</li>
+<li>Ending a rented Machine hands its Tasks back here; a hand-off that lands mid-end is caught by the retry, and planning config is read only with the lock free (section 7).</li>
 </ul>
 
 <h2>Not reached, and why</h2>
 <ul>
-<li><b>Handoff, marker ingestion (<code>lf task move --machine</code>, session move), Linear comment ingestion and rental hand-back</b> each need a second reachable Machine or Linear.
+<li><b>Marker ingestion on a real remote, and Linear comment ingestion</b> need a real second Machine or Linear. Handoff and rental hand-back are now driven through stand-in <code>uv</code>/<code>ssh</code> (section 7); the stand-ins do not exercise a real provider, network or sandbox image.
 No SSH server runs on this host, and the only other Machine is a real one. <code>lf task move --machine mini</code> stops at <code>SSH destination cannot be empty</code>.
 The focused lib tests cover these paths (<code>store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}</code>, 22 tests).
 All 22 passed here (627 s at load average ~155; <code>scratch/qa/tests.log</code>).</li>
@@ -93,4 +112,9 @@ All 22 passed here (627 s at load average ~155; <code>scratch/qa/tests.log</code
 <li>One CLI command loads the personal config many times. With a malformed file, the warning prints 19 times per unassign on the branch (21 at HEAD 3cd3700868), against 12 on 0.15.3
 (claim: 19 vs 15; show: 12 vs 11). 0.15.3 is older than origin/main, so this isn't a clean before/after. Part of the increase is that
 <code>OwnershipFacts</code> now loads Machine names and the owning Machine on every write, even when the holder is already yours. Each load happens outside the lock.</li>
+<li>Outside this change: from one repository, <code>lf task show &lt;full task id&gt;</code> for another repository's Task says
+<code>Task … is not registered</code>, though the Task exists and shows from its own repository.</li>
+<li>Outside this change, seen with a faulty stand-in: when a new sandbox answers with a Machine identity already attached to another rental,
+<code>lf machine ondemand rent</code> fails on <code>UNIQUE constraint failed: rentals.machine_id</code> after <code>add_machine</code> has already relabeled the existing Machine
+(qa-1 became qa-2). A real fresh sandbox has a new identity; a sandbox image carrying a copied <code>~/.lf</code> would not.</li>
 </ol>

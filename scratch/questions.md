@@ -33,11 +33,11 @@ the store is read before `BEGIN` and passed in as values. The merge of
 87f0e3c60a touched no ownership code; no product choice is open. The one
 remaining in-write config load is `hand_back_in`'s fallback, listed above.
 
-Next implement: one Machine-name reader. This branch added
-`task_ownership::machine_names_in`, but `owners_in` (from main, read by
-`task_details`) still builds the same `MachineId -> name` map inline from
-`machine_declarations`. Make `owners_in` call `machine_names_in`, so the
-declarations-to-names mapping and its error conversion live once.
+Done: `owners_in` now calls `machine_names_in`, so the declarations-to-names
+mapping and its error conversion live once. `cargo test -p loopflow --lib
+store::sqlite::task_ownership:: store::sqlite::selections::`: 29 of 29 pass
+(the test process was SIGSTOPped 8 times and resumed by PID). Gate reruns
+clippy over it.
 
 ## Gate (2026-11-13, HEAD e282904291, base 87f0e3c60a = origin/main)
 

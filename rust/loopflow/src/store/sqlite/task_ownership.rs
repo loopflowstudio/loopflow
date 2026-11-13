@@ -89,11 +89,7 @@ pub(super) fn owners_in(
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, TaskOwner>> {
     let local = local_machine_in(conn)?;
-    let labels: HashMap<_, _> = crate::config::placement::machine_declarations(conn)
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?
-        .into_iter()
-        .map(|(name, declaration)| (declaration.id, name))
-        .collect();
+    let labels = machine_names_in(conn)?;
     let mut owners = HashMap::new();
     for (task, rows) in logs_in(conn, tasks)? {
         let Some(mut owner) = read_log(&rows, &local).owner else {

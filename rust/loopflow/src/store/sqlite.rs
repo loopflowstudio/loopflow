@@ -222,6 +222,13 @@ pub(crate) struct TaskWorktreeOwnership {
     pub unfinished: bool,
 }
 
+/// Copy only into a fresh fixture; reopening must retain its writes and schema.
+#[cfg(test)]
+fn copy_test_store(path: &Path) -> StoreResult<()> {
+    super::test_database::copy(path)
+        .map_err(|error| StoreError::InvalidData(format!("copy test store: {error}")))
+}
+
 /// Open a registry read-only without migrating it.
 fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(
@@ -559,6 +566,8 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
             })?;
         }
+        #[cfg(test)]
+        copy_test_store(path)?;
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
@@ -610,6 +619,10 @@ impl SqliteStore {
             })?;
         }
 
+        #[cfg(test)]
+        if !existing_database {
+            copy_test_store(path)?;
+        }
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
@@ -2084,6 +2097,68 @@ mod frontier_tests {
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn test_store_image_matches_migrations_and_copies_are_independent() {
+        let migrated = rusqlite::Connection::open_in_memory().unwrap();
+        crate::store::migrations::apply_sqlite(&migrated).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.db");
+        let second = directory.path().join("second.db");
+        super::copy_test_store(&first).unwrap();
+        super::copy_test_store(&second).unwrap();
+        let image = rusqlite::Connection::open(&first).unwrap();
+        let schema = crate::store::migration_schema::product_schema(&migrated).unwrap();
+        assert_eq!(
+            *schema,
+            *crate::store::migration_schema::product_schema(&image).unwrap()
+        );
+        for table in schema.iter().filter(|object| object.object_type == "table") {
+            let rows = |conn: &rusqlite::Connection| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM [{}]", table.name))
+                    .unwrap();
+                let columns = query.column_count();
+                let mut rows: Vec<_> = query
+                    .query_map([], |row| {
+                        (if table.name == "machines" { 3 } else { 0 }..columns)
+                            .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .map(|row| format!("{:?}", row.unwrap()))
+                    .collect();
+                rows.sort();
+                rows
+            };
+            assert_eq!(rows(&migrated), rows(&image), "{}", table.name);
+        }
+        let machine = |conn: &rusqlite::Connection| {
+            conn.query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        assert_ne!(
+            machine(&image),
+            machine(&rusqlite::Connection::open(&second).unwrap())
+        );
+        image
+            .execute_batch("CREATE TABLE fixture_write(value); INSERT INTO fixture_write VALUES(1)")
+            .unwrap();
+        super::copy_test_store(&first).unwrap();
+        assert_eq!(
+            image
+                .query_row("SELECT value FROM fixture_write", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(rusqlite::Connection::open(second)
+            .unwrap()
+            .prepare("SELECT * FROM fixture_write")
+            .is_err());
+    }
 
     #[test]
     fn observation_reads_identity_without_execution_schema() {

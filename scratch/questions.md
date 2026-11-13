@@ -328,8 +328,11 @@ which names mini from the claim on.
   laptop carries the laptop's personal settings (`config::remote::PROFILE_ENV`),
   whose Machine list replaces mini's and never names the laptop. That run now
   fails with `X is moving here from <laptop>, which did not send it; the same
-  move run there carries it on` instead of `already runs on`. Whether Machine
-  routes should travel in the forwarded profile is open.
+  move run there carries it on` instead of `already runs on`; machines.md says
+  so. QA's exact command therefore still does not deliver. Open decision:
+  should a forwarded run use the target's own Machine routes (merge or prefer
+  mini's list over `LF_PERSONAL_PROFILE`'s), or should the laptop run a
+  forwarded retry of a move it sent itself, locally?
 - Ship log bounded: `restarted` stops at `SHIP_RESTARTS_COUNTED` (6, where
   `repair_backoff` stops growing); a step completing deletes them (`progressed`
   is gone); a new `carried` row replaces the last. `ship_log_in` reads from the

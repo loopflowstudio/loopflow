@@ -186,3 +186,14 @@ Second pass (2026-11-13): nothing to change. A Graph's Wave stays derived (its
 Task's Wave, which `lf task move` can change, else its steps' captures), so
 only the Task is recorded. The adoption choice in `scratch/questions.md` gained
 its sharpest case: a Graph still running when the checkout is adopted.
+
+Third pass (2026-11-13, after the adoption repair): nothing to change. Two
+readings now exist and each has one meaning: a Task's Graphs are the ones
+launched for it (recorded); a Task's execution is whatever still runs in its
+work (open Processes by checkout). The adopted-mid-Graph case walks through as:
+status shows it running, `lf task run` refuses with the same sentence, and it
+ends by finishing or being stopped where it was started. `lf task interrupt`
+records its interrupt on the Task's Work, which a Graph launched without that
+Work never reads; its receipt already says only "a Task run or a `--task`
+Session stops on it". No open product choice beyond the one in
+`scratch/questions.md`, which has its direction.

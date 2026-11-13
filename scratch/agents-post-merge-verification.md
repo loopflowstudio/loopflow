@@ -1,6 +1,6 @@
 # LOO-873: model-unavailable fix forward
 
-Gate, publishing and post-merge verification remain. The model-unavailable
+Publishing and post-merge verification remain; the final checks are recorded below. The model-unavailable
 repair, Auto-Ship stop repair and compress changes are committed through
 `3c721c645e`, including the sync onto `dfbea8cf81`. The focused refusal regression
 and isolated CLI stop/status/restart scenario passed again after compress.
@@ -138,10 +138,6 @@ unchanged; docs are in `docs/{config,orchestration,subscriptions,troubleshooting
 
 ## Remaining work
 
-- Gate: affected `agent::tests`, `ops::task_execution`,
-  `task_graph_launch_tests`, `binary(agent_tests)` and `documented_commands`
-  suites, formatting and Clippy. The 54-test compress result covers the first
-  two modules and three Task regressions, not the whole affected suite set.
 - Publish the repair, then verify the merged repair and its push CI. PR #1906
   validates the earlier usage-limit implementation only. No app or release
   check applies to this CLI-only change.
@@ -235,3 +231,14 @@ CLI, provider, server or watcher processes.
 
 - Fresh build `lf 0.15.3+3c721c645.dirty`. `scripts/test_network.py` ran `/tmp/lf-qa-873-final/drive.py`: every configuration, fallthrough, pin, exhaustion, direct-skill and legacy-spelling scenario **passed** on the first run. It also ran `task_stop.py`, a copy of the compress Task driver rooted at `/private/tmp/lf-qa-873-final-task`: **passed**. The walkthrough is in `scratch/qa.html`. No product fix was needed.
 - Seen, but not changed: the setting-validation errors share the `invalid graph:` prefix (`lf set --global agents clod:opus`). This predates the change.
+
+## Publication checks, November 13 UTC
+
+- `lf sync`: passed without conflicts; actual base `dfbea8cf81434b72c2243a416827a29994afc877`, product code unchanged from the previous QA.
+- `scripts/test.py --reuse-passing --rust-filter 'test(agent::tests::) | test(ops::task_execution::) | test(task_graph_launch_tests::) | binary(agent_tests) | test(documented_commands::)'`: stopped before product checks because the uv-cache inventory exceeded 15 seconds; free disk was 47.5 GiB. Used the manual plan documented in `scripts/testing.md`; `/tmp/lf-873-publish-gate.log`.
+- Architecture, Rust test inventory, `cargo fmt --all -- --check`, `git diff --check`: passed.
+- `cargo build -p loopflow --bin lf --jobs 4`: passed, 1m 16s; `/tmp/lf-873-publish-build.log`.
+- The same filtered nextest plan, with network sandboxing, prepared CLI, inherited `LF_*` removed and stable Rust: 128 passed, 1 failed in 116.071s; `/tmp/lf-873-publish-tests.log`. The failed capacity-wait restart fixture created an ordinary repeated failure before inserting its synthetic wait. The repaired terminal stop now withdraws approval during that initial failure. The fixture now restores the approval that a genuine capacity wait retains; production code was unchanged.
+- `cargo test -p loopflow --lib --jobs 4 -- a_shipping_tasks_restarted_wait a_restarted_wait --test-threads=1` under the same isolation: all 3 affected fixture cases passed, 15.60s; `/tmp/lf-873-publish-restart.log`. The other 128 passing tests retain their result. Builds reported the existing macOS large `__eh_frame` linker warning.
+- `cargo clippy --all-targets --jobs 4 -- -D warnings`: passed, 4m 44s; `/tmp/lf-873-publish-clippy.log`. Cargo emitted manifest-level unused-dependency warnings for unchanged `chrono-tz`, `rpassword`, and `tokio-stream` entries.
+- `website/dev.py test` under `scripts/test_network.py`, with the prepared CLI on PATH: passed; `/tmp/lf-873-publish-website.log`. The first invocation used a root-relative script path from the website directory and exited before running checks; the corrected command above completed.

@@ -1844,6 +1844,11 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         rusqlite::params![waiting, recorded],
     )
     .unwrap();
+    // Convert the ordinary failure into a capacity wait. A real wait retains
+    // the end-to-end Graph's approval; the repeated failure above withdrew it.
+    if graph == "held" {
+        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
+    }
     // A failed ship waits before restarting; that wait has passed too.
     db.execute(
         "UPDATE processes SET completed_at=1 WHERE outcome='failed'",

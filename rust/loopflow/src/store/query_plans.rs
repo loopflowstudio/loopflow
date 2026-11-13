@@ -26,9 +26,26 @@ const GROWING: [&str; 12] = [
     "tasks",
 ];
 
+/// Partial indexes whose rows are current work, not history: walking one
+/// reads what is live now. Any other partial index (captured inputs, turn
+/// events) holds all history of its kind and counts as a scan of its table.
+const LIVE_SUBSETS: [&str; 10] = [
+    "agent_process_unfinished",
+    "agent_sessions_held_terminal",
+    "agent_sessions_primary_repository",
+    "agent_sessions_primary_wave",
+    "open_sessions",
+    "processes_held_terminal",
+    "processes_unfinished",
+    "processes_unrecorded_ancestry",
+    "task_retirements_unfinished",
+    "tasks_abandoned_checkout",
+];
+
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 16,489
 /// Sessions, 166,864 Processes, 266,075 Session events and 36,055 planning
-/// changes (November 12). `steers` and `task_retirements` are left to the
+/// changes (November 12); the history window indexes as measured on that
+/// Machine on November 13. `steers` and `task_retirements` are left to the
 /// fixture, which analyzes them as built so partial indexes are measured.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
@@ -55,6 +72,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('processes','agent_process_attachment','17262 113'),
          ('processes','agent_process_session','17262 1'),
          ('processes','agent_process_unfinished','68 1'),
+         ('processes','processes_completed','170063 2 1'),
          ('processes','processes_cwd','166864 159'),
          ('processes','processes_held_terminal','97 3'),
          ('processes','processes_parent','166864 7 2 1'),
@@ -72,6 +90,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
          ('session_events','session_capture_caller','16643 15'),
          ('session_events','session_capture_key','16643 1'),
+         ('session_events','session_capture_window','17723 1'),
          ('session_events','session_event_input','20248 2 2'),
          ('session_events','session_event_receipt','266075 17 9 8 3 1'),
          ('session_events','session_events_captured_event','188608 12'),
@@ -81,9 +100,11 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('session_events','session_events_task','152437 289'),
          ('session_events','session_events_turn','266075 17 9 8 1'),
          ('session_events','session_input_membership','16623 1 1 1'),
+         ('session_events','session_input_outcome_window','34882 1'),
          ('session_events','session_observation_receipt','168288 11 1'),
          ('session_events','session_process_membership','61597 4 4'),
          ('session_events','session_turn_events','81144 6 6 4 1 1'),
+         ('session_events','session_turn_window','85815 2 1 1 1 1'),
          ('session_events','session_events_wave','112013 5092'),
          ('session_steers','session_steers_steer','43213 24'),
          ('session_steers','sqlite_autoindex_session_steers_1','43213 6 1'),
@@ -121,13 +142,16 @@ fn trace(event: rusqlite::trace::TraceEvent<'_>) {
     if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
         TRACED.with(|traced| {
             if let Some(traced) = traced.borrow_mut().as_mut() {
-                traced.extend(statement.expanded_sql());
+                traced.push(statement.sql().into_owned());
             }
         });
     }
 }
 
-/// Every statement `run` executes on `store`'s connection, with its values bound.
+/// Every statement `run` executes on `store`'s connection, as prepared, with
+/// its parameters unbound. SQLite never folds a parameter into the plan, so
+/// `?6 AND …` keeps its index where the literal `0 AND …` would plan as a scan
+/// that never runs.
 pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String> {
     TRACED.with(|traced| *traced.borrow_mut() = Some(Vec::new()));
     store.conn.lock().unwrap().trace_v2(
@@ -147,15 +171,6 @@ pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String>
 /// then measured. Leaves `store` analyzed.
 pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<String> {
     let conn = store.conn.lock().unwrap();
-    // A partial index holds only its live subset (unfinished Processes, open
-    // retirements), so walking it is not a scan of the growing table.
-    let partial: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql LIKE '% WHERE %'")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
     let plan = |stats: &str| {
         let mut scans = Vec::new();
         for sql in statements {
@@ -182,20 +197,20 @@ pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<S
             }
             let mut explain = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
             let details = explain
-                .query_map([], |row| row.get::<_, String>(3))
-                .unwrap()
+                .raw_query()
+                .mapped(|row| row.get::<_, String>(3))
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
             for detail in details {
                 let table = detail
                     .strip_prefix("SCAN ")
                     .and_then(|rest| rest.split_whitespace().next());
-                let through_partial = detail
+                let through_live = detail
                     .split_whitespace()
                     .skip_while(|word| *word != "INDEX")
                     .nth(1)
-                    .is_some_and(|index| partial.iter().any(|name| name == index));
-                if table.is_some_and(|table| growing.contains(&table)) && !through_partial {
+                    .is_some_and(|index| LIVE_SUBSETS.contains(&index));
+                if table.is_some_and(|table| growing.contains(&table)) && !through_live {
                     scans.push(format!("{stats}: {detail}\n  in {sql}"));
                 }
             }
@@ -347,6 +362,33 @@ mod tests {
             store.unrecorded_agent_ancestry().unwrap();
             store.session_steers("viewed", 0, 10).unwrap();
             store.session_steer_source("viewed", &steer.id).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn session_history_reads_plan_by_window() {
+        let (_home, store, _task, _viewer) = fixture();
+        let input = crate::session_record::new_artifact_key();
+        store.test_session("history", &input);
+        store
+            .record_session_event(
+                "history",
+                &"thread".into(),
+                "turn",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let traced = statements(&store, || {
+            store
+                .recent_conversation_history(None, None, None, 100, 50)
+                .unwrap();
+            store
+                .pending_conversation_history(None, None, None, 100, true)
+                .unwrap();
+            store.input_history(&input).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

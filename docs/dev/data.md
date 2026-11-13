@@ -189,12 +189,16 @@ While a write transaction is open, every other writer on the Machine waits:
 - Never hold one across an `await`, a request or a provider call.
 
 `store::query_plans` traces what a hot path executes on a fixture store, then
-plans each statement twice: unanalyzed, and with `sqlite_stat1` measured on a
-Machine at that size. A `SCAN` of a growing table fails the test; walking a
-partial index, which holds only its live subset, does not. A new hot path gets
-a test there (`server::boundary` uses the same helpers). Foreign keys count:
-deleting a parent row looks up its children, so a child column on a growing
-table needs an index.
+plans each statement as prepared, parameters unbound, twice: unanalyzed, and
+with `sqlite_stat1` measured on a Machine at that size. A `SCAN` of a growing
+table fails the test, and so does a full walk of an index on one. The
+exception is a partial index named in `LIVE_SUBSETS` (unfinished Processes,
+open retirements), whose size tracks current work rather than history. A
+partial index filtered by kind, such as captured inputs or turn events, holds
+all history of that kind: a read over a window range-scans it by
+`observed_at` instead. A new hot path gets a test there (`server::boundary`
+uses the same helpers). Foreign keys count: deleting a parent row looks up its
+children, so a child column on a growing table needs an index.
 
 The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
 PRAGMA optimize=0x10002` once when it starts and about once a day after, never

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Compare the history query before/after on a copy of the Machine store:
-#   sqlite3 -readonly ~/.lf/loopflow.db ".backup /tmp/loo866/store.db"
+#   sqlite3 -readonly ~/.lf/loopflow.db "VACUUM INTO '/tmp/loo866/store.db'"   # .backup restarts forever on a busy store
 #   scratch/loo-866-bench/bench.sh /tmp/loo866/store.db
 # Builds <copy>.after with the history_window_indexes migration, diffs full results, times best of 5.
 set -e

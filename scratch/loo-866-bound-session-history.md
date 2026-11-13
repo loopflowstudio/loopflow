@@ -167,6 +167,7 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
 
 - `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass; clippy clean (compress).
 - `bench.sh /tmp/loo866/store.db` (load avg 57–80) — `same` all six windows; 1d 0.55→0.10 s, 0.51→0.15 s; 7d 0.46→0.40 s, 0.61→0.30 s; 30d 1.04→1.55 s; whole 0.93→1.23 s (implement; rerun on a fresh copy for the PR).
+- QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
 - `check_migrations.py`, `documented_commands::` for `docs/dev/data.md` — gate.
 
 ## Docs

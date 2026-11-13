@@ -29,7 +29,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 }
 
 /// The three ways to name a Task for a Graph: the Task entry, `--task`, and its
-/// worktree. All block in the foreground and reach the same checks.
+/// worktree. All block in the foreground; only the Task entry requires
+/// admission to start Task work.
 const LAUNCHES: [&[&str]; 3] = [
     &["-b", "task", "run", "INF-123", "proof"],
     &["-b", "--task", "INF-123", "graph", "proof"],
@@ -37,7 +38,7 @@ const LAUNCHES: [&[&str]; 3] = [
 ];
 
 #[test]
-fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
+fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
     for condition in [
         "valid",
         "invalid",
@@ -127,16 +128,32 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "removed" => "deleted",
                 _ => "planning",
             };
-            for launch in LAUNCHES {
+            for (launched, launch) in LAUNCHES.iter().enumerate() {
                 let output = run(launch);
-                assert!(!output.status.success(), "{condition} admitted {launch:?}");
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                let graphs = support::recorded_graphs(home.path());
+                if launched == 0 {
+                    assert!(!output.status.success(), "{condition} admitted {launch:?}");
+                    assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                    assert!(graphs.is_empty(), "{condition} started Task work");
+                } else {
+                    // The Graph starts even when its `task sync --plan` command
+                    // cannot use the retained planning input.
+                    assert_eq!(graphs.len(), launched, "{condition} {launch:?}: {error}");
+                    let (outcome, steps) = graphs.last().unwrap();
+                    assert_eq!(steps.len(), 1, "{condition} {launch:?}: {error}");
+                    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+                    assert_eq!(
+                        outcome.as_deref(),
+                        Some(if output.status.success() {
+                            "succeeded"
+                        } else {
+                            "failed"
+                        }),
+                        "{condition} {launch:?}: {error}"
+                    );
+                }
             }
-            assert!(
-                support::recorded_graphs(home.path()).is_empty(),
-                "{condition} launched a Graph"
-            );
             continue;
         }
         // Each launch has finished when its command returns, and is its own

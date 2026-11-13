@@ -435,6 +435,7 @@ journal-era claims yours. Test
 - `cargo test -p loopflow --lib store::sqlite::task_ownership::` — 12 passed (implement)
 - `cargo test -p loopflow --test integration machine_commands::claim` — 2 passed (implement)
 - `cargo clippy --all-targets -- -D warnings` — clean (implement)
+- Compress: `is_mine_in` doc comment now lists the checks in code order; comment-only, no rerun
 
 ## Open questions (each reversible; the simpler option is built)
 

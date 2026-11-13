@@ -335,13 +335,12 @@ fn is_my_machine_in(
     Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
 }
 
-/// Whether a holder is you. A holder named by your `people` id is you.
-/// Different ids don't prove different people: connecting Linear moves this
-/// Machine from `journal:<key>` to `linear:<viewer>`, and earlier claims keep
-/// the journal id. So a holder with a person key (Git `user.email`) is you
-/// exactly when the key is yours, even on a Machine you registered. A keyless
-/// entry, written before keys or recorded before ownership existed, is yours
-/// when it holds one of your Machines. Names are display only.
+/// Whether a holder is you, checked in order: your `people` id; else your
+/// person key (Git `user.email`), even on a Machine you registered; else, for
+/// a keyless entry written before keys, one of your Machines. A different id
+/// alone doesn't mean someone else: connecting Linear moves this Machine from
+/// `journal:<key>` to `linear:<viewer>`, and earlier claims keep the journal
+/// id. Names are display only.
 fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
     if holder.person_id.is_some() && holder.person_id == me.person.id {
         return Ok(true);

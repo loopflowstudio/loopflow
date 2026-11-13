@@ -632,6 +632,6 @@ then exits 255 loses the arrival answer. Both homes share the host name, so mini
 labels the laptop's claim by its own host name. For mini to reach the laptop
 (retries on mini, moves back), route the stand-in by host: when an argument is
 `laptop`, run under the laptop's `HOME` and `LF_HOME`; then `lf machine add
-laptop` on mini, from outside its clone. Running `lf` inside a clone on mini
-before the first move mints mini's own planning key, and the move's check then
-refuses; start mini's home over.
+laptop` on mini, from outside any clone. Run inside a clone before the first
+move, `lf machine add` and `lf config repo --bind` minted mini's own planning
+key, and the move's check then refused; start mini's home over.

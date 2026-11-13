@@ -53,3 +53,7 @@ The gate below ran at e282904291, before that commit.
 - `cargo clippy --all-targets -- -D warnings`: pass.
 - `website/dev.py test` with the candidate `lf` on PATH: pass.
 - CI still skips proof jobs until `scratch/` is clear at `lf pr submit`; CI's `rust-test` and `rust-lint` rerun these there.
+
+## Docs
+
+- Changed doc: `docs/dev/data.md` (write-transaction rules: config loads before `BEGIN`). No user-facing behavior changes, so no README or guide edits.

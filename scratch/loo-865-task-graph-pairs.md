@@ -244,3 +244,18 @@ records its interrupt on the Task's Work, which a Graph launched without that
 Work never reads; its receipt already says only "a Task run or a `--task`
 Session stops on it". No open product choice beyond the one in
 `scratch/questions.md`, which has its direction.
+
+Fourth pass (2026-11-13, after the Task state repair): nothing to change. State
+now follows the execution reading, so header, board, `execution` and `lf task
+run` say the same thing about one Task. "Execution is whatever runs in the
+Task's work" is by checkout containment, which reaches three cases the recorded
+association excludes; each follows from the rule and none is in the live store:
+
+- A `--wave` Graph run inside a Task's checkout makes that Task `moving` and
+  holds its `lf task run`, while staying out of its Graphs.
+- A nested Task's Graph makes the enclosing Task `moving` too (Process
+  membership is every containing checkout, not the deepest).
+- Auto-Ship approved while an earlier Graph still runs in the adopted checkout:
+  state reads `shipping`; `restart_ships` (`ops/task/ship.rs`) skips only a run
+  in `task_graphs`, so the ship process starts, is refused by `select_task_run`,
+  and retries with its usual backoff until the Graph exits. Read from code, not run.

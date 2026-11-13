@@ -429,6 +429,7 @@ fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
 
 /// The step left `provider` for the next agent in its order.
 fn _record_agent_move(provider: &str, reason: &str, next: &str) {
+    eprintln!("Continuing on {next}: {reason}");
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
@@ -440,6 +441,7 @@ fn _record_agent_move(provider: &str, reason: &str, next: &str) {
 /// and what would let it move, where Task status and `lf task run` read it.
 fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried: &[String]) {
     let advice = _limit_stop_advice(provider, launch, tried);
+    eprintln!("Stopped: {advice}");
     _record_limit_recovery(
         provider,
         &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),

@@ -20,8 +20,10 @@
 
 One ordered `agents` list supplies harness and model choices. A headless step
 refused by a usage limit tries available logins, then the remaining entries;
-an exhausted order stops without repeating the same Graph. `-a` pins one
-provider. The old comma spelling remains readable with a deprecation warning.
+an exhausted order with no known account reset stops without repeating the
+same Graph. A known reset retains the existing wait and recovery path. `-a`
+pins one provider. The old comma spelling remains readable with a deprecation
+warning.
 
 `Config::agent_order` supplies the selected entry and fallbacks. In
 `config/settings.rs::resolve_layers`, a `default_agent` leads only when its
@@ -45,6 +47,13 @@ behavior. The stop output, status and subscription/troubleshooting docs name
 `lf task run <ID>` as the manual restart command. Automatic retries remain
 suppressed and shipping stops. No new recovery type or schema change.
 
+The concept review 5 direction is implemented in `c57f1daf3d`.
+`a_run_stopped_by_a_usage_limit_is_not_started_again` checks one initial Graph,
+then a manual invocation with only `graph show late`; the earlier step stays
+done. `a_run_that_failed_after_moving_agents_starts_again_from_where_it_began`
+checks the unrelated-failure case. `LimitWait` now carries only the reset and
+agent needed by automatic restart callers.
+
 ### Remaining verification
 
 - Verify the production recording path through a real provider refusal in
@@ -52,39 +61,23 @@ suppressed and shipping stops. No new recovery type or schema change.
   script provider results. Neither establishes the whole path together.
 - Gate still owns the affected suites below. The four product choices remain
   open for demo; the preceding retry-stop direction did not resolve them.
-- The preceding feedback's routed-account premature stop is repaired in
-  `_run_with_transient_retries`; `exhausted_accounts_without_a_reset_move_to_the_next_agent`
-  covers `[codex, claude]` with and without a thread, and a same-provider model
-  change after discarding a thread. The one-Graph stop regression remains.
 
-### Delete — do not maintain
-
-No remaining deletion targets in this pass. The unconditional terminal stop
-after routed account exhaustion now uses the existing `_climb` and move
-recording path for remaining entries. The no-fallback stop and attempt without
-a resume token remain. No schema change.
-
-Manual recovery now gets its step from `ended_step_recovery`; `LimitWait`
-keeps only the reset and agent needed by automatic restart callers. Settings
-inspection folds candidate references, cloning only the candidates it keeps,
-without a separate removal path for `agent`.
-
-Compression shares one advance/stop branch between provider refusal and
-account exhaustion. Only a finished provider attempt prepares a continuation;
-an unavailable account keeps that preparation, including a discarded thread.
-The regression also covers moving to another model without restoring it.
+### Compatibility cleanup
 
 LOO-875 removes the deprecated `default_agent` comma alias,
 `old_default_agent_warning`, `_split_agent_list`, and their exclusive tests
 once `agents` ships. Keep `config::agent_list`: comma strings are also a
 supported spelling of `agents` in files, `lf set` and `--setting`.
 
-On 2026-11-12, realign's `git fetch origin` found `origin/main` at `78bb9f5564`,
-already merged in `d1184a5120`. The upstream Task-move change makes
+On 2026-11-12, realign rechecked `origin/main`: `git fetch origin` still found
+`78bb9f5564`, already merged in `d1184a5120`; `git log HEAD..origin/main`
+was empty. The upstream Task-move change makes
 `limit_recovery::restarts_by_itself` require `task_claimed_here` instead of
 `task_owned`; it does not change agent ordering or the exhausted-limit stop.
-Task comments supplied no
-newer product decision. No Wave is selected.
+`lf task status LOO-873 --json` supplied no newer product decision. No Wave is
+selected. Source review confirmed that the manual-recovery code, stop/status
+messages and subscription/troubleshooting docs agree; no code repair was
+needed in this realign pass.
 
 ## Observed runs (2026-11-12)
 
@@ -168,6 +161,14 @@ Each has a default built; none stops the work.
    the harness's models before the next entry (`claude:opus` opts out), or
    remove the built-in ladder and try only written entries. This decides
    whether `[claude, codex]` prefers Haiku or Codex after Opus.
+   Task comment, 2026-11-12, Jack Heart: "if its agents: [claude, codex] /
+   claude: / default_model: fable / then we need some way of establishing if
+   claude:fable fails, we can still try claude:opus". The next comment: "maybe
+   we should say agents needs to be: [claude:opus, codex, claude:fable]". The
+   build follows the second: with `[claude, codex]` and Fable saved, a refused
+   Fable goes to Codex, and Opus runs only when written
+   (`[claude, claude:opus, codex]`). Nobody has said the second replaces the
+   first for a bare entry.
 2. `supported_harnesses` is a second list, read only by the model picker.
    Should that picker read `agents` and the setting go?
 3. "model unavailable" was named beside usage limits as a reason to move.
@@ -178,6 +179,10 @@ Each has a default built; none stops the work.
    Codex and makes `agent` the only way to get "Codex only". Also undecided:
    should a repository `default_agent` lead a personal list? Built: no.
 
+Concept review 6 (2026-11-12) read the docs, config resolution, agent loop,
+stop record and manual restart against the Task comments and found no design
+change. Implement has no new direction.
+
 ## Checks and handoff
 
 - Earlier checks (152 implement tests, 67 after compression, formatting and
@@ -187,6 +192,15 @@ Each has a default built; none stops the work.
 - Implement: `cargo test -p loopflow --test integration documented_commands::`: four passed; `cargo fmt --check` passed.
 - Compress: `cargo test -p loopflow --lib -- config::settings:: agent::tests:: ops::task_execution:: a_run_stopped_by_a_usage_limit a_run_that_failed_after_moving_agents a_run_that_ended_waiting a_stopped_run_is_started_again a_restarted_wait a_shipping_tasks_restarted_wait task_ship_stops_shipping` (LF variables unset, stdin closed): 76 passed; `cargo fmt --check` and `git diff --check` passed. Existing linker `__eh_frame` advisory. Gate owns the affected suites.
 - Gate: affected config, agent, task_execution, settings_launch_tests, documented_commands, configuration_changes_reach_an_existing_subscription, graph_defaults_follow_task_wave_and_repository, wave_setup_tests, task_graph_launch_tests, and two_people suites.
+- QA (2026-11-12, `scratch/qa.html`): branch `lf -b graph` in a private home
+  with a stream-json stand-in `claude` returning a real `is_error` usage-limit
+  result. `[claude:opus, claude:sonnet]` moved Opus→Sonnet on the same thread;
+  both refused stopped once with the order advice; `-a claude:opus` stopped
+  after Opus; lone `claude` with Fable saved ran fable→opus→sonnet; deprecated
+  comma `default_agent` and a per-skill `default_agent` led correctly. Fixed:
+  moves and stops now print to stderr beside the existing wait line; doc line
+  on bare-claude fallthrough. Not reached: Task path (needs a real managed
+  login) and Codex on either side.
 - Demo still needs a real provider refusal: the Graph test's failing step
   writes the stop record itself. With no `agents`, run on an exhausted Codex
   login, inspect the stop and `lf task status`; then set `agents` and see it

@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><title>LOO-873 QA: agents list fallthrough</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}</style>
+<h1>LOO-873 QA: one ordered <code>agents</code> list</h1>
+<p>Branch <code>lf 0.15.3+c57f1daf3.dirty</code>, private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-873</code>, disposable Git repo, foreground <code>lf server run</code>. A stand-in <code>claude</code> on <code>PATH</code> speaks Claude's stream-json and answers a turn with a real <code>result</code> line <code>{"is_error":true,"result":"You've hit your usage limit for &lt;model&gt;…"}</code> for the models named in a control file, and succeeds otherwise. Every launch's argv was logged, so the models tried are what lf actually started.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>Setup</th><th>Models launched</th><th>Result</th></tr>
+<tr><td>1</td><td><code>lf set --global agents claude:opus,claude:sonnet</code></td><td>–</td><td>File holds <code>agents: [claude:opus, claude:sonnet]</code>; <code>lf config settings</code>: <code>agent  claude:opus, then claude:sonnet  Personal global</code>; <code>--explain</code> names the list as selected.</td></tr>
+<tr><td>2</td><td>same list, Opus refuses; <code>lf -b graph qa-run</code></td><td>opus → sonnet (<code>--resume</code> same thread)</td><td>exit 0. Store: <code>…usage limit for opus…; continuing on claude:sonnet</code>.</td></tr>
+<tr><td>3</td><td>same list, both refuse</td><td>opus → sonnet</td><td>exit 1, one attempt each. Store: <code>…; stopped: Nothing is left in its order after claude:opus, claude:sonnet; add another agent to `agents`</code>.</td></tr>
+<tr><td>4</td><td><code>-a claude:opus</code>, Opus refuses</td><td>opus only</td><td>exit 1; stop advice names the pin.</td></tr>
+<tr><td>5</td><td><code>agents: [claude]</code>, <code>claude.model: fable</code>; Fable and Opus refuse</td><td>fable → opus → sonnet</td><td>exit 0, lone bare <code>claude</code> ladder as documented.</td></tr>
+<tr><td>6</td><td>deprecated <code>default_agent: claude:opus,claude:haiku</code>, no <code>agents</code>; Opus refuses</td><td>opus → haiku</td><td>exit 0; warning names the replacement. Printed 3× in one Graph run (see below).</td></tr>
+<tr><td>7</td><td><code>agents: [claude:opus, claude:haiku]</code> + <code>skill.qa-work.default_agent: claude:sonnet</code>; Sonnet refuses</td><td>sonnet → opus</td><td>exit 0; settings show <code>claude:sonnet, then claude:opus, then claude:haiku</code>.</td></tr>
+<tr><td>8</td><td>plus repository <code>lf set agents claude:haiku</code></td><td>–</td><td><code>agent  claude:haiku  Personal project</code>; <code>--explain</code>: global skill <code>default_agent</code> "unused: a higher agents list is the whole order".</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>A move or stop was recorded in the store but never shown on the terminal, while a wait already prints <code>Waiting for … capacity</code>. Running a headless Graph, the stop said only "agent stopped after account subscription limit" plus the provider text, with no hint that adding to <code>agents</code> would help. <code>agent/mod.rs</code> now prints both:</p>
+<pre>[1/1] qa-work
+Continuing on claude:sonnet: claude_result: You've hit your usage limit for opus. Upgrade or try again later.
+Stopped: Nothing is left in its order after claude:opus, claude:sonnet; add another agent to `agents`
+Error: agent stopped after account subscription limit. Check …/runs/92/… for details.
+Error: qa-work: claude_result: You've hit your usage limit for sonnet. Upgrade or try again later.</pre>
+<p><code>docs/config.md</code> said bare <code>claude</code> always falls through its other models; that now holds only with nothing behind it in <code>agents</code>. Reworded. <code>cargo test -p loopflow --lib agent::tests::</code>: 45 passed; <code>cargo fmt --check</code> clean.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><b>Task path with a real refusal</b> (<code>lf -b task run</code>, <code>lf task status</code>, no relaunch). Task steps need a managed login; a fixture account inserted through <code>upsert_provider_account</code> shows "needs a login" because a real build reads the credential through the provider login, not the fixture file. <code>lf account connect claude --api-key</code> does not satisfy it either. The Task-level stop and manual restart remain covered by <code>a_run_stopped_by_a_usage_limit_is_not_started_again</code>, which injects the stop record. The agent loop's recording, exercised for real above, is the record that test injects.</li>
+<li><b>Codex as either side.</b> Codex runs through its app-server protocol; no stand-in was built. The incident's exact shape (Codex refused, Claude takes over) remains for demo on real logins.</li>
+<li>Login-to-login failover within one provider (needs two managed logins).</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The deprecated-spelling warning prints once per lf process, and a headless Graph runs several: three identical lines in scenario 6. Every config warning behaves this way; LOO-875 deletes this one.</li>
+<li><code>lf set</code> prints <code>saved; NextLaunch</code> (a Debug enum name) for every key. Present before this change.</li>
+<li>Stop advice for an <code>-a</code> pin suggests <code>lf set --global agents …</code>, which cannot help a pinned command (already listed in <code>scratch/questions.md</code>).</li>
+</ol>

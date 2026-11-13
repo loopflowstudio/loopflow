@@ -836,7 +836,8 @@ team. The setting follows [normal precedence](#which-value-wins); inspect it
 with `lf config settings --explain`. `lf unset --global claude.model` removes
 the global declaration. With no applicable value, Claude chooses its own model.
 
-Account routing checks capacity for the starting model. Bare `claude` retains
+Account routing checks capacity for the starting model. A bare `claude` with
+nothing behind it in `agents` retains
 [capacity fallthrough](subscriptions.md#when-an-account-runs-out) to other models;
 `claude:opus` pins Opus.
 

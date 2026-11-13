@@ -13,8 +13,9 @@
 - `ingest_marker_in` has a third caller the concept review did not list:
   `task_comments::ingest_task_comment`, inside `apply_linear_observation`'s
   write. It takes the same Machine-name map, read before `BEGIN`.
-- `rentals::tasks_held_in` had one labelled caller left (`tasks_held_by`, which
-  needs only `since`). It is now inlined there as `held_in` + `ownership_in`.
+- `rentals::tasks_held_in` is gone. `task_ownership::held_in` returns
+  `HeldTask { task, owner, since }` from the store alone, so `tasks_held_by`
+  no longer loads Machine declarations once per held Task.
 
 ## Checks
 
@@ -22,3 +23,6 @@
 - Focused lib tests (`store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}`):
   binary built (15 min at load ~110), 22 tests selected, none finished in 5 min;
   process sat in state `T`. Stopped by hand; gate runs them, plus clippy.
+- After `HeldTask` (6bd724d6ee): `cargo check -p loopflow --lib --tests` clean;
+  `cargo test --lib -- store::sqlite::rentals store::sqlite::task_ownership`
+  ran 3 of 16 (all ok) before the 30-minute limit stopped it. Gate runs the rest.

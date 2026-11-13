@@ -9,15 +9,15 @@ estimates, the seams). This plan keeps only what steers the work.
 ## Outcome
 
 A developer changing promotion, launch policy or Task Graph admission runs
-one filter and gets the decision table back in about a second, then the
+one filter and gets the decision table back in a few seconds, then the
 surface's few full-Machine tests (listed in `rust/loopflow/tests/README.md`)
 for wiring. A new decision case lands as a table row, not a new fixture.
 
 Demo, per finished surface:
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promotion/bind decision, <1 s each
-cargo nextest run -p loopflow --test integration -E 'test(session_lifecycle_tests::promotion_)'  # the kept few
+cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promotion/bind decision, 1–3 s per family
+cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'  # the kept few (standalone binary)
 ```
 
 plus the before/after table below with real numbers.
@@ -63,7 +63,7 @@ Promotion and binding (from 17 promotion/bind tests):
 |---|---|
 | `promotion_selects_session_in_owned_and_shared_checkouts`, one case (owned, `task create --session` from inside the conversation) | `LF_AGENT_CALLER` reaches creation; `resume --task` continues the same native conversation in the recorded cwd |
 | `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | bound directory reaches the next provider launch, not the running child |
-| `promotion_background_run_does_not_claim_primary` | a real `-b` run's Session never becomes primary |
+| `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` claims neither the checkout nor the Task's conversation |
 | `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
 
 Everything else in the promotion/bind family becomes rows: recency never
@@ -174,7 +174,7 @@ Measure each group's "before" on this branch's base before changing it. Per grou
 | Group | Before (tests, s, <1 s) | After |
 |---|---|---|
 | Promotion/bind, `session_lifecycle_tests` | 14, 194.5, 0 | 4, 43.2, 0 |
-| Promotion/bind rows, `adoption::tests` | — | 8, 17.9, 0 (1.3–3.1 s each) |
+| Promotion/bind rows, `adoption::tests` | — | 8, 17.9, 0 (1.3–3.3 s each) |
 | session_launch_contract | 30, ?, ? | |
 
 Promotion, 2026-11-13, Mac debug, load average 545–600 from other
@@ -186,7 +186,9 @@ git (~0.4 s unloaded, per the probe), and families hold three to six.
 ## Done when
 
 - Promotion/binding, launch policy, Task Graph explain and Machine dispatch
-  decisions each run as in-process rows under 1 s.
+  decisions each run as in-process rows. The brief asks "well under 1 s"
+  per decision; promotion rows cost ~0.4 s each but their family tests take
+  1.3–3.3 s (open, `scratch/questions.md`).
 - `tests/README.md` lists each surface's kept full-Machine tests with the
   wiring each proves.
 - The table above has before/after for every touched group.

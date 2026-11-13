@@ -36,6 +36,15 @@ for waits and stops; `TaskRunStopped` covers limit stops and repeated failures
 so shipping has one halt path. An unrouted login has no reset time: the step
 walks its order once, then stops. Provider reset text is not parsed.
 
+### Manual recovery (concept review 5)
+
+`select_task_run` now reads `ended_step_recovery`: a record with `retry_at`
+or matching `limit_stop` selects that step, so earlier steps stay done. A move
+followed by an unrelated failure (`; continuing on`) retains ordinary restart
+behavior. The stop output, status and subscription/troubleshooting docs name
+`lf task run <ID>` as the manual restart command. Automatic retries remain
+suppressed and shipping stops. No new recovery type or schema change.
+
 ### Remaining verification
 
 - Verify the production recording path through a real provider refusal in
@@ -43,6 +52,10 @@ walks its order once, then stops. Provider reset text is not parsed.
   script provider results. Neither establishes the whole path together.
 - Gate still owns the affected suites below. The four product choices remain
   open for demo; the preceding retry-stop direction did not resolve them.
+- The preceding feedback's routed-account premature stop is repaired in
+  `_run_with_transient_retries`; `exhausted_accounts_without_a_reset_move_to_the_next_agent`
+  covers `[codex, claude]` with and without a thread, and a same-provider model
+  change after discarding a thread. The one-Graph stop regression remains.
 
 ### Delete — do not maintain
 
@@ -50,6 +63,11 @@ No remaining deletion targets in this pass. The unconditional terminal stop
 after routed account exhaustion now uses the existing `_climb` and move
 recording path for remaining entries. The no-fallback stop and attempt without
 a resume token remain. No schema change.
+
+Manual recovery now gets its step from `ended_step_recovery`; `LimitWait`
+keeps only the reset and agent needed by automatic restart callers. Settings
+inspection folds candidate references, cloning only the candidates it keeps,
+without a separate removal path for `agent`.
 
 Compression shares one advance/stop branch between provider refusal and
 account exhaustion. Only a finished provider attempt prepares a continuation;
@@ -61,9 +79,12 @@ LOO-875 removes the deprecated `default_agent` comma alias,
 once `agents` ships. Keep `config::agent_list`: comma strings are also a
 supported spelling of `agents` in files, `lf set` and `--setting`.
 
-On 2026-11-12, a fresh `git fetch origin` left `origin/main` at `7fdd055a4b`,
-already in this branch; there were no new main commits to reconcile. Task
-comments supplied no newer product decision. No Wave is selected.
+On 2026-11-12, realign's `git fetch origin` found `origin/main` at `78bb9f5564`,
+already merged in `d1184a5120`. The upstream Task-move change makes
+`limit_recovery::restarts_by_itself` require `task_claimed_here` instead of
+`task_owned`; it does not change agent ordering or the exhausted-limit stop.
+Task comments supplied no
+newer product decision. No Wave is selected.
 
 ## Observed runs (2026-11-12)
 
@@ -159,11 +180,12 @@ Each has a default built; none stops the work.
 
 ## Checks and handoff
 
-- Compress: `cargo test -p loopflow --lib -- agent::tests:: config::settings::tests:: a_run_stopped_by_a_usage_limit` (LF variables unset, stdin closed): 67 passed, including the discarded-thread and one-Graph regressions; existing linker `__eh_frame` advisory.
-- Compress: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: passed.
-- Implement: `cargo test -p loopflow --lib -- config:: agent::tests:: ops::task_execution:: ops::task::limit a_run_stopped_by_a_usage_limit a_stopped_run_is_started_again task_ship_stops_shipping a_run_that_ended_waiting restarted_wait` (LF variables unset, stdin closed): 152 passed; the one config fixture failure above passed alone and was repaired with the environment lock.
-- Implement: `cargo test -p loopflow --lib config::files::tests::`: all 12 passed after the fixture repair; the linker emitted its existing `__eh_frame` size advisory.
-- Implement: `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. `documented_commands::` passed on the preceding Rust tree (no command changes this pass).
+- Earlier checks (152 implement tests, 67 after compression, formatting and
+  clippy) are recorded in `d1184a5120:scratch/questions.md`; those results
+  precede the `78bb9f5564` merge. Gate still checks the combined tree.
+- Implement: `cargo test -p loopflow --lib -- a_run_stopped_by_a_usage_limit a_run_that_failed_after_moving_agents a_run_that_ended_waiting a_stopped_run_is_started_again task_ship_stops_shipping status_tells_waiting_retrying_and_a_plain_failure_apart` (LF variables unset, stdin closed): four existing checks passed; both new regressions passed on focused rerun after correcting their expected argv to include `graph`. Existing linker `__eh_frame` advisory.
+- Implement: `cargo test -p loopflow --test integration documented_commands::`: four passed; `cargo fmt --check` passed.
+- Compress: `cargo test -p loopflow --lib -- config::settings:: agent::tests:: ops::task_execution:: a_run_stopped_by_a_usage_limit a_run_that_failed_after_moving_agents a_run_that_ended_waiting a_stopped_run_is_started_again a_restarted_wait a_shipping_tasks_restarted_wait task_ship_stops_shipping` (LF variables unset, stdin closed): 76 passed; `cargo fmt --check` and `git diff --check` passed. Existing linker `__eh_frame` advisory. Gate owns the affected suites.
 - Gate: affected config, agent, task_execution, settings_launch_tests, documented_commands, configuration_changes_reach_an_existing_subscription, graph_defaults_follow_task_wave_and_repository, wave_setup_tests, task_graph_launch_tests, and two_people suites.
 - Demo still needs a real provider refusal: the Graph test's failing step
   writes the stop record itself. With no `agents`, run on an exhausted Codex

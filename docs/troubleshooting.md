@@ -252,11 +252,13 @@ lf gate -a codex                    # run this one on another harness
 lf --only-account claude=work@ gate # stay inside the logins you name
 ```
 
-A step with nowhere left to move stops its run once; `lf task run` does not
-start it again into the same refusal. The stop line and `lf task status` say
-whether its order ran out or it had no next entry. Use
+A step with nowhere left to move stops its run once, without automatic retries.
+The stop line and `lf task status` say whether its order ran out or it had no
+next entry. Use
 `lf config settings --skill <name> --explain` to inspect the order and any
 `agent` choice or `-a` that pins its provider.
+After a reset or an `agents` change, `lf task run <ID>` starts the run again
+at the stopped step; earlier steps stay done.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.

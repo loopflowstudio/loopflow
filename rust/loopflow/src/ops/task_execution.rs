@@ -132,8 +132,8 @@ pub(crate) const MOVED_TO: &str = "; continuing on ";
 /// agent it may use was left; what would let it move follows.
 pub(crate) const STOPPED: &str = "; stopped: ";
 
-/// The limit that stopped a step for good and what would let it move, as one
-/// sentence. `lf task run` does not start such a run again.
+/// The limit that stopped a step and what would let it move, as one sentence.
+/// The current `lf task run` does not retry such a run automatically.
 pub(crate) fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
     let (reason, advice) = recovery.reason.rsplit_once(STOPPED)?;
     Some(format!("{reason}. {advice}"))
@@ -179,7 +179,7 @@ fn apply_limit_recovery(
         (TaskExecutionState::Blocked, None) => {
             if let Some(stop) = limit_stop(recovery) {
                 snapshot.reason =
-                    format!("{label} stopped on a usage limit and is not started again: {stop}");
+                    format!("{label} stopped on a usage limit: {stop}; `lf task run {issue}` starts the run again at it");
             }
         }
         _ => {}
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(stopped.state, TaskExecutionState::Blocked);
         assert_eq!(
             stopped.reason,
-            "implement stopped on a usage limit and is not started again: codex_error: You've hit your usage limit. no `agents` list is set"
+            "implement stopped on a usage limit: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
         );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);

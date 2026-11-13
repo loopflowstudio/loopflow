@@ -154,9 +154,10 @@ pub(super) enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
     Repeated { run: String, cause: String },
     #[error(
-        "the run of {run} stopped on a usage limit at {step} and is not started again: {cause}"
+        "the run of {run} stopped on a usage limit at {step}: {cause}; `lf task run {issue}` starts the run again at it"
     )]
     Limit {
+        issue: String,
         run: String,
         step: String,
         cause: String,
@@ -268,6 +269,7 @@ pub fn run_task_graph_for(
                 }
                 if let Some(cause) = crate::ops::task_execution::limit_stop(&recovery) {
                     let stop = TaskRunStopped::Limit {
+                        issue: task.identifier.clone(),
                         run: run.to_string(),
                         step,
                         cause,

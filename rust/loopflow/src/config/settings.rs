@@ -916,19 +916,16 @@ pub fn resolve_layers(
         candidates: Vec::new(),
     };
     for key in ["agents", "default_agent", "agent"] {
-        let declared = if key == "agent" {
-            explanations.remove(key)
-        } else {
-            explanations.get(key).cloned()
-        };
         agent.candidates.extend(
-            declared
+            explanations
+                .get(key)
                 .into_iter()
-                .flat_map(|setting| setting.candidates)
+                .flat_map(|setting| &setting.candidates)
                 .filter(|candidate| {
                     candidate.source != ConfigSource::Builtin
                         || (key == "default_agent" && config.default_agent.is_some())
-                }),
+                })
+                .cloned(),
         );
     }
     explanations.insert("agent".into(), agent);

@@ -737,10 +737,14 @@ pub(crate) fn select_task_run(
             ))
         })?),
         // A run that stopped starts again from where it began, or from the
-        // step it was waiting at on a usage limit: the steps before it are done.
-        (None, Some((cursor, _))) => limit_recovery::waiting_on_limit(&store.sqlite, &task.id)
+        // step a usage limit held or stopped: the steps before it are done.
+        (None, Some((cursor, _))) => limit_recovery::ended_step_recovery(&store.sqlite, &task.id)
             .map_err(task_error)?
-            .and_then(|wait| graph.find(&wait.step))
+            .filter(|(_, recovery)| {
+                recovery.retry_at.is_some()
+                    || crate::ops::task_execution::limit_stop(recovery).is_some()
+            })
+            .and_then(|(step, _)| graph.find(&step))
             .or_else(|| graph.place_of(cursor)),
         (None, None) if step == START => graph.find(START),
         (None, None) if step == END => {

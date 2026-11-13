@@ -81,15 +81,17 @@ Working context after the clear:
   already requires before its own clear.
 - Gate writes nothing new under `scratch/`: `lf commit` and `lf pr publish`
   stage it, the next head becomes a checkpoint and CI skips again. Findings
-  that are fixed need no note; the rest goes in the report and the PR body.
-  The cached PR copy files (`scratch/pr-title.txt`, `pr-body.md`,
+  that are fixed need no note; the rest, and any headless assumption that
+  would otherwise go to `scratch/questions.md`, goes in the report and the PR
+  body. The cached PR copy files (`scratch/pr-title.txt`, `pr-body.md`,
   `.pr-copy-ref`) are the exception: `consume_gate_artifacts`
-  (`rust/loopflow/src/ops/pr.rs`) deletes them before publish commits,
-  except in a persistent worktree (`is_persistent_worktree`), where gate
-  passes `--title`/`--body` instead.
+  (`rust/loopflow/src/ops/pr.rs`) deletes them before publish commits; the
+  ref must name HEAD or its immediate ancestor, so they are written after the
+  clear. A persistent worktree (`is_persistent_worktree`) keeps them, so
+  there gate passes `--title`/`--body` instead.
 - A gate that ends with work it cannot finish restores the notes with
-  `git revert --no-edit <clear-commit>` and says so. The head is a checkpoint
-  again, which is the truth.
+  `git revert --no-edit <clear-commit>` and leaves it unpublished. Local HEAD
+  is a checkpoint again; the PR and its checks remain on the candidate head.
 
 `lf land` after gate finds nothing to clear (`ops::scratch::clear` returns 0).
 
@@ -103,48 +105,11 @@ Working context after the clear:
 - **CI configured but the relevant suites don't trigger** (path filter, label,
   fork): report the suites that did not run by name.
 
-## Implementation state (2026-11-13)
+## State (2026-11-13)
 
-Both gate skills use prepare/publish, confirm the head and real suites,
-review while CI runs, then publish fixes and report by head. The builtin has
-no scratch cleanup requirement; Loopflow's copy owns candidate cleanup and
-context retention through checkpoint history and PR copy. Sibling skills and
-user docs describe focused local feedback with CI owning suites.
-
-`ops::scratch::clear` and the CI classifier are unchanged. `lf pr publish`
-creates/refreshes a ready PR without arming. Cached PR copy is read and
-removed by `consume_gate_artifacts` before publication commits; its ref must
-name HEAD or its immediate ancestor, so prepare those files after cleanup.
-
-Remaining: the concept-review edits below, then packaging and live gate
-acceptance.
-
-### Next implement pass (concept-review, 2026-11-13)
-
-Two sentences in `.lf/skills/gate.md`; the builtin is unchanged, since a
-repository whose CI ignores `scratch/` can keep writing there.
-
-- **`scratch/questions.md` after the clear.** The headless preamble
-  (`builtins/surfaces/headless.md`) and AGENTS.md tell every headless run to
-  note an assumption in `scratch/questions.md`. Deliver runs gate headless, so
-  a gate that follows that default after `lf scratch clear` re-adds a scratch
-  file; the next publish commits it and the matrix skips. "Write no notes
-  under `scratch/`" covers it only by implication. Name the file: an
-  assumption made after the clear goes in the PR body and the report.
-- **The restoring revert is a local commit.** `git revert <clear-commit>`
-  changes local HEAD only; the PR stays the candidate until something
-  publishes. Say so: gate leaves the revert unpublished, reports the PR head
-  and its checks as the candidate's, and reports local HEAD as the checkpoint
-  the next run starts from.
-
-Checked and left as they are: in `code`, pursue's `pr-publish` has already
-made the PR before deliver's gate, so "no PR" is only `queue` and bare
-`lf gate`; `land` and `ci-fix` after gate ran without scratch before this
-change too; the test naming sits in step 1, as the Task brief asks ("At the
-start").
-Publication and the live matrix observation belong to delivery, not implement.
-Realign 2026-11-13: branch is level with origin/main; no PR exists yet, so
-the first `lf pr publish` in gate creates it.
+Skills and docs are written; no Rust or workflow change. The branch is level
+with origin/main and has no PR, so gate's first `lf pr publish` creates it.
+Remaining: packaging and live gate acceptance, both in delivery.
 
 ## Alternatives
 
@@ -250,8 +215,8 @@ of flaky tests survive on the CI-first path.
 - Before/after for the PR: minutes from gate start to the first suite job
   start on the PR (before: after `land`; after: target under 5 min).
 
-- Compress: gate steps kept once in `.lf/skills/gate.md`, `.github/CI.md`
-  links there; prose in unembedded files, no test rerun.
+- Compress: `git diff --check` → pass; edits are prose in `.lf/skills/gate.md`
+  and this plan, neither embedded, so no test rerun.
 
 ## Done when
 

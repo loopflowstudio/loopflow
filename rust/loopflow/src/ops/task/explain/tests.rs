@@ -13,7 +13,7 @@
 //! what the preview names stay with the full-Machine tests in `tests/README.md`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::ops::context::ContextFact;
 use crate::ops::human_session::tests::SessionHome;
@@ -146,6 +146,10 @@ impl Machine {
             options,
         ))
     }
+}
+
+fn none_options() -> TaskProcessOptions {
+    TaskProcessOptions::default()
 }
 
 fn graph(name: &str) -> TaskProcessOptions {
@@ -324,10 +328,6 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
     assert!(text.contains("Nothing was executed"), "{text}");
 }
 
-fn none_options() -> TaskProcessOptions {
-    TaskProcessOptions::default()
-}
-
 #[test]
 fn run_names_option_impediments_selection_and_missing_evidence() {
     let machine = Machine::new("explain-proof", true);
@@ -458,63 +458,59 @@ fn checkout_reuses_a_present_checkout_and_names_option_impediments() {
 #[test]
 fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
     let machine = Machine::new("restore-proof", false);
-    let checkout: PathBuf = machine.repo.path().join("missing-checkout");
+    let checkout = machine.repo.path().join("missing-checkout");
     let db = rusqlite::Connection::open(machine.home.path().join("loopflow.db")).unwrap();
     db.execute("UPDATE tasks SET worktree=?1", [checkout.to_str().unwrap()])
         .unwrap();
     let sqlite = &machine.store.sqlite;
     let local = sqlite.local_machine().unwrap().id;
-    let peer = crate::durable::MachineId::new();
-    // A handoff is append-only, so the remote owner comes last.
-    for condition in ["absent", "occupied", "terminal", "remote"] {
+    let reset = || {
         db.execute(
             "UPDATE tasks SET planning_state=NULL,checkout_machine_id=?1",
             [local.as_str()],
         )
+        .unwrap()
+    };
+    let explain = || machine.checkout(Some(machine.task.id.as_str()), &none_options());
+
+    reset();
+    let report = explain();
+    assert_eq!(
+        report.action.as_ref().unwrap().behavior,
+        TaskCheckoutBehavior::Restore
+    );
+    assert!(report.impediments.is_empty(), "{report:?}");
+    assert!(mentions(&report.unavailable, "must fetch"), "{report:?}");
+    assert!(!checkout.exists());
+
+    fs::create_dir(&checkout).unwrap();
+    let report = explain();
+    assert!(mentions(&report.impediments, "occupied"), "{report:?}");
+
+    db.execute("UPDATE tasks SET planning_state='canceled'", [])
         .unwrap();
-        match condition {
-            "occupied" => fs::create_dir(&checkout).unwrap(),
-            "terminal" => drop(
-                db.execute("UPDATE tasks SET planning_state='canceled'", [])
-                    .unwrap(),
-            ),
-            "remote" => {
-                sqlite
-                    .add_machine(&peer, "must-not-contact.invalid", "peer")
-                    .unwrap();
-                sqlite.handoff_task(&machine.task.id, &peer).unwrap();
-            }
-            _ => {}
-        }
-        let report = machine.checkout(Some(machine.task.id.as_str()), &none_options());
-        match condition {
-            "absent" => {
-                assert_eq!(
-                    report.action.as_ref().unwrap().behavior,
-                    TaskCheckoutBehavior::Restore
-                );
-                assert!(report.impediments.is_empty(), "{report:?}");
-                assert!(mentions(&report.unavailable, "must fetch"), "{report:?}");
-                assert!(!checkout.exists());
-            }
-            "occupied" => assert!(mentions(&report.impediments, "occupied"), "{report:?}"),
-            "terminal" => assert!(
-                mentions(&report.impediments, "terminal planning"),
-                "{report:?}"
-            ),
-            "remote" => {
-                assert!(
-                    matches!(&report.resolution.execution_machine, ContextFact::Bound { value, .. } if value == peer.as_str()),
-                    "{report:?}"
-                );
-                assert!(
-                    mentions(&report.unavailable, "no remote preparation was performed"),
-                    "{report:?}"
-                );
-            }
-            _ => unreachable!(),
-        }
-    }
+    let report = explain();
+    assert!(
+        mentions(&report.impediments, "terminal planning"),
+        "{report:?}"
+    );
+
+    // A handoff is append-only, so the remote owner comes last.
+    reset();
+    let peer = crate::durable::MachineId::new();
+    sqlite
+        .add_machine(&peer, "must-not-contact.invalid", "peer")
+        .unwrap();
+    sqlite.handoff_task(&machine.task.id, &peer).unwrap();
+    let report = explain();
+    assert!(
+        matches!(&report.resolution.execution_machine, ContextFact::Bound { value, .. } if value == peer.as_str()),
+        "{report:?}"
+    );
+    assert!(
+        mentions(&report.unavailable, "no remote preparation was performed"),
+        "{report:?}"
+    );
 }
 
 #[test]

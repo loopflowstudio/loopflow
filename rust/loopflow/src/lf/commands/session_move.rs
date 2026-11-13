@@ -482,11 +482,10 @@ fn retry_session(error: anyhow::Error, id: &str, target: &Machine) -> anyhow::Er
 
 /// A Task's move is recorded as sent, so the same move delivers it again.
 fn retry_task(error: anyhow::Error, name: &str, target: &Machine) -> anyhow::Error {
+    let place = target.name();
     anyhow!(
-        "{error:#}\n{name} was sent but did not arrive on {}; retry with\n  lf task move {name} --machine {}\n  {}",
-        target.name(),
-        target.name(),
-        crate::ops::task_ownership::take_back(name),
+        "{error:#}\n{name} was sent but did not arrive on {place}\n{}",
+        crate::ops::task_ownership::ways_out(name, &place),
     )
 }
 

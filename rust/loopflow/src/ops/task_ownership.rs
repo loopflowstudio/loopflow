@@ -167,16 +167,16 @@ pub(crate) fn describe_move(
     moving: &MoveInFlight,
 ) -> StoreResult<String> {
     let (place, line) = moving_to(store, moving)?;
-    Ok(format!(
-        "{line}\n  retry: lf task move {identifier} --machine {place}\n  {}",
-        take_back(identifier)
-    ))
+    Ok(format!("{line}\n{}", ways_out(identifier, &place)))
 }
 
-/// The way back when a move's target stays out of reach: claiming the Task
-/// here asks the target first, so it never runs on both Machines.
-pub(crate) fn take_back(identifier: &str) -> String {
-    format!("take back: lf task claim {identifier}")
+/// What to run for a move to `place` that has not arrived: the same move
+/// again, or, while `place` stays out of reach, claiming the Task here, which
+/// asks the target first so it never runs on both Machines.
+pub(crate) fn ways_out(identifier: &str, place: &str) -> String {
+    format!(
+        "  retry: lf task move {identifier} --machine {place}\n  take back: lf task claim {identifier}"
+    )
 }
 
 /// The line a list shows for a Task whose move from here has not arrived,

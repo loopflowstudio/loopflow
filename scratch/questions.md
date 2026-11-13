@@ -418,8 +418,9 @@ left both Machines running it.
 
 ## A stuck move names its way back (fourteenth pass, 2026-11-13)
 
-Status and a failed retry print `take back: lf task claim X` under the retry
-(`task_ownership::take_back`); lists stay one line.
+Status and a failed retry print the same two lines, `retry:` and
+`take back: lf task claim X` (`task_ownership::ways_out`); lists stay one line.
+Compress: one function builds both lines.
 `machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it`
 and clippy pass; `documented_commands::` passes.
 

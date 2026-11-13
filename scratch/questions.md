@@ -60,8 +60,9 @@ agent needed by automatic restart callers.
   QA exercised Claude refusals through the production Graph recording path
   using a stream-json stand-in (`scratch/qa.html`); the Task regression
   injects its stop record. Real-provider checks have not passed.
-- Gate still owns the affected suites below. The four product choices remain
-  open for demo; the preceding retry-stop direction did not resolve them.
+- The affected suites, clippy, architecture, inventory, website and container-only
+  cross-Task agent check passed in the publication pass below. The four product
+  choices remain open for demo.
 
 ### Compatibility cleanup
 
@@ -202,6 +203,8 @@ choices stay open for demo with their built defaults.
 
 ## Checks and handoff
 
+- Publication (2026-11-13), after `lf sync` left base `78bb9f5564` unchanged: the gate runner stopped before tests because `~/.cache/uv` inventory exceeded 15 seconds (92.9 GiB free). Ran its planned commands directly per `scripts/testing.md`: affected nextest filter (`config::`, `agent::`, `ops::task_execution::`, settings launch, documented commands, configuration subscription, graph defaults, Wave setup, Task Graph launch, `two_people`) 236 passed; `cargo clippy --all-targets --jobs 4 -- -D warnings`, formatting, architecture and Rust test inventory passed. Website with candidate CLI: 73 passed. Existing linker `__eh_frame` advisory.
+- Publication: `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` failed before tests: Linux `rustc` compiling the library test received SIGKILL with two build jobs. The same script run in memory with `CARGO_BUILD_JOBS=1` passed the selected check and both prerequisite migration checks; repository source was unchanged and both disposable containers were removed.
 - Advice correction and compression: `cargo test -p loopflow --lib agent::tests::a_pinned_agent_refused_at_launch_fails_with_its_limit` (LF variables unset, stdin closed): 1 passed after the shorter wording; existing linker `__eh_frame` advisory. `cargo fmt --check` and `git diff --check` passed. Gate owns affected suites and clippy.
 - Earlier checks (152 implement tests, 67 after compression, formatting and
   clippy) are recorded in `d1184a5120:scratch/questions.md`; those results

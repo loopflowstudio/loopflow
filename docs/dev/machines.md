@@ -109,6 +109,8 @@ A person is named once, in `people`: by the planning provider's user
 the Git journal's planning user key (`journal:<key>`), with a display name.
 Ownership entries and Machines refer to that row; the Git email names nobody new.
 Entries written before a Machine knew its person still carry only the Git email.
+A claim naming your person is yours; one naming a different person is still
+yours when its Git email is, so connecting Linear keeps journal-era claims.
 
 Which Machine runs a person's Wave work is that person's choice, never
 repository content:

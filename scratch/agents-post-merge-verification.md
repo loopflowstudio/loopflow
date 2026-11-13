@@ -1,9 +1,10 @@
 # LOO-873: model-unavailable fix forward
 
-Publishing and post-merge verification remain; the final checks are recorded below. The model-unavailable
-repair, Auto-Ship stop repair and compress changes are committed through
-`3c721c645e`, including the sync onto `dfbea8cf81`. The focused refusal regression
-and isolated CLI stop/status/restart scenario passed again after compress.
+PR [#1908](https://github.com/loopflowstudio/loopflow/pull/1908) is open at
+`c4c9c4e8df`; landing and post-merge verification remain. The model-unavailable
+repair, Auto-Ship stop repair and corrected capacity-wait fixture include the
+sync onto `dfbea8cf81`. The focused refusal regression and isolated CLI
+stop/status/restart scenario passed again after compress.
 The earlier incomplete validation is superseded by those results, not by
 PR #1906's merged CI. No Wave or product question is open.
 
@@ -138,7 +139,7 @@ unchanged; docs are in `docs/{config,orchestration,subscriptions,troubleshooting
 
 ## Remaining work
 
-- Publish the repair, then verify the merged repair and its push CI. PR #1906
+- Land PR #1908, then verify the merged repair and its push CI. PR #1906
   validates the earlier usage-limit implementation only. No app or release
   check applies to this CLI-only change.
 
@@ -242,3 +243,29 @@ CLI, provider, server or watcher processes.
 - `cargo test -p loopflow --lib --jobs 4 -- a_shipping_tasks_restarted_wait a_restarted_wait --test-threads=1` under the same isolation: all 3 affected fixture cases passed, 15.60s; `/tmp/lf-873-publish-restart.log`. The other 128 passing tests retain their result. Builds reported the existing macOS large `__eh_frame` linker warning.
 - `cargo clippy --all-targets --jobs 4 -- -D warnings`: passed, 4m 44s; `/tmp/lf-873-publish-clippy.log`. Cargo emitted manifest-level unused-dependency warnings for unchanged `chrono-tz`, `rpassword`, and `tokio-stream` entries.
 - `website/dev.py test` under `scripts/test_network.py`, with the prepared CLI on PATH: passed; `/tmp/lf-873-publish-website.log`. The first invocation used a root-relative script path from the website directory and exited before running checks; the corrected command above completed.
+
+## Gate review at `c4c9c4e8df`, November 13 UTC
+
+Comparison: checkout base `dfbea8cf81` through HEAD, plus the initially clean
+worktree. No product change was needed. The existing PR describes the repair
+and its provider-message limits accurately; this pass corrects the stale
+publication state in these notes.
+
+Affected plan: `agent/mod.rs` and `agent_tests.rs` reach `agent::tests::` and
+`binary(agent_tests)`; Graph/ship stop handling, Task status and the restart
+fixture reach `ops::task_execution::` and `task_graph_launch_tests::`; the four
+docs pages reach `documented_commands::` and website tests. Architecture,
+Rust inventory, formatting and Clippy accompany those suites. No wire, schema,
+embedded resource or app input changed.
+
+- `scripts/test.py --list`: confirmed architecture, Rust and website selection; app, Python and e2e suites are unreached.
+- `scripts/test.py --reuse-passing --rust-filter 'test(agent::tests::) | test(ops::task_execution::) | test(task_graph_launch_tests::) | binary(agent_tests) | test(documented_commands::)'`: resource preflight stopped before product checks; uv-cache `du` exceeded its 15-second inventory deadline, with 38.4 GiB free above the 32 GiB reserve. Automatic build cleanup also returned exit 2. `/tmp/lf-873-gate-current.log`; this is not a passing gate-runner result.
+- Retained the publication checks above after reading their logs: 128 filtered tests passed before the five-line fixture correction, and all 3 cases using that fixture passed afterward; Clippy passed after that correction; website had 73 passes. Product code and docs have not changed since those checks. No failed test remains unresolved.
+- `cargo +stable fmt --all -- --check`; `git diff --check`: passed on this checkout. Stable Rust and Clippy report 1.100.0 (`0ef1bc386`, November 9).
+
+The timeout belongs to cache inventory, not compilation or a test; the
+documented manual fallback and the completed publication logs supply the
+product checks. Unchanged suites retain their results rather than repeating
+them. CI still owns the full matrix and the scratch-free landing candidate.
+Real provider refusal and native transcript continuation remain unobserved,
+as disclosed in PR #1908 and the QA walkthrough.

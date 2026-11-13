@@ -402,9 +402,11 @@ No Graph is privileged: every one started for the Task, by naming it or in its
 checkout, is equally its work. The Graph records that Task when it starts, so
 reading a Task's Graphs costs the same however many other Graphs ran.
 `task status`'s `work` contains all Sessions, Graphs and Processes, including
-headless and closed history. Its `execution` and Task Graph record observe the
-most recently launched Graph only: `none`, `latest` or `finished`. The one control is `start`, available whenever the Task can run,
-even when an earlier Graph exists.
+headless and closed history. Its Task Graph record observes the most recently
+launched Graph: `none`, `latest` or `finished`. Execution also reports an open
+Graph in the Task's work, including one started before checkout adoption. The
+`start` control is available whenever the Task can run, even when an earlier
+Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
 one question of one gate: does OS process evidence show any of the work's

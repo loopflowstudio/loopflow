@@ -354,18 +354,17 @@ which names mini from the claim on.
 - Compress: `runs_here` replaced `selects_current_machine` +
   `delivers_sent_move`, opening the store once.
 
-## Next implement direction (concept review, 2026-11-13)
+## Done (2026-11-13, eleventh pass): any in-flight move runs where it began
 
-machines.md states the rule: running the same move again, from any Machine,
-asks the Machine the Task left. The Machine holding the in-flight move is the
-one that can carry it on, whatever its stage. `runs_here` matching only
-`MoveStage::Sent` breaks that rule for a `leaving` move: `lf --machine mini task
-move X --machine mini` from the laptop while X is still leaving reaches mini and
-refuses with "did not send it". Drop the stage match: any `task_move_in_flight`
-to the target runs here (leaving carries on; sent redelivers). machines.md's
-sentence becomes "a move the laptop began runs on the laptop". Test: the
-leaving case beside
-`machine_commands::a_sent_move_forwarded_to_its_target_delivers_what_was_sent`.
+- `ssh::runs_here` drops its `MoveStage::Sent` match: any `task_move_in_flight`
+  to the target runs here (leaving carries on; sent redelivers). machines.md:
+  "a move the laptop began runs on the laptop, which holds the move".
+- Test `machine_commands::a_leaving_move_forwarded_to_its_target_carries_on`.
+  With the old check it fails, but not with "did not send it": mini answers
+  "already runs on <mini> (this Machine)", since the leaving claim already
+  names mini.
+- Checks: integration `machine_commands::a_` 11 ok, `documented_commands::` 4 ok;
+  clippy `--all-targets -D warnings` clean.
 
 ## Open questions (each reversible; the simpler option is built)
 

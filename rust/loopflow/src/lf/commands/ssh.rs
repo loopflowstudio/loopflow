@@ -14,9 +14,9 @@ pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 /// Whether `lf --machine <target> <args>` runs on this Machine: the target is
 /// this Machine, or the command is `task move X --machine <target>` and this
-/// Machine sent X there without it arriving. Run here, that move delivers what
-/// was sent; forwarded, the target would see a move from a Machine the
-/// forwarded personal settings do not name.
+/// Machine began moving X there without it arriving. Run here, a leaving move
+/// carries on and a sent move delivers what was sent; forwarded, the target
+/// would see a move from a Machine the forwarded personal settings do not name.
 pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     let Some(store) = crate::store::read_existing_registry()? else {
         return Ok(false);
@@ -46,13 +46,9 @@ pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     let Some(task) = store.task_by_issue(issue)? else {
         return Ok(false);
     };
-    Ok(store.task_move_in_flight(&task.id)?.is_some_and(|moving| {
-        moving.to_machine_id == target
-            && matches!(
-                moving.stage,
-                crate::store::sqlite::task_moves::MoveStage::Sent { .. }
-            )
-    }))
+    Ok(store
+        .task_move_in_flight(&task.id)?
+        .is_some_and(|moving| moving.to_machine_id == target))
 }
 
 pub fn run(

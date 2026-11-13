@@ -2532,6 +2532,46 @@ fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
 }
 
+/// The laptop began moving the Task and was killed before sending it. The same
+/// move addressed to mini from the laptop runs on the laptop, which holds the
+/// move, and carries it on.
+#[test]
+fn a_leaving_move_forwarded_to_its_target_carries_on() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "forwarded-leaving");
+    plan.local.begin_task_move(&task, &mini).unwrap();
+    fs::write(worktree.join("notes.txt"), "halfway\n").unwrap();
+
+    let retried = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "move",
+            task.as_str(),
+            "--machine",
+            "mini",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("Carrying on"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "forwarded-leaving:notes.txt"]
+        ),
+        "halfway"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
 /// The move reached mini's check but never arrived. Mini remembers which
 /// Machine the move comes from, so the same command run on mini asks the
 /// laptop for it and delivers it there.

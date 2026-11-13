@@ -220,33 +220,34 @@ reader left outside the pre-`task_checkouts` fallbacks in
 `read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
 remaining mentions are pre-migration fixtures.
 
-## Next implement direction (concept review, third pass, 2026-11-13)
+## Done (2026-11-13, seventh pass): a Task's conversation resumes where its Task runs
 
-A Task's conversation is where its Task runs. Today `lf resume <session>`
-asks `work_route::moved_session` first, which forwards by
-`agent_sessions.moved_to_machine_id`, and `send_task` still writes that marker
-through `complete_moved_session`. Counterexample: LOO-9 moves laptop → rental;
-the rental ends and `hand_back_in` (rentals.rs) writes the Task back to the
-laptop; `lf task status LOO-9` says it runs here, but `lf resume <its session>`
-on the laptop forwards to the ended rental.
-
-- `send_task` completes the leaving conversation without the marker;
-  `complete_moved_session` keeps it only for Task-less Sessions (`moves::send`).
-- `moved_session` skips a Session `moves::conversation_task` names a Task for;
-  that resume routes like `resume --task` (the ownership log), and reopens the
-  Session here when the Task runs here (`reopen_moved_session`).
-- Backfill: clear `moved_to_machine_id` on Task conversations in the migration.
-- Test: a handed-back Task's conversation resumes here, not on the ended Machine.
+- `send_task` completes the leaving conversation with
+  `complete_task_conversation`: no `moved_to_machine_id`, and the row is bound
+  to the Task (with the Task's Wave, which the ancestry trigger requires) so
+  it still maps to the Task after its checkout here is pruned.
+  `complete_moved_session` (the marker) is only for Task-less Sessions.
+- `work_route::moved_session`: a Session `moves::conversation_task` maps to a
+  Task forwards to the Task's route (ownership log) when it runs elsewhere and
+  resumes here when it runs here; others follow the marker as before.
+- Migration clears `moved_to_machine_id` on Sessions with a `task_id` or a
+  `task_primary_sessions` row. A pre-migration non-primary conversation whose
+  checkout is gone keeps its marker (nothing maps it to a Task any more).
+- Test `a_handed_back_tasks_conversation_resumes_here` (rental row for mini
+  ended on the laptop, then `lf resume <session>` stays on the laptop).
+- docs/dev/machines.md: one sentence under "The conversation goes only with its Task".
+- Checks: integration `machine_commands::` resume/move/sent 15 passed; lib
+  `ops::human_session` + `store::migrations::` 181 passed; clippy
+  `--all-targets -D warnings` clean (covers the post-295f257b8e sync).
 
 `session_moves` (an agent switch at the Stop hook) and
 `relocated_task_processes` (a repository directory moved on disk) stay: the
 brief listed them with Machine moves, but neither crosses Machines.
 
-Left for gate, collected from the passes above: clippy `--all-targets -D
-warnings` after the 295f257b8e sync (only `task_ownership::` and fmt ran);
+Left for gate, collected from the passes above:
 `two_people`, `transport_tests`, `session_lifecycle_tests`, `served_reads`,
 `task_graph_launch_tests` (fixtures changed); `server::schema::tests::` (Clap
-help for `session send`); `documented_commands::` (machines.md); a nextest run
+help for `session send`); `documented_commands::` (machines.md, edited again this pass); a nextest run
 that answers the parallel-stall question below.
 
 ## Open questions (each reversible; the simpler option is built)

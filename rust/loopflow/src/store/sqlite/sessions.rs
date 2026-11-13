@@ -1704,6 +1704,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// `task`'s conversation left with it: complete it here, bound to the Task
+    /// as it arrives there, rather than naming a Machine. It resumes wherever
+    /// the Task runs, even after its checkout here is gone.
+    pub(crate) fn complete_task_conversation(&self, id: &str, task: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET completed_at=COALESCE(completed_at,?3),moved_to_machine_id=NULL,
+                wave_id=CASE WHEN task_id IS NULL THEN (SELECT p.wave_id FROM tasks t
+                    LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) ELSE wave_id END,
+                task_id=COALESCE(task_id,?2)
+             WHERE id=?1",
+            params![id, task.as_str(), crate::store::rows::now_unix()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     /// The Machine a Session here moved to; `None` when it never left.
     pub fn session_moved_to(&self, id: &str) -> StoreResult<Option<crate::durable::MachineId>> {
         let canonical = crate::id::canonical_session(id);

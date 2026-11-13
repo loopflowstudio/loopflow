@@ -81,6 +81,11 @@ CREATE TRIGGER store_revision_task_primary_sessions_update AFTER UPDATE ON task_
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_task_primary_sessions_delete AFTER DELETE ON task_primary_sessions
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+-- A Task's conversation resumes wherever its Task runs (the ownership log),
+-- so it no longer names the Machine it last moved to.
+UPDATE agent_sessions SET moved_to_machine_id=NULL
+WHERE moved_to_machine_id IS NOT NULL
+  AND (task_id IS NOT NULL OR id IN (SELECT session_id FROM task_primary_sessions));
 
 -- The current PR follows the checkout's branch, base and parent.
 CREATE TRIGGER task_checkout_to_pr_insert AFTER INSERT ON task_checkouts

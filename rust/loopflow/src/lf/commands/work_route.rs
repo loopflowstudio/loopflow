@@ -403,7 +403,8 @@ pub(super) fn resumed_task(cli: &Cli) -> Option<&str> {
     }
 }
 
-/// A Session that moved to another Machine resumes there.
+/// A Session resumes where it is: a Task's conversation where its Task runs
+/// (the ownership log), any other Session on the Machine it moved to.
 fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(id) = resumed_session(cli) else {
         return Ok(None);
@@ -416,7 +417,15 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    Ok(store.session_moved_to(id)?.map(|machine| Forward {
+    let canonical = crate::id::canonical_session(id);
+    let machine = match crate::ops::human_session::moves::conversation_task(&store, &canonical)? {
+        Some(task) => {
+            let runs_on = store.task_execution_route(&task)?.machine_id;
+            (runs_on != store.local_machine()?.id).then_some(runs_on)
+        }
+        None => store.session_moved_to(id)?,
+    };
+    Ok(machine.map(|machine| Forward {
         machine,
         resumed: None,
         args: args[1..].to_vec(),

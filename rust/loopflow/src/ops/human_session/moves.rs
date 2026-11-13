@@ -205,7 +205,9 @@ pub(crate) async fn send_task(
             }
         };
     if let Some(session) = &conversation {
-        store.sqlite.complete_moved_session(&session.id, to)?;
+        store
+            .sqlite
+            .complete_task_conversation(&session.id, &task.id)?;
     }
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));

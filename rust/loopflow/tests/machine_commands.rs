@@ -3324,6 +3324,65 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
 }
 
+/// Mini is a rental that ends while it holds the Task: the Task comes back to
+/// the laptop, and so does resuming its conversation, which never forwards to
+/// the Machine it last moved to.
+#[test]
+fn a_handed_back_tasks_conversation_resumes_here() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "handed-back");
+    let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a5c");
+    let moved = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "resume",
+            &session,
+            "--prepare",
+            "--json",
+        ])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    assert!(plan.local.session_moved_to(&session).unwrap().is_none());
+
+    let rental = loopflow::rental::RentalId::new();
+    rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,by_hand,hardware,
+                usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+             VALUES(?1,'code','daytona',?1,0,
+                '{\"vcpus\":4,\"memory_gb\":8,\"disk_gb\":10,\"gpu\":null,\"spot\":false}',
+                '0.24','1.00',4000000000,'running',1,?2)",
+            [rental.as_str(), mini.as_str()],
+        )
+        .unwrap();
+    let (_, returned) = plan
+        .local
+        .set_rental_state(&rental, loopflow::rental::RentalState::Ended)
+        .unwrap();
+    assert_eq!(returned, std::slice::from_ref(&task));
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop
+    );
+
+    let resumed = fixture
+        .command(&["resume", &session, "--prepare", "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&resumed);
+    let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(resumed["id"], session.as_str());
+    assert_eq!(resumed["workspace"]["machine_id"], laptop.as_str());
+}
+
 /// A Task with two conversations: resuming the one that is not its primary
 /// on mini moves the Task with that one, and mini resumes it.
 #[test]

@@ -276,6 +276,9 @@ that command opens it again from mini.
 **The conversation goes only with its Task.** `lf --machine mini resume <session>`
 on a Task's conversation moves the Task, exactly as `lf task move` does, then
 resumes the conversation there. A conversation outside any Task moves alone.
+`lf resume <session>` opens a Task's conversation wherever the Task runs now:
+when a rental ends and its Tasks come back to the laptop, their conversations
+resume on the laptop.
 
 **A running step starts over from the checkpoint.** The Task's primary Session
 travels with its transcript. A headless step that was mid-run, such as

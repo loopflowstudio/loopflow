@@ -310,6 +310,20 @@ Left for gate, collected from the passes above:
 help for `session send`); `documented_commands::` (machines.md, edited again this pass); a nextest run
 that answers the parallel-stall question below.
 
+## QA (2026-11-13)
+
+Report: `scratch/qa.html`. Fixed: `lf task list` and `lf machine list` read a
+move in flight (`Moving to mini since …: sent, not arrived`) before ownership,
+which names mini from the claim on. Open findings:
+
+- A retry run on the target before arrival (`lf --machine mini task move X
+  --machine mini`) refuses with `X already runs on <mini> (this Machine)`: mini
+  took the Task in at the check but holds no ownership entry, so the route says
+  it is mini's own. machines.md says retries work "from any Machine".
+- `task_ship_events` gains a `restarted` row per failed restart (about 48 a day
+  at the 30-minute cap) and `ship_log_in` reads the whole log; the column it
+  replaced was a counter. One real Task has 7504 restarts.
+
 ## Open questions (each reversible; the simpler option is built)
 
 - **Parallel stalls.** Whether the stalls of those three groups under the

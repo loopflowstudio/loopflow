@@ -166,6 +166,18 @@ pub(crate) fn describe_move(
     identifier: &str,
     moving: &MoveInFlight,
 ) -> StoreResult<String> {
+    let (place, line) = moving_to(store, moving)?;
+    Ok(format!(
+        "{line}\n  retry: lf task move {identifier} --machine {place}"
+    ))
+}
+
+/// The Machine `moving` names and its one line, without the retry:
+/// `Moving to mini since Nov 12 10:42: sent, not arrived`.
+pub(crate) fn moving_to(
+    store: &SqliteStore,
+    moving: &MoveInFlight,
+) -> StoreResult<(String, String)> {
     let to = &moving.to_machine_id;
     let place = store
         .machine_by_id(to)?
@@ -174,10 +186,11 @@ pub(crate) fn describe_move(
         MoveStage::Leaving { .. } => "not sent",
         MoveStage::Sent { .. } => "sent, not arrived",
     };
-    Ok(format!(
-        "Moving to {place} since {}: {progress}\n  retry: lf task move {identifier} --machine {place}",
+    let line = format!(
+        "Moving to {place} since {}: {progress}",
         crate::lf::output::format_time(moving.at)
-    ))
+    );
+    Ok((place, line))
 }
 
 pub fn render(ownership: &TaskOwnership) -> String {

@@ -2421,6 +2421,22 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Moving to mini since"), "{status}");
     assert!(status.contains("sent, not arrived"), "{status}");
     assert!(status.contains(&format!("retry: {retry}")), "{status}");
+    // The lists read the move the same way, not as a Task that runs on mini.
+    for args in [&["task", "list"][..], &["machine", "list"][..]] {
+        let listed = fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&listed);
+        let listed = String::from_utf8_lossy(&listed.stdout);
+        let row = listed
+            .lines()
+            .find(|line| line.contains(&name))
+            .unwrap_or_else(|| panic!("{name} missing from:\n{listed}"));
+        assert!(row.contains("Moving to mini since"), "{row}");
+        assert!(row.contains("sent, not arrived"), "{row}");
+    }
 
     // The retry delivers what was sent: nothing is committed or pushed again.
     executable(&remote_lf, &working);

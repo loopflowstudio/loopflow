@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LOO-874 QA</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f4;padding:.8em;overflow:auto;font-size:13px}h2{margin-top:2em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style></head><body>
+<h1>LOO-874 QA: what a Machine has checked out</h1>
+<p>Branch <code>lf</code> built from 90b20d2bfe plus the fixes below. Private homes under <code>/tmp/lf-qa-874</code>, <code>LF_*</code> cleared, stdin closed. A second Machine, "mini", is a second private home on this host, reached through a stand-in <code>ssh</code>.</p>
+
+<h2>1. Upgrade: the real store</h2>
+<p>A <code>.backup</code> copy of <code>~/.lf/loopflow.db</code> (1239 Tasks), with main's pending <code>foreign_key_children</code> and then <code>task_machine_local.sql</code> applied through <code>sqlite3</code> (never opened with <code>lf</code>). Each took under 0.1 s.</p>
+<table><tr><th>Check</th><th>Result</th></tr>
+<tr><td>Tasks with a worktree → <code>task_checkouts</code></td><td>870 → 870, 0 missing, 0 field mismatches, 0 on another Machine</td></tr>
+<tr><td><code>primary_session_id</code> → <code>task_primary_sessions</code></td><td>330 → 330</td></tr>
+<tr><td>Ship columns → <code>task_ship_events</code></td><td>174 approved (= <code>shipped_at</code> rows), 84 carried, 12 stopped, 765 restarted</td></tr>
+<tr><td>Ownership writer</td><td>879 of 890 entries name this Machine; 11 (from planning) name none</td></tr>
+<tr><td>People</td><td>one <code>journal:</code> person, the local Machine points to it; <code>name</code> NULL</td></tr>
+</table>
+<p>Restarts are capped at 64 rows per Task in the backfill; real counts reach 7504. Backoff stops growing after 7, so nothing reads the difference.</p>
+
+<h2>2. Upgrade: installed 0.15.3 → branch on the same home</h2>
+<p>Installed <code>lf</code> created two Tasks and checked one out. Branch <code>lf task status</code> and <code>lf task list</code> on that home print byte-for-byte what 0.15.3 printed; the store gained the checkout row, the writer and the person.</p>
+<pre>Planning evidence: available
+Recover a report · 0429e4
+Planning: unstarted · current
+Owner: QA on Jacks-MacBook-Pro-2
+  Nov 13 11:08  claim  QA on Jacks-MacBook-Pro-2
+0429e4  idle
+  task: task_0429e445e5ed488e975c26709b105274
+  body: provider codex
+  worktree: /private/tmp/lf-qa-874/repo.0429e4-recover-a-report
+  branch: qa/0429e4-recover-a-report
+  PM writeback: current
+  latest Graph: No Task Graph has run; independent Sessions may still be active
+  action: run  (run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first)</pre>
+
+<h2>3. Fresh: Graph, ship, hold</h2>
+<p><code>lf task run</code> stopped at <code>demo</code>. <code>lf ship</code> logged <code>approved</code>; the demo step failed three times (no Codex in the private home) and logged <code>withdrawn</code>. <code>lf task hold</code> logged <code>stopped</code>, which <code>lf task show --json</code> reads as <code>execution.ship_stop</code>; a second <code>lf ship</code> logged <code>approved</code> again.</p>
+
+<h2>4. Move to mini</h2>
+<pre>$ lf task move 0429e4 --machine mini
+Checked mini: it can take 0429e4
+Committed and pushed 0429e4 on qa/0429e4-recover-a-report
+Arrived on mini</pre>
+<p>Laptop: <code>0429e4  Runs on mini since Nov 13 11:10</code>, no path; <code>lf machine list</code> lists it under mini; <code>lf wt prune --dry-run</code> offers the old checkout (“runs on mini”). Mini: its own <code>task_checkouts</code> row at <code>mini/src/origin.0429e4-…</code>, with the edit made before the move. Laptop and mini each have one <code>arrived</code> row.</p>
+
+<h2>5. A move that did not arrive</h2>
+<p>Mini's <code>lf</code> was swapped for one that fails <code>session receive</code>.</p>
+<pre>$ lf task move 5caa86 --machine mini
+Checked mini: it can take 5caa86
+Committed and pushed 5caa86 on qa/5caa86-second-with-ship
+Error: Machine command unavailable: mini fell over
+5caa86 was sent but did not arrive on mini; retry with
+  lf task move 5caa86 --machine mini</pre>
+<p><code>lf task status</code>: <code>5caa86  Moving to mini since Nov 13 11:10: sent, not arrived</code> plus the retry line.</p>
+<p><b>Broken, fixed:</b> <code>lf task list</code> printed <code>5caa86 · QA · Runs on mini since Nov 13 11:10</code> and <code>lf machine list</code> printed <code>5caa86 since …</code> under mini, as though the Task had arrived. The claim naming mini is written before anything is sent, and both lists read only ownership. Both now read the move in flight first (<code>task_ownership::moving_to</code>):</p>
+<pre>86e1f7 · QA · Moving to mini since Nov 13 11:12: sent, not arrived · Third stuck move
+mini  mini  home_b394…
+  86e1f7 Moving to mini since Nov 13 11:12: sent, not arrived</pre>
+<p>With mini restored, the same command from the laptop:</p>
+<pre>Carrying on 5caa86&#x27;s move to mini
+Arrived on mini (Graph at `demo`)</pre>
+<p>The lists then read <code>Runs on mini since …</code>. <code>machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it</code> now checks both lists; the 53 tests in <code>machine_commands::</code> pass and clippy is clean.</p>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><b>A retry run on mini refuses wrongly.</b> <code>lf --machine mini task move 86e1f7 --machine mini</code> while the move was <code>sent, not arrived</code>: <code>Error: 86e1f7 already runs on Jacks-MacBook-Pro-2 (this Machine)</code>. Mini had the Task (taken in by the move's check) but no ownership entry, read it as unowned, and resolved it to itself; it has no checkout. machines.md says the same move works “from any Machine”. Retrying from the laptop works.</li>
+<li><b>The Auto-Ship log grows by one row per failed restart.</b> Restarting every 30 minutes, a Task stuck under Auto-Ship adds about 48 rows a day, and <code>ship_log_in</code> reads them all on each check. The old column was a counter. One real Task has 7504 restarts.</li>
+<li>Mini's ownership log for a Task it first saw through a move holds only the move's claim, not the laptop's earlier claim. Cosmetic.</li>
+</ol>
+
+<h2>Not reached</h2>
+<ul>
+<li>Moving back to the laptop: the stand-in <code>ssh</code> reaches only mini. <code>a_task_sent_without_its_reply_delivers_its_conversation_when_repeated</code> covers it.</li>
+<li>A conversation travelling with its Task: the private homes have no Claude or Codex login.</li>
+<li>Linear people (<code>linear:</code> ids): no Linear login in a private home.</li>
+<li>Desktop windows: Swift mirrors are covered only by the automated suites listed in questions.md.</li>
+</ul>
+</body></html>

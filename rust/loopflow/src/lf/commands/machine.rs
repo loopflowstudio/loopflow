@@ -199,11 +199,19 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                         println!("  {scope} {} {part}", default.name);
                     }
                     for task in &listing.tasks {
-                        println!(
-                            "  {} since {}",
-                            task.identifier,
-                            crate::lf::output::format_time(task.since)
-                        );
+                        // A move that has not arrived reads as that, as in `lf task status`.
+                        match store.sqlite.task_move_in_flight(&task.id)? {
+                            Some(moving) => println!(
+                                "  {} {}",
+                                task.identifier,
+                                crate::ops::task_ownership::moving_to(&store.sqlite, &moving)?.1
+                            ),
+                            None => println!(
+                                "  {} since {}",
+                                task.identifier,
+                                crate::lf::output::format_time(task.since)
+                            ),
+                        }
                     }
                 }
             }

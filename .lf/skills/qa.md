@@ -616,3 +616,17 @@ placeholder `DAYTONA_API_KEY` and an SSH key in the private `HOME`; stub
 `ssh-keygen -R`, which would edit the real `known_hosts`. To land a write between
 a preflight read and its transaction, serve a repository's `.lf/config.yaml`
 through a FIFO and act from another repository at the first open.
+
+## Moving a Task between owned Machines
+
+The same stand-in `ssh` drives `lf machine add mini` and `lf task move <task>
+--machine mini` with no real host: it runs its last argument under mini's own
+`HOME` and explicit `LF_HOME` (unset, `lf` finds the real `~/.lf`), with mini's
+`~/.local/bin/lf` the branch binary and a `~/.gitconfig` identity. A local bare
+origin and `planning: {provider: git, personal: true}` are enough; the move's
+check clones the repository on mini. To leave a move `sent, not arrived`, swap
+mini's `lf` for a wrapper that exits 1 on `session receive` without `--check`,
+then read `lf task status`, `lf task list` and `lf machine list` before
+restoring it and repeating the move. Both homes share the host name, so mini
+labels the laptop's claim by its own host name; moving back needs an SSH route
+from mini to the laptop's home, which this one-way stand-in does not give.

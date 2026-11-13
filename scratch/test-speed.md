@@ -1,5 +1,16 @@
 # Make the Rust tests fast
 
+## Change of priority (2026-11-13, read before the next edit)
+
+Stop working on transport tests: `tests/transport_tests.rs`, `tests/transport/`,
+`src/transport/*tests*`. A separate Task (f3d86e, "Rebuild the transport tests
+around the current design") redesigns that suite stacked on this branch. Commit
+transport work that is finished and green; revert the rest. Continue with the
+other groups: `store::sqlite`, `store::migrations`,
+`ops::linear::task_planning_tests`, `task_graph_launch_tests`,
+`session_lifecycle_tests`, `machine_commands`, `session_launch_contract`,
+`local_planning`, `release_lock_tests`.
+
 Goal: as many tests as possible under 1 s, better under 100 ms. Cutting
 redundant or unimportant tests is fine. Said about this work: "lets go
 ballistic on these. Totally fine to cut redundant or unimportant tests. Find
@@ -153,6 +164,19 @@ Fixed missing owners: the resume-JSON new-owner test, the three
 They had started managed conversations without a `MachineServer` guard.
 Both focused and full transport runs now finish without leaving fixture servers. This is a fixture
 cleanup defect; no product correctness failure has been established.
+
+## Quiet native runner (fourth win)
+
+Codex now uses the same 1 s idle observation as Claude, removing a 60 s fixed
+sleep. The provider remains held at readiness, no HTTP requests may occur while
+idle, and the real turn boundary must still acquire the changed title with two
+requests. All four provider/mode variants remain.
+
+`cargo nextest run -p loopflow --lib --test integration -E
+'test(ops::linear::task_planning_tests::native_runner_is_quiet_until_its_turn_ends) | test(documented_commands::)' --test-threads 6`:
+8/8 passed, 7.702 s wall. Four runner cases: 86.043 → 15.291 s summed;
+Codex foreground: 65.720 → 3.823 s. The testing guide no longer excludes these
+short cases from affected Linear gates. `cargo fmt` passed; clippy pending.
 
 ## Next work
 

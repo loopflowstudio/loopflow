@@ -116,9 +116,22 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             sessions_by_task.entry(task).or_default().push(session);
         }
     }
+    // State, publication and ownership for every Task in a fixed number of
+    // statements: a query per Task costs thousands on a large repository.
+    let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
+    let task_states = super::task_details::states_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(|id| id.as_str())),
+    )?;
+    let published = super::project_adoption::published_in(conn, &ids)?;
+    let owners = super::task_ownership::owners_in(conn, &ids)?;
     for task in tasks {
-        let started = super::project_adoption::task_started_or_published_in(conn, &task.id)?;
-        let state = super::durable::task_state_in(conn, &task.id)?;
+        let state = *task_states
+            .get(&task.id)
+            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
+        let owned = owners.contains_key(&task.id);
+        // Started as `task_started_or_published_in` defines it.
+        let started = owned || published.contains(&task.id);
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
         if open {
@@ -132,11 +145,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Shipping => SelectionState::Shipping,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
-        let section = TaskSection::of(
-            state,
-            super::task_ownership::owned_in(conn, &task.id)?,
-            task.state.as_deref(),
-        );
+        let section = TaskSection::of(state, owned, task.state.as_deref());
         states.insert(match section {
             TaskSection::Backlog => SelectionState::Backlog,
             TaskSection::Working => SelectionState::Working,

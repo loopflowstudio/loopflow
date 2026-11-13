@@ -462,6 +462,15 @@ from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
+Read changes on a large private repository: `lf task create` takes seconds
+each, so create hundreds in parallel batches with `--request-id` (twelve at a
+time held up), claiming and completing some. For a "before" binary, run
+`--version` on sibling worktrees' `target/debug/lf` and pick a build that
+descends from the branch's base with no `store/migrations/` diff; it reads the
+same private store. Compare `jq -S` output of both binaries, then time them in
+interleaved rounds, since other worktrees' builds make the Machine's load swing.
+`lf server status` prints JSON without `--json`.
+
 ## Waking idle conversations
 
 Real turns need real logins: keep the account's `HOME` (Claude's Keychain login

@@ -34,8 +34,6 @@ mod repositories;
 pub mod rows;
 mod sessions;
 pub mod sqlite;
-#[cfg(test)]
-mod test_database;
 mod token_crypto;
 
 pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};

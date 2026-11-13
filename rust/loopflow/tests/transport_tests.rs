@@ -71,6 +71,12 @@ impl Drop for PausedOwner {
 
 impl Fixture {
     fn new() -> Self {
+        let fixture = Self::uninitialized();
+        support::seed_store(fixture.home.path());
+        fixture
+    }
+
+    fn uninitialized() -> Self {
         // An OSC opcode in an ordinary path is not terminal status.
         let home = tempfile::Builder::new()
             .prefix("lf-7501-")
@@ -6912,7 +6918,7 @@ fn server_registration_migrates_old_job_and_respects_disabled_choice() {
 
 #[test]
 fn server_status_does_not_install_or_create_work() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::uninitialized();
     let result = fixture.command(&["server", "status"]).output().unwrap();
     assert!(
         result.status.success(),

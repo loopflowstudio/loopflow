@@ -18,6 +18,12 @@ struct Machines {
 
 impl Machines {
     fn new() -> Self {
+        let fixture = Self::uninitialized();
+        support::seed_store(&fixture.root.path().join("local"));
+        fixture
+    }
+
+    fn uninitialized() -> Self {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("local");
         let remote = root.path().join("remote");
@@ -506,7 +512,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
 
 #[test]
 fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identity() {
-    let fixture = Machines::new();
+    let fixture = Machines::uninitialized();
     let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
     assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));

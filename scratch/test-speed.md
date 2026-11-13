@@ -70,16 +70,74 @@ The initial viewer run spent 66 s per resume case preparing a CLI; passing
 
 Against one fresh private `LF_HOME`, `target/debug/lf session list --json`:
 1.447 s first open, 0.094 s second, 0.098 s third. Each new home pays replay;
-subsequent processes on that home do not. Fixture images should remove the
-first open's replay while retaining real CLI validation on subsequent opens.
+subsequent processes on that home do not. Repeated paired runs during the
+integration baseline, including image copy and identity refresh in seeded times:
+empty homes 1.578 / 1.554 / 1.537 s, seeded homes 0.204 / 0.182 / 0.292 s
+(medians 1.554 → 0.204 s). The seed itself took 0.006 s. CLI validation remains
+real. These probes used Python sqlite3 only to reproduce the Rust fixture copy;
+the committed fixtures share `store/test_database.rs`.
+
+## Integration fixture image (second win)
+
+`tests/support::seed_store` compiles the same test-only copy helper. Account and
+Task fixture registration plus transport, Machine command, Session lifecycle,
+and launch-contract constructors seed before starting their first CLI.
+The server-status and initial unregistered-Machine dispatch proofs use
+uninitialized fixtures. They keep their absence/first-open behavior. Generic environment guards do
+not seed stores, so absence/upgrade proofs keep their original starting point.
+
+Filtered six-thread baseline: 247/247 passed, 313.090 s wall. Totals below are
+**summed test seconds**, not concurrent wall time; no CI speedup is claimed.
+
+| Group | Tests | Before local s | After local s |
+|---|---:|---:|---:|
+| Machine commands | 48 | 325.884 | 272.464 |
+| Session launch contract | 30 | 202.828 | 159.677 |
+| Session lifecycle | 41 | 330.047 | 329.797 |
+| Transport (non-SSH) | 128 | 893.027 | 756.319 |
+
+Command: `cargo nextest run -p loopflow --test transport_tests --test integration --test session_lifecycle_tests --test session_launch_contract -E '(binary(transport_tests) - test(ssh_shells::)) | test(machine_commands::) | binary(session_lifecycle_tests) | binary(session_launch_contract)' --test-threads 6`.
+The first after-run exposed the Machine dispatch proof's dependence on an
+uninitialized local store: the diagnostic for an initialized store differs.
+Its fixture now starts uninitialized; expectations stay unchanged. The full
+Machine-command rerun passed all 48 tests; the table uses that run's times.
+The after-run passed the other 203 tests, including all four documentation checks.
+Session lifecycle total was flat; individual process-heavy timings varied in both
+directions, so this is not evidence of a whole-group speedup there.
+
+Use inherited `LF_*` unset, `< /dev/null`, and
+`LOOPFLOW_TEST_LF=$PWD/target/debug/lf`. The after-run also includes
+`test(documented_commands::)` for the fixture guidance in `tests/README.md`.
+
+## Cleanup finding
+
+After the two filtered transport runs, ten `target/debug/lf server run` processes
+remained (five per run). `lsof` showed private `lf-7501-*` database homes, all
+already removed by their fixtures. Those ten PIDs were stopped directly.
+Likely missing owners: the resume-JSON new-owner test, the three
+`prepared_thread_json` variants, and the prepared-conversation owner/relay test.
+They start managed conversations without a `MachineServer` guard. Add guards
+and check that a transport run leaves no fixture server alive. This is a fixture
+cleanup defect; no product correctness failure has been established.
 
 ## Next work
 
-1. Store image win validated and ready to commit; continue with integration.
-2. Seed integration fixture homes from the same image; measure filtered
-   transport and integration groups before/after.
-3. Work down slow groups: transport fixed sleeps, native Linear runner's
+1. Store and integration image wins implemented; fmt passed.
+   Clippy found a duplicated module include in the library test crate; the
+   shared helper now compiles only through `test_support`, without a second
+   `store` module. The image equivalence/isolation check and named bind test
+   passed again (1.327 s / 0.169 s, serial); `cargo clippy --all-targets -- -D warnings` passed.
+   Further focused validation: 107/107 passed in 117.684 s, including all 55
+   Task graph launch tests, all 48 Machine commands, and all four quiet native
+   runner variants. These are the baseline for any further runner changes.
+2. Work down slow groups: transport fixed sleeps, native Linear runner's
    60 s idle wait, repeated TestRepo Git setup, redundant lifecycle checks.
+   Transport candidates measured after fixture seeding: obsolete detached-limit
+   integration test duplicates config parsing plus held-conversation lifetime;
+   20 identical shell lifecycle iterations; a 61 s grace-expiry wait that can be
+   exercised directly through the host request handler with a dropped timestamp.
+   Codex quiet-runner baseline: 65.720 s (60 s is idle waiting); Claude variants
+   use 1 s for the same quiet-before-turn assertion.
    Do not shorten waits that are the behavior being exercised without replacing
    their coverage. No tests deleted yet; no product bug identified yet.
 

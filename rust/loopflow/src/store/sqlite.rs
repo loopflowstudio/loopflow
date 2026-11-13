@@ -225,7 +225,7 @@ pub(crate) struct TaskWorktreeOwnership {
 /// Copy only into a fresh fixture; reopening must retain its writes and schema.
 #[cfg(test)]
 fn copy_test_store(path: &Path) -> StoreResult<()> {
-    super::test_database::copy(path)
+    crate::test_support::test_database::copy(path)
         .map_err(|error| StoreError::InvalidData(format!("copy test store: {error}")))
 }
 

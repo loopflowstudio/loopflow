@@ -1,5 +1,5 @@
 //! Typed preferences, preserving source authority until an invocation is selected.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -165,9 +165,20 @@ pub(crate) fn preference_parts<'a, 'b>(parts: &'a [&'b str]) -> Result<&'a [&'b 
 pub fn parse_value(key: &str, text: &str) -> Result<Value, LoadError> {
     let path = preference_path(key)?;
     let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    let value: Value = serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
+    let mut value: Value =
+        serde_yaml_ng::from_str(text).map_err(|error| invalid(error.to_string()))?;
+    if path[0] == "agents" {
+        _list_agents(&mut value);
+    }
     validate_value(&path, &value)?;
     Ok(value)
+}
+
+/// `agents: claude,codex` is the list `[claude, codex]`.
+fn _list_agents(value: &mut Value) {
+    if let Some(list) = value.as_str() {
+        *value = Value::Sequence(super::agent_list(list).map(Value::from).collect());
+    }
 }
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
@@ -181,8 +192,8 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| invalid("agent needs harness[:model]"))?;
-        // A fallback may list the agents a step falls through to; a choice
-        // names one.
+        // The retired `default_agent: claude,codex` spelling still reads
+        // until LOO-875 removes it.
         if path[0] == "default_agent" {
             for entry in super::agent_list(agent) {
                 validate_agent_policy(entry)?;
@@ -191,8 +202,23 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             validate_agent_policy(agent)?;
         }
     }
+    let mut normalized = value.clone();
+    if path[0] == "agents" {
+        _list_agents(&mut normalized);
+        let entries = normalized
+            .as_sequence()
+            .ok_or_else(|| invalid("agents needs a list, such as claude,codex"))?;
+        for entry in entries {
+            validate_agent_policy(
+                entry
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| invalid("agents entries need harness[:model]"))?,
+            )?;
+        }
+    }
     let mut check = super::catalog::defaults();
-    insert(&mut check, path, value.clone());
+    insert(&mut check, path, normalized);
     let parsed = serde_yaml_ng::from_value::<Config>(check)
         .map_err(|error| invalid(format!("{}: {error}", path.join("."))))?;
     if let Some(model) = &parsed.claude.model {
@@ -580,6 +606,47 @@ fn _filter_file_settings(
     });
 }
 
+/// What to write instead of the retired `default_agent: claude,codex`, when
+/// `value` is that spelling. LOO-875 deletes this with the spelling.
+pub(crate) fn old_default_agent_warning(value: &str) -> Option<String> {
+    let entries: Vec<&str> = super::agent_list(value).collect();
+    let first = entries.first().filter(|_| value.contains(','))?;
+    Some(format!(
+        "default_agent: {value} is the old spelling; write agents: [{}] and default_agent: {first}",
+        entries.join(", ")
+    ))
+}
+
+/// Read the retired `default_agent: claude,codex` as `agents: [claude, codex]`
+/// with `default_agent: claude`, and say where to write the replacement.
+/// LOO-875 deletes this once `agents` has shipped.
+fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
+    let Some(list) = values
+        .get("default_agent")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let Some(warning) = old_default_agent_warning(&list) else {
+        return;
+    };
+    // One read resolves a file several times; say it once per file.
+    static WARNED: std::sync::Mutex<BTreeSet<String>> = std::sync::Mutex::new(BTreeSet::new());
+    if WARNED
+        .lock()
+        .expect("warned files lock")
+        .insert(locator.to_owned())
+    {
+        super::reader::warn(std::path::Path::new(locator), None, &warning);
+    }
+    let entries: Vec<Value> = super::agent_list(&list).map(Value::from).collect();
+    values.insert("default_agent".into(), entries[0].clone());
+    if !values.contains_key("agents") {
+        values.insert("agents".into(), Value::Sequence(entries));
+    }
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
@@ -733,6 +800,10 @@ pub fn resolve_layers(
                         && super::catalog::definition(key).is_some()
                 })
             });
+            if let Some(agents) = map.get_mut("agents") {
+                _list_agents(agents);
+            }
+            _split_agent_list(map, &candidate.locator);
         }
         let mut flat = Vec::new();
         leaves(&values, &mut Vec::new(), &mut flat);
@@ -823,18 +894,39 @@ pub fn resolve_layers(
             }
         }
     }
-    // Config keeps the two authored keys distinct. Inspection's effective agent
-    // includes both classes, with every fallback below every explicit choice.
-    let mut agent = explanations
-        .get("default_agent")
-        .cloned()
-        .unwrap_or(EffectiveSetting {
-            value: Value::Null,
-            candidates: Vec::new(),
-        });
-    if let Some(choices) = explanations.remove("agent") {
-        agent.value = choices.value;
-        agent.candidates.extend(choices.candidates);
+    // `default_agent` leads only a list that ranks no higher than it by
+    // source, then scope, then target: a higher `agents` is the whole order.
+    // The sole installed harness ranks below every authored list.
+    let rank = |key: &str| {
+        let winner = explanations.get(key)?.candidates.last()?;
+        Some((winner.source, winner.scope, winner.target.clone()))
+    };
+    let outranked = !config.agents.is_empty() && rank("default_agent") < rank("agents");
+    if outranked {
+        config.default_agent = None;
+    }
+    // Config keeps the three authored keys distinct. Inspection's effective
+    // agent includes them all: the list lowest, then every fallback, then
+    // every explicit choice.
+    let mut agent = EffectiveSetting {
+        value: config
+            .agent_order()
+            .first()
+            .map_or(Value::Null, |agent| agent.as_str().into()),
+        candidates: Vec::new(),
+    };
+    for key in ["agents", "default_agent", "agent"] {
+        agent.candidates.extend(
+            explanations
+                .get(key)
+                .into_iter()
+                .flat_map(|setting| &setting.candidates)
+                .filter(|candidate| {
+                    candidate.source != ConfigSource::Builtin
+                        || (key == "default_agent" && config.default_agent.is_some())
+                })
+                .cloned(),
+        );
     }
     explanations.insert("agent".into(), agent);
     for (key, setting) in &mut explanations {
@@ -846,6 +938,11 @@ pub fn resolve_layers(
             .iter()
             .rposition(|candidate| candidate.value.as_sequence().is_some_and(Vec::is_empty));
         let last = setting.candidates.len().saturating_sub(1);
+        let list = setting
+            .candidates
+            .iter()
+            .rposition(|candidate| candidate.key == "agents")
+            .filter(|_| !config.agents.is_empty());
         for (index, candidate) in setting.candidates.iter_mut().enumerate() {
             candidate.reason = if super::catalog::definition(key).is_some_and(|definition| {
                 definition.lifecycle == super::catalog::Lifecycle::Inactive
@@ -857,6 +954,17 @@ pub fn resolve_layers(
                 } else {
                     "contributes"
                 }
+            } else if key == "agent" && Some(index) == list {
+                // The list in force; it selects when no default_agent leads it.
+                if config.agent.is_some() {
+                    "unused: an agent choice pins one provider"
+                } else if config.default_agent.is_none() {
+                    "selected"
+                } else {
+                    "contributes"
+                }
+            } else if key == "agent" && candidate.key == "default_agent" && outranked {
+                "unused: a higher agents list is the whole order"
             } else if index == last && !setting.value.is_null() {
                 "selected"
             } else if key == "agent" && candidate.key == "default_agent" && config.agent.is_some() {
@@ -1037,6 +1145,153 @@ mod tests {
             value: serde_yaml_ng::from_str(text).unwrap(),
         }
     }
+    #[test]
+    fn agents_orders_what_a_fallback_moves_through() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let order = |layers: &[ConfigDeclarations], skill: Option<&Skill>| {
+            resolve_layers(layers, skill).unwrap().config.agent_order()
+        };
+        let personal = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: [codex, claude]\nskills: {implement: {default_agent: claude}}",
+        );
+        // The list outranks the sole installed harness.
+        assert_eq!(
+            order(std::slice::from_ref(&personal), None),
+            ["codex", "claude"]
+        );
+        let implement = Skill::named("implement");
+        assert_eq!(
+            order(std::slice::from_ref(&personal), Some(&implement)),
+            ["claude", "codex"]
+        );
+        // A narrower list replaces the wider one whole; precedence is unchanged.
+        let repo = layer(
+            ConfigSource::Repository,
+            SettingScope::Repository,
+            "agents: [pi]",
+        );
+        assert_eq!(order(&[personal.clone(), repo], None), ["codex", "claude"]);
+        let wave = layer(
+            ConfigSource::Personal,
+            SettingScope::Wave,
+            "agents: [claude]",
+        );
+        assert_eq!(order(&[personal.clone(), wave], None), ["claude"]);
+        // A default_agent leads only a list that ranks no higher than it.
+        let fallback = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: [claude, codex]\ndefault_agent: claude\nskills: {review: {agents: [codex]}, compress: {default_agent: codex}}",
+        );
+        assert_eq!(
+            order(std::slice::from_ref(&fallback), None),
+            ["claude", "codex"]
+        );
+        assert_eq!(
+            order(
+                std::slice::from_ref(&fallback),
+                Some(&Skill::named("compress"))
+            ),
+            ["codex", "claude"]
+        );
+        let review = Skill::named("review");
+        let narrowed = resolve_layers(std::slice::from_ref(&fallback), Some(&review)).unwrap();
+        assert_eq!(narrowed.config.agent_order(), ["codex"]);
+        assert_eq!(narrowed.settings["agent"].value.as_str(), Some("codex"));
+        let reasons = |resolved: &super::ResolvedSettings| -> Vec<(String, String)> {
+            resolved.settings["agent"]
+                .candidates
+                .iter()
+                .map(|candidate| (candidate.key.clone(), candidate.reason.clone()))
+                .collect()
+        };
+        assert!(reasons(&narrowed).contains(&(
+            "default_agent".into(),
+            "unused: a higher agents list is the whole order".into()
+        )));
+        assert!(reasons(&narrowed).contains(&("agents".into(), "selected".into())));
+        let codex_wave = layer(
+            ConfigSource::Personal,
+            SettingScope::Wave,
+            "agents: [codex]",
+        );
+        assert_eq!(order(&[fallback, codex_wave], None), ["codex"]);
+        let pinned = layer(
+            ConfigSource::Repository,
+            SettingScope::Repository,
+            "agent: pi",
+        );
+        let resolved = resolve_layers(&[personal, pinned], None).unwrap();
+        assert_eq!(resolved.config.agent_order(), ["pi"]);
+        let reasons: Vec<_> = resolved.settings["agent"]
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.key.as_str(), candidate.reason.as_str()))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                ("agents", "unused: an agent choice pins one provider"),
+                ("agent", "selected")
+            ]
+        );
+    }
+
+    #[test]
+    fn the_comma_spelling_of_default_agent_reads_as_agents() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let old = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "default_agent: 'codex, claude:opus'",
+        );
+        let resolved = resolve_layers(&[old], None).unwrap();
+        assert_eq!(resolved.config.default_agent.as_deref(), Some("codex"));
+        assert_eq!(resolved.config.agents, ["codex", "claude:opus"]);
+        assert_eq!(resolved.settings["agent"].value.as_str(), Some("codex"));
+        assert_eq!(
+            resolved.settings["agent"].selected().unwrap().key,
+            "default_agent"
+        );
+    }
+
+    #[test]
+    fn a_comma_string_is_the_agents_list() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let saved = super::parse_value("agents", "claude:opus, codex").unwrap();
+        assert_eq!(
+            saved,
+            serde_yaml_ng::from_str::<Value>("[claude:opus, codex]").unwrap()
+        );
+        assert!(super::parse_value("skill.review.agents", "codex").is_ok());
+        assert!(super::parse_value("agents", "claude,not a harness").is_err());
+        let file = layer(
+            ConfigSource::Personal,
+            SettingScope::Global,
+            "agents: codex,claude\nskills: {implement: {agents: claude}}",
+        );
+        assert!(super::validate_preferences(&file.value, false, true).is_ok());
+        let order = |skill: Option<&Skill>| {
+            resolve_layers(std::slice::from_ref(&file), skill)
+                .unwrap()
+                .config
+                .agent_order()
+        };
+        assert_eq!(order(None), ["codex", "claude"]);
+        assert_eq!(order(Some(&Skill::named("implement"))), ["claude"]);
+    }
+
+    #[test]
+    fn saving_the_comma_spelling_of_default_agent_names_the_replacement() {
+        assert_eq!(
+            super::old_default_agent_warning("claude,codex").unwrap(),
+            "default_agent: claude,codex is the old spelling; write agents: [claude, codex] and default_agent: claude"
+        );
+        assert_eq!(super::old_default_agent_warning("claude"), None);
+    }
+
     fn occurrence() -> Skill {
         let mut skill = Skill::named("implement");
         skill.occurrence = Some(Box::new(OccurrenceSettings {

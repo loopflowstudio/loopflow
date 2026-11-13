@@ -165,6 +165,34 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   `relay` moves only Task-less Sessions and returns `()`. Clippy clean;
   integration `machine_commands::` resume/move tests 4 passed.
 
+## Next implement direction (concept review, 2026-11-13, second)
+
+1. **The Machine a Task leaves records the move.** Today `relay_task`
+   (`session_move.rs`) records `sent` on the Machine running the command,
+   after the send returns. When the Task is owned on a third Machine and the
+   SSH reply is lost, the source has stopped the Graph, pushed and completed
+   the conversation, and no Machine holds the payload; a repeat sends the
+   Task without its conversation. Move the record into `moves::send_task`:
+   it writes `sent` with the payload before returning, and a repeat naming
+   the same target returns that payload instead of leaving again (it
+   already reuses the claim through `sent_before`). `relay_task` drops its
+   own `resent` lookup and asks the source either way; the local case is the
+   same call. `lf task status` on the source shows `sent, not arrived`.
+   Test: a send whose reply is dropped, repeated, delivers the conversation.
+2. **Resuming a Task conversation on M carries that conversation.**
+   `move_session` runs `move_task`, which carries `task_conversation`
+   (primary, else latest input). Resuming a second open conversation of the
+   Task on M moves the Task with the other one and the forwarded resume finds
+   no such Session on M. `send_task` takes the conversation to carry
+   (`None` = `task_conversation`); `move_session` passes the named Session.
+   It arrives as the Task's primary on M through `ensure_primary_session`.
+3. **Swift mirrors `TaskOwner.person_id`.** Rust's `TaskOwner` gained a
+   required nullable `person_id` on the wire; `swift/Loopflow/Models/WaveWorkMap.swift`
+   `TaskOwner` still decodes only `person`, `person_key`, `machine`. Add
+   `personId` with `decode(String?.self, forKey:)`, extend the Swift fixture
+   test that reads `tests/fixtures/dto/` owners, and update the `personKey`
+   comment (display fallback, not the identity). Replaces Remaining item 1.
+
 ## Remaining
 
 Every Machine-local column the brief names (`worktree`, `branch`,
@@ -174,8 +202,7 @@ reader left outside the pre-`task_checkouts` fallbacks in
 `read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
 remaining mentions are pre-migration fixtures.
 
-1. Swift does not decode `person_id` (Codable ignores it); add it where the
-   app shows owners.
+1. Direction 3 above.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -202,14 +229,5 @@ remaining mentions are pre-migration fixtures.
   `ensure_task` opens a Task conversation in the repository when the Task has
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
-- **Which conversation goes.** A Task move carries the Task's chosen
-  conversation (`task_conversation`: primary, else most recent human input).
-  Resuming a second open conversation of the same Task on M moves the Task
-  with the other one, and the forwarded resume finds no such Session on M.
-  Rare (two open conversations on one Task); not handled.
-- **Lost reply from a remote source.** When the coordinator sends a Task owned
-  on a third Machine and the SSH reply is lost, the source has completed the
-  conversation and no `task_moves` payload exists anywhere; a repeat sends the
-  Task without it. The deleted marker branch covered this.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.

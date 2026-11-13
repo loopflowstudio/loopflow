@@ -25,7 +25,7 @@ fn read_kind(value: &str) -> StoreResult<OwnershipKind> {
     serde_json::from_value(value.into()).map_err(Into::into)
 }
 
-fn log_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<TaskOwnershipEntry>> {
+pub(super) fn log_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<TaskOwnershipEntry>> {
     Ok(logs_in(conn, std::slice::from_ref(task))?
         .remove(task)
         .unwrap_or_default())
@@ -500,7 +500,9 @@ fn require_writer_in(
 ) -> StoreResult<MachineId> {
     let local = local_machine_in(conn)?;
     let (writer, _) = writer_in(conn, task, me)?;
-    if writer != local {
+    // Until a move this Machine began arrives, its target has not taken the
+    // Task: the next entry, which ends the move, is written here.
+    if writer != local && super::task_moves::move_in_flight_in(conn, task)?.is_none() {
         return Err(StoreError::InvalidAuthority(format!(
             "Task {task} ownership is written on Machine {writer}; run the command there"
         )));
@@ -1392,5 +1394,20 @@ mod tests {
         store.record_move_sent(&task, "{}").unwrap();
         let sent = store.task_move_in_flight(&task).unwrap().unwrap();
         assert!(matches!(sent.stage, MoveStage::Sent { .. }));
+
+        // Claimed back here before it arrives, the move is over; its row stays.
+        store.claim_task(&task).unwrap().unwrap();
+        assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
+        let moves: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM task_moves WHERE task_id=?1 AND state='sent'",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(moves, 1);
     }
 }

@@ -268,18 +268,23 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     if route.machine_id == store.local_machine()?.id {
         return Ok(None);
     }
+    let ownership = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Claim { .. } | TaskCommand::Unassign { .. }
+        })
+    );
+    // A move from here that has not arrived leaves the next entry here.
+    if ownership && store.task_move_in_flight(&route.task_id)?.is_some() {
+        return Ok(None);
+    }
     if !crate::journal::request::active()
         && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
     {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
     let mut forwarded = args[1..].to_vec();
-    if matches!(
-        cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Claim { .. } | TaskCommand::Unassign { .. }
-        })
-    ) {
+    if ownership {
         // Ownership needs no checkout on the writer; name the exact Task in place.
         match forwarded.iter().rposition(|arg| arg == selector) {
             Some(position) => forwarded[position] = route.task_id.to_string(),
@@ -341,6 +346,21 @@ pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> 
     };
     let route = store.task_execution_route(&task)?;
     Ok((route.machine_id != store.local_machine()?.id).then_some(route))
+}
+
+/// The other Machine that writes the Task's ownership: where it runs, unless
+/// a move from here has not arrived, which leaves the next entry here.
+pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    let Some(route) = remote_task(selector)? else {
+        return Ok(None);
+    };
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    Ok(store
+        .task_move_in_flight(&route.task_id)?
+        .is_none()
+        .then_some(route))
 }
 
 /// What `lf <args> --json` prints on the route's Machine: its API's value.

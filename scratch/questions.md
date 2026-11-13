@@ -368,28 +368,23 @@ which names mini from the claim on.
 - Compress: nothing to cut; `runs_here` is one ownership check, and the two
   forwarded-move tests share only their command line.
 
-## Next implement direction (concept review, 2026-11-13): a later entry ends a move
+## Done (2026-11-13, twelfth pass): a later entry ends a move
 
-The ownership log decides where a Task runs, and `hand_back` already states
-the rule for a move: until it arrives, nothing may follow its claim in the log.
-Read the other way, any later entry ends the move. Today only
-`begin_task_move` and `hand_back` delete `task_moves` rows, so a move sent to
-a mini that never answers stays in flight after `lf task claim MTG-321` (or
-`unassign`, or an ingested later claim) on the laptop: status and both lists
-keep printing `Moving to mini …: sent, not arrived` with a retry line over
-"runs here", `runs_here` still routes `lf --machine mini task move …` to the
-laptop, and the retry delivers the old payload, whose marker mini then takes
-in as the owner while the laptop also claims it.
-
-Direction: keep `claim_id` on the `sent` row (`record_move_sent` stops nulling
-it; stage comes from `state`), and have `task_move_in_flight` return a move
-only while its claim is the Task's last ownership entry (one savepoint read,
-like `hand_back`'s check). No new writer deletes rows; a superseded row is
-history. machines.md Failures gains one sentence: if mini is gone, `lf task
-claim MTG-321` on the laptop takes the Task back and ends the move. Test: send
-to an unreachable mini, claim on the laptop, then `lf task status` shows no
-move line and `lf task move MTG-321 --machine mini` begins a new move rather
-than redelivering. Check the `task_moves_task` plan for the added join.
+A `sent` row keeps `claim_id` (schema CHECK: leaving or sent ⇔ claim);
+`task_move_in_flight` returns a move only while its claim is the Task's last
+ownership entry (savepoint: row, then `log_in`). No new deleter; a superseded
+row stays. Found while testing: the move claim names mini, so mini was the
+ownership writer and `lf task claim` on the laptop was refused in the store and
+forwarded to mini twice (`work_route::forward`, `engine::task::ownership`).
+While a move from here is in flight, `require_writer_in` writes here and both
+routes keep claim/unassign here (`work_route::remote_ownership_writer`);
+execution routing (`writer_in`) is unchanged. machines.md gained the sentence.
+`query_plans` counts `task_moves` and `task_ownership` as growing and measures
+`idx_task_ownership_task` (895 entries / 880 Tasks on this Machine's store).
+- Checks: lib `query_plans::` + `task_ownership::` + `task_moves::` 23 passed;
+  integration `machine_commands::` 57 passed (incl.
+  `claiming_a_task_back_ends_a_move_that_never_arrived`);
+  `documented_commands::` 4 passed; clippy clean.
 
 ## Open questions (each reversible; the simpler option is built)
 

@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 15] = [
+const GROWING: [&str; 17] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
@@ -25,6 +25,8 @@ const GROWING: [&str; 15] = [
     "steers",
     "task_checkouts",
     "task_events",
+    "task_moves",
+    "task_ownership",
     "task_primary_sessions",
     "task_retirements",
     "task_ship_events",
@@ -41,11 +43,13 @@ const GROWING: [&str; 15] = [
 /// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
 /// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
 /// stopped Tasks backfill to, 216 of them naming a Process.
+/// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events');
+         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
+         'task_ownership');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
@@ -125,6 +129,8 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_root','838 1'),
          ('task_checkouts','task_checkouts_branch','838 2'),
          ('task_checkouts','task_checkouts_parent_pr','11 2'),
+         ('task_ownership','idx_task_ownership_task','895 1'),
+         ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
          ('task_ship_events','task_ship_events_task','396 3 1'),
          ('task_ship_events','task_ship_events_process','216 1'),
@@ -471,6 +477,19 @@ mod tests {
                 .unwrap();
             store.task_shipping(&task).unwrap();
             store.reset_ship_restarts(&task).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn a_move_in_flight_reads_its_row_and_the_ownership_log_by_index() {
+        let (_home, store, task, _viewer) = fixture();
+        let mini = crate::durable::MachineId::new();
+        store.begin_task_move(&task, &mini).unwrap();
+        store.record_move_sent(&task, "{}").unwrap();
+        let traced = statements(&store, || {
+            assert!(store.task_move_in_flight(&task).unwrap().is_some());
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

@@ -22,8 +22,10 @@ BEGIN SELECT RAISE(ABORT, 'Task ownership entries are append-only'); END;
 -- that claim and, once its Graph stopped, the step it stopped, so running the
 -- same move again carries on leaving. A sent move keeps what it sent until it
 -- arrives, so running it again delivers it without stopping, committing or
--- pushing again. The target records a move it `checked` it can take, naming
--- where it comes from, so the same command run there asks that Machine for it.
+-- pushing again. Either is in flight only while its claim is the Task's last
+-- ownership entry; a later entry ends it and the row stays. The target
+-- records a move it `checked` it can take, naming where it comes from, so the
+-- same command run there asks that Machine for it.
 CREATE TABLE task_moves (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -32,13 +34,13 @@ CREATE TABLE task_moves (
     state TEXT NOT NULL CHECK (state IN ('checked', 'leaving', 'sent', 'arrived')),
     -- When the move was checked or began; when it arrived, once arrived.
     at INTEGER NOT NULL,
-    -- The ownership entry claiming the Task for the target, while leaving.
+    -- The ownership entry claiming the Task for the target, until it arrives.
     claim_id TEXT,
     -- The Graph the move stopped, while leaving.
     stopped TEXT CHECK (stopped IS NULL OR json_valid(stopped)),
     -- The move as sent, while it has not arrived.
     payload TEXT CHECK (payload IS NULL OR json_valid(payload)),
-    CHECK ((state = 'leaving') = (claim_id IS NOT NULL)),
+    CHECK ((state IN ('leaving', 'sent')) = (claim_id IS NOT NULL)),
     CHECK (state = 'leaving' OR stopped IS NULL),
     CHECK ((state = 'sent') = (payload IS NOT NULL))
 );

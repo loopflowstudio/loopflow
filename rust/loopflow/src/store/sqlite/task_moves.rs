@@ -2,9 +2,11 @@
 //! then `sent` when this Machine sent it, until it arrives. A leaving move
 //! keeps its claim and the Graph it stopped, so running the same move again
 //! carries on leaving; a sent move keeps what it sent, so running it again
-//! delivers it without stopping, committing or pushing again. The target
+//! delivers it without stopping, committing or pushing again. A move is in
+//! flight only while its claim is the Task's last ownership entry: a later
+//! claim, unassign or move ends it, and its row stays as history. The target
 //! records a move it `checked` it can take, naming the Machine it comes from.
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{MachineId, OwnershipEntryId, TaskId};
 use crate::store::rows::now_unix;
@@ -51,7 +53,7 @@ impl SqliteStore {
     pub(crate) fn record_move_sent(&self, task: &TaskId, payload: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE task_moves SET state='sent',claim_id=NULL,stopped=NULL,payload=?2
+            "UPDATE task_moves SET state='sent',stopped=NULL,payload=?2
              WHERE task_id=?1 AND state='leaving'",
             params![task.as_str(), payload],
         )?;
@@ -110,7 +112,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE task_moves SET state='arrived',at=?3,payload=NULL,from_machine_id=?4
+            "UPDATE task_moves SET state='arrived',at=?3,claim_id=NULL,payload=NULL,
+                 from_machine_id=?4
              WHERE task_id=?1 AND to_machine_id=?2 AND state IN ('checked','sent')",
             params![task.as_str(), to.as_str(), now_unix(), from.as_str()],
         )?;
@@ -146,34 +149,54 @@ impl SqliteStore {
             .unwrap_or(false))
     }
 
-    /// The Task's move this Machine began that has not arrived. At most one
-    /// is in flight: beginning or sending a move replaces the last.
+    /// The Task's move this Machine began that has not arrived, while its
+    /// claim is still the Task's last ownership entry. At most one is in
+    /// flight: beginning a move replaces the last.
     pub fn task_move_in_flight(&self, task: &TaskId) -> StoreResult<Option<MoveInFlight>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT to_machine_id,at,claim_id,stopped,payload FROM task_moves
-                 WHERE task_id=?1 AND state IN ('leaving','sent') ORDER BY id DESC LIMIT 1",
-                [task.as_str()],
-                |row| {
-                    let stage = match row.get::<_, Option<String>>(2)? {
-                        Some(claim_id) => MoveStage::Leaving {
-                            claim_id: OwnershipEntryId::from_raw(claim_id),
-                            stopped: row.get(3)?,
-                        },
-                        None => MoveStage::Sent {
-                            payload: row.get(4)?,
-                        },
-                    };
-                    Ok(MoveInFlight {
-                        to_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
-                        at: row.get(1)?,
-                        stage,
-                    })
-                },
-            )
-            .optional()?)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let read = conn.savepoint()?;
+        move_in_flight_in(&read, task)
     }
+}
+
+/// [`SqliteStore::task_move_in_flight`] on `conn`, inside the caller's
+/// savepoint or transaction.
+pub(super) fn move_in_flight_in(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<Option<MoveInFlight>> {
+    let moving = conn
+        .query_row(
+            "SELECT to_machine_id,at,state,claim_id,stopped,payload FROM task_moves
+             WHERE task_id=?1 AND state IN ('leaving','sent') ORDER BY id DESC LIMIT 1",
+            [task.as_str()],
+            |row| {
+                let claim_id = OwnershipEntryId::from_raw(row.get::<_, String>(3)?);
+                let stage = match row.get::<_, String>(2)?.as_str() {
+                    "leaving" => MoveStage::Leaving {
+                        claim_id: claim_id.clone(),
+                        stopped: row.get(4)?,
+                    },
+                    _ => MoveStage::Sent {
+                        payload: row.get(5)?,
+                    },
+                };
+                let moving = MoveInFlight {
+                    to_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
+                    at: row.get(1)?,
+                    stage,
+                };
+                Ok((claim_id, moving))
+            },
+        )
+        .optional()?;
+    let Some((claim_id, moving)) = moving else {
+        return Ok(None);
+    };
+    let last = super::task_ownership::log_in(conn, task)?
+        .pop()
+        .map(|entry| entry.id);
+    Ok((last == Some(claim_id)).then_some(moving))
 }
 
 #[cfg(test)]
@@ -244,8 +267,8 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,payload)
-                 VALUES(?1,?2,?3,'sent',1,'{}')",
+                "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,claim_id,payload)
+                 VALUES(?1,?2,?3,'sent',1,'claim','{}')",
                 [task.as_str(), laptop.as_str(), third.as_str()],
             )
             .unwrap();

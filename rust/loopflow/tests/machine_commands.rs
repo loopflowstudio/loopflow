@@ -2473,6 +2473,68 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Runs on mini since"), "{status}");
 }
 
+/// Mini never took the Task it was sent, and the laptop claims it back: the
+/// move is over, so status shows none and moving it again begins a new move
+/// instead of delivering the old one.
+#[test]
+fn claiming_a_task_back_ends_a_move_that_never_arrived() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "claimed-back");
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+
+    let claimed = fixture
+        .command(&["task", "claim", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&claimed);
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(!status.contains("Moving to mini"), "{status}");
+
+    executable(&remote_lf, &working);
+    fs::write(worktree.join("notes.txt"), "edited after claiming\n").unwrap();
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "claimed-back:notes.txt"]
+        ),
+        "edited after claiming"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
 /// The laptop sent the Task and mini fell over receiving it. The same move
 /// addressed to mini from the laptop (`lf --machine mini task move X --machine
 /// mini`) runs on the laptop, which holds what it sent, and delivers it.

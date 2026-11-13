@@ -3,9 +3,10 @@
 - Peer planning import reads `planning_client::connected(repo)` once for the
   imported repository and passes it to every reasserted Task; touched Tasks are
   assumed to belong to that repository.
-- `hand_back_in` takes planning connections read before `BEGIN` for the Tasks
-  the ended Machine held; a Task claimed there between that read and `BEGIN`
-  loads its connection inside the write (rare race, correct result).
+- Rental hand-back retries the whole transaction when a new claim arrived
+  after preflight: roll back, read planning connections outside the write lock,
+  then recheck current ownership. No config fallback runs inside the write.
+  This replaces the rare-race exception recorded at 9efef8b859.
 - `apply_linear_observation` takes `planning_connected` from its callers. Both
   callers return early unless it is true, so production always passes `true`;
   the tests pass `false`, which is what the old in-store read returned for
@@ -31,8 +32,8 @@
 
 `OwnershipFacts` still holds: everything an ownership write needs from outside
 the store is read before `BEGIN` and passed in as values. The merge of
-87f0e3c60a touched no ownership code; no product choice is open. The one
-remaining in-write config load is `hand_back_in`'s fallback, listed above.
+87f0e3c60a touched no ownership code; no product choice is open. The remaining
+in-write fallback found in that review is removed below.
 
 `owners_in` now calls `machine_names_in` (7cde745b90), so the
 declarations-to-names mapping lives once. `cargo test -p loopflow --lib
@@ -57,3 +58,13 @@ The gate below ran at e282904291, before that commit.
 ## Docs
 
 - Changed doc: `docs/dev/data.md` (write-transaction rules: config loads before `BEGIN`). No user-facing behavior changes, so no README or guide edits.
+
+## Stale-preflight repair (uncommitted at 9efef8b859)
+
+Delete — do not maintain: the in-write `planning_connected_in` fallback in
+`hand_back_in`. It now returns `None` when a held Task lacks planning facts,
+and `set_rental_state` rolls back and retries. `RepoFacts` and
+`rentals::tasks_held_in` stay removed.
+
+- `cargo test -p loopflow --lib store::sqlite::rentals::tests::`: 10/10 pass after compress, including `hand_back_writes_nothing_when_a_claim_lacks_planning_facts`.
+- Gate reruns the rental/ownership suites and clippy; results above predate this repair.

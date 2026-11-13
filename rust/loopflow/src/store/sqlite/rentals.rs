@@ -511,23 +511,32 @@ impl SqliteStore {
         state: RentalState,
     ) -> StoreResult<(Rental, Vec<TaskId>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let planning = match (&rental_in(&conn, id)?.machine_id, state.is_live()) {
-            (Some(machine), false) => super::task_ownership::held_planning_in(&conn, machine)?,
-            _ => Default::default(),
-        };
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let ended = (!state.is_live()).then(now_unix);
-        tx.execute(
-            "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
-            params![id.as_str(), state.as_str(), ended],
-        )?;
-        let rental = rental_in(&tx, id)?;
-        let returned = match (&rental.machine_id, state.is_live()) {
-            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine, &planning)?,
-            _ => Vec::new(),
-        };
-        tx.commit()?;
-        Ok((rental, returned))
+        loop {
+            let planning = match (&rental_in(&conn, id)?.machine_id, state.is_live()) {
+                (Some(machine), false) => super::task_ownership::held_planning_in(&conn, machine)?,
+                _ => Default::default(),
+            };
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let ended = (!state.is_live()).then(now_unix);
+            tx.execute(
+                "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
+                params![id.as_str(), state.as_str(), ended],
+            )?;
+            let rental = rental_in(&tx, id)?;
+            let returned = match (&rental.machine_id, state.is_live()) {
+                (Some(machine), false) => {
+                    match super::task_ownership::hand_back_in(&tx, machine, &planning)? {
+                        Some(tasks) => tasks,
+                        // A claim arrived after preflight: roll back, read its
+                        // planning configuration outside the write lock, retry.
+                        None => continue,
+                    }
+                }
+                _ => Vec::new(),
+            };
+            tx.commit()?;
+            return Ok((rental, returned));
+        }
     }
 
     /// Reachable and added: the rental is running as this Machine.

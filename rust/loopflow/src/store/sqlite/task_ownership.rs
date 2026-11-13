@@ -799,21 +799,21 @@ pub(super) fn reassert_in(
 
 /// Hand each open Task an ended Machine still owns to this Machine, in its
 /// owner's name: the claim survives and the log keeps the Machine as history.
-/// `planning` comes from [`held_planning_in`]; a Task claimed on the Machine
-/// since then loads its planning connection here.
+/// `planning` comes from [`held_planning_in`]. Returns `None` without writing
+/// if a new claim needs planning facts; roll back and read them before retrying.
 pub(super) fn hand_back_in(
     conn: &Connection,
     machine: &MachineId,
     planning: &HashMap<TaskId, bool>,
-) -> StoreResult<Vec<TaskId>> {
+) -> StoreResult<Option<Vec<TaskId>>> {
     let local = local_machine_in(conn)?;
     let held = held_in(conn, machine)?;
+    if held.iter().any(|held| !planning.contains_key(&held.task)) {
+        return Ok(None);
+    }
     let mut tasks = Vec::with_capacity(held.len());
     for HeldTask { task, owner, .. } in held {
-        let planning_connected = match planning.get(&task) {
-            Some(&connected) => connected,
-            None => planning_connected_in(conn, &task)?,
-        };
+        let planning_connected = planning[&task];
         append_in(
             conn,
             &task,
@@ -825,7 +825,7 @@ pub(super) fn hand_back_in(
         )?;
         tasks.push(task);
     }
-    Ok(tasks)
+    Ok(Some(tasks))
 }
 
 impl SqliteStore {

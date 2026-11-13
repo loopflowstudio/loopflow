@@ -505,3 +505,16 @@ DTO, documented-command, and static-analysis checks.
 - `cargo fmt`, `git diff --check`, `lf context` — clean; scratch remains within both limits (implement). Wider checks remain with gate.
 - Compress: status and the unknown-target refusal on mini print the same check and retry (`task_ownership::describe_check`); the refusal's own wording is gone. `cargo test -p loopflow --test integration -- machine_commands::a_move_retried_on_its_target machine_commands::a_move_checked_on_its_target` — 2 passed. Gate runs clippy and `documented_commands::` (machines.md).
 - Realign after syncing main (727b18f633, which seeds fixture stores in `machine_commands.rs`): the same two tests — 2 passed. The demo direction in `scratch/demo-decision.md` is built; nothing remains from it.
+
+## Concept review of the target check (2026-11-13): nothing to change
+
+Mini's status holds three separate facts: owner (the log as it reached mini),
+checkout, and the check (`task_moves` `checked`, the one row that names the
+source when mini's log has neither the laptop's claim nor the move's). The
+line's verb matches the laptop's `Checked mini: it can take X`. No open choice.
+
+Read from code, not run: after a source claim-back, the printed retry on mini
+asks the laptop, which has no move in flight and begins a new one. It then
+prints `Carrying on X's move`, and the check line stays until a later check or
+arrival even when mini's log shows the Task elsewhere. Qa runs it if that
+path matters; `a_move_checked_on_its_target…claim_back` stops at status.

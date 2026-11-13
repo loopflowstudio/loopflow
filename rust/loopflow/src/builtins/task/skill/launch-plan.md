@@ -92,11 +92,12 @@ on, supersedes, verified by). In lists, put the ID first: `[Task ID or PR number
 For designed work, pick a Graph that continues the design: the one asked for,
 else the Wave chapter's recommendation.
 
-`--graph pursue` runs kickoff → write-docs → implement → refresh → loop-or-next
-→ concept-review → loop-or-next → compress → qa → loop-or-next → pr-publish.
-Refresh is sync → realign. Each decider's Iterate goes back to implement;
-compression runs only after the first two deciders advance, immediately before
-QA. The third's Advance publishes and ends the pursuit. `code` starts with
+`--graph pursue` runs kickoff → write-docs → implement → concept-review
+→ refresh → loop-or-next → compress → qa → loop-or-next → pr-publish.
+Refresh is sync → realign. Both deciders' Iterate goes back to implement.
+The first decides after concept review and reconciliation; compression runs
+only after it advances, immediately before QA. The second's Advance publishes
+and ends the pursuit. `code` starts with
 that pursuit; `feature` drafts the design first;
 both land an accepted PR through `ship`. Design review and the demo are
 interactive steps: `lf task run <issue>` stops before each, the person takes

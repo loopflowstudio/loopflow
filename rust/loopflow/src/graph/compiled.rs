@@ -615,10 +615,9 @@ mod tests {
                     "kickoff",
                     "write-docs",
                     "implement",
+                    "concept-review",
                     "sync",
                     "realign",
-                    "loop-or-next",
-                    "concept-review",
                     "loop-or-next",
                     "compress",
                     "qa",
@@ -626,7 +625,7 @@ mod tests {
                     "pr-publish",
                 ],
                 &[],
-                3,
+                2,
             ),
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
@@ -698,10 +697,9 @@ mod tests {
                 "kickoff",
                 "write-docs",
                 "implement",
+                "concept-review",
                 "sync",
                 "realign",
-                "loop-or-next",
-                "concept-review",
                 "loop-or-next",
                 "compress",
                 "qa",
@@ -718,9 +716,8 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[5].key, &implement),
-                (compiled.steps[7].key, &implement),
-                (compiled.steps[10].key, &implement)
+                (compiled.steps[6].key, &implement),
+                (compiled.steps[9].key, &implement)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.

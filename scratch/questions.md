@@ -307,7 +307,7 @@ Left for gate, collected from the passes above:
 `two_people`, `transport_tests`, `session_lifecycle_tests`, `served_reads`,
 `task_graph_launch_tests` (fixtures changed); a nextest run that answers the
 parallel-stall question below. `server::schema::tests::` (ninth pass) and
-`documented_commands::` (tenth pass, before compress only rewrapped machines.md)
+`documented_commands::` (eleventh pass, after its machines.md edit)
 passed after their last relevant change; gate's suite run covers them again.
 
 ## QA (2026-11-13)

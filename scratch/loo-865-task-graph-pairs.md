@@ -149,7 +149,7 @@ record and never changes; the table stays append-only. Tasks are never deleted
 
 ## Status
 
-Built and gated; left: CI (`binary(session_launch_contract)`, full matrix). PR #1910.
+Built, gated, CI green on PR #1910 (2026-11-13, merge-clean against origin/main). Nothing remains in code; the open choice in `scratch/questions.md` (no Graph backfill on adoption) stands.
 
 - Store copy 2026-11-13: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's `task_graph_pairs` over every Task, then the branch migration. 2,141 pairs on 434 Tasks both ways, 0 differences, 0 Graphs with more than one Task.
 - QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished`, `plan.list` latest Graph, `lf graph list --processes`/`--taskless`/`--for-task` and `lf task status` agree with `graph_processes.task_id`.

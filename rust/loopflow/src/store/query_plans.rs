@@ -36,6 +36,8 @@ const GROWING: [&str; 15] = [
 /// changes and 3,362 steers (November 13). Indexes newer than that store's
 /// schema were built and analyzed on a copy of it.
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
+/// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
+/// `task_checkouts_parent_pr` its 11 parent PRs;
 /// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
@@ -120,6 +122,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_worktree','838 1'),
          ('task_checkouts','task_checkouts_root','838 1'),
          ('task_checkouts','task_checkouts_branch','838 2'),
+         ('task_checkouts','task_checkouts_parent_pr','11 2'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
@@ -129,11 +132,13 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('tasks','idx_tasks_worktree','1219 10'),
          ('tasks','sqlite_autoindex_tasks_1','1219 1'),
          ('tasks','sqlite_autoindex_tasks_2','1219 1'),
+         ('tasks','tasks_abandoned','259 1'),
          ('tasks','tasks_abandoned_checkout','179 179'),
          ('tasks','tasks_branch','1219 10'),
          ('tasks','tasks_checkout_machine','1224 612'),
          ('tasks','tasks_checkout_root','858 401 1'),
          ('tasks','tasks_parent_pr','11 2'),
+         ('tasks','tasks_primary_session','319 1'),
          ('tasks','tasks_ship_process','168 1'),
          ('waves','idx_waves_active_locator','61 2 2 1'),
          ('waves','idx_waves_parent','61 61'),

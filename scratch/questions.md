@@ -119,7 +119,8 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 - Drop list for LOO-877: `tasks.ship_lf_process_id`, `ship_restarts`,
   `ship_approved_lf_process_id`, `ship_stopped_at`, `ship_stopped_lf_process_id`,
   `ship_stopped_person`, index `tasks_ship_process`; `machines.pool`,
-  `cost_usd`, `expires_at`. (`shipped_at` stays.)
+  `cost_usd`, `expires_at`; index `tasks_parent_pr` (main's, on the old
+  column). (`shipped_at` stays.)
 
 ## Done (2026-11-13, fourth pass): Task primary Sessions
 
@@ -278,6 +279,17 @@ target-change reset were unreachable: `send_task` always begins the move
 (`begin_task_move`) before sending, and a sent repeat returns early. Lib
 `task_moves::` + `task_ownership::` 14 passed; integration `machine_commands::`
 move tests 11 passed; clippy clean.
+
+## Sync onto main 0afb302f52 (2026-11-13)
+
+`query_plans.rs` combines main's refreshed measurements and foreign-key checks
+with `task_checkouts` and `task_primary_sessions`. Main's stricter checks
+needed: `task_checkouts_parent_pr` (partial, in the migration) for the
+foreign-key lookup main indexes as `tasks_parent_pr`; MEASURED rows for
+`tasks_abandoned` (259 abandoned Tasks on the Machine store) and the retained
+`tasks_primary_session` (`319 1`, dropped in the merge),
+`task_checkouts_parent_pr` (`11 2`). Lib `store::query_plans::` 9 and
+`store::migrations::` 131 passed. `tasks_parent_pr` joins LOO-877's drop list.
 
 ## Remaining
 

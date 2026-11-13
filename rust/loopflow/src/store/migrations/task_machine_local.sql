@@ -70,6 +70,8 @@ WHERE worktree IS NOT NULL AND worktree != ''
 CREATE UNIQUE INDEX task_checkouts_worktree ON task_checkouts(worktree);
 CREATE INDEX task_checkouts_root ON task_checkouts(rtrim(worktree,'/'));
 CREATE INDEX task_checkouts_branch ON task_checkouts(branch);
+CREATE INDEX task_checkouts_parent_pr ON task_checkouts(parent_pr_id)
+    WHERE parent_pr_id IS NOT NULL;
 -- The retirement sweep finds abandoned Tasks that still have a checkout here.
 CREATE INDEX tasks_abandoned ON tasks(id) WHERE abandoned_at IS NOT NULL;
 

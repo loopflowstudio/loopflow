@@ -1998,3 +1998,65 @@ fn list_primary_selects_current_scopes_before_paging() {
         );
     });
 }
+
+/// An owner from an earlier build cannot write the advanced store, so its
+/// record can keep a viewer that left. Reading the Session asks the owner: one
+/// that holds no viewer, or never answers, reads unviewed.
+#[test]
+fn a_stale_viewer_record_reads_unviewed_unless_the_owner_says_it_is_held() {
+    use std::io::{Read, Write};
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let store = crate::journal::process_ledger().unwrap();
+    let owner = store.test_lf_process();
+    let live = crate::journal::OsProcess::read(std::process::id())
+        .unwrap()
+        .unwrap();
+    store.test_session("stale", &crate::session_record::new_artifact_key());
+    {
+        let conn = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+        conn.execute(
+            "UPDATE processes SET pid=?2,os_started_at=?3,viewed=1 WHERE id=?1",
+            rusqlite::params![owner, live.pid, live.started_at],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET transport_lf_process_id=?1,agent_process_id=?1",
+            [&owner],
+        )
+        .unwrap();
+    }
+    let unviewed = || {
+        super::viewed_summary(&store, "stale")
+            .unwrap()
+            .unwrap()
+            .unviewed
+    };
+    let endpoint = crate::transport::endpoint(&owner).unwrap();
+    // The owner answers whether a viewer holds it, and otherwise says nothing.
+    let answer = |held: Option<bool>| {
+        let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0; 256];
+            let _ = socket.read(&mut request);
+            if let Some(held) = held {
+                let reply = serde_json::json!({"answers":0,"seq":0,"kind":"controlled","held":held,"ready":null});
+                let payload = reply.to_string().into_bytes();
+                let mut frame = vec![0x01];
+                frame.extend((payload.len() as u32).to_be_bytes());
+                frame.extend(payload);
+                socket.write_all(&frame).unwrap();
+            }
+            // Keep the connection until the reader gives up on it.
+            let _ = socket.read_to_end(&mut Vec::new());
+        })
+    };
+    for (held, expected) in [(Some(true), false), (Some(false), true), (None, true)] {
+        let owner = answer(held);
+        assert_eq!(unviewed(), expected, "held={held:?}");
+        std::fs::remove_file(&endpoint).unwrap();
+        owner.join().unwrap();
+    }
+    // An owner with no socket at all holds no viewer either.
+    assert!(unviewed());
+}

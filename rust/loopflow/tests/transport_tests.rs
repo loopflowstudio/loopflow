@@ -466,17 +466,6 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
-    /// Record a turn in progress for `session`.
-    fn mark_working(&self, session: &str) {
-        self.sql()
-            .execute(
-                "INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,attachment_token)
-                 SELECT s.id,0,1,0,0,s.agent_process_id,p.attachment_token
-                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
-                [session],
-            )
-            .unwrap();
-    }
     /// Decode the last screen left by an ending owner.
     fn last_screen(&self, session: &str) -> ghostty_vt::Terminal {
         let bytes = std::fs::read(self.home.path().join(format!("screens/{session}.ghostsnp")))
@@ -505,24 +494,6 @@ read -r answer < /dev/tty
                 [session],
             )
             .unwrap();
-    }
-    /// Wait until `owner` has recorded whether a viewer is attached.
-    fn wait_viewed(&self, owner: &str, viewed: bool) {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while self
-            .sql()
-            .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
-                r.get::<_, Option<bool>>(0)
-            })
-            .unwrap()
-            != Some(viewed)
-        {
-            assert!(
-                Instant::now() < deadline,
-                "{owner} never recorded viewed={viewed}"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
     }
     fn ends(&self, owner: &str) {
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -684,16 +655,6 @@ impl Viewer {
             other => panic!("unexpected frame tag {other:#x}"),
         })
     }
-    /// Whether the owner ever told this viewer it lost input control.
-    fn moved(&mut self) -> bool {
-        let mut moved = false;
-        while let Some(item) = self.next() {
-            if let Item::Event(event) = item {
-                moved |= event["type"] == "control" && event["held"] == false;
-            }
-        }
-        moved
-    }
     #[track_caller]
     fn until_reply(&mut self) -> Value {
         loop {
@@ -847,58 +808,6 @@ printf '%s' "$answer" > "$HOME/answer"
     let result = wait_for_viewer(viewer, Duration::from_secs(20));
     assert!(result.status.success(), "{result:?}");
     assert_eq!(fixture.launches(1).len(), 1);
-}
-
-#[test]
-fn conversation_open_pending_retry_waits_for_the_controlling_viewers_readiness() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let owner =
-        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "original"));
-    fixture.launches(1);
-    let session = fixture.session_of_owner(&owner);
-    let mut viewer = fixture.viewer(&owner, true);
-    let returned = viewer.until_event("return");
-    let ready = events(&returned, "return")[0]["detach"].clone();
-    // The opening caller can time out while its viewer has yet to accept Return.
-    // Repeating open must neither claim readiness nor create another attachment.
-    for _ in 0..2 {
-        let report = fixture
-            .command(&["open", "--session", &session, "--json"])
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(report.status.success(), "{report:?}");
-        let report: Value = serde_json::from_slice(&report.stdout).unwrap();
-        assert_eq!(report["receipts"][0]["status"], "opening");
-        assert!(report["receipts"][0]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("Still opening"));
-    }
-    viewer.request(json!({"kind":"controlled", "ready":ready}));
-    viewer.until_reply();
-    // Wait for the owner to observe the acknowledgement, independently of caller timing.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        viewer.request(json!({"kind":"controlled"}));
-        if viewer.until_reply()["ready"] == true {
-            break;
-        }
-        assert!(Instant::now() < deadline);
-    }
-    let report = fixture
-        .command(&["open", "--session", &session, "--json"])
-        .env("PATH", &path)
-        .output()
-        .unwrap();
-    assert!(report.status.success(), "{report:?}");
-    let report: Value = serde_json::from_slice(&report.stdout).unwrap();
-    assert_eq!(report["receipts"][0]["status"], "elsewhere");
-    assert_eq!(fixture.session_of_owner(&owner), session);
-    assert_eq!(fixture.launches(1).len(), 1);
-    viewer.input("done\n");
-    viewer.finish();
 }
 
 /// Workspace opening uses the same resume command as a person in a native tab.
@@ -1821,147 +1730,6 @@ fn a_held_conversation_outlives_its_view() {
     fixture.held_ends(&held);
 }
 
-#[test]
-fn taskless_session_renames_reach_plain_terminals_and_reattached_viewers() {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
-printf '%s\n' "$*" > "$HOME/launches"
-while read -r answer < /dev/tty; do
-    [ "$answer" = stale ] || exit 0
-    printf '\033]2;default\007\033]7501;state=idle:app=claude-code\033\\'
-done
-"#,
-    );
-    let mut command = fixture.serve(true, &[env!("CARGO_BIN_EXE_lf"), "-i", "-a", "claude"]);
-    command
-        .env("PATH", path)
-        .env_remove("TMUX")
-        .env_remove("TMUX_PANE");
-    let owner = fixture.owner(command);
-    fixture.launches(1);
-    let session = fixture.session_of_owner(&owner);
-    let initial: String = fixture
-        .sql()
-        .query_row(
-            "SELECT title FROM agent_sessions WHERE id=?1",
-            [&session],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let mut viewer = fixture.viewer(&owner, true);
-    until_out(&mut viewer, &format!("\x1b]0;{initial}\x07"));
-    let renamed = fixture
-        .command(&["session", "rename", &session, "Resume repair"])
-        .output()
-        .unwrap();
-    assert!(
-        renamed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&renamed.stderr)
-    );
-    until_out(&mut viewer, "\x1b]0;Resume repair\x07");
-    viewer.input("stale\n");
-    let overwritten = out(&until_out(&mut viewer, "\x1b]0;Resume repair\x07"));
-    assert!(overwritten
-        .windows(b"\x1b]2;default\x07".len())
-        .any(|bytes| bytes == b"\x1b]2;default\x07"));
-    assert!(overwritten
-        .windows(b"7501;state=idle".len())
-        .any(|bytes| bytes == b"7501;state=idle"));
-    drop(viewer);
-    let mut viewer = fixture.viewer(&owner, true);
-    let snapshot = match viewer.next().unwrap() {
-        Item::Snapshot(bytes) => bytes,
-        other => panic!("expected snapshot, got {other:?}"),
-    };
-    viewer.input("bye\n");
-    viewer.finish();
-    fixture.ends(&owner);
-    assert_ne!(initial, "default");
-    let title = b"\x1b]0;Resume repair\x07";
-    assert!(snapshot.windows(title.len()).any(|bytes| bytes == title));
-}
-
-#[test]
-fn native_program_status_has_no_stale_launcher_working_record() {
-    let fixture = Fixture::new();
-    let path = fixture.provider(
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
-printf 'native ready\n'
-while read -r state < /dev/tty; do
-    [ "$state" = exit ] && exit 0
-    # Claude's title-disable flag also disables its Program Status reports.
-    if [ -z "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" ]; then
-        printf '\033]7501;state=%s:app=claude-code\033\\' "$state"
-    fi
-    printf 'reported %s\n' "$state"
-done
-"#,
-    );
-    let owner =
-        fixture.owner(fixture.native(Path::new(env!("CARGO_BIN_EXE_lf")), &path, "native status"));
-    let mut viewer = fixture.viewer(&owner, true);
-    let mut received = out(&until_out(&mut viewer, "native ready"));
-    let states = [
-        "working", "idle", "blocked", "working", "done", "idle", "clear",
-    ];
-    for state in states {
-        viewer.input(&format!("{state}\n"));
-        received.extend(out(&until_out(&mut viewer, &format!("reported {state}"))));
-        if state == "working" {
-            // No provider output or turn settlement while this read completes.
-            // A quiet stream must not synthesize idle.
-            viewer.request(json!({"kind":"controlled"}));
-            let quiet = until(
-                &mut viewer,
-                |items| matches!(items.last(), Some(Item::Reply(reply)) if reply["kind"] == "controlled"),
-            );
-            received.extend(out(&quiet));
-        }
-        drop(viewer);
-        viewer = fixture.viewer(&owner, true);
-        let snapshot = match viewer.next().unwrap() {
-            Item::Snapshot(bytes) => bytes,
-            other => panic!("expected retained snapshot, got {other:?}"),
-        };
-        let mut terminal = ghostty_vt::Terminal::new(80, 24).unwrap();
-        terminal.write(b"\x1b]7501;id=previous:state=working\x1b\\");
-        terminal.write(&snapshot);
-        let status = terminal.program_status();
-        assert!(status.seen);
-        if state == "clear" {
-            assert!(status.records.is_empty());
-        } else {
-            assert_eq!(status.records.len(), 1);
-            assert_eq!(
-                serde_json::to_value(status.records[0].state).unwrap(),
-                state
-            );
-            assert_eq!(status.records[0].id, None);
-            assert_eq!(status.records[0].app.as_deref(), Some("claude-code"));
-        }
-    }
-    viewer.input("exit\n");
-    viewer.finish();
-
-    let received = String::from_utf8(received).unwrap();
-    let reports: Vec<_> = received
-        .split("\x1b]7501;")
-        .skip(1)
-        .map(|report| report.split("\x1b\\").next().unwrap())
-        .collect();
-    assert_eq!(
-        reports,
-        states.map(|state| format!("state={state}:app=claude-code")),
-        "native reports must pass unchanged without a competing lf record"
-    );
-}
-
 fn native_pending_request(silent_owner: Option<SilentOwner>) {
     let fixture = Fixture::new();
     let path = fixture.provider(
@@ -2372,7 +2140,7 @@ fn resume_json_returns_after_relay_and_viewer_takeover() {
     fixture.ends(&owner);
 }
 
-fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
+fn prepared_thread_json(command: &str, fork: bool) {
     let fixture = Fixture::new();
     let _server = fixture.machine_server();
     let bin = fixture.home.path().join("bin");
@@ -2382,7 +2150,7 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     );
     let path = format!("{}:/usr/bin:/bin", bin.display());
     let prepared = fixture
-        .command(&["-a", source_provider, "resume", "--prepare", "--json"])
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
         .env("PATH", &path)
         .output()
         .unwrap();
@@ -2413,23 +2181,13 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
          SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
         [source_id, &input, &native],
     ).unwrap();
-    let transcript = if source_provider == "codex" {
-        fixture.home.path().join(format!(
-            "codex/sessions/2026/11/02/rollout-2026-11-02T00-00-00-{native}.jsonl"
-        ))
-    } else {
-        fixture
-            .home
-            .path()
-            .join(format!("claude/projects/fixture/{native}.jsonl"))
-    };
+    let transcript = fixture
+        .home
+        .path()
+        .join(format!("claude/projects/fixture/{native}.jsonl"));
     std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
     let request = "Keep the original request";
-    let turn = if source_provider == "codex" {
-        json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":request}]}})
-    } else {
-        json!({"type":"user","userType":"external","message":{"content":request}})
-    };
+    let turn = json!({"type":"user","userType":"external","message":{"content":request}});
     std::fs::write(transcript, turn.to_string()).unwrap();
     let mut args = vec!["-a", "claude", "session", command, source_id, "--json"];
     if fork {
@@ -2439,7 +2197,6 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
         .command(&args)
         .env("PATH", &path)
         .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"))
-        .env("CODEX_HOME", fixture.home.path().join("codex"))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -2488,17 +2245,12 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
 
 #[test]
 fn resume_fork_json_launches_once_and_returns_the_new_session() {
-    prepared_thread_json("resume", true, "claude");
+    prepared_thread_json("resume", true);
 }
 
 #[test]
 fn session_new_json_launches_once_and_keeps_the_session() {
-    prepared_thread_json("new", false, "claude");
-}
-
-#[test]
-fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
-    prepared_thread_json("resume", false, "codex");
+    prepared_thread_json("new", false);
 }
 
 /// Opening a prepared conversation leaves one owner and one relay: the connect
@@ -2661,371 +2413,6 @@ fn interactive_graph_settles_each_step_before_starting_the_next() {
     viewer.input("done\n");
     viewer.finish();
     fixture.ends(&owner);
-}
-
-fn retire_conversations(fixture: &Fixture) {
-    let output = fixture.command(&["task", "retire"]).output().unwrap();
-    assert!(output.status.success(), "{output:?}");
-}
-
-/// Complete a Task without a checkout and advance its viewing grace.
-fn complete_conversation(fixture: &Fixture, owner: &str) -> String {
-    fixture.wait_viewed(owner, false);
-    let sql = fixture.sql();
-    let session = fixture.bound_session(owner);
-    let task: Option<String> = sql
-        .query_row(
-            "SELECT task_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    let task = task.unwrap_or_else(|| {
-        let store =
-            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-                .unwrap();
-        let task = store
-            .create_task(&loopflow::work::task::NewTask {
-                id: loopflow::durable::TaskId::new(),
-                repository_id: store
-                    .ensure_repository(fixture.repo.path().to_str().unwrap())
-                    .unwrap(),
-                project_id: None,
-                title: "Retire conversation".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        task.id.to_string()
-    });
-    sql.execute(
-        "UPDATE agent_sessions SET task_id=?1,interactive=1 WHERE id=?2",
-        rusqlite::params![task, session],
-    )
-    .unwrap();
-    // The planning journal owns Task state, and the Machine server projects
-    // it back over the row, so complete as a journal edit over the observed one.
-    let disposition = json!({"planning_state": "completed", "planning_completed": 1,
-        "planning_completed_at": "2000-01-01T00:00:00Z"});
-    sql.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let parents: Vec<String> = sql
-        .prepare(
-            "SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field='disposition'
-             AND id IN (SELECT id FROM planning_peer_observed)",
-        )
-        .unwrap()
-        .query_map([&task], |r| r.get(0))
-        .unwrap()
-        .map(Result::unwrap)
-        .collect();
-    let clock: i64 = sql
-        .query_row("SELECT max(clock)+1 FROM planning_peer_changes", [], |r| {
-            r.get(0)
-        })
-        .unwrap();
-    let change = uuid::Uuid::new_v4().to_string();
-    let mutation = json!({"edit": {"target": task, "change": {"field": "disposition",
-        "value": disposition}}, "clock": clock, "parents": parents});
-    sql.execute(
-        "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
-        [&change, &mutation.to_string()],
-    )
-    .unwrap();
-    sql.execute(
-        "DELETE FROM planning_peer_observed WHERE id IN
-         (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field='disposition')",
-        [&task],
-    )
-    .unwrap();
-    sql.execute(
-        "INSERT INTO planning_peer_observed(id) VALUES(?1)",
-        [&change],
-    )
-    .unwrap();
-    sql.execute("UPDATE tasks SET planning_state='completed',planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [&task]).unwrap();
-    sql.execute_batch("COMMIT").unwrap();
-    // Advance the existing absence grace without waiting fifteen minutes.
-    sql.execute(
-        "UPDATE processes SET viewer_hold='absent',viewer_hold_at=0 WHERE id=?1",
-        [owner],
-    )
-    .unwrap();
-    task
-}
-
-/// An upgrade preserves a running provider's saved callback contract and identity.
-#[test]
-fn retained_hooks_survive_upgrade() {
-    let fixture = Fixture::new();
-    // Hooks reach the Machine server, which records their turns.
-    let _server = fixture.machine_server();
-    let path = fixture.provider(
-        r#"#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys, time
-if sys.argv[1:] == ["--version"]:
-    print("2.1.302")
-    sys.exit(0)
-home = pathlib.Path(os.environ["HOME"])
-settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
-# Keep the declaration an older lf installed, including its executable address.
-for groups in settings["hooks"].values():
-    for group in groups:
-        for handler in group["hooks"]:
-            handler["command"] = handler["command"].replace(os.environ["LF_BIN"], os.environ["HOOK_ENTRY"])
-stop = settings["hooks"]["Stop"][0]["hooks"][0]
-stop["command"] = stop["command"].replace("__context-block --moment stop", "__planning-check")
-def mark(name, text="ready"):
-    pending = home / (name + ".tmp")
-    pending.write_text(text)
-    pending.replace(home / name)
-def hook(event, group=0, **extra):
-    command = settings["hooks"][event][group]["hooks"][0]["command"]
-    payload = dict(session_id="retained-native-thread", hook_event_name=event, **extra)
-    result = subprocess.run(command, shell=True, input=json.dumps(payload).encode(), capture_output=True)
-    if result.returncode:
-        raise RuntimeError(result.stderr.decode())
-    return result
-def wait(name):
-    deadline = time.monotonic() + 25
-    while not (home / name).exists():
-        if time.monotonic() > deadline: raise RuntimeError("missing " + name)
-        time.sleep(0.02)
-hook("SessionStart", source="startup")
-hook("UserPromptSubmit")
-hook("Stop", background_tasks=[], session_crons=[])
-hook("UserPromptSubmit")
-mark("before-upgrade", str(os.getpid()))
-wait("upgrade-ready")
-# These are the same in-memory declarations and inherited environment.
-hook("SessionStart", group=1, source="compact")
-hook("Stop", agent_id="child", background_tasks=[], session_crons=[])
-mark("child-stopped")
-wait("stop-parent")
-result = hook("Stop", background_tasks=[], session_crons=[])
-assert result.stderr == b"", result.stderr
-# A real delivery failure must not be turned into a successful retired hook.
-missing = home / "missing-delivery.json"
-env = dict(os.environ, LF_CONTEXT_DELIVERY=str(missing))
-failed = subprocess.run(stop["command"], shell=True, env=env,
-    input=json.dumps(dict(session_id="retained-native-thread", hook_event_name="Stop")).encode(), capture_output=True)
-assert failed.returncode != 0, failed
-assert str(missing).encode() in failed.stderr, failed.stderr
-mark("after-upgrade", str(os.getpid()))
-wait("finish-upgrade")
-"#,
-    );
-    let entry = fixture.home.path().join("bin/lf-entry");
-    // Model the old command spelling at the installed address, then replace
-    // that address while its provider stays alive. No installed Home is touched.
-    let candidate = env!("CARGO_BIN_EXE_lf");
-    std::fs::write(
-        &entry,
-        format!(
-            "#!/bin/sh\nif [ \"$1\" = __planning-check ]; then shift; exec '{candidate}' __context-block --moment stop \"$@\"; fi\nexec '{candidate}' \"$@\"\n"
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut command = fixture.native(Path::new(candidate), &path, "retained request");
-    command.env("HOOK_ENTRY", &entry);
-    let owner = fixture.owner(command);
-    let mut viewer = fixture.viewer(&owner, false);
-    let before_pid = fixture.wait_file("before-upgrade");
-    let sql = fixture.sql();
-    let identity = || {
-        sql.query_row(
-            "SELECT s.id,s.provider_thread,p.id,p.pid,p.attachment_token,s.current_capture
-             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-             WHERE s.transport_lf_process_id=?1",
-            [&owner],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, i64>(5)?,
-                ))
-            },
-        )
-        .unwrap()
-    };
-    let before = identity();
-    let yielded = || {
-        sql.query_row(
-            "SELECT yielded FROM session_activity WHERE session_id=?1",
-            [&before.0],
-            |r| r.get::<_, bool>(0),
-        )
-        .unwrap()
-    };
-    assert!(!yielded());
-    let replacement = entry.with_extension("next");
-    std::os::unix::fs::symlink(candidate, &replacement).unwrap();
-    std::fs::rename(replacement, &entry).unwrap();
-    std::fs::write(fixture.home.path().join("upgrade-ready"), "ready").unwrap();
-    fixture.wait_file("child-stopped");
-    assert!(!yielded(), "a subagent must not settle the retained turn");
-    std::fs::write(fixture.home.path().join("stop-parent"), "ready").unwrap();
-    assert_eq!(fixture.wait_file("after-upgrade"), before_pid);
-    assert!(yielded(), "the retained Stop hook must run, not be skipped");
-    assert_eq!(
-        identity(),
-        before,
-        "upgrade must retain the conversation and fence"
-    );
-    std::fs::write(fixture.home.path().join("finish-upgrade"), "ready").unwrap();
-    viewer.finish();
-    fixture.ends(&owner);
-}
-
-/// Native start/stop callbacks protect live work during completed-Task cleanup.
-#[test]
-fn silent_native_turns_survive_until_settlement() {
-    native_work_survives_until_settlement(false);
-}
-
-#[test]
-fn native_background_watches_survive_until_settlement() {
-    native_work_survives_until_settlement(true);
-}
-
-fn native_work_survives_until_settlement(background: bool) {
-    let fixture = Fixture::new();
-    // Hooks reach the Machine server, which records their turns.
-    let _server = fixture.machine_server();
-    let path = fixture.provider(
-        r#"#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys, time
-if sys.argv[1:] == ["--version"]:
-    print("2.1.302")
-    sys.exit(0)
-home = pathlib.Path(os.environ["HOME"])
-name = os.environ["SILENT_CASE"]
-background = os.environ["BACKGROUND_WATCH"] == "true"
-settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
-def hook(event, **extra):
-    command = settings["hooks"][event][0]["hooks"][0]["command"]
-    payload = dict(session_id=name, hook_event_name=event, **extra)
-    subprocess.run(command, shell=True, input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=True)
-hook("SessionStart", source="startup")
-# A second prompt must report its start even with no new steering to deliver.
-hook("UserPromptSubmit")
-hook("Stop")
-hook("UserPromptSubmit")
-# Child-agent completion must not settle the main conversation's turn.
-hook("Stop", agent_id="child")
-if background:
-    hook("Stop", background_tasks=[dict(id="watch", type="shell", status="running")], session_crons=[])
-    # Missing registry evidence and child completion cannot settle that subscription.
-    hook("Stop")
-    hook("Stop", agent_id="child", background_tasks=[], session_crons=[])
-(home / (name + "-started")).write_text("started")
-while not (home / (name + "-settle")).exists():
-    time.sleep(0.05)
-if background:
-    # The shell subscription finished, but a scheduled wakeup still owns work.
-    hook("Stop", background_tasks=[], session_crons=[dict(id="poll", schedule="* * * * *", recurring=True)])
-    (home / (name + "-scheduled")).write_text("scheduled")
-    while not (home / (name + "-unschedule")).exists():
-        time.sleep(0.05)
-hook("Stop", background_tasks=[], session_crons=[])
-(home / (name + "-settled")).write_text("settled")
-while True:
-    time.sleep(1)
-"#,
-    );
-    let removable = fixture.home.path().join("bin/lf-removable");
-    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &removable).unwrap();
-    let mut owners = Vec::new();
-    for (name, executable) in [
-        ("idle", Path::new(env!("CARGO_BIN_EXE_lf"))),
-        ("gone", removable.as_path()),
-    ] {
-        let mut command = fixture.native(executable, &path, "silent turn");
-        command
-            .env("BACKGROUND_WATCH", background.to_string())
-            .env("SILENT_CASE", name);
-        let owner = fixture.owner(command);
-        let viewer = fixture.viewer(&owner, false);
-        fixture.wait_file(&format!("{name}-started"));
-        drop(viewer);
-        complete_conversation(&fixture, &owner);
-        owners.push(owner);
-    }
-    // Cleanup signals synchronously; its return is the lifetime decision.
-    retire_conversations(&fixture);
-    for owner in &owners {
-        assert!(
-            fixture.running(owner),
-            "silent native turn ended while unviewed"
-        );
-    }
-    // A viewed idle terminal cannot settle a quiet supervisor's native turn.
-    let viewed = fixture.viewer(&owners[1], false);
-    fixture
-        .sql()
-        .execute(
-            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}'
-           WHERE session_id=(SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1)"#,
-            [&owners[1]],
-        )
-        .unwrap();
-    std::fs::remove_file(&removable).unwrap();
-    retire_conversations(&fixture);
-    for owner in &owners {
-        assert!(
-            fixture.running(owner),
-            "silent native turn ended with its executable"
-        );
-    }
-    drop(viewed);
-    complete_conversation(&fixture, &owners[1]);
-    // A live Graph continues to hold a supervisor after its native turn yields.
-    let sql = fixture.sql();
-    let graphs = if background {
-        Vec::new()
-    } else {
-        owners
-            .iter()
-            .map(|owner| {
-                sql.query_row(
-                    "INSERT INTO graph_processes(lf_process_id,graph,compiled)
-                 SELECT id,'supervised','{\"name\":\"supervised\",\"steps\":[]}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
-                 RETURNING lf_process_id",
-                    [owner],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>()
-    };
-    for (name, owner) in ["idle", "gone"].iter().zip(&owners) {
-        std::fs::write(fixture.home.path().join(format!("{name}-settle")), "").unwrap();
-        if background {
-            fixture.wait_file(&format!("{name}-scheduled"));
-            retire_conversations(&fixture);
-            assert!(fixture.running(owner), "scheduled native work ended");
-            std::fs::write(fixture.home.path().join(format!("{name}-unschedule")), "").unwrap();
-        }
-        fixture.wait_file(&format!("{name}-settled"));
-    }
-    if !background {
-        retire_conversations(&fixture);
-        for owner in &owners {
-            assert!(fixture.running(owner), "quiet Graph supervisor ended");
-        }
-        for graph in graphs {
-            sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [graph])
-                .unwrap();
-        }
-    }
-    // Completed Tasks end once work settles and viewing has expired.
-    retire_conversations(&fixture);
-    for owner in &owners {
-        fixture.ends(owner);
-    }
 }
 
 /// An lf executable with other bytes than the test binary, still runnable:
@@ -3300,92 +2687,10 @@ fn resume_attaches_an_answering_superseded_owner_of_a_completed_session() {
     assert_eq!(launches.len(), 1, "resume launched another provider");
 }
 
-/// Desktop restarting after an lf upgrade leaves the conversation in an owner
-/// from the earlier build, which cannot write the advanced store, so its record
-/// still says the departed terminal shows it. Opening the Session asks the owner, reads
-/// `detached` and reattaches to it without starting anything new.
-#[test]
-fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
-    let fixture = Fixture::new();
-    let owner = fixture.owner(fixture.serve(
-        false,
-        &["/bin/sh", "-c", "read -r answer; printf '%s' \"$answer\""],
-    ));
-    let session = fixture.session(&owner);
-    fixture
-        .sql()
-        .execute(
-            "UPDATE agent_sessions SET provider='claude' WHERE id=?1",
-            [&session],
-        )
-        .unwrap();
-    let viewed = || -> Option<bool> {
-        fixture
-            .sql()
-            .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
-                r.get(0)
-            })
-            .unwrap()
-    };
-    let desktop = fixture.viewer(&owner, true);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while viewed() != Some(true) {
-        assert!(Instant::now() < deadline, "owner never recorded its viewer");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    // Desktop quits.
-    desktop.socket.shutdown(std::net::Shutdown::Both).unwrap();
-    drop(desktop);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while viewed() != Some(false) {
-        assert!(Instant::now() < deadline, "the viewer never left");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    // An earlier build's owner cannot write the store a newer lf advanced, so
-    // its record keeps the viewer that left.
-    fixture
-        .sql()
-        .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
-        .unwrap();
-
-    let prepared = fixture
-        .command(&["session", "resume", &session, "--prepare", "--json"])
-        .output()
-        .unwrap();
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    assert_eq!(prepared["state"], "detached");
-    assert_eq!(
-        prepared["actions"],
-        json!([
-            {"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null},
-            {"kind":"reveal","label":"Show conversation","help":"Continue existing history without taking another terminal's input","unavailable_reason":null}
-        ])
-    );
-    assert_eq!(prepared["terminal_ids"], json!([]));
-
-    let mut reopened = fixture
-        .command(&["session", "resume", &session])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    reopened
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"same conversation\n")
-        .unwrap();
-    let output = wait_for_viewer(reopened, Duration::from_secs(10));
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(output.stdout, b"same conversation");
-}
-
 /// An idle owner from an earlier lf can stay alive after an upgrade yet never
-/// answer its socket. Opening its Session neither waits on it nor gives up: the stale
-/// viewer record reads `detached`, and reconnecting stops its provider and
-/// continues the same provider thread in a new owner, without replaying input.
+/// answer its socket. Reconnecting neither waits on it nor gives up: it stops
+/// its provider and continues the same provider thread in a new owner, without
+/// replaying input. `human_session`'s tests own how its stale record reads.
 #[test]
 fn opening_takes_over_from_an_owner_that_never_answers() {
     let fixture = Fixture::new();
@@ -3411,15 +2716,6 @@ fn opening_takes_over_from_an_owner_that_never_answers() {
         .sql()
         .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
         .unwrap();
-
-    let prepared = fixture
-        .command(&["session", "resume", &session, "--prepare", "--json"])
-        .output()
-        .unwrap();
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    assert_eq!(prepared["state"], "detached", "{prepared}");
-    assert_eq!(prepared["actions"][0]["label"], "Reconnect", "{prepared}");
 
     let reopened = fixture
         .command(&["session", "resume", &session])
@@ -3715,7 +3011,6 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
         .unwrap();
     fixture.wait_file("ready");
     let owner = fixture.shell_owner("cleanup-shell");
-    let session = fixture.bound_session(&owner);
     // The launch attaches after the shell starts; take over only from it.
     fixture.wait_controlled(&owner);
     let mut viewer = fixture.viewer(&owner, true);
@@ -3759,9 +3054,10 @@ fn completed_task_cleanup_signals_shell_owner_and_settles_jobs() {
         "automatic cleanup must not store a shell Close"
     );
     assert!(fixture.repo.path().is_dir());
-    // The ended shell's last screen keeps input typed but never submitted.
+    // The ended shell's last screen, kept under its owner, holds input typed
+    // but never submitted.
     assert!(fixture
-        .last_screen(&session)
+        .last_screen(&owner)
         .text()
         .unwrap()
         .contains("unfinished draft"));

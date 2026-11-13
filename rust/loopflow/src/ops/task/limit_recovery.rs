@@ -9,17 +9,15 @@
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::task_execution::task_execution_blockers;
-use crate::store::sqlite::SqliteStore;
+use crate::store::sqlite::{AgentLimitRecovery, SqliteStore};
 use crate::store::StoreResult;
 
 use super::super::error::OpsResult;
 use super::{block_on_task, task_error, task_store};
 
-/// A step of the Task's latest Graph whose Process ended waiting on a limit. It
-/// is where `lf task run` picks up.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// When an ended step can restart and the explicit agent it ran under.
+#[derive(Debug)]
 pub(crate) struct LimitWait {
-    pub step: String,
     pub retry_at: i64,
     /// The explicit agent choice the step ran under.
     pub agent: Option<String>,
@@ -29,6 +27,21 @@ pub(crate) fn waiting_on_limit(
     store: &SqliteStore,
     task: &TaskId,
 ) -> StoreResult<Option<LimitWait>> {
+    let Some((_, recovery)) = ended_step_recovery(store, task)? else {
+        return Ok(None);
+    };
+    Ok(recovery.retry_at.map(|retry_at| LimitWait {
+        retry_at,
+        agent: recovery.agent,
+    }))
+}
+
+/// The latest step of the Task's latest Graph, once its Process has ended,
+/// and how it was getting past a limit.
+pub(crate) fn ended_step_recovery(
+    store: &SqliteStore,
+    task: &TaskId,
+) -> StoreResult<Option<(String, AgentLimitRecovery)>> {
     let Some(graph) = store.task_graphs(task)?.pop() else {
         return Ok(None);
     };
@@ -38,21 +51,16 @@ pub(crate) fn waiting_on_limit(
     if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
-    let Some(recovery) = store.agent_limit_recovery(&step.process.id)? else {
-        return Ok(None);
-    };
-    Ok(recovery.retry_at.map(|retry_at| LimitWait {
-        step: graph.label(step),
-        retry_at,
-        agent: recovery.agent,
-    }))
+    Ok(store
+        .agent_limit_recovery(&step.process.id)?
+        .map(|recovery| (graph.label(step), recovery)))
 }
 
 /// Whether the sweep starts a waiting run again without anyone asking: the
-/// Task is assigned, unfinished, and nothing else still executes for it.
+/// Task is owned by this Machine, unfinished, and nothing else still executes for it.
 /// Status promises an automatic restart only when this holds.
 pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResult<bool> {
-    Ok(store.task_owned(task).map_err(task_error)?
+    Ok(store.task_claimed_here(task).map_err(task_error)?
         && !store.task_state(task).map_err(task_error)?.is_terminal()
         && task_execution_blockers(store, task)?.is_empty())
 }

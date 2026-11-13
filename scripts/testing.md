@@ -41,6 +41,11 @@ Changes to server protocol types or their doc comments also run
 the generated schema; regenerate its checked-in fixture using the command in
 [the server README](../rust/loopflow/src/server/README.md) when it changes.
 
+Server startup or background store maintenance changes also run
+`binary(served_reads)`, including configuration access with an unreadable store.
+Seed corrupt databases before starting SQLite readers or writers; overwriting
+only a live database's main file can leave readable pages in its WAL.
+
 Changes to compile-time embedded files also run
 `cargo package --locked --allow-dirty -p loopflow`. The extracted source archive
 must compile without access to files outside the crate. Server examples shared
@@ -62,6 +67,9 @@ Session while retaining the saved provider thread and completes again on exit.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and held-terminal lifetimes
 exercise writers beyond the changed store module.
+Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_workflow_readable)`
+for Task schema or trigger changes: its missing-column fixture checks that a
+planning read failure still leaves the Wave and stored Workflow readable.
 
 Configuration file loading or filtering changes also run `binary(two_people)`:
 it checks that a shared Wave graph choice reaches another person's Task launch.

@@ -148,20 +148,36 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// A Task run whose every attempt failed with the same error. A shipped Task
-/// stops shipping on it rather than starting the run again later.
+/// A Task run that must stop rather than retry, including when shipping.
 #[derive(Debug, thiserror::Error)]
-#[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
-pub struct RepeatedRunFailure {
-    pub run: String,
-    pub cause: String,
+pub(super) enum TaskRunStopped {
+    #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
+    Repeated { run: String, cause: String },
+    #[error(
+        "the run of {run} stopped on a usage limit at {step}: {cause}; `lf task run {issue}` starts the run again at it"
+    )]
+    Limit {
+        issue: String,
+        run: String,
+        step: String,
+        cause: String,
+    },
+}
+
+impl TaskRunStopped {
+    pub(super) fn cause(&self) -> &str {
+        match self {
+            Self::Repeated { cause, .. } | Self::Limit { cause, .. } => cause,
+        }
+    }
 }
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// start it again while a Graph process fails. Each attempt records its own
-/// GraphProcess beneath this process. A Graph held for a person or a watcher, an
-/// interrupted one, and a launch refused before any Graph started are returned
-/// as they ended. Once someone interrupts the Task, nothing is started again.
+/// retry failed Graphs unless a usage limit stopped them. Each attempt records
+/// its own GraphProcess beneath this process. A Graph held for a person or a
+/// watcher, an interrupted one, and a launch refused before any Graph started
+/// are returned as they ended. Once someone interrupts the Task, nothing is
+/// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
 /// With `release`, a bare run inside its execution owner lets its launcher go
@@ -236,25 +252,38 @@ pub fn run_task_graph_for(
             }
             let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
-        }
-        // A run that ended waiting out a limit starts again at the reset, by
-        // the recovery sweep; starting it now would only wait again.
-        if let Some(wait) = crate::ops::task::limit_recovery::waiting_on_limit(store, &task.id)?
-            .filter(|wait| failed && wait.retry_at > crate::store::rows::now_unix())
-        {
-            eprintln!(
-                "The run of {run} is waiting on a limit until {}; it starts again at {} then.",
-                crate::lf::output::format_time(wait.retry_at),
-                wait.step
-            );
-            return Err(exit_of(status).into());
+            if let Some((step, recovery)) =
+                crate::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
+            {
+                // The recovery sweep restarts a wait at its reset, not now.
+                if let Some(retry_at) = recovery
+                    .retry_at
+                    .filter(|at| *at > crate::store::rows::now_unix())
+                {
+                    eprintln!(
+                        "The run of {run} is waiting on a limit until {}; it starts again at {step} then.",
+                        crate::lf::output::format_time(retry_at),
+                    );
+                    return Err(exit_of(status).into());
+                }
+                if let Some(cause) = crate::ops::task_execution::limit_stop(&recovery) {
+                    let stop = TaskRunStopped::Limit {
+                        issue: task.identifier.clone(),
+                        run: run.to_string(),
+                        step,
+                        cause,
+                    };
+                    eprintln!("{stop}");
+                    return Err(anyhow::Error::new(exit_of(status)).context(stop));
+                }
+            }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 if let Some(cause) = repeated {
                     // Render it here: a detached run's log closes when this
                     // process records its exit, before `main` prints errors.
-                    let repeated = RepeatedRunFailure {
+                    let repeated = TaskRunStopped::Repeated {
                         run: run.to_string(),
                         cause,
                     };

@@ -878,14 +878,18 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         };
         if json {
             println!("{}", serde_json::to_string(&tasks)?);
-        } else {
+        } else if let Some(store) = &store {
+            // Without a store there are no Tasks to print.
+            let local = store.sqlite.local_machine()?.id;
             for task in tasks {
-                println!(
-                    "{} · {} · {}",
-                    task.task.identifier,
-                    owner_text(task.runtime.as_ref()),
-                    task.task.name
-                );
+                let id = crate::durable::TaskId::from_raw(task.task.id.clone());
+                let ownership = store.sqlite.task_ownership(&id)?;
+                let mut owner = owner_text(task.runtime.as_ref()).to_string();
+                if let Some(place) = crate::ops::task_ownership::runs_elsewhere(&ownership, &local)
+                {
+                    owner = format!("{owner} · {place}");
+                }
+                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
             }
         }
         Ok(())
@@ -4237,8 +4241,11 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
+        // Remove the column's dependents so the planning read, not this setup, fails.
         conn.execute_batch(
-            "DROP INDEX tasks_ship_process; ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
+            "DROP INDEX tasks_ship_process;
+             DROP TRIGGER store_revision_tasks_update;
+             ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
         )
         .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();

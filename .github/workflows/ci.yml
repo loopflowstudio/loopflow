@@ -70,6 +70,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       - uses: astral-sh/setup-uv@v7
       # Migrations need SQLite >= 3.47 (RAISE expressions); the runner's system Python is older.
       - name: Verify the architecture map
@@ -115,6 +119,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -266,6 +274,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
@@ -342,6 +354,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"

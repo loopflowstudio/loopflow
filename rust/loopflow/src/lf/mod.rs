@@ -1929,9 +1929,23 @@ pub enum SessionCommand {
         /// Read no move; exit non-zero unless this Machine can receive one
         #[arg(long)]
         check: bool,
-        /// With --check, also require that this Machine knows the Task
-        #[arg(long, requires = "check")]
+        /// With --check, also take in this Task from planning when this
+        /// Machine has not saved it yet
+        #[arg(long, requires_all = ["check", "issue", "repository"])]
         task: Option<String>,
+        /// The Task's identifier in planning, such as LOO-12
+        #[arg(long, requires = "task")]
+        issue: Option<String>,
+        /// The Task's repository
+        #[arg(long, requires = "task")]
+        repository: Option<crate::durable::RepositoryId>,
+        /// Where a Machine without the repository clones it from
+        #[arg(long, requires = "task")]
+        origin: Option<String>,
+        /// The sending Machine's planning key, adopted by a Machine with none
+        /// so a personal Git plan reads the same journal
+        #[arg(long, requires = "task")]
+        planning_key: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2008,7 +2022,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status
+    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2475,7 +2490,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
-        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Workflow position and Session; `lf task run` there runs its route again. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
     )]
     Move {
         issue: String,

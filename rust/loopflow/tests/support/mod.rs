@@ -21,6 +21,15 @@ pub mod ambient;
 #[cfg(unix)]
 pub mod rex;
 
+// Shared with the library's cfg(test) store setup; production never embeds it.
+#[path = "../../src/store/test_database.rs"]
+pub(crate) mod test_database;
+
+#[allow(dead_code)] // Shared helper compiled into each integration test binary.
+pub fn seed_store(home: &Path) {
+    test_database::copy(&home.join("loopflow.db")).expect("copy fixture store");
+}
+
 /// Agent shells such as Codex export the developer's real provider home
 /// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap
 /// fixture logins into that home, so every test binary drops both variables
@@ -286,6 +295,7 @@ pub fn register_codex_login(home: &Path, name: &str) {
         .to_string(),
     )
     .unwrap();
+    seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
@@ -346,6 +356,7 @@ pub fn register_claude_login(home: &Path, name: &str) {
     .to_string();
     fs::write(account_home.join(".credentials.json"), &credential).unwrap();
     let email = format!("{name}@example.com");
+    seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     store
@@ -564,6 +575,7 @@ fn register_task_fixture(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
+    seed_store(home);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
         .block_on(loopflow::store::open_ephemeral_store(
@@ -917,6 +929,7 @@ pub fn managed_codex_account(home: &Path) {
             .to_string(),
     )
     .unwrap();
+    seed_store(home);
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
     let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
     store

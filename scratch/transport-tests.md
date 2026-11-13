@@ -208,7 +208,14 @@ no test that waits out a production timeout except a named fallback above.
      exit (`release_viewer_hold` always computes from no viewers).
 2. Relay re-exec harness with `#[cfg(test)]` timing; move relay heartbeat,
    attach timeout, outage-input, exhaustion, pane-closure, Move here; delete the
-   server reconnect cluster.
+   server reconnect cluster. Timing sites the `#[cfg(test)]` value replaces:
+   `HEARTBEAT_INTERVAL` at `transport.rs` `view()` (`heartbeat = …` three
+   places), `HEARTBEAT_TIMEOUT` in `view()`'s `last_response.elapsed()` check
+   (the host side, `Viewer::expire_heartbeat` and `Hosted::deadline`, keeps the
+   constant: the bench backdates instead), `ATTACH_TIMEOUT` passed into `view()`
+   by `attach_with_terminal`, and `connection.rs` backoff `100 << attempt.min(5)`
+   with `MAX_ATTEMPTS`. The host bench owns `Hosted` on the test thread; a relay
+   case that needs a real host runs the bench on a thread of its own.
 3. Non-transport moves (store retention, human_session, server, retirement).
 4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)

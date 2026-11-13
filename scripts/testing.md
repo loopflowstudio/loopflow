@@ -128,7 +128,7 @@ fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
-`local_planning`) and can exhaust the Rust phase's 2400 s budget; name modules.
+`local_planning`) and can exhaust the Rust phase's 1800 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
 pin/build reach both Desktop build paths: run `--swift --loopflow`. Desktop
 talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
@@ -155,7 +155,7 @@ Before gate, regenerate the portable architecture page after edits to
 Include `docs/dev/index.html` in the change; the website suite checks it for drift.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
 (`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
-unless the diff reaches them; together they exceed the 2400 s Rust budget, and
+unless the diff reaches them; together they exceed the 1800 s Rust budget, and
 CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
 the union first: `(test(a::) | test(b::)) - test(slow)`; without the
 parentheses the subtraction applies only to the last term.
@@ -171,10 +171,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 - The runner stops at sustained `syspolicyd` pressure, which can last as long
   as other checkouts keep compiling. Run its printed Rust plan by hand (build,
   the `nextest` line with the same `-E` filter, clippy), then each suite's
-  command, and record that the runner's pressure stop was bypassed. The same
-  applies when its resource preflight fails with "cannot measure
-  ~/.cache/uv: 15-second inventory deadline exceeded" while disk is ample: a
-  cold `du` of a large uv cache outlasts the deadline. In zsh, clear `LF_*`
+  command, and record that the runner's pressure stop was bypassed. A run by
+  hand keeps nextest's limits from `.config/nextest.toml`: a test is killed at
+  five minutes and the run at twenty. Don't raise them or wait past them; a
+  test that times out only under load goes to CI. In zsh, clear `LF_*`
   inline with `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /')`; a
   variable holding those flags is passed as one word and clears nothing.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it

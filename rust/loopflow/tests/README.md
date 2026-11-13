@@ -33,7 +33,7 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 ## Decision rows and full-Machine tests
 
 Changing how promotion picks a Session, checkout or Task? Run the decision
-table first. It answers in about a second per family:
+table first. Each family answers in one to three seconds:
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'
@@ -80,8 +80,8 @@ Promotion and binding (`session_lifecycle_tests`):
 | Test | Wiring it proves |
 |---|---|
 | `promotion_selects_session_in_owned_and_shared_checkouts` | `LF_AGENT_CALLER` reaches creation from `task create --session` inside the conversation; `resume --task` continues the same native conversation in the recorded cwd |
-| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | the bound directory reaches the next provider launch, not the running child |
-| `promotion_background_run_does_not_claim_primary` | a real `-b` run's Session never becomes primary |
+| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | binding leaves the live provider's attachment alone; the bound directory reaches the next provider launch, not the running child |
+| `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` files new work and claims neither the checkout nor its Task's conversation |
 | `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
 
 ## Boundary checks

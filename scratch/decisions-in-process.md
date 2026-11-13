@@ -100,7 +100,7 @@ planning one case per connection mode.
 
 ## Slices
 
-1. **This slice: promotion and binding.** Kept list into `tests/README.md`;
+1. **Done: promotion and binding.** Kept list into `tests/README.md`;
    adoption decision table beside `ops/task/adoption.rs`; delete the moved
    integration tests and the moved cases inside kept ones. Focused test:
    `cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'`.
@@ -120,6 +120,19 @@ planning one case per connection mode.
 
 Transport is LOO-887. Deliberate sleeps in `ops::linear::task_planning_tests`
 and the slow `config::migrate`/`store::tests` are outside this pattern.
+
+## Promotion slice notes
+
+- Rows cover what the ten deleted tests checked except: plain `--run`
+  creation opening a fresh checkout (Task Graph admission, slice 3), `lf open
+  --link`/`task status` output after binding, and `task checkout` after a
+  shared-primary transfer. None is a promotion decision.
+- A closed Session row records through `SessionRecorder::begin_at`, then sets
+  `completed_at` with one `UPDATE`: closing follows the agent process's exit,
+  and a row has no process.
+- `promotion_background_run_does_not_claim_primary` asserted `returned["id"]`
+  on a receipt that nests the Task under `task`; both asserts passed on null.
+  Fixed. It still inserts its Session row directly.
 
 ## Risks and findings
 
@@ -180,8 +193,15 @@ Measure each group's "before" on this branch's base before changing it. Per grou
 
 | Group | Before (tests, s, <1 s) | After |
 |---|---|---|
-| session_lifecycle_tests | 42, ?, ? | |
+| Promotion/bind, `session_lifecycle_tests` | 14, 194.5, 0 | 4, 43.2, 0 |
+| Promotion/bind rows, `adoption::tests` | — | 8, 17.9, 0 (1.3–3.1 s each) |
 | session_launch_contract | 30, ?, ? | |
+
+Promotion, 2026-11-13, Mac debug, load average 545–600 from other
+checkouts: before and after ran back to back. An earlier baseline at lower
+load summed 163.8 s for the same 14. Promotion total 194.5 → 61.1 s. Rows
+miss the <1 s target: each adopting row pays `TestRepo` worktree + `prepare`
+git (~0.4 s unloaded, per the probe), and families hold three to six.
 
 ## Done when
 

@@ -65,13 +65,13 @@ pub(crate) async fn execution_of_latest_graph(
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
         return Ok((
-            TaskExecutionSnapshot {
+            open_graph_execution(sqlite, &task.id)?.unwrap_or(TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,
                 reason: "No Task Graph has run; independent Sessions may still be active"
                     .to_string(),
                 step: None,
                 captured: None,
-            },
+            }),
             None,
         ));
     };
@@ -121,7 +121,50 @@ pub(crate) async fn execution_of_latest_graph(
             }
         }
     }
+    if matches!(
+        snapshot.state,
+        TaskExecutionState::Idle | TaskExecutionState::Blocked
+    ) {
+        if let Some(open) = open_graph_execution(sqlite, &task.id)? {
+            snapshot = open;
+        }
+    }
     Ok((snapshot, Some(graph.detail(entry))))
+}
+
+/// Execution in the Task's work can predate checkout adoption. It prevents
+/// overlapping runs without making that Graph part of the Task's history.
+pub(crate) fn open_graph_execution(
+    sqlite: &SqliteStore,
+    task: &TaskId,
+) -> StoreResult<Option<TaskExecutionSnapshot>> {
+    for process in sqlite.task_open_processes(task)? {
+        let Some(lf) = process.as_lf() else {
+            continue;
+        };
+        let graph = if sqlite.runs_graph(&lf.id)? {
+            &lf.id
+        } else if let Some(parent) = lf.parent_lf_process_id.as_ref() {
+            if !sqlite.runs_graph(parent)? {
+                continue;
+            }
+            parent
+        } else {
+            continue;
+        };
+        let state = match crate::journal::process_entry_evidence(sqlite, &process) {
+            ProcessIdentityEvidence::Live => TaskExecutionState::Running,
+            ProcessIdentityEvidence::Unknown => TaskExecutionState::Unknown,
+            ProcessIdentityEvidence::Dead => continue,
+        };
+        return Ok(Some(TaskExecutionSnapshot {
+            state,
+            reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
+            step: None,
+            captured: None,
+        }));
+    }
+    Ok(None)
 }
 
 /// Ends a recorded limit reason when the step moved to another agent rather

@@ -727,6 +727,13 @@ pub(crate) fn select_task_run(
             )));
         }
     }
+    // A Graph that was running in the checkout before the Task adopted it.
+    if let Some(execution) =
+        crate::ops::task_execution::open_graph_execution(&store.sqlite, &task.id)
+            .map_err(task_error)?
+    {
+        return Err(task_error(execution.reason));
+    }
     let step = row.as_ref().map_or(START, |row| row.step.as_str());
     let start = match (from, row.as_ref().and_then(|row| row.run.as_ref())) {
         (Some(name), _) => Some(graph.find(name).ok_or_else(|| {

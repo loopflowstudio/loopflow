@@ -119,12 +119,7 @@ Slices 5 and 6 go beyond Done-when; take them only if this Task continues.
 Transport is LOO-887. Deliberate sleeps in `ops::linear::task_planning_tests`
 and the slow `config::migrate`/`store::tests` are outside this pattern.
 
-## Row fixture name (concept review, 2026-11-13)
-
-Done: the row fixture in `ops/task/adoption/tests.rs`,
-`lf/commands/run/launch_policy_tests.rs` and `ops/task/explain/tests.rs` is
-`Table`, the README's decision table; `Machine` stays only where it is the
-domain noun (dispatch and ownership rows, `Pair` holds one `Side` per Machine).
+## Row speed (concept review, 2026-11-13)
 
 Row speed reads as met: the brief's "Each decision is checked once,
 in-process, in well under 1 s" is per decision, and a row costs ~0.4 s
@@ -265,3 +260,4 @@ build), not product failures.
 - implement slice 4, 2026-11-13: `ssh::dispatch_tests:: | task_ownership::tests::` 15/15; `machine_commands` + destination-policy 44/44; clippy `--all-targets` clean
 - compress slice 4, 2026-11-13: ownership `Pair` holds one `Side` (store, checkout, path) per Machine; `ssh::dispatch_tests:: | task_ownership::tests::` 15/15 in 2.3 s; clippy `--all-targets` clean
 - implement rename, 2026-11-13: `Machine` → `Table` row fixtures; three row filters 20/20 in 4.3 s; fmt, clippy `--all-targets` clean
+- compress rename, 2026-11-13: nothing to reduce; rename is name-only (`Machine` stays in dispatch and ownership rows, where it is the domain noun)

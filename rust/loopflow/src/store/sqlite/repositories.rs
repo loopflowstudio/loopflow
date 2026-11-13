@@ -81,7 +81,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
             if !retained_checkout_matches(conn, repo)? {
                 return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo --bind {id}`, or recover the moved checkout with `lf repo --relocate {id}`"
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf config repo --bind {id}`, or recover the moved checkout with `lf config repo --relocate {id}`"
                 )));
             }
             crate::repository::location::write_locator(common, &id)

@@ -2759,7 +2759,18 @@ fn a_move_retried_on_its_target_asks_the_machine_it_comes_from() {
         plan.remote.task_move_checked_from(&task).unwrap(),
         Some(plan.local.local_machine().unwrap().id)
     );
-    let retried = on_mini(&["task", "move", task.as_str(), "--machine", mini.as_str()]);
+    // The laptop's retry line names mini by the laptop's label; on mini the
+    // refusal names the command that works there, which the person runs.
+    let laptop_line = on_mini(&["task", "move", task.as_str(), "--machine", "mini"]);
+    assert!(!laptop_line.status.success());
+    let refusal = String::from_utf8_lossy(&laptop_line.stderr);
+    let here = refusal
+        .lines()
+        .last()
+        .and_then(|line| line.trim().strip_prefix("lf "))
+        .unwrap_or_else(|| panic!("{refusal}"));
+    assert!(here.starts_with("task move"), "{refusal}");
+    let retried = on_mini(&here.split(' ').collect::<Vec<_>>());
     assert_success(&retried);
     let stderr = String::from_utf8_lossy(&retried.stderr);
     assert!(stderr.contains("move to"), "{stderr}");

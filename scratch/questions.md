@@ -438,6 +438,14 @@ journal-era claims yours. Test
 - Compress: `is_mine_in` doc comment now lists the checks in code order; comment-only, no rerun
 - Realign: `docs/dev/machines.md` (people paragraph) states the rule; gate reruns `documented_commands::` (prose only, no command changed)
 
+## QA, second round (2026-11-13)
+
+Report: `scratch/qa.html`. Fixed: the hints named `lf repo --bind`/`--relocate`, which don't exist (`lf config repo …`); the rental bootstrap script ran it too. A retry on mini by the laptop's label now prints the command that works there.
+- `cargo test -p loopflow --test integration machine_commands::a_move_retried_on_its_target` — 1 passed (qa)
+- `cargo test -p loopflow --lib rental::` — 25 passed (qa)
+- `documented_commands::` — 4 passed; clippy `--all-targets -D warnings` clean (qa)
+- Open: mini's status shows nothing for a move it checked (a later laptop take-back never reaches mini's `checked` row); Owner reads the target before arrival.
+
 ## Open questions (each reversible; the simpler option is built)
 
 - **Mini's ownership log.** After a move, mini's `lf task status` log does

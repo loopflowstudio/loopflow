@@ -50,7 +50,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo --bind {id}` in its repository on this Machine"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf config repo --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 

@@ -1,75 +1,82 @@
-<!doctype html><html><head><meta charset="utf-8"><title>LOO-874 QA</title>
-<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f4;padding:.8em;overflow:auto;font-size:13px}h2{margin-top:2em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style></head><body>
-<h1>LOO-874 QA: what a Machine has checked out</h1>
-<p>Branch <code>lf</code> built from 90b20d2bfe plus the fixes below. Private homes under <code>/tmp/lf-qa-874</code>, <code>LF_*</code> cleared, stdin closed. A second Machine, "mini", is a second private home on this host, reached through a stand-in <code>ssh</code>.</p>
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-874 QA, second round</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f4;padding:.8em;overflow:auto;font-size:13px}h2{margin-top:2em}</style>
+<h1>LOO-874 QA, second round: moves between two Machines</h1>
+<p>Branch <code>lf</code> at 142bc1c80e plus the fixes below. Two private homes on this host: the laptop (<code>/tmp/lf-qa-874b/lfhome</code>) and mini (<code>/tmp/lf-qa-874b/mini</code>), each with a separate store and repository clone, <code>LF_*</code> cleared, stdin closed. A stand-in <code>ssh</code> routes by host, so mini reaches the laptop too, which the first round couldn't do. Personal Git planning on a local bare origin. Both homes share this host's name, so mini calls itself <code>Jacks-MacBook-Pro-2</code>. The first round's report is <code>d124b3b4a4:scratch/qa.html</code>.</p>
 
-<h2>1. Upgrade: the real store</h2>
-<p>A <code>.backup</code> copy of <code>~/.lf/loopflow.db</code> (1239 Tasks), with main's pending <code>foreign_key_children</code> and then <code>task_machine_local.sql</code> applied through <code>sqlite3</code> (never opened with <code>lf</code>). Each took under 0.1 s.</p>
-<table><tr><th>Check</th><th>Result</th></tr>
-<tr><td>Tasks with a worktree → <code>task_checkouts</code></td><td>870 → 870, 0 missing, 0 field mismatches, 0 on another Machine</td></tr>
-<tr><td><code>primary_session_id</code> → <code>task_primary_sessions</code></td><td>330 → 330</td></tr>
-<tr><td>Ship columns → <code>task_ship_events</code></td><td>174 approved (= <code>shipped_at</code> rows), 84 carried, 12 stopped, 765 restarted</td></tr>
-<tr><td>Ownership writer</td><td>879 of 890 entries name this Machine; 11 (from planning) name none</td></tr>
-<tr><td>People</td><td>one <code>journal:</code> person, the local Machine points to it; <code>name</code> NULL</td></tr>
-</table>
-<p>Restarts are capped at 64 rows per Task in the backfill; real counts reach 7504. Backoff stops growing after 7, so nothing reads the difference.</p>
-
-<h2>2. Upgrade: installed 0.15.3 → branch on the same home</h2>
-<p>Installed <code>lf</code> created two Tasks and checked one out. Branch <code>lf task status</code> and <code>lf task list</code> on that home print byte-for-byte what 0.15.3 printed; the store gained the checkout row, the writer and the person.</p>
-<pre>Planning evidence: available
-Recover a report · 0429e4
-Planning: unstarted · current
-Owner: QA on Jacks-MacBook-Pro-2
-  Nov 13 11:08  claim  QA on Jacks-MacBook-Pro-2
-0429e4  idle
-  task: task_0429e445e5ed488e975c26709b105274
-  body: provider codex
-  worktree: /private/tmp/lf-qa-874/repo.0429e4-recover-a-report
-  branch: qa/0429e4-recover-a-report
-  PM writeback: current
-  latest Graph: No Task Graph has run; independent Sessions may still be active
-  action: run  (run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first)</pre>
-
-<h2>3. Fresh: Graph, ship, hold</h2>
-<p><code>lf task run</code> stopped at <code>demo</code>. <code>lf ship</code> logged <code>approved</code>; the demo step failed three times (no Codex in the private home) and logged <code>withdrawn</code>. <code>lf task hold</code> logged <code>stopped</code>, which <code>lf task show --json</code> reads as <code>execution.ship_stop</code>; a second <code>lf ship</code> logged <code>approved</code> again.</p>
-
-<h2>4. Move to mini</h2>
-<pre>$ lf task move 0429e4 --machine mini
-Checked mini: it can take 0429e4
-Committed and pushed 0429e4 on qa/0429e4-recover-a-report
+<h2>1. First move to a fresh mini</h2>
+<p>Mini starts with no repository. The check clones it and adopts the laptop's planning key. The Task arrives, and the edit made before the move is in mini's checkout. This was repeated 5 times from a clean mini, and every attempt arrived.</p>
+<pre>Checked mini: it can take 54e7b6
+Committed and pushed 54e7b6 on qa/54e7b6-recover-a-report
 Arrived on mini</pre>
-<p>Laptop: <code>0429e4  Runs on mini since Nov 13 11:10</code>, no path; <code>lf machine list</code> lists it under mini; <code>lf wt prune --dry-run</code> offers the old checkout (“runs on mini”). Mini: its own <code>task_checkouts</code> row at <code>mini/src/origin.0429e4-…</code>, with the edit made before the move. Laptop and mini each have one <code>arrived</code> row.</p>
+<p>One earlier attempt failed: <code>this Machine plans under planning key 0e8d…, the sending Machine under 5fbf…</code>. Before it, I had run lf inside a clone on mini, and that minted a key. Replaying the same order, including the "remote machine identity changed" refusal, did not reproduce it. No background server for these homes was running.</p>
 
-<h2>5. A move that did not arrive</h2>
-<p>Mini's <code>lf</code> was swapped for one that fails <code>session receive</code>.</p>
-<pre>$ lf task move 5caa86 --machine mini
-Checked mini: it can take 5caa86
-Committed and pushed 5caa86 on qa/5caa86-second-with-ship
-Error: Machine command unavailable: mini fell over
-5caa86 was sent but did not arrive on mini; retry with
-  lf task move 5caa86 --machine mini</pre>
-<p><code>lf task status</code>: <code>5caa86  Moving to mini since Nov 13 11:10: sent, not arrived</code> plus the retry line.</p>
-<p><b>Broken, fixed:</b> <code>lf task list</code> printed <code>5caa86 · QA · Runs on mini since Nov 13 11:10</code> and <code>lf machine list</code> printed <code>5caa86 since …</code> under mini, as though the Task had arrived. The claim naming mini is written before anything is sent, and both lists read only ownership. Both now read the move in flight first (<code>task_ownership::moving_to</code>):</p>
-<pre>86e1f7 · QA · Moving to mini since Nov 13 11:12: sent, not arrived · Third stuck move
-mini  mini  home_b394…
-  86e1f7 Moving to mini since Nov 13 11:12: sent, not arrived</pre>
-<p>With mini restored, the same command from the laptop:</p>
-<pre>Carrying on 5caa86&#x27;s move to mini
-Arrived on mini (Graph at `demo`)</pre>
-<p>The lists then read <code>Runs on mini since …</code>. <code>machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it</code> now checks both lists; the 53 tests in <code>machine_commands::</code> pass and clippy is clean.</p>
+<h2>2. A stale clone on mini: the hint named a command that doesn't exist</h2>
+<pre>Machine command unavailable: Error: …/mini/src/origin exists but is not repository repo_76c5… here; run `lf repo --bind repo_76c5…` in it, then move again
+$ lf repo --bind repo_76c5…
+error: unexpected argument '--bind' found</pre>
+<p><b>Fixed.</b> The flag lives at <code>lf config repo --bind</code>. Main has the same wrong text in five places, the rental bootstrap script among them, so a rented Machine's setup would run the missing command too. All five now say <code>lf config repo --bind</code> / <code>--relocate</code>. Released 0.15.3 accepts that form, so the script works with an older <code>lf</code> on the remote. After the fix I followed the printed hint literally and the move arrived. <code>rental::</code> unit tests pass (25).</p>
+
+<h2>3. A sent move that didn't arrive</h2>
+<p>Mini's <code>lf</code> was replaced by a wrapper whose <code>session receive</code> fails:</p>
+<pre>Error: Machine command unavailable: mini fell over
+bf6c17 was sent but did not arrive on mini
+  retry: lf task move bf6c17 --machine mini
+  take back: lf task claim bf6c17
+$ lf task status bf6c17
+bf6c17  Moving to mini since Nov 13 14:01: sent, not arrived
+  retry: lf task move bf6c17 --machine mini
+  take back: lf task claim bf6c17
+$ lf task list
+bf6c17 · QA · Moving to mini since Nov 13 14:01: sent, not arrived · Stuck move
+$ lf machine list
+mini  mini  home_f165…
+  bf6c17 Moving to mini since Nov 13 14:01: sent, not arrived</pre>
+<p>The first round fixed task list and machine list. Both still read correctly, and status and the failed move now print the same pair of lines.</p>
+
+<h2>4. Taking it back while mini doesn't have it</h2>
+<p><code>lf task claim bf6c17</code> asked mini first (<code>session receive --arrived</code>, which answered no) and then wrote the claim here. The sent row stays in <code>task_moves</code>, but status reads idle with its checkout. Moving it again rechecked mini, sent it, and failed the same way.</p>
+
+<h2>5. Mini took it in but its answer was lost</h2>
+<p>The wrapper runs the real receive and then exits 255. The laptop shows <code>sent, not arrived</code>, while mini has the checkout and a claim naming itself. With mini restored, <code>lf task claim</code> on the laptop asked mini, heard yes, and forwarded the claim to mini, where it was a no-op:</p>
+<pre>ssh mini exec 'lf' 'session' 'receive' '--arrived' 'task_9559…'
+ssh mini exec 'lf' '--repo-id' 'repo_76c5…' 'task' 'claim' 'task_9559…' '--json'
+laptop: 95590c · QA · Runs on mini since Nov 13 14:02 · Lost answer</pre>
+<p>Both stores hold one claim naming mini, and both mark the move <code>arrived</code>. Nothing runs on two Machines.</p>
+
+<h2>6. The retry, addressed to mini, from the laptop</h2>
+<pre>$ lf --machine mini task move bf6c17 --machine mini
+Carrying on bf6c17's move to mini
+Arrived on mini</pre>
+<p>It ran on the laptop and sent only <code>session receive</code> to mini. Mini's log holds all four claims: laptop, mini, laptop (the take-back), mini.</p>
+
+<h2>7. The retry run on mini itself</h2>
+<p>The laptop's retry line names mini by the laptop's label. Mini doesn't know itself by that name:</p>
+<pre>mini$ lf task move 0876d0 --machine mini
+Error: mini is neither a registered Machine label nor a Machine id; `lf machine add` it</pre>
+<p>Given its own Machine id, mini asked the laptop and the Task arrived with its edit. That fixes the first round's worst defect. The remaining problem was the name: machines.md promises "the same move again, from any Machine", and a real mini's hostname is rarely the label the laptop gave it.</p>
+<p><b>Fixed.</b> When the target name doesn't resolve and this Machine checked a move of the Task, the refusal says how to carry the move on here:</p>
+<pre>mini$ lf task move c1d0a7 --machine mini
+Error: mini is neither a registered Machine label nor a Machine id; `lf machine add` it
+c1d0a7 is moving to this Machine; carry the move on here with
+  lf task move c1d0a7 --machine Jacks-MacBook-Pro-2
+mini$ lf task move c1d0a7 --machine Jacks-MacBook-Pro-2
+Carrying on c1d0a7's move to Jacks-MacBook-Pro-2 (this Machine)
+Arrived on Jacks-MacBook-Pro-2 (this Machine)</pre>
+<p><code>machine_commands::a_move_retried_on_its_target_asks_the_machine_it_comes_from</code> now runs the laptop's line on mini, then runs the command the refusal prints. It passes. Without the fix it panics, because the refusal contains no <code>lf task move</code> line. machines.md has a sentence on this. <code>documented_commands::</code> passes (4), and <code>clippy --all-targets -D warnings</code> is clean.</p>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li><b>A retry run on mini refuses wrongly.</b> <code>lf --machine mini task move 86e1f7 --machine mini</code> while the move was <code>sent, not arrived</code>: <code>Error: 86e1f7 already runs on Jacks-MacBook-Pro-2 (this Machine)</code>. Mini had the Task (taken in by the move's check) but no ownership entry, read it as unowned, and resolved it to itself; it has no checkout. machines.md says the same move works “from any Machine”. Retrying from the laptop works.</li>
-<li><b>The Auto-Ship log grows by one row per failed restart.</b> Restarting every 30 minutes, a Task stuck under Auto-Ship adds about 48 rows a day, and <code>ship_log_in</code> reads them all on each check. The old column was a counter. One real Task has 7504 restarts.</li>
-<li>Mini's ownership log for a Task it first saw through a move holds only the move's claim, not the laptop's earlier claim. Cosmetic.</li>
-</ol>
+<ul>
+<li><b>Mini's status hides a move it checked.</b> Before the retry, <code>lf task status 0876d0</code> on mini printed <code>Unowned</code> / <code>Not checked out on Jacks-MacBook-Pro-2</code> with no retry line, and <code>lf task list</code> printed <code>0876d0 · — · …</code>. Mini holds a <code>checked</code> row from the laptop, so it could show "Arriving from laptop: checked, not arrived" with the working command. I didn't build that: a later claim-back on the laptop never reaches mini's <code>checked</code> row, so mini can't tell a stale line from a live one.</li>
+<li><b>Owner shows the target before arrival.</b> While a move is stuck, the laptop's status prints <code>Owner: QA on mini</code> above <code>Moving to mini … sent, not arrived</code>. The log is accurate, since the claim names mini, but the two lines read as a contradiction.</li>
+<li>The planning-key mismatch in §1 happened once and didn't come back in 5 replays.</li>
+</ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>Moving back to the laptop: the stand-in <code>ssh</code> reaches only mini. <code>a_task_sent_without_its_reply_delivers_its_conversation_when_repeated</code> covers it.</li>
+<li>Auto-Ship log growth under real restarts. A restart comes every 30 minutes, so I relied on <code>a_ship_process_failing_all_day_keeps_its_log_short</code>. I didn't run it in this round.</li>
 <li>A conversation travelling with its Task: the private homes have no Claude or Codex login.</li>
-<li>Linear people (<code>linear:</code> ids): no Linear login in a private home.</li>
-<li>Desktop windows: Swift mirrors are covered only by the automated suites listed in questions.md.</li>
+<li>Linear people: there's no Linear login in a private home. <code>connecting_linear_keeps_journal_era_claims_yours</code> covers it.</li>
+<li>Desktop windows: the Swift mirrors are covered only by the automated suites in questions.md.</li>
 </ul>
-</body></html>

@@ -5,7 +5,7 @@
 //! side is this Machine, otherwise over one SSH request, so laptop → mini,
 //! rental → laptop and rental → mini are the same relay.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 use crate::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
@@ -166,7 +166,17 @@ async fn relay_task(
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
     let local = store.sqlite.local_machine()?.id;
-    let target = crate::ops::task_ownership::resolve_machine(&store.sqlite, target)?;
+    let target = match crate::ops::task_ownership::resolve_machine(&store.sqlite, target) {
+        Ok(target) => target,
+        // The retry line the laptop printed names this Machine by the
+        // laptop's label, which need not be a name here.
+        Err(error) if store.sqlite.task_move_checked_from(&task.id)?.is_some() => bail!(
+            "{error}\n{name} is moving to this Machine; carry the move on here with\n  lf task move {name} --machine {here}",
+            name = task.identifier,
+            here = crate::store::sqlite::task_ownership::local_label(),
+        ),
+        Err(error) => return Err(error.into()),
+    };
     let target = if target == local {
         None
     } else {

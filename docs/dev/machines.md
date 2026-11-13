@@ -342,7 +342,8 @@ when the move began.
 
 Running the same move again, from any Machine, asks the Machine the Task left.
 Run on mini, it asks the Machine mini checked the move with, so mini needs that
-Machine added (`lf machine add`). Addressed to mini from the laptop
+Machine added (`lf machine add`). Mini may not know itself by the laptop's
+label; then the refusal prints the move with a name mini does know. Addressed to mini from the laptop
 (`lf --machine mini task move MTG-321 --machine mini`), a move the laptop began
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent

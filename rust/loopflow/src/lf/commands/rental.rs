@@ -797,7 +797,7 @@ fn checkout_script(
         })
         .collect();
     let script = format!(
-        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repo --bind {repository}",
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
     );
@@ -1359,7 +1359,7 @@ mod tests {
         // No store records either checkout: the Task alone names the repository.
         let repository = crate::durable::RepositoryId::new();
         let (_, script) = checkout_script(&worktree, &repository).unwrap();
-        assert!(script.ends_with(&format!("lf repo --bind {repository}")));
+        assert!(script.ends_with(&format!("lf config repo --bind {repository}")));
         assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
         assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }

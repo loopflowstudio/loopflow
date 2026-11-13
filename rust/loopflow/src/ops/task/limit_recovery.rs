@@ -49,10 +49,10 @@ pub(crate) fn waiting_on_limit(
 }
 
 /// Whether the sweep starts a waiting run again without anyone asking: the
-/// Task is assigned, unfinished, and nothing else still executes for it.
+/// Task is owned by this Machine, unfinished, and nothing else still executes for it.
 /// Status promises an automatic restart only when this holds.
 pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResult<bool> {
-    Ok(store.task_owned(task).map_err(task_error)?
+    Ok(store.task_claimed_here(task).map_err(task_error)?
         && !store.task_state(task).map_err(task_error)?.is_terminal()
         && task_execution_blockers(store, task)?.is_empty())
 }

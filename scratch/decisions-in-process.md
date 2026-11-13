@@ -46,7 +46,7 @@ Seams per surface (all in the CLI's call path):
 | Promotion / binding | `engine::creation::create` (CLI and served `task create`; normalizes the directory, checks the receipt, then `ops::task::task_create` → `adoption::resolve_source`/`save`), `ops::human_session::bind`, `preview_binding`, `primary::ensure`; `lf::commands::session::prepared(cli, dir)` for `resume --prepare`, fed a Clap-parsed `Cli` so selector wiring stays covered |
 | Launch policy | `run::build_prompt` (Clap-parsed `Cli` → config at the checkout → `prepare_process_prompt` → `AgentConfig`) → `build_session_command`; resume: `select_invocation` + `resolve_session_config(session, &Cli::default())` |
 | Task Graph run | `ops::task::explain::explain_task_run`, `checkout_explain::explain_task_checkout`, `planning_explain::explain_task_planning`, `task_graph::CapturedGraph` |
-| Machine dispatch | `lf::navigation::machine_invocation`, `ssh::parse_remote_command`, `machine::transport_failure`, `work_route::forward` |
+| Machine dispatch | `lf::navigation::machine_invocation`, `ssh::parse_remote_command`, `machine::transport_failure` (`work_route::forward` carries Task moves, covered by the kept `machine_commands` tests) |
 
 `planning_explain` still has no in-process tests: its six `global_commands`
 tests (`task_planning_explain_*`, 49 s warm) are the next row candidate. It is
@@ -109,6 +109,8 @@ planning one case per connection mode.
    lookup), so it left the rows rather than becoming a parse row. Kept list
    in `tests/README.md`. `work_route::forward` got no rows: its cases
    (moved Sessions and Tasks) are the Task-move tests, not parsing.
+Slices 5 and 6 go beyond Done-when; take them only if this Task continues.
+
 5. Release lock matrix: cut to one killed and one exited case per mutation
    class (no in-process move; the cost is real processes).
 6. Local planning, `work_open_tests`, `context_launch_tests`,

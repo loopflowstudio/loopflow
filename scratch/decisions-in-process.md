@@ -214,3 +214,4 @@ stays in the previews test.
 - full suites — CI
 - compress, 2026-11-13: `adoption::tests::` 8/8 passed (1.3–3.3 s each); clippy `--all-targets` clean
 - implement slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5; `session_launch_contract` 27/27; `documented_commands::` ok; clippy clean
+- compress slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5 (0.8–1.9 s each)

@@ -164,31 +164,26 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
     let machine = Machine::new();
     // Claude's own attended mode stays in charge unless lf is told to bypass.
     machine.claude_settings("auto");
+    const OFF: &str = "agent: claude\nyolo: false\nchrome: false";
     for (personal, repository, flags, bypass, chrome) in [
         (
             Some("yolo: true\nchrome: true\n"),
-            "agent: claude\nyolo: false\nchrome: false",
+            OFF,
             &["-i"][..],
             true,
             "--chrome",
         ),
         (
             Some("yolo: true\nchrome: true\n"),
-            "agent: claude\nyolo: false\nchrome: false",
+            OFF,
             &["-i", "--setting", "yolo=false", "--chrome", "off"],
             false,
             "--no-chrome",
         ),
+        (None, OFF, &["-i"], false, "--no-chrome"),
         (
             None,
-            "agent: claude\nyolo: false\nchrome: false",
-            &["-i"],
-            false,
-            "--no-chrome",
-        ),
-        (
-            None,
-            "agent: claude\nyolo: false\nchrome: false",
+            OFF,
             &["-i", "--yolo", "--chrome", "on"],
             true,
             "--chrome",

@@ -119,7 +119,12 @@ record and never changes; the table stays append-only. Tasks are never deleted
   bind`) does not pick up Graphs that ran there before it existed. Today it
   does; the live store has one such Graph. The Task's Process list
   (`lf_process_ids`) still shows that Process by cwd. Taking the simpler option;
-  noted in `scratch/questions.md`.
+  noted in `scratch/questions.md`. While such a Graph or its step still runs,
+  `open_graph_execution` (`ops/task_execution.rs`) reports it in the Task's
+  execution and `select_task_run` (`ops/task.rs`) refuses another run. The
+  Waves board pays one `task_open_processes` query per detailed Task for this,
+  bounded by unfinished Processes and run beside each Task's `git status`;
+  not measured on the live store.
 - Graph association now follows launch binding (canonicalized cwd, work
   declaration), not the lexical cwd test. Symlinked checkout paths resolve the
   same way the launch does.
@@ -139,6 +144,8 @@ record and never changes; the table stays append-only. Tasks are never deleted
   board's latest Graph and `GraphStepFinished` subscription events show the
   same Graphs as before on a migrated copy of a real store.
 - One Task's Graph reading is independent of how many Graphs other Tasks ran.
+- A Graph running when its checkout is adopted shows as the Task's execution
+  and blocks `lf task run` until it finishes, without joining the Task's Graphs.
 
 ## Checks
 

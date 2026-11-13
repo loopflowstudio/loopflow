@@ -8,7 +8,6 @@ for the repository's Task list instead of three queries per Task. This covers
 `idx_task_prs_current` serves it.
 
 Remaining:
-- Gate.
 - Measure the win in-process: the brief's baseline is about 2,250 statements and
   180–220 ms warm for a 750-Task repository on a store copy. QA (scratch/qa.html)
   measured only whole-CLI debug wall time at load ~68: 751 Tasks, `desktop view list`
@@ -16,8 +15,11 @@ Remaining:
   Output was identical to the base build. A quiet-Machine release number is still missing.
 
 QA: scratch/qa.html (real CLI and served subscription; nothing broken) → done.
-Check: `target/debug/deps/loopflow-* store::sqlite::selections::` → 22 passed (implement).
-On 2026-11-12 an outside SIGSTOP repeatedly stopped test binaries here and in other
-worktrees (state `T`, even under `setsid` with no terminal; source not found in
-this repo or `~/.lf/logs/lf.log`). The run passed after resuming its own PID 10 times.
-Gate may see the same thing.
+Gate (2026-11-12, HEAD 4b4be68e59, merged with origin/main): `scripts/test.py` stopped at
+resource preflight (15 s `du` deadline on uv cache, Swift builds and `~/.lf/runs`; 60.6 GiB free,
+32 GiB floor), so its plan ran by hand: architecture ok, test inventory ok, `cargo fmt --check` ok,
+`cargo build --bin lf` ok, nextest `test(store::sqlite::selections) | test(store::sqlite::project_adoption::)
+| test(store::sqlite::task_details::) | test(store::sqlite::task_ownership::) | test(lf::commands::desktop::)
+| test(documented_commands::)` → 48 passed, `cargo clippy --all-targets -- -D warnings` ok. CI owns the full matrix.
+An outside SIGSTOP stopped this run's test binaries again (state `T`, parent nextest); a loop
+resumed them 14 times.

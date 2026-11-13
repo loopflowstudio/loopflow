@@ -67,6 +67,9 @@ Session while retaining the saved provider thread and completes again on exit.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_workflow_readable)`
+for Task schema or trigger changes: its missing-column fixture checks that a
+planning read failure still leaves the Wave and stored Workflow readable.
 
 Configuration file loading or filtering changes also run `binary(two_people)`:
 it checks that a shared Wave graph choice reaches another person's Task launch.

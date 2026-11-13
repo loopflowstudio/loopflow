@@ -129,6 +129,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
@@ -161,6 +164,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - name: Fetch canonical migration history
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
       # Claims name their person by Git user.email; repository-local test identities win.
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"

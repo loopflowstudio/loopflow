@@ -673,6 +673,9 @@ pub(crate) async fn request(
 }
 
 #[cfg(test)]
+mod dispatch_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{build_preamble, command_result, parse_remote_command, resident_args};
 

@@ -20,6 +20,7 @@ cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promo
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'  # the kept few (standalone binary)
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'  # launch/resume settings, 0.6–1.9 s each
 cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # task run/checkout previews, 0.02–2.5 s each (load-dependent)
+cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'  # Machine dispatch and ownership, 15 in 2.5 s
 ```
 
 plus the before/after table below with real numbers.
@@ -58,13 +59,11 @@ owner/PTY/provider argv, a native conversation identity surviving resume, or
 receipt JSON. Write the surface's list into `tests/README.md` under a
 "Full-Machine tests" heading before deleting any of its tests.
 
-Promotion (4 of 17 kept) and launch/resume (one launch and one resume per
-harness) lists are in `tests/README.md`; the plan doesn't repeat them.
+Promotion, launch/resume, Task Graph run and Machine dispatch lists are in
+`tests/README.md`; the plan doesn't repeat them.
 
 Other surfaces get their list when their slice starts; candidates from the
-brief: one Machine dispatch round trip plus one transport
-failure, one Task Graph run to an interactive step and one to Auto-Ship,
-release lock one killed and one exited case per mutation class, local
+brief: release lock one killed and one exited case per mutation class, local
 planning one case per connection mode.
 
 ## Slices
@@ -98,15 +97,18 @@ planning one case per connection mode.
    wiring and renamed the Graph run test
    `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named`. Kept list
    in `tests/README.md`.
-4. **Next: Machine commands.** Measure the `machine_commands` before (and
-   `machine_dispatch_resolves_destination_policy_…` in
-   `session_launch_contract`), read the handler and name its chain
-   (`navigation::machine_invocation`, `ssh::parse_remote_command`,
-   `machine::transport_failure`, `work_route::forward`) in the row module's
-   header, write the kept list (one dispatch round trip, one transport
-   failure) into `tests/README.md`, then move parsing and failure-text cases
-   to rows. The three ownership tests that make no `lf` call after setup
-   move whole.
+4. **Done: Machine dispatch.** Rows in `lf/commands/ssh/dispatch_tests.rs`
+   (`machine_invocation` → `parse_remote_command`; `transport_failure`) and
+   three ownership tests moved whole into `store/sqlite/task_ownership.rs`
+   (two `open_ephemeral` stores, two `TestRepo`s, peer planning exchange).
+   Deleted `machine_selector_dispatches_…`, `transport_options_require_…`
+   and the three `task_ownership_*` tests; trimmed
+   `failures_name_the_recovery_…` to one diagnostic and the literal-prompt
+   dispatch from `machine_dispatch_resolves_destination_policy_…`. `lf ssh
+   mini status` parses as a skill named `ssh` (refused only at skill
+   lookup), so it left the rows rather than becoming a parse row. Kept list
+   in `tests/README.md`. `work_route::forward` got no rows: its cases
+   (moved Sessions and Tasks) are the Task-move tests, not parsing.
 5. Release lock matrix: cut to one killed and one exited case per mutation
    class (no in-process move; the cost is real processes).
 6. Local planning, `work_open_tests`, `context_launch_tests`,
@@ -191,6 +193,8 @@ Measure each group's "before" on this branch's base before changing it. Per grou
 | Launch/resume rows, `run::launch_policy_tests` | — | 5, 6.0, 1 (0.6–1.5 s each) |
 | Explain and Graph run, `global_commands` + `task_graph_launch_tests` | 15, 190.3, 0 | 10, 94.6, 0 |
 | Explain rows, `ops::task::explain::tests` | — | 7, 7.0, 2 (0.02–1.4 s each) |
+| machine_commands + destination-policy test | 49, 1769.1, 0 | 44, 1717.5, 0 |
+| Dispatch and ownership rows | — | 3 + 3 new, 7.2, 3 (dispatch 0.02–0.1 s, ownership 1.3–2.4 s) |
 
 Promotion, 2026-11-13, Mac debug, load average 545–600 from other
 checkouts: before and after ran back to back. An earlier baseline at lower
@@ -212,11 +216,19 @@ Explain, 2026-11-13: before at load 484–638, after at 712–724, both warm
 (59.6 s before); the Graph/run/checkout part went 9 tests, 130.7 s → 4,
 45.7 s.
 
+Machine dispatch, 2026-11-13, load average 585–675: totals are noise.
+Each run's first wave of six paid a cold `lf` (~150 s each); without them
+the warm tests summed 889.0 s (43) before and 875.2 s (37) after. The moved
+tests themselves cost 55.4 s before (`machine_selector_…` 25.1, three
+ownership 7.2 each, `transport_options_…` 8.7); `failures_name_…` went
+32.6 → 25.5 s and the destination-policy test 16.1 → 7.3 s. The before run
+had two failures from a build-version skew (`.dirty` from editing during the
+build), not product failures.
+
 ## Done when
 
 - Promotion/binding, launch policy, Task Graph explain and Machine dispatch
-  decisions each run as in-process rows. Done: promotion/binding, launch
-  policy, Task Graph explain. Remaining: Machine dispatch (slice 4). The brief asks "well under 1 s"
+  decisions each run as in-process rows. Done: all four. The brief asks "well under 1 s"
   per decision; promotion rows cost ~0.4 s each but their family tests take
   1.3–3.3 s (open, `scratch/questions.md`).
 - `tests/README.md` lists each surface's kept full-Machine tests with the
@@ -234,3 +246,4 @@ Explain, 2026-11-13: before at load 484–638, after at 712–724, both warm
 - compress slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5 (0.8–1.9 s each)
 - implement slice 3, 2026-11-13: `ops::task::explain::tests::` 7/7; kept explain + Graph run filter 10/10; clippy `--all-targets` clean
 - compress slice 3, 2026-11-13: restore rows read as sequential stanzas; `ops::task::explain::tests::` 7/7 (0.05–2.5 s each)
+- implement slice 4, 2026-11-13: `ssh::dispatch_tests:: | task_ownership::tests::` 15/15; `machine_commands` + destination-policy 44/44; clippy `--all-targets` clean

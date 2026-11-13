@@ -566,24 +566,6 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     pair(&explicit, "--model", "haiku");
     assert!(args(&explicit).contains(&"--chrome"));
     assert_eq!(remote.session(), session);
-    let explicit = dispatch(&[
-        "-i",
-        "--yolo",
-        "--chrome",
-        "on",
-        "-a",
-        "claude:sonnet",
-        ":",
-        "--",
-        "--- literal prompt",
-    ]);
-    bypass(&explicit, "claude", true);
-    pair(&explicit, "--model", "sonnet");
-    assert!(args(&explicit).contains(&"--chrome"));
-    assert!(explicit["input"]
-        .as_str()
-        .unwrap()
-        .contains("--- literal prompt"));
 }
 
 #[path = "support/mod.rs"]

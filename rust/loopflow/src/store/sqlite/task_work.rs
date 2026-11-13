@@ -394,7 +394,8 @@ pub(super) fn ship_stop_in(
 }
 
 /// One kind of row in a Task's Auto-Ship log (`task_ship_events`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum ShipEvent {
     Approved,
     Carried,
@@ -414,22 +415,6 @@ impl ShipEvent {
             Self::Stopped => "stopped",
             Self::Withdrawn => "withdrawn",
         }
-    }
-
-    fn parse(value: &str) -> StoreResult<Self> {
-        Ok(match value {
-            "approved" => Self::Approved,
-            "carried" => Self::Carried,
-            "restarted" => Self::Restarted,
-            "progressed" => Self::Progressed,
-            "stopped" => Self::Stopped,
-            "withdrawn" => Self::Withdrawn,
-            other => {
-                return Err(crate::store::StoreError::InvalidData(format!(
-                    "unknown Auto-Ship event {other:?}"
-                )))
-            }
-        })
     }
 }
 
@@ -458,7 +443,7 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
     while let Some(row) = rows.next()? {
         let at: i64 = row.get(1)?;
         let process: Option<LfProcessId> = row.get(2)?;
-        match ShipEvent::parse(&row.get::<_, String>(0)?)? {
+        match serde_json::from_value::<ShipEvent>(row.get::<_, String>(0)?.into())? {
             ShipEvent::Approved => {
                 log = ShipLog {
                     approval: Some(ShipApproval {
@@ -581,7 +566,8 @@ fn ship_in(
         return Ok(None);
     }
     let now = crate::store::rows::now_unix();
-    if shipping_in(tx, task)?.is_none() {
+    let shipping = shipping_in(tx, task)?.is_some();
+    if !shipping {
         super::planning_write::local(
             tx,
             &crate::work::edit::WorkEdit::for_target(
@@ -596,9 +582,9 @@ fn ship_in(
                 summary: format!("Shipping: {note}"),
             },
         )?;
-        append_ship_event_in(tx, task, ShipEvent::Approved, now, Some(by), None)?;
-    } else if log.stop.is_some() {
-        // `lf ship` lifts a stop that stands beside shipping a peer recorded.
+    }
+    // `lf ship` also lifts a stop that stands beside shipping a peer recorded.
+    if !shipping || log.stop.is_some() {
         append_ship_event_in(tx, task, ShipEvent::Approved, now, Some(by), None)?;
     } else if log.carrier.as_ref() != Some(by) {
         append_ship_event_in(tx, task, ShipEvent::Carried, now, Some(by), None)?;

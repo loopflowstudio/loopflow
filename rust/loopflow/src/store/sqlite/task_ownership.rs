@@ -315,7 +315,7 @@ pub(crate) struct RepoFacts {
 }
 
 /// The person an entry names: their display name, stable key and `people` id.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct Person {
     name: Option<String>,
     key: Option<String>,
@@ -774,19 +774,11 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
     let held = super::rentals::tasks_held_in(conn, machine)?;
     let mut tasks = Vec::with_capacity(held.len());
     for (task, ownership) in held {
-        let person = match ownership.owner {
-            Some(owner) => owner.into(),
-            None => Person {
-                name: None,
-                key: None,
-                id: None,
-            },
-        };
         append_in(
             conn,
             &task,
             OwnershipKind::Claim,
-            person,
+            ownership.owner.map(Person::from).unwrap_or_default(),
             &local,
             planning_connected_in(conn, &task)?,
         )?;

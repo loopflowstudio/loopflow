@@ -118,8 +118,8 @@ BEGIN DELETE FROM task_retirements WHERE task_id=OLD.task_id; END;
 -- `progressed` resets that count; `stopped` is a person's stop, which stands
 -- until the next approval, and `withdrawn` ends an approval without one.
 -- `tasks.shipped_at` stays the planning fact peers share. The Processes may be
--- pruned, so no key. The seven `tasks.ship_*`/`shipped_at` columns' local
--- parts stay for released lf until the contract drops them.
+-- pruned, so no key. The six `tasks.ship_*` columns stay for released lf
+-- until the contract drops them.
 CREATE TABLE task_ship_events (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,

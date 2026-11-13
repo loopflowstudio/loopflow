@@ -110,6 +110,12 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   waves `planning_failure_keeps_the_stored_workflow_readable` pass; integration
   dto_fixtures::, machine_commands:: (50), documented_commands:: pass.
   `server_schema.json` regenerated. Gate runs `two_people`, `transport_tests`.
+- Compress: `ShipEvent` reads through serde like `OwnershipKind`; `ship_in`
+  appends one approval branch; `Person: Default` in `hand_back_in`. Kept the
+  move's empty `carried` row: recovery never reads an unknown (foreign)
+  carrier as dead, so without it the moved Task would never restart shipping.
+  Lib task_work::, task_ownership::, ops::task::ship::, store::migrations:: 161
+  passed; clippy clean.
 - Drop list for LOO-877: `tasks.ship_lf_process_id`, `ship_restarts`,
   `ship_approved_lf_process_id`, `ship_stopped_at`, `ship_stopped_lf_process_id`,
   `ship_stopped_person`, index `tasks_ship_process`; `machines.pool`,

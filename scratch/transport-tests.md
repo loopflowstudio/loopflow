@@ -68,9 +68,14 @@ Done when:
   real-process test still shows ~10 s on CI.
 - Simple owner tests cost ~5–6 s: an owner lingers 2 s after its child exits
   (`hosted.rs:1171`) plus process startup. Accept it for the kept set.
-- Fixed sleeps in tests: 3 s (line ~1387), 6 s (~1855), 5 s (~2322), 3 s (~2864),
-  8 s (~4007), 4 s (~4743), 4 s ×2 (~5624), 6 s shell sleep (~6010), 32 s
-  (~7690), 32 s quiet loop in `ssh_shells.rs:704`. All go.
+- Fixed sleeps left after slice 2 (`tests/transport_tests.rs`, by test):
+  6 s `acknowledged_viewer_remains_attached_past_handshake_deadline`, 5 s
+  `a_held_conversation_outlives_its_view`, 3 s
+  `a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait`, 8 s
+  `sessions_keep_serving_when_their_lf_executable_goes`, 4 s in `headless_run`
+  and in `shell_reconnects_and_settles`, a 6 s shell sleep in
+  `viewer_stream_waits_for_destination_resolution_before_attachment`; the 32 s
+  quiet loop in `ssh_shells.rs:704`. All go.
 - `ghostty_vt`'s 7 unit tests also run in `transport_tests` through its `#[path]`
   include. Negligible; left alone.
 - `scripts/testing.md` routes store-wide schema changes to `binary(transport_tests)`
@@ -164,10 +169,8 @@ surface, merged where they share a fixture):
 
 ### Delete — do not maintain
 
-Duplicates or guards for removed mechanisms; each one's rule is covered above:
-`automatic_command_attachment_preserves_an_existing_viewers_control`,
-`prepared_reveal_preserves_a_later_controlling_viewer`,
-`prepared_start_preserves_a_later_controlling_viewer`,
+Duplicates or guards for removed mechanisms; each one's rule is covered above.
+Still in `transport_tests` after slice 2:
 `a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait` (guards a removed timeout),
 `native_program_status_detects_support_before_a_viewer_attaches` (`output.rs:405`),
 `viewer_stream_waits_for_destination_resolution_before_attachment` (asserts only that 60 s > 6 s),
@@ -176,12 +179,10 @@ Duplicates or guards for removed mechanisms; each one's rule is covered above:
 `sessions_keep_serving_when_their_lf_executable_goes` (no executable watcher exists; resume tail joins the takeover test),
 `unanswering_superseded_owner_preserves_pending_turn_and_queued_input`,
 `resumed_session_completes_turns_after_build_replacement_and_viewer_return` (owner-hosted Task conversation predates #1887; restart leg = `registry_tests`),
-`server_reconnect_refreshes_expired_output_without_replaying_input` (= spool host rule),
-`server_failed_setup_retry_only_reconnects_and_preserves_newer_claims`, `server_reconnect_retries_after_exhaustion_…`, `server_reconnect_reports_unavailable_…` (→ one relay exhaustion rule),
-`server_reconnects_a_writable_bridge_that_stops_answering`, `server_heartbeats_keep_a_quiet_provider_attached`, `viewer_stream_heartbeat_expires_only_the_silent_viewer_while_output_continues` (→ host + relay rules),
-`server_move_here_lost_ack_…`, `server_move_here_pending_action_is_cancelled_by_pane_closure`, `server_reconnect_cancels_when_native_pane_closes`, `status_channel_failure_keeps_relay_alive_…` (→ relay rules),
-`desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged),
-and every real-process test whose rule moved to layer 1 (the viewer-protocol cluster: `first_snapshot_uses_the_new_viewers_dimensions` through `viewer_input_survives_its_disconnect`, the control-claim cluster, `session_viewers_retain_until_the_last_leaves_…`, `slow_observer_…`, `a_locked_store_…`, `only_controlling_viewers_…`, `viewers_enter_the_execution_directory_…`, `zero_viewers_preserve_shell_jobs_…`, `viewer_stream_backpressure_…`).
+`desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged).
+Slices 1–2 deleted the rest of this list (the viewer-protocol and control-claim
+clusters, the `prepared_*_preserves_a_later_controlling_viewer` pair, the server
+heartbeat/reconnect/exhaustion/Move here cluster); names are in `git show 7acc5cea27 117378aadb -- rust/loopflow/tests/transport_tests.rs`.
 Unused fixture helpers go with them. `lifetime.rs` tests (14 s on `POLL` sleeps) get the same `#[cfg(test)]` timing value if it is one line; otherwise leave them.
 
 ## Forbidden
@@ -225,7 +226,8 @@ no test that waits out a production timeout except a named fallback above.
    Deleted 10 real-process tests, 218.5 s of CI medians; `transport_tests`
    holds 95. Compressed: single-use `Peer` helpers inlined into `Server::accept`,
    setup check shared. `cargo nextest run -p loopflow --lib -E
-   'test(transport::relay_tests::)'`: 7/7, 2.83 s wall (0.7–2.8 s each).
+   'test(transport::relay_tests::)'`: 7/7 (six cases plus `relay_fixture`, the
+   child's entry point), 2.83 s wall (0.7–2.8 s each).
    Gaps left on purpose:
    - Relay cases use only `Host::Terminal`; owner bridging through the server
      ticket (`bridge_existing`) stays covered by the kept
@@ -234,9 +236,14 @@ no test that waits out a production timeout except a named fallback above.
    - Pane closure while a Move here is pending (relay SIGSTOPped) is not
      ported; the closure case covers a pending reconnect and `take_move`
      checks `closed()` before consuming.
-   - Local (non-server) relay rules from the design — control handoff notice,
-     a host that stops reading input — are not in `relay_tests` yet; their
-     real-process tests are in the kept local-reconnect set (slice 4 decides).
+   - Local (non-server) relay rules from the design — control handoff notice
+     (`control_handoff_restores_the_terminal_and_prints_the_notice`), a host
+     that stops reading input, an acknowledged viewer past the attach deadline
+     (`acknowledged_viewer_remains_attached_past_handshake_deadline`, 6 s sleep)
+     — are not in `relay_tests` yet; they stay real-process until slice 4
+     ports them to `relay_tests` with `TEST_PACE` or merges them into
+     `local_terminal_reconnects_…`. 95 − 35 = 60 tests still have to go in
+     slices 3–4.
 3. Non-transport moves (store retention, human_session, server, retirement).
 4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)

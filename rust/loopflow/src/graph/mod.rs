@@ -1576,8 +1576,7 @@ mod tests {
             edges(&pursue),
             [
                 ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 6),
-                ("loop-or-next".to_string(), 8)
+                ("loop-or-next".to_string(), 7)
             ]
         );
 

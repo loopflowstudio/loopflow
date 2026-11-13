@@ -225,7 +225,7 @@ impl SqliteStore {
                     ownership: ownership_in(&snapshot, &id)?,
                     tasks: super::task_ownership::held_in(&snapshot, &id)?
                         .into_iter()
-                        .map(|(task, _)| task)
+                        .map(|held| held.task)
                         .collect(),
                     machine,
                 })
@@ -324,14 +324,14 @@ impl SqliteStore {
         let snapshot = conn.savepoint()?;
         super::task_ownership::held_in(&snapshot, machine)?
             .into_iter()
-            .map(|(task, _)| {
-                let ownership = super::task_ownership::ownership_in(&snapshot, &task)?;
-                let since = ownership.since(machine).ok_or_else(|| {
+            .map(|held| {
+                let since = held.since.ok_or_else(|| {
                     StoreError::InvalidData(format!(
-                        "Task {task} is owned on {machine} with no log entry naming it"
+                        "Task {} is owned on {machine} with no log entry naming it",
+                        held.task
                     ))
                 })?;
-                Ok((task, since))
+                Ok((held.task, since))
             })
             .collect()
     }

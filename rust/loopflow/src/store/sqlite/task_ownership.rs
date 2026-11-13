@@ -264,12 +264,17 @@ pub(super) fn ownership_in(conn: &Connection, task: &TaskId) -> StoreResult<Task
     })
 }
 
-/// Unfinished Tasks whose current owner is `machine`, each with that owner as
-/// the log names them. Reads only the store.
-pub(super) fn held_in(
-    conn: &Connection,
-    machine: &MachineId,
-) -> StoreResult<Vec<(TaskId, TaskOwner)>> {
+/// An unfinished Task a Machine owns: the owner as the log names them, and
+/// when the latest entry naming the Machine was written.
+#[derive(Debug)]
+pub(super) struct HeldTask {
+    pub(super) task: TaskId,
+    pub(super) owner: TaskOwner,
+    pub(super) since: Option<i64>,
+}
+
+/// The unfinished Tasks whose current owner is `machine`. Reads only the store.
+pub(super) fn held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<HeldTask>> {
     let candidates = {
         let mut statement = conn.prepare(
             "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
@@ -282,12 +287,19 @@ pub(super) fn held_in(
     let mut held = Vec::new();
     for task in candidates {
         let task = TaskId::from_raw(task);
-        let (_, reading) = reading_in(conn, &task)?;
-        if let Some(owner) = reading.owner {
-            if owner.machine.id.as_ref() == Some(machine) {
-                held.push((task, owner));
-            }
+        let (rows, reading) = reading_in(conn, &task)?;
+        let Some(owner) = reading.owner else {
+            continue;
+        };
+        if owner.machine.id.as_ref() != Some(machine) {
+            continue;
         }
+        let since = rows
+            .iter()
+            .rev()
+            .find(|row| row.entry.machine_id.as_ref() == Some(machine))
+            .map(|row| row.entry.at);
+        held.push(HeldTask { task, owner, since });
     }
     Ok(held)
 }
@@ -415,7 +427,7 @@ pub(super) fn held_planning_in(
 ) -> StoreResult<HashMap<TaskId, bool>> {
     held_in(conn, machine)?
         .into_iter()
-        .map(|(task, _)| Ok((task.clone(), planning_connected_in(conn, &task)?)))
+        .map(|held| Ok((held.task.clone(), planning_connected_in(conn, &held.task)?)))
         .collect()
 }
 
@@ -801,7 +813,7 @@ pub(super) fn hand_back_in(
     let local = local_machine_in(conn)?;
     let held = held_in(conn, machine)?;
     let mut tasks = Vec::with_capacity(held.len());
-    for (task, owner) in held {
+    for HeldTask { task, owner, .. } in held {
         let planning_connected = match planning.get(&task) {
             Some(&connected) => connected,
             None => planning_connected_in(conn, &task)?,

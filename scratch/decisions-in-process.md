@@ -18,17 +18,16 @@ Demo, per finished surface:
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promotion/bind decision, 1–3 s per family
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'  # the kept few (standalone binary)
+cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'  # launch/resume settings, 0.6–1.9 s each
 ```
 
 plus the before/after table below with real numbers.
 
 ## Docs
 
-Written for this slice (intended behavior, before the code exists):
-
 - `rust/loopflow/tests/README.md` "Decision rows and full-Machine tests":
-  the row recipe and the promotion kept list. Later slices add their table
-  under "Full-Machine tests".
+  the row recipe, and under "Full-Machine tests" the promotion and launch
+  kept lists. Later slices add their table there.
 - `scripts/testing.md` "Implement: one focused test": points at the rows.
 
 ## Approach
@@ -43,12 +42,12 @@ Seams per surface (all in the CLI's call path):
 | Surface | Functions the CLI calls |
 |---|---|
 | Promotion / binding | `engine::creation::create` (CLI and served `task create`; normalizes the directory, checks the receipt, then `ops::task::task_create` → `adoption::resolve_source`/`save`), `ops::human_session::bind`, `preview_binding`, `primary::ensure`; `lf::commands::session::prepared(cli, dir)` for `resume --prepare`, fed a Clap-parsed `Cli` so selector wiring stays covered |
-| Launch policy | `prompt::process::prepare_process_prompt` → `AgentConfig` → `agent::session::build_session_command`; resume: `resolve_session_config` |
+| Launch policy | `run::build_prompt` (Clap-parsed `Cli` → config at the checkout → `prepare_process_prompt` → `AgentConfig`) → `build_session_command`; resume: `select_invocation` + `resolve_session_config(session, &Cli::default())` |
 | Task Graph run | `ops::task::explain::explain_task_run`, `checkout_explain::explain_task_checkout`, `planning_explain::explain_task_planning`, `task_graph::CapturedGraph` |
 | Machine dispatch | `lf::navigation::machine_invocation`, `ssh::parse_remote_command`, `machine::transport_failure`, `work_route::forward` |
 
-The three explain modules and adoption have no in-process tests today; every
-check of them goes through spawned `lf`.
+The three explain modules have no in-process tests today; every check of
+them goes through spawned `lf`.
 
 ## Kept full-Machine tests
 
@@ -57,25 +56,11 @@ owner/PTY/provider argv, a native conversation identity surviving resume, or
 receipt JSON. Write the surface's list into `tests/README.md` under a
 "Full-Machine tests" heading before deleting any of its tests.
 
-Promotion and binding (from 17 promotion/bind tests):
-
-| Keep | Wiring it proves |
-|---|---|
-| `promotion_selects_session_in_owned_and_shared_checkouts`, one case (owned, `task create --session` from inside the conversation) | `LF_AGENT_CALLER` reaches creation; `resume --task` continues the same native conversation in the recorded cwd |
-| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | bound directory reaches the next provider launch, not the running child |
-| `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` claims neither the checkout nor the Task's conversation |
-| `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
-
-Everything else in the promotion/bind family becomes rows: recency never
-selects, shared-checkout transfer, exact selection, done Tasks, failed
-reservation and retry, session-only vs worktree-only, recorded subdirectory,
-cross-repository and cross-Task refusals, closed Session refusal, retry
-idempotence. Rows whose current test also asserts a launch count keep that
-assertion only in the kept tests.
+Promotion (4 of 17 kept) and launch/resume (one launch and one resume per
+harness) lists are in `tests/README.md`; the plan doesn't repeat them.
 
 Other surfaces get their list when their slice starts; candidates from the
-brief: launch per harness (Claude terminal, Claude stream, Codex native,
-OpenCode server, Pi), one Machine dispatch round trip plus one transport
+brief: one Machine dispatch round trip plus one transport
 failure, one Task Graph run to an interactive step and one to Auto-Ship,
 release lock one killed and one exited case per mutation class, local
 planning one case per connection mode.
@@ -94,6 +79,10 @@ planning one case per connection mode.
    `personal_true_overrides_…`, `unset_chrome_leaves_…`; trimmed the
    override resume from `terminal_launch_and_resume_…` and the schema/chrome
    checks from `headless_launch_and_graph_…`. Kept list in `tests/README.md`.
+   The brief estimated 12 of 30 decision-only; 3 moved whole. Not yet read
+   for row candidates: `contextual_resume_uses_scope_and_recovers_…`,
+   `wave_targets_prepare_reuse_and_open_…` (resume target selection);
+   `machine_dispatch_resolves_destination_policy_…` belongs to slice 4.
 3. Task Graph run and `global_commands` explain tests: rows against the three
    explain functions and `CapturedGraph`; keep the two Graph runs.
 4. Machine commands: parsing and failure-text rows; keep one dispatch and the
@@ -199,7 +188,8 @@ stays in the previews test.
 ## Done when
 
 - Promotion/binding, launch policy, Task Graph explain and Machine dispatch
-  decisions each run as in-process rows. The brief asks "well under 1 s"
+  decisions each run as in-process rows. Done: promotion/binding, launch
+  policy. Remaining: Task Graph explain (slice 3), Machine dispatch (slice 4). The brief asks "well under 1 s"
   per decision; promotion rows cost ~0.4 s each but their family tests take
   1.3–3.3 s (open, `scratch/questions.md`).
 - `tests/README.md` lists each surface's kept full-Machine tests with the

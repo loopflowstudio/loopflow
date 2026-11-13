@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-870 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem}pre{background:#f4f4f4;padding .6rem;overflow-x:auto;font-size:13px}td,th{padding:.2rem .6rem;text-align:left}table{border-collapse:collapse}tr:nth-child(even){background:#f7f7f7}</style>
+<h1>LOO-870 QA: partial-index walks and foreign-key children</h1>
+<p>2026-11-13. Who this is for: anyone deleting or re-keying rows on a Machine-sized store, which holds the shared write lock while SQLite checks foreign-key children, and contributors whose new query or index the guard judges.</p>
+
+<h2>1. The migration on a copy of this Machine's store</h2>
+<p><code>sqlite3 -readonly ~/.lf/loopflow.db ".backup copy.db"</code>. The copy was missing <code>session_summary_indexes</code> (main) and <code>foreign_key_children</code> (this branch); both applied with <code>sqlite3</code>, then <code>ANALYZE</code>. The copy was never opened with <code>lf</code>.</p>
+<p>Before, every foreign key in the schema planned as a child lookup. These growing children scanned:</p>
+<pre>agent_sessions.wave_id -> waves (17633 rows): SCAN agent_sessions
+processes.agent_session_id -> agent_sessions (171021 rows): SCAN processes
+steer_batches.agent_process_id -> processes (11163 rows): SCAN steer_batches
+steers.project_id -> projects (3363 rows): SCAN steers
+tasks.checkout_machine_id -> machines (1224 rows): SCAN tasks
+tasks.parent_pr_id -> task_prs (1224 rows): SCAN tasks</pre>
+<p>After, each one is a <code>SEARCH ... USING COVERING INDEX</code> on the new index, and no child lookup on a <code>GROWING</code> table scans. The agent lookup still uses an index under its new name:</p>
+<pre>SELECT id FROM processes WHERE kind='agent' AND agent_session_id=?1
+before: SEARCH processes USING INDEX agent_process_session (agent_session_id=?)
+after:  SEARCH processes USING INDEX processes_agent_session (agent_session_id=?)</pre>
+<p>Deleting one Session (FKs on, in a rolled-back savepoint, five runs per store, two rounds):</p>
+<table><tr><th>store</th><th>seconds</th></tr>
+<tr><td>before</td><td>0.040 0.037 0.036 0.035 0.046 / 0.041 0.033 0.033 0.033 0.044</td></tr>
+<tr><td>after</td><td>0.005 0.000 0.000 0.002 0.001 / 0.005 0.000 0.000 0.002 0.000</td></tr></table>
+<p>Deleting a non-agent Process went from 1 ms to 0.1 ms (the <code>steer_batches</code> check). Applying <code>foreign_key_children.sql</code> to the Machine-sized copy took 0.07 s.</p>
+
+<h2>2. Upgrading a private home with the branch <code>lf</code></h2>
+<p>A temporary repository with a bare origin and git planning, an isolated <code>HOME</code>/<code>LF_HOME</code>, and <code>LF_*</code>/<code>REX_*</code> unset. Installed <code>lf 0.15.3</code> created "Before upgrade"; the branch build then created "After upgrade". <code>schema_migrations</code> gained both missing migrations, <code>agent_process_session</code> was replaced by <code>processes_agent_session</code>, and <code>lf task list</code> showed both Tasks. <code>integrity_check</code> and <code>foreign_key_check</code> came back clean. No process or launchd job was left for that home.</p>
+
+<h2>3. The guard, as a contributor meets it</h2>
+<p>Focused tests: <code>store::query_plans::</code>, <code>process_membership_upgrade_probes_cwd_and_session_indexes</code> and <code>boundary_statements_never_scan_tables_that_grow_with_use</code> pass. Their 83–114 s wall time came from the Machine's load average of 98; a lone test ran in 6–7 s.</p>
+<p>With <code>steer_batches_agent_process</code> and <code>steers_project</code> removed from the migration, the FK test names each key and its parent:</p>
+<pre>unanalyzed: SCAN steer_batches
+  in SELECT 1 FROM steer_batches WHERE agent_process_id = ? -- foreign key to processes
+unanalyzed: SCAN steers
+  in SELECT 1 FROM steers WHERE project_id = ? -- foreign key to projects
+analyzed: SCAN steers
+  in SELECT 1 FROM steers WHERE session_id = ? -- foreign key to agent_sessions
+analyzed: SCAN steers
+  in SELECT 1 FROM steers WHERE task_id = ? -- foreign key to tasks
+...</pre>
+<p>The last two lines were wrong: <code>steers_session</code> and <code>steers_task</code> still existed. SQLite reads a <code>sqlite_stat1</code> row whose index does not exist as the table's own row count, so <code>MEASURED</code>'s leftover <code>('steers','steers_project','1 1')</code> made <code>steers</code> look like a one-row table. The same thing happened on the Machine copy: drop <code>steers_project</code>, insert that row, and <code>SELECT 1 FROM steers WHERE session_id=?</code> plans as <code>SCAN steers</code>. Renaming or dropping an index, as this branch does with <code>agent_process_session</code>, would leave that trap whenever its <code>MEASURED</code> row stayed.</p>
+<p><b>Fixed:</b> <code>every_measured_row_names_an_index</code> fails on any <code>MEASURED</code> row naming a missing index. With <code>steers_project</code> dropped it reports <code>MEASURED names indexes the schema no longer has: steers.steers_project</code>, and it passes on the branch.</p>
+
+<h2>What works, what wasn't reached, what's still wrong</h2>
+<ul>
+<li>Works: the migration on a Machine-sized store and on an upgraded private home; every growing FK child is indexed; Session deletes hold the write lock for about 1 ms instead of 35–45 ms; guard failures name the index or foreign key.</li>
+<li>Not reached: a live server or Desktop walkthrough. Nothing in this change is visible there apart from shorter write-lock holds.</li>
+<li>Still wrong, outside <code>GROWING</code> (the brief excludes these): FK children that scan on this Machine include <code>ci_incidents.repair_session_id</code> and <code>ci_incidents.task_id</code> (914 rows), and <code>pr_landings.task_id</code> and <code>pr_landings.supervisor_machine_id</code> (849). <code>EXPLAIN QUERY PLAN DELETE FROM agent_sessions</code> ends in <code>SCAN ci_incidents</code>. These tables grow with every Task, so they are candidates for <code>GROWING</code>, which would be a separate finding.</li>
+</ul>

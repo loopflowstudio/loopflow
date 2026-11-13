@@ -43,13 +43,8 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_graph(graph, repo)?;
-    if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async {
-            let store = open_graph_store().await?;
-            store.sqlite.require_task_launch(task)?;
-            Ok(())
-        })?;
-    }
+    // A named Graph runs here with the checkout's context; only `task run`
+    // advances the Task's Graph and requires admission to start Task work.
     print_pipeline_header(&graph.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))

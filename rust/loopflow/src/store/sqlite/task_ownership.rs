@@ -295,7 +295,7 @@ impl RepoFacts {
         conn: &Connection,
         repo: &str,
         wave: Option<String>,
-        repository: &RepositoryId,
+        repository: String,
     ) -> StoreResult<Self> {
         Ok(Self {
             key: crate::config::participant_email(std::path::Path::new(repo)),
@@ -310,7 +310,7 @@ impl RepoFacts {
             owning_machine: super::scope_defaults::owning_machine_in(
                 conn,
                 wave,
-                Some(repository.to_string()),
+                Some(repository),
                 MachineSetting::Tasks,
             )?,
         })
@@ -332,7 +332,7 @@ impl RepoFacts {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        Self::in_scope(conn, &repo, wave, &RepositoryId::from_raw(repository))
+        Self::in_scope(conn, &repo, wave, repository)
     }
 
     /// You in the repository and Project of a Task about to be created.
@@ -341,35 +341,31 @@ impl RepoFacts {
         repository: &RepositoryId,
         project: Option<&ProjectId>,
     ) -> StoreResult<Self> {
-        let repo: String = conn
+        let (repo, wave): (String, Option<String>) = conn
             .query_row(
-                "SELECT repo FROM repository_plans WHERE id=?1",
-                [repository.as_str()],
-                |row| row.get(0),
+                "SELECT repo,(SELECT wave_id FROM projects WHERE id=?2)
+                 FROM repository_plans WHERE id=?1",
+                params![repository.as_str(), project.map(ProjectId::as_str)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        let wave = match project {
-            Some(project) => conn
-                .query_row(
-                    "SELECT wave_id FROM projects WHERE id=?1",
-                    [project.as_str()],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten(),
-            None => None,
-        };
-        Self::in_scope(conn, &repo, wave, repository)
+        Self::in_scope(conn, &repo, wave, repository.to_string())
     }
 }
 
 /// Whether the Task's repository has a remote planning provider. Loading
 /// planning configuration takes milliseconds: read it before the write lock.
 pub(super) fn planning_connected_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(crate::ops::planning_client::connected(&task_repo_in(
-        conn, task,
-    )?))
+    let repo: String = conn
+        .query_row(
+            "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
+    Ok(crate::ops::planning_client::connected(&repo))
 }
 
 /// The planning connection of each open Task a Machine holds, read before the
@@ -382,16 +378,6 @@ pub(super) fn held_planning_in(
         .into_iter()
         .map(|(task, _)| Ok((task.clone(), planning_connected_in(conn, &task)?)))
         .collect()
-}
-
-fn task_repo_in(conn: &Connection, task: &TaskId) -> StoreResult<String> {
-    conn.query_row(
-        "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
-        [task.as_str()],
-        |row| row.get(0),
-    )
-    .optional()?
-    .ok_or(StoreError::NotFound)
 }
 
 /// The one Machine of yours that writes the Task's next entry: the owner's,
@@ -770,7 +756,7 @@ pub(super) fn hand_back_in(
             .owner
             .map_or((None, None), |owner| (owner.person, owner.person_key));
         let planning_connected = match planning.get(&task) {
-            Some(connected) => *connected,
+            Some(&connected) => connected,
             None => planning_connected_in(conn, &task)?,
         };
         append_in(

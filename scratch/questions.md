@@ -11,7 +11,7 @@
 
 ## Checks
 
-- `cargo build -p loopflow --lib --tests`: passes. `cargo fmt`: clean.
+- `cargo check -p loopflow --lib --tests` after compress: passes, no warnings. `cargo fmt`: clean.
 - Focused lib tests (`store::sqlite::task_ownership::`, `rentals`,
   `linear_observation`, `planning_peers`, `scope_defaults`): 3 of 20 passed,
   then the process sat in state `T` (stopped) at load 40–115; tests in other

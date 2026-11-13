@@ -1,28 +1,54 @@
 //! `lf --machine M resume <session>` moves the conversation before resuming
-//! it there; `lf task move X --machine M` and `lf --machine M resume --task X`
-//! move a Task with its conversation. `send` runs where the work lives and
-//! `receive` on M, each locally when that side is this Machine, otherwise over one SSH request, so
-//! laptop → mini, rental → laptop and rental → mini are the same relay.
+//! it there; `lf task move X --machine M`, `lf --machine M resume --task X`
+//! and resuming a Task's conversation on M move a Task with its conversation.
+//! `send` runs where the work lives and `receive` on M, each locally when that
+//! side is this Machine, otherwise over one SSH request, so laptop → mini,
+//! rental → laptop and rental → mini are the same relay.
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
+use crate::durable::{Machine, MachineId, RepositoryId, TaskId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
-/// Move `session`, which this Machine knows, to `target` unless it is
-/// already there.
-pub(crate) async fn relay(
+/// `lf --machine M resume <session>`: move the Session, if this Machine knows
+/// it, to `target` unless it is already there. A Task's conversation moves only
+/// with its Task, as `lf task move` moves it.
+pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
+    let task = tokio::runtime::Runtime::new()?.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await? else {
+            return Ok(None);
+        };
+        let store: SharedStore = std::sync::Arc::new(store);
+        let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
+            return Ok(None);
+        };
+        let target = super::ssh::resolve_target(target, forward_agent).await?;
+        relay(&store, &session, &target).await
+    })?;
+    if let Some(task) = task {
+        move_task(task.as_str(), target)?;
+    }
+    Ok(())
+}
+
+/// Move a Task-less `session` to `target` unless it is already there. For a
+/// Task's conversation, returns its Task when the Task still has to move there.
+async fn relay(
     store: &SharedStore,
     session: &LfSession,
     target: &Machine,
-) -> Result<()> {
+) -> Result<Option<TaskId>> {
+    if let Some(task) = moves::conversation_task(&store.sqlite, &session.id)? {
+        let route = store.task_execution_route(&task).await?;
+        return Ok((route.machine_id != target.id).then_some(task));
+    }
     let id = session.id.to_string();
     let moved_to = store.sqlite.session_moved_to(&id)?;
     if moved_to.as_ref() == Some(&target.id) {
-        return Ok(());
+        return Ok(None);
     }
     ready(store, target, None, &format!("Session {}", session.title)).await?;
     let moved = match moved_to {
@@ -48,7 +74,7 @@ pub(crate) async fn relay(
         .await
         .map_err(|error| retry_session(error, &id, target))?;
     eprintln!("Moved {} to {}", session.title, target.name());
-    Ok(())
+    Ok(None)
 }
 
 /// `lf task move X --machine M`. A Graph the move stopped continues where the

@@ -265,7 +265,7 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
         return Ok(None);
     };
     if route.machine_id == store.local_machine()?.id {
-        return moved_task_conversation(cli, args, &store, &route.task_id);
+        return Ok(None);
     }
     if !crate::journal::request::active()
         && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
@@ -420,61 +420,6 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         machine,
         resumed: None,
         args: args[1..].to_vec(),
-        route: None,
-    }))
-}
-
-/// `resume --task X` for a Task that stayed here while its conversation moved
-/// on its own resumes that conversation where it went.
-fn moved_task_conversation(
-    cli: &Cli,
-    args: &[String],
-    store: &SqliteStore,
-    task: &TaskId,
-) -> Result<Option<Forward>> {
-    let Some(Commands::Session {
-        cmd: SessionCommand::Resume { connection, .. },
-    }) = &cli.command
-    else {
-        return Ok(None);
-    };
-    let named = connection.task.is_some() || cli.task.is_some();
-    if !named
-        || (!crate::journal::request::active()
-            && std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some())
-    {
-        return Ok(None);
-    }
-    let Some((session, machine)) = store.task_conversation_moved_to(task)? else {
-        return Ok(None);
-    };
-    let mut forwarded = Vec::new();
-    let mut rest = args[1..].iter();
-    while let Some(arg) = rest.next() {
-        match arg.as_str() {
-            "--" => {
-                forwarded.push(session.clone());
-                forwarded.push(arg.clone());
-                forwarded.extend(rest.by_ref().cloned());
-                break;
-            }
-            "--task" => {
-                rest.next();
-            }
-            _ if arg.starts_with("--task=") => {}
-            _ => forwarded.push(arg.clone()),
-        }
-    }
-    if !forwarded.contains(&session) {
-        forwarded.push(session);
-    }
-    let resumed = <Cli as clap::Parser>::try_parse_from(
-        std::iter::once("lf".to_string()).chain(forwarded.iter().cloned()),
-    )?;
-    Ok(Some(Forward {
-        machine,
-        resumed: Some(resumed),
-        args: forwarded,
         route: None,
     }))
 }

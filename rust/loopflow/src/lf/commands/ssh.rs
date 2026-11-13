@@ -89,17 +89,7 @@ pub(super) fn run_with_io(
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it there first.
-        runtime.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await? else {
-                return anyhow::Ok(());
-            };
-            let store: crate::store::SharedStore = std::sync::Arc::new(store);
-            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
-                return Ok(());
-            };
-            let machine = resolve_target(target, forward_agent).await?;
-            super::session_move::relay(&store, &session, &machine).await
-        })?;
+        super::session_move::move_session(id, target, forward_agent)?;
     }
     let source = if preview || resident_operation {
         None

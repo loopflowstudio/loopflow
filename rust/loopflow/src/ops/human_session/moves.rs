@@ -117,11 +117,15 @@ pub(crate) struct MovedFile {
 
 /// Commit and push the Session's branch, stop its agent, read its transcript
 /// and complete it here as moved to `to`. Repeating it after a failed receive
-/// reads the same Session again.
+/// reads the same Session again. A Task's conversation moves only with its
+/// Task, so it sends the Task.
 pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Result<Move> {
     let session = session_by_id(store, id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    if let Some(task) = conversation_task(&store.sqlite, &session.id)? {
+        return send_task(store, task.as_str(), to).await;
+    }
     let name = &session.title;
     let root = crate::git::worktree_root(&session.cwd).map_err(|_| {
         anyhow!(
@@ -146,6 +150,18 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
         checkout: Some(checkout),
         history,
         task: None,
+    })
+}
+
+/// The Task whose conversation `session` is: the Task it is the primary
+/// Session of, else the one Task it belongs to.
+pub(crate) fn conversation_task(store: &SqliteStore, session: &str) -> Result<Option<TaskId>> {
+    if let Some(PrimaryScope::Task(task)) = store.primary_scope(session)? {
+        return Ok(Some(task));
+    }
+    Ok(match store.session_task_ids(session)?.as_slice() {
+        [task] => Some(task.clone()),
+        _ => None,
     })
 }
 
@@ -223,14 +239,7 @@ async fn leave(
     let checkout = worktree
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
-    let conversation = match super::primary::task_conversation(store, &task.id).await? {
-        Some(session) => Some(session),
-        // Repeated after a failed receive: the conversation already left for `to`.
-        None => match store.sqlite.task_conversation_moved_to(&task.id)? {
-            Some((id, machine)) if machine == *to => session_by_id(store, &id).await?,
-            _ => None,
-        },
-    };
+    let conversation = super::primary::task_conversation(store, &task.id).await?;
     let taken = match conversation.as_ref() {
         Some(session) => {
             await_provider_identity(&store.sqlite, &session.id).await?;

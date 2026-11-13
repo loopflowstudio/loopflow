@@ -273,6 +273,10 @@ preferences, which don't name the laptop, and shows its Machine id.
 Session ends it with `This conversation moved to mini: lf resume --task MTG-321`;
 that command opens it again from mini.
 
+**The conversation goes only with its Task.** `lf --machine mini resume <session>`
+on a Task's conversation moves the Task, exactly as `lf task move` does, then
+resumes the conversation there. A conversation outside any Task moves alone.
+
 **A running step starts over from the checkpoint.** The Task's primary Session
 travels with its transcript. A headless step that was mid-run, such as
 `implement`, is stopped, and mini runs that step again from the commit the move

@@ -143,39 +143,24 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   flag and inventory filter search its `session_id` index. Lib query_plans 6,
   server::boundary 13 passed.
 
-## Next implement direction (concept review, 2026-11-13)
+## Done (2026-11-13, fifth pass): a Task's conversation moves only with its Task
 
-A Task's conversation moves only with its Task. Today `lf --machine mini
-resume <session>` on a Task's primary Session runs `moves::send` with
-`task: None`: the conversation and a pushed checkout go to mini while the
-ownership log, `task_checkouts`, Graph and Auto-Ship stay here, and
-`lf resume --task X` follows the Session marker (`work_route.rs`
-`moved_task_conversation`, `task_conversation_moved_to`). That is a second
-answer to "where does this Task run", and the brief's first line wants one.
-Counterexample it allows: Auto-Ship restarts the ship process here while the
-conversation commits to the same branch on mini. Behavior from #1720
-(`resume_task_follows_a_task_session_moved_alone`), built before LOO-863's
-Task move existed.
-
-- `moves::send` on a Session that is a Task's conversation (primary or
-  bound to the Task) runs the Task move (`send_task`) instead; the result
-  and notice are the Task move's (`lf resume --task X`).
-- `resume --task X` routes by the ownership log and `task_moves` only;
-  delete `moved_task_conversation`, `task_conversation_moved_to`, and the
-  `leave` retry branch that reads it (the retry reads the sent `task_moves`
-  payload, which already holds the conversation).
-- `agent_sessions.moved_to_machine_id` stays as a Session fact: the sender's
-  record of where a Task-less conversation went, and the ended mark on a
-  Task conversation that left with its Task.
-- Replace `resume_task_follows_a_task_session_moved_alone` with a test that
-  resuming a Task's Session on mini moves the Task (status on both Machines
-  names mini; `task_moves` shows `sent`/`arrived`).
-
-Not moves, so they stay outside `task_moves` (the brief listed them):
-`session_moves` is the agent-switch queue `lf session move -a` leaves for a
-busy Session's Stop hook; `relocated_task_processes` freezes Process
-membership when a repository's path changes on one Machine
-(`relocate_repository`). Neither crosses Machines.
+- `moves::send` on a Task's conversation (its primary Session, else the one
+  Task it belongs to: `moves::conversation_task`) runs `send_task`.
+  `lf --machine M resume <session>` (`session_move::move_session`) runs
+  `move_task` for one, so the move records `task_moves` and continues the
+  Graph; a Task already on M moves nothing.
+- Deleted `moved_task_conversation`, `task_conversation_moved_to` and the
+  `leave` marker-retry branch; `resume --task` routes by ownership only.
+  `agent_sessions.moved_to_machine_id` stays a Session fact.
+- Tests: `resume_task_follows_a_task_session_moved_alone` →
+  `resuming_a_task_conversation_on_mini_moves_its_task`;
+  `a_repeated_task_send_carries_the_conversation_that_already_left` (tested
+  the deleted branch) deleted, its conversation check moved into
+  `a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it`.
+- Checks: lib `ops::human_session` + `task_moves::` 51 pass; integration
+  `machine_commands::` 49 + the two changed tests pass; clippy clean.
+  Gate runs `documented_commands::` for the machines.md paragraph.
 
 ## Remaining
 
@@ -214,5 +199,14 @@ remaining mentions are pre-migration fixtures.
   `ensure_task` opens a Task conversation in the repository when the Task has
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
+- **Which conversation goes.** A Task move carries the Task's chosen
+  conversation (`task_conversation`: primary, else most recent human input).
+  Resuming a second open conversation of the same Task on M moves the Task
+  with the other one, and the forwarded resume finds no such Session on M.
+  Rare (two open conversations on one Task); not handled.
+- **Lost reply from a remote source.** When the coordinator sends a Task owned
+  on a third Machine and the SSH reply is lost, the source has completed the
+  conversation and no `task_moves` payload exists anywhere; a repeat sends the
+  Task without it. The deleted marker branch covered this.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.

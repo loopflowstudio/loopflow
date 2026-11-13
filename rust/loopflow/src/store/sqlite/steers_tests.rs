@@ -128,6 +128,87 @@ fn pending_requests_hold_the_owner_until_the_current_attachment_settles_them() {
     assert_eq!(store.owner_retention(owner).unwrap(), None);
 }
 
+/// An idle owner holds nothing; a Graph it runs, a Graph step its Session
+/// captures, a headless run or a finished Session each name what holds it.
+#[test]
+fn owner_retention_names_the_graph_run_or_absence_that_holds_an_idle_owner() {
+    use crate::store::sqlite::sessions::OwnerRetention::{
+        HeadlessRun, NoOpenSession, RunningGraph,
+    };
+    for case in ["idle", "graph", "step", "run", "completed"] {
+        let (_home, store, _adapter) = native_fixture();
+        let owner = store
+            .session_attachment("session")
+            .unwrap()
+            .unwrap()
+            .lf_process_id
+            .unwrap();
+        let conn = store.conn.lock().unwrap();
+        let graph = LfProcessId::new();
+        let graph_under = |parent: Option<&LfProcessId>| {
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+                params![graph, parent],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'fixture','{}')",
+                [&graph],
+            )
+            .unwrap();
+        };
+        let expected = match case {
+            "idle" => None,
+            "graph" => {
+                graph_under(Some(&owner));
+                Some(RunningGraph)
+            }
+            "step" => {
+                graph_under(None);
+                // The Session's current capture comes from a step of that Graph.
+                let step = LfProcessId::new();
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,started_at,parent_lf_process_id) VALUES(?1,'fixture',1,?2)",
+                    params![step, graph],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+                     SELECT session_id,kind,receipt_key||':step',observed_at,payload,?1 FROM session_events
+                     WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id='session')",
+                    [&step],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE agent_sessions SET current_capture=last_insert_rowid()",
+                    [],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                     VALUES(?1,?2,0,'[]')",
+                    params![graph, step],
+                )
+                .unwrap();
+                Some(RunningGraph)
+            }
+            "run" => {
+                conn.execute("UPDATE agent_sessions SET interactive=0", [])
+                    .unwrap();
+                Some(HeadlessRun)
+            }
+            "completed" => {
+                conn.execute("UPDATE agent_sessions SET completed_at=1", [])
+                    .unwrap();
+                Some(NoOpenSession)
+            }
+            _ => unreachable!(),
+        };
+        drop(conn);
+        assert_eq!(store.owner_retention(&owner).unwrap(), expected, "{case}");
+    }
+}
+
 #[test]
 fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
     let (_home, store, adapter) = native_fixture();

@@ -216,8 +216,12 @@ you add one, copy its `sqlite_stat1` row from a Machine store into `MEASURED`
 in `store/query_plans.rs`.
 
 A new hot path gets a test there (`server::boundary` uses the same helpers).
-Foreign keys count: deleting a parent row looks up its children, so a child
-column on a growing table needs an index.
+Foreign-key checks never appear in `EXPLAIN QUERY PLAN`: deleting a parent row
+or changing its key looks up every child. The guard reads each foreign key from
+the schema and plans that lookup (`SELECT 1 FROM <child> WHERE <column> = ?`)
+under the same rules, so a child column on a growing table needs an index
+whatever its `ON DELETE` action. A partial `WHERE <column> IS NOT NULL` index
+serves it when the column is mostly NULL.
 
 The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
 PRAGMA optimize=0x10002` once when it starts and about once a day after, never

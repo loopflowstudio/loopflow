@@ -149,39 +149,21 @@ record and never changes; the table stays append-only. Tasks are never deleted
 
 ## Status
 
-Built: migration `graph_process_task.sql` (fixture `graph_process_task_released.sql`,
-test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
-indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
-recording the deepest checkout's Task. Left: CI.
+Built and gated; left: CI (`binary(session_launch_contract)`, full matrix). PR #1910.
 
 - Store copy 2026-11-13: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's `task_graph_pairs` over every Task, then the branch migration. 2,141 pairs on 434 Tasks both ways, 0 differences, 0 Graphs with more than one Task.
-
-- QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished` and `plan.list` latest Graph pair correctly. Focused tests stopped in `TN` again; gate or CI runs them.
-
-- Gate 2026-11-13: `scripts/test.py --reuse-passing` stopped at resource preflight (uv cache inventory deadline, 38 GiB free); its plan ran by hand. Lib and integration test processes started under nextest on this Machine enter `TN` and stay there until they get SIGCONT; this happens to other worktrees' tests too, so it is not this branch. The runs below continued stopped descendants of their own nextest only.
-  - architecture, test inventory, `cargo fmt --check`: pass.
-  - nextest `task_work::`, `graph_inventory::` (store and command), `bind_attribution::`, migration test, `server::events::`, `graph_tests::`, `task_graph_launch_tests::`, `planning_foreground_tests::`, `graph_discovery_tests::`, `machine_commands::`, and the two `record_graph` integration tests: 173/173 after fixes. An earlier pass also covered `store::sqlite::processes::`, `rollover::`, `documented_commands::`, `performance_tests::`, `task_adoption_tests::`: pass. `machine_commands::` remote tests failed once with the SSH stand-in unreachable for 20 s, then passed.
-  - `cargo clippy --all-targets -- -D warnings`: pass. Website `dev.py test`: 73 passed.
-  - Left to CI: `binary(session_launch_contract)`, the full matrix.
-- Gate fixes: the migration fixture inserted a second local Machine (rejected); `entry_in` still derived a Graph's `task_id` from the cwd/Session rule while `graphs_of_task` read the column, so it now reads the column; `task_work_includes_checkout_binding…` asserted the old nested-checkout, cleared-worktree and late-Session-link pairings and now asserts the recorded ones.
+- QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished`, `plan.list` latest Graph, `lf graph list --processes`/`--taskless`/`--for-task` and `lf task status` agree with `graph_processes.task_id`.
+- Gate 2026-11-13 (last on 4e8851107): `scripts/test.py --reuse-passing` stopped at resource preflight (uv cache inventory deadline), so its plan ran by hand. nextest test processes on this Machine enter `TN` until SIGCONT, other worktrees' too; runs continued only their own descendants. fmt, clippy, architecture, test inventory, website `dev.py test` (73), and 173/173 focused tests (`task_work::`, `graph_inventory::`, `bind_attribution::`, migration test, `server::events::`, `graph_tests::`, `task_graph_launch_tests::`, `planning_foreground_tests::`, `graph_discovery_tests::`, `machine_commands::`, `record_graph` integration, `documented_commands::`): pass.
+- Gate fixes: `entry_in` derived a Graph's `task_id` from the cwd/Session rule while `graphs_of_task` read the column; it now reads the column.
+- Compress 2026-11-13: `graphs_of_task` probes `task_id IN (?1)` directly. A second pass on 4c54a93ec found nothing further to cut; `entry_in`'s per-Graph `task_id` lookup replaces an equal per-Graph `task_of_process` call.
 
 ## Docs
 
-Updated for launch-recorded Graph Tasks: `docs/dev/data.md`, `docs/dev/planning.md`,
-`docs/dev/reference-models.md`, `docs/dev/index.md` (and regenerated
-`docs/dev/index.html`). `lf task status` output is the same. User-facing: `docs/work.md` (Keep work already in progress) says an adopted checkout's earlier Graphs stay unattached.
+`docs/dev/data.md`, `planning.md`, `reference-models.md`, `index.md` (+ regenerated `index.html`); user-facing `docs/work.md` (an adopted checkout's earlier Graphs stay unattached). `lf task status` output is unchanged.
 
 ## Concept review (2026-11-13)
 
-The model matches the work model: a Graph runs *for* a Task (or a Wave, or
-nothing), the launch already decides which, and the store now records that
-decision instead of re-deriving it from directories on every read. A Graph run
-with an explicit `--wave` inside a Task's checkout no longer counts as the
-Task's; that follows from the same concept. Writers are the launch
-(`graph.rs` execute), `World::graph` and test fixtures; no other production
-INSERT exists. Nothing further to change; the adoption question in
-`scratch/questions.md` stays reversible and does not change the design.
-- Compress 2026-11-13: `graphs_of_task` probes `task_id IN (?1)` directly (a `TaskId` is canonical, so the identifier-matching `tasks()` subquery added nothing). `cargo test -p loopflow --lib store::sqlite::task_work::`: 13 passed (binary stopped in `TN` repeatedly; continued by PID).
-- QA re-run 2026-11-13 on 6ae00e744 (`scratch/qa.html` §4): `lf graph list --processes` `task_id`, `--taskless`, `--for-task` (full and short id) and `lf task status` agree with `graph_processes.task_id`; a new launch pairs at once. Nothing fixed.
-- Gate re-run 2026-11-13 on 4e8851107 (only `task_work.rs` compress and `docs/work.md` changed since the last gate): `cargo fmt --check` pass; `cargo test -p loopflow --lib store::sqlite::task_work::` 13 passed (stopped in `TN` five times, continued by PID); `--test integration documented_commands::` 4 passed; `cargo clippy --all-targets -- -D warnings` pass. Left to CI: `binary(session_launch_contract)`, the full matrix.
-- Kickoff re-read 2026-11-13 on 883343b98: plan unchanged. PR #1910 is open and merge-clean at 4e8851107 with 2 checks passed and 15 skipped; 883343b98 (the `docs/work.md` line) is not pushed yet. origin/main is 1 commit ahead (`uv.lock` only), no conflict. No Task comments or PR review comments.
+A Graph runs *for* a Task (or a Wave, or nothing); the launch already decides
+which, and the store now records that decision. A Graph run with an explicit
+`--wave` inside a Task's checkout no longer counts as the Task's. Writers are
+the launch (`graph.rs` execute), `World::graph` and test fixtures.

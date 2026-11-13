@@ -74,7 +74,10 @@ scenario, prepare a Session with the installed binary before opening the same
 state with the branch binary. `lf -b graph <name>` runs a command-only Graph
 (`- cmd: help`) in place with no server; run it in a checkout adopted by
 `lf task create --worktree <path>` to give that Task Graphs. A `cmd:` step must
-name a real `lf` command (`version` is not one).
+name a real `lf` command (`version` is not one). To keep a Graph live, give it
+a skill step run by a stand-in `claude` that `cat > /dev/null`: `-p` stream-json
+keeps stdin open, so the step runs until you kill the stand-in. macOS has no
+`setsid` command; detach with Python (`os.fork()`, `os.setsid()`, `os.execvp`).
 
 Run `lf server run` as a child with closed stdin; get its socket from
 `lf server status`. Use the current revision's newline JSON protocol in

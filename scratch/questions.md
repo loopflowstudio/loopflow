@@ -14,4 +14,6 @@
 - Relay case `cancelled` (SIGINT while waiting for an acknowledgement) was not
   ported. Exit 130 comes from `lf`'s `ctrlc` handler (`agent::exit_on_interrupt`),
   not the relay, and "no input before acknowledgement" is the
-  `owner-unacknowledged` case.
+  `owner-unacknowledged` case. `viewer_tests`' `cancel` preview case already
+  installs that handler and cancels before acknowledgement; slice 7 moves it
+  into `relay_tests`.

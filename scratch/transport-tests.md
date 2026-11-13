@@ -367,6 +367,37 @@ no test that waits out a production timeout except the one named above.
    bounds, not `POLL` multiples. `viewer_tests::snapshot_preview_*` (3 cases,
    > 60 s each under this load) are untouched. CI sum under 400 s is
    unmeasured until gate.
+7. **Next (concept review, 2026-11-13): one relay bench.** Layer 2 has two
+   child benches doing one job: `viewer_tests.rs` (`LOOPFLOW_VIEWER_FIXTURE`,
+   the pattern `relay_tests` copied) and `relay_tests.rs`
+   (`LOOPFLOW_RELAY_FIXTURE`, `TEST_PACE`). Both re-exec the lib binary on a
+   PTY and relay to an owner socket a thread plays. `viewer_tests` never sets
+   `TEST_PACE`, so its cases run at production pace, and three of them are not
+   relay rules at all: `resume`, `reveal` and `provider_failure` run
+   `resume_fixture`, which starts the real `lf` binary (`lf session serve`).
+   That is why `test(transport::)` still holds > 60 s cases while the demo
+   calls it "host + relay rules, seconds".
+   - The owner-socket preview cases (`startup_failure`, `cancel`, `blank`,
+     `modes`, `completed`, `startup_input`, `directory`) become `preview-…`
+     cases in `relay_tests`' child: one entry point, one `Pace`, one PTY
+     driver. The fixture's `ctrlc` handler comes along; `cancel` is the
+     SIGINT-before-acknowledgement case slice 4 did not port.
+   - The three `resume_fixture` cases are surface tests. For each, name the
+     kept `transport_tests` test that asserts its rule (candidates:
+     `resume_json_returns_after_relay_and_viewer_takeover`,
+     `conversation_open_here_confirms_attachment_…`,
+     `a_terminal_launcher_becomes_its_provider_…` failed-provider leg) and
+     delete it; a rule nothing covers becomes a leg of the nearest kept test.
+   - `viewer_tests.rs` is deleted. Done when `test(transport::)` has no case
+     that starts `lf` and none over the relay windows slice 6 lists.
+
+## Outside this Task
+
+The frozen-resume overrun on #1922's Linux CI (still running at 20 s where
+the Mac probe exited at 6.7 s) is a product question, not a test one: the
+relay's `UnixStream::connect` to the owner and the setup before it have no
+bound, and lf at a turn boundary is meant to keep passing. Slice 5 does not
+exercise that path. Unreproduced; worth its own Task if it recurs.
 
 ## Checks
 

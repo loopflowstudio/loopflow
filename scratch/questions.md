@@ -268,6 +268,28 @@ Closes the concept review's one gap (a kill between the claim and `sent` left
   the leaving test 2 passed; integration `machine_commands::` move tests 5
   passed; clippy clean.
 
+## Next implement (concept review, 2026-11-13): one move, one status verb
+
+A move in flight is one thing with a stage (`MoveInFlight { stage }`), but
+`lf task status` names it with two verbs: `Leaving for mini since …: not sent`
+and `Moving to mini since …: sent, not arrived`. Both lines say the same thing
+to the person (the move to mini isn't done) and take the same retry command;
+the second verb is a word to learn for no benefit. And `since` resets when the
+row turns `sent` (`record_move_sent` deletes the leaving row and inserts a new
+one at now), so a retried move looks younger than it is.
+
+- Status and the refusal print `Moving to mini since <move began>: not sent`
+  or `…: sent, not arrived`, plus the retry line. `describe_move` loses its
+  verb match.
+- `at` on a `leaving` or `sent` row is when the move began: `record_move_sent`
+  turns the leaving row into `sent` in place (or, with no leaving row, inserts
+  one), keeping `at`; a repeated send keeps it too. `arrived` stamps its own
+  time as now.
+- machines.md: one status example with both stages after the colon;
+  `machine_commands.rs:3098` asserts `Moving to mini since … not sent`.
+- The stored state keeps the name `leaving` (settles the Names question
+  below): a `sent` row with no payload would call a move sent that was not.
+
 ## Remaining
 
 Every Machine-local column the brief names (`worktree`, `branch`,
@@ -313,7 +335,6 @@ that answers the parallel-stall question below.
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
-  `task_ship_events`, `people`, `pool_machines`. `leaving` is a third
-  `task_moves` state beside the brief's "sent or arrived"; the alternative the
-  concept review offered was a `sent` row with no payload meaning "not finished
-  leaving" (review page: `294de82873:scratch/concept-review.html`).
+  `task_ship_events`, `people`, `pool_machines`. `leaving` stays a third
+  `task_moves` state beside the brief's "sent or arrived" (see Next implement);
+  the payloadless-`sent` alternative is in `294de82873:scratch/concept-review.html`.

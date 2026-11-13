@@ -40,15 +40,13 @@ nothing inside a write. No naming or model change is called for, and no
 product choice is open. The remaining in-write config load is the one already
 listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
 
-## Gate (2026-11-12/13, tree cb38c1949b)
+## Gate (2026-11-13, HEAD e282904291, base 87f0e3c60a = origin/main)
 
-- `scripts/test.py --reuse-passing`: stopped at resource preflight (`~/.cache/uv`
-  inventory deadline, 42.7 GiB free). Plan run by hand instead:
-- `check_architecture.py`: pass. `check_rust_test_inventory.py`: pass. `cargo fmt --check`: pass.
-- `cargo build -p loopflow --bin lf`: pass (16 m 36 s, load ~70).
-- nextest `test(store::sqlite::{task_ownership,rentals,children::linear_observation_tests,planning_peers,task_comments}::) | test(ops::linear_observe::) | test(store::query_plans::) | test(documented_commands::) | binary(two_people)`:
-  not run. Compiling the test binaries outlasted the 2 h limit (load 140–190,
-  other checkouts compiling). No test started; CI's `rust-test` owns the result.
-- `cargo clippy --all-targets -- -D warnings`: not run (queued behind nextest); CI `rust-lint` owns it.
-- PR #1909 CI: every proof job skipped (still so at head 3ec9fe627a). `ci.yml` runs them only once `scratch/` is clear, which happens at `lf pr submit`. Until then, nothing has checked the test binaries or clippy after the merges of 4b84a0dc9e and 87f0e3c60a (current origin/main).
-- Implement, compress and realign passes (2026-11-13): no code change, no local rerun; code still matches every claim above.
+- `scripts/test.py --reuse-passing`: stopped at resource preflight again (`~/.cache/uv` inventory deadline, 38.7 GiB free). Plan run by hand:
+- `check_architecture.py`, `check_rust_test_inventory.py`, `cargo fmt --check`: pass.
+- `cargo build -p loopflow --bin lf`: pass (3 min).
+- nextest under `test_network.py`, filter `test(store::sqlite::{task_ownership,rentals,children::linear_observation_tests,planning_peers,task_comments}::) | test(ops::linear_observe::) | test(store::query_plans::) | test(documented_commands::) | binary(two_people)`: 36 of 36 pass (`rentals::` 9/9 in its own run, the rest 27/27).
+- First attempt sat 6,700 s on four `rentals::` tests. They were not hung: `ps` showed state `T` (stopped by a signal) at 0% CPU, and `kill -CONT` let each one pass at once. Test processes in other checkouts (loo-865, loo-593) were stopped the same way; the sender is unknown and the kernel log has no swap/suspend entry. The rerun used `/tmp/loo867-cont.sh`, which resumes stopped descendants of this run only; it resumed 4 tests.
+- `cargo clippy --all-targets -- -D warnings`: pass.
+- `website/dev.py test` with the candidate `lf` on PATH: pass.
+- CI still skips proof jobs until `scratch/` is clear at `lf pr submit`; CI's `rust-test` and `rust-lint` rerun these there.

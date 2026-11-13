@@ -124,33 +124,13 @@ Beyond the prototype:
   `tasks t` in the project filter; both now `CROSS JOIN` from the small side
   (`eligible`, `projects`), here and in `session_events.rs`'s event reader.
 
-## Remaining: sync onto LOO-870 (#1916)
+## Synced onto LOO-870 (#1916), Nov 13
 
-origin/main `0afb302f52` replaced the partial-index exemption this branch
-added. `git merge-tree HEAD origin/main` conflicts in `query_plans.rs` and
-`docs/dev/data.md`. Main's rule: a walk of a partial index is a scan once
-its measured `sqlite_stat1` row count reaches `LIVE_SUBSET_ROWS` (1,000), and
-`every_partial_index_on_a_growing_table_is_measured` requires stats for each
-partial index. Main re-measured `MEASURED` on Nov 13 (283,304 events).
-
-Resolve to main's mechanism; one exemption rule, not two:
-
-- Delete this branch's `LIVE_SUBSETS` name list and its use in
-  `growing_scans`; keep main's row-count filter.
-- Take main's `MEASURED` and add the four new indexes with the stats above
-  (`session_capture_window` 17723, `session_input_outcome_window` 34882,
-  `session_turn_window` 85815, `processes_completed` 170063).
-- Keep this branch's prepared-statement tracing (`raw_query()` instead of
-  `expanded_sql()`): main still inlines values, which folds `0 AND …` arms to
-  `WHERE 0` and plans scans of arms that never run.
-- `docs/dev/data.md`: main's paragraph on the row-count rule, plus "plans as
-  prepared".
-
-`session_history_reads_plan_by_window` must pass under main's rule: the
-window-index steps should plan as `SEARCH … (observed_at>?)`, not `SCAN`
-(unverified against main's stats until merged). Check:
-`cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session`
-after the merge, then rerun `bench.sh` only if `sessions.rs` changed.
+Merge `65be402161`: `LIVE_SUBSETS` deleted; main's `LIVE_SUBSET_ROWS`
+row-count rule and re-measured `MEASURED` taken, plus the four window indexes
+with the stats above. Branch's prepared-statement tracing (`statement.sql()`)
+kept; the plan query takes main's explicit NULL binding. `docs/dev/data.md`
+keeps the branch paragraph and main's foreign-key text.
 
 ## Every arm has a test
 
@@ -191,6 +171,7 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
 
 ## Checks
 
+- After sync `65be402161`: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` 51 pass; fmt and clippy clean.
 - `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass; clippy clean (compress).
 - `bench.sh /tmp/loo866/store.db` (load avg 57–80) — `same` all six windows; 1d 0.55→0.10 s, 0.51→0.15 s; 7d 0.46→0.40 s, 0.61→0.30 s; 30d 1.04→1.55 s; whole 0.93→1.23 s (implement; rerun on a fresh copy for the PR).
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.

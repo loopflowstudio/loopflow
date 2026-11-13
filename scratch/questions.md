@@ -324,15 +324,6 @@ which names mini from the claim on.
   Test `machine_commands::a_move_retried_on_its_target_asks_the_machine_it_comes_from`
   (run with mini's own `lf`, laptop added on mini). machines.md: mini needs the
   source added.
-- Not fixed: `lf --machine mini task move X --machine mini` forwarded from the
-  laptop carries the laptop's personal settings (`config::remote::PROFILE_ENV`),
-  whose Machine list replaces mini's and never names the laptop. That run now
-  fails with `X is moving here from <laptop>, which did not send it; the same
-  move run there carries it on` instead of `already runs on`; machines.md says
-  so. QA's exact command therefore still does not deliver. Open decision:
-  should a forwarded run use the target's own Machine routes (merge or prefer
-  mini's list over `LF_PERSONAL_PROFILE`'s), or should the laptop run a
-  forwarded retry of a move it sent itself, locally?
 - Ship log bounded: `restarted` stops at `SHIP_RESTARTS_COUNTED` (6, where
   `repair_backoff` stops growing); a step completing deletes them (`progressed`
   is gone); a new `carried` row replaces the last. `ship_log_in` reads from the
@@ -348,8 +339,26 @@ which names mini from the claim on.
   `task_ship_events_start` went (a Task's log is a few rows). lib `query_plans::`
   + `ship` 102 ok, integration `machine_commands::a_move_` 3 ok, clippy clean.
 
+## Done (2026-11-13, tenth pass): forwarded retry delivers
+
+- `lf --machine mini task move X --machine mini` from the laptop, while the
+  laptop holds X's `sent` move to mini, runs on the laptop instead of forwarding
+  (`ssh::delivers_sent_move`, checked in `bin/lf.rs` beside
+  `selects_current_machine`). It redelivers what was sent; forwarded profile
+  semantics are unchanged. Test
+  `machine_commands::a_sent_move_forwarded_to_its_target_delivers_what_was_sent`
+  (fails with QA's "did not send it" refusal when the check is off).
+  machines.md drops the refusal sentence.
+- Checks: integration `machine_commands::a_` 10 ok, `documented_commands::` 4 ok;
+  clippy `--all-targets -D warnings` clean.
+
 ## Open questions (each reversible; the simpler option is built)
 
+- **Forwarded retry of a leaving move.** Only a `sent` move runs locally when
+  forwarded; a forwarded retry of a move still `leaving` on the laptop still
+  reaches mini and refuses with "did not send it". Running any in-flight move
+  locally (drop the stage match in `delivers_sent_move`) would also cover it;
+  kept to `sent` as directed.
 - **Parallel stalls.** Whether the stalls of those three groups under the
   default thread count predate this branch is unchecked; gate's nextest run
   answers it.

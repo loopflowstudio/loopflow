@@ -20,6 +20,45 @@ pub fn selects_current_machine(target: &str) -> anyhow::Result<bool> {
     Ok(selected == store.sqlite.local_machine()?.id)
 }
 
+/// `lf --machine M task move X --machine M` where this Machine sent X to M
+/// and it has not arrived. Run here, it delivers what was sent, as the same
+/// move run without `--machine M` does; forwarded, M would see a move from a
+/// Machine that the forwarded personal settings do not name.
+pub fn delivers_sent_move(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
+    let Ok(cli) = parse_remote_command(lf_args) else {
+        return Ok(false);
+    };
+    let Some(crate::lf::Commands::Task {
+        cmd:
+            crate::lf::TaskCommand::Move {
+                issue,
+                machine: Some(machine),
+                ..
+            },
+    }) = &cli.command
+    else {
+        return Ok(false);
+    };
+    let Some(store) = crate::store::read_existing_registry()? else {
+        return Ok(false);
+    };
+    let store = &store.sqlite;
+    let target = crate::ops::task_ownership::resolve_machine(store, target)?;
+    if crate::ops::task_ownership::resolve_machine(store, machine)? != target {
+        return Ok(false);
+    }
+    let Some(task) = store.task_by_issue(issue)? else {
+        return Ok(false);
+    };
+    Ok(store.task_move_in_flight(&task.id)?.is_some_and(|moving| {
+        moving.to_machine_id == target
+            && matches!(
+                moving.stage,
+                crate::store::sqlite::task_moves::MoveStage::Sent { .. }
+            )
+    }))
+}
+
 pub fn run(
     target: &str,
     forward_agent: bool,

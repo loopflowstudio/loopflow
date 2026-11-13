@@ -1684,9 +1684,10 @@ fn run() -> anyhow::Result<()> {
         })?
     {
         let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
-        if loopflow::lf::commands::ssh::selects_current_machine(
-            remote.machine.as_deref().expect("machine selector"),
-        )? {
+        let machine = remote.machine.as_deref().expect("machine selector");
+        if loopflow::lf::commands::ssh::selects_current_machine(machine)?
+            || loopflow::lf::commands::ssh::delivers_sent_move(machine, &args[1..])?
+        {
             raw_args = args;
         } else {
             let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
@@ -1709,10 +1710,7 @@ fn run() -> anyhow::Result<()> {
             ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
                 .expect("failed to set Ctrl+C handler");
             return loopflow::lf::commands::ssh::run(
-                remote
-                    .machine
-                    .as_deref()
-                    .expect("remote invocation has a machine"),
+                machine,
                 remote.forward_agent,
                 &cli,
                 &args[1..],

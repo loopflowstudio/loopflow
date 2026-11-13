@@ -2473,6 +2473,65 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Runs on mini since"), "{status}");
 }
 
+/// The laptop sent the Task and mini fell over receiving it. The same move
+/// addressed to mini from the laptop (`lf --machine mini task move X --machine
+/// mini`) runs on the laptop, which holds what it sent, and delivers it.
+#[test]
+fn a_sent_move_forwarded_to_its_target_delivers_what_was_sent() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "forwarded-retry");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    executable(&remote_lf, &working);
+
+    fs::write(worktree.join("notes.txt"), "edited after sending\n").unwrap();
+    let retried = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "move",
+            task.as_str(),
+            "--machine",
+            "mini",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("move to mini"), "{stderr}");
+    assert!(!stderr.contains("Committed and pushed"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "forwarded-retry:notes.txt"]
+        ),
+        "sent once"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
 /// The move reached mini's check but never arrived. Mini remembers which
 /// Machine the move comes from, so the same command run on mini asks the
 /// laptop for it and delivers it there.

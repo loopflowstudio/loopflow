@@ -282,7 +282,7 @@ no test that waits out a production timeout except a named fallback above.
    Local run, Mac, debug, load average ~650, `--test-threads 6`: 34/34 pass,
    166.4 s summed, 34.4 s wall; slowest `resume_takes_over_only_…` 16.3 s.
    - Ported to `relay_tests` (child relays a terminal to an owner socket a
-     thread plays; `LOCAL` cases set no `LF_SERVER_STATUS`): control handoff
+     thread plays; `owner-…` cases set no `LF_SERVER_STATUS`): control handoff
      0.11 s, stalled owner 0.40 s, unacknowledged owner 0.64 s, acknowledged
      past the attach deadline 1.1 s. `Pace` gained `stall` (the 2 s
      `Stream::write` deadline). The quiet case now also asserts the pane reads
@@ -313,6 +313,10 @@ no test that waits out a production timeout except a named fallback above.
    - `cargo nextest run -p loopflow --lib -E 'test(transport::)'`: 104/104,
      72 s wall under that load. Clippy `--lib --tests --test transport_tests`
      clean. SSH cases not run here (Linux CI).
+   - Compressed: owner cases are named `owner-…` instead of a second name
+     list; five held-terminal `SessionStart` requests became
+     `ServerProof::start_held`. `relay_tests::` 11/11, 2.5 s wall;
+     `transport_tests -E 'test(held)'` 7/7; clippy clean.
 5. **Next.** Steer (comment 087e0ee8, 2026-11-13): coverage removed in
    #1922 (not yet on main) "to rebuild in this suite with a controlled
    timeout": `unanswering_superseded_owner_preserves_pending_turn_and_queued_input`

@@ -29,8 +29,9 @@ const PACE: Pace = Pace {
     backoff: Duration::from_millis(1),
     stall: Duration::from_millis(200),
 };
-/// Cases relaying to an owner's socket directly, with no server or pane.
-const LOCAL: [&str; 4] = ["handoff", "acknowledged", "unacknowledged-owner", "stalled"];
+/// Cases named `owner-…` relay to an owner's socket directly, with no server
+/// or pane.
+const OWNER: &str = "owner-";
 
 // ---------------------------------------------------------------------------
 // Child: the relay, its server and its Desktop pane
@@ -42,7 +43,7 @@ fn relay_fixture() {
     };
     TEST_PACE.set(PACE);
     let home = crate::store::lf_home_dir();
-    let (host, scenario): (Host, Box<dyn FnOnce() + Send>) = if LOCAL.contains(&case.as_str()) {
+    let (host, scenario): (Host, Box<dyn FnOnce() + Send>) = if case.starts_with(OWNER) {
         let owner = LfProcessId::new();
         let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
         let owner_socket = Owner {
@@ -50,10 +51,10 @@ fn relay_fixture() {
             home: home.clone(),
         };
         let scenario = move || match case.as_str() {
-            "handoff" => control_handoff(&owner_socket),
-            "acknowledged" => acknowledged_past_the_deadline(&owner_socket),
-            "unacknowledged-owner" => unacknowledged_owner(&owner_socket),
-            "stalled" => stalled_owner(&owner_socket),
+            "owner-handoff" => control_handoff(&owner_socket),
+            "owner-acknowledged" => acknowledged_past_the_deadline(&owner_socket),
+            "owner-unacknowledged" => unacknowledged_owner(&owner_socket),
+            "owner-stalled" => stalled_owner(&owner_socket),
             other => panic!("unknown relay case {other}"),
         };
         (Host::Owner(owner), Box::new(scenario))
@@ -642,7 +643,7 @@ fn relay_case(case: &str) -> Relayed {
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(Stdio::piped());
-    if !LOCAL.contains(&case) {
+    if !case.starts_with(OWNER) {
         command.env("LF_SERVER_STATUS", pane.join("status.sock"));
     }
     let mut child = RelayProcess(command.spawn().unwrap());
@@ -764,7 +765,7 @@ fn move_here_is_consumed_before_its_takeover_is_sent() {
 
 #[test]
 fn control_handoff_restores_the_terminal_and_prints_the_notice() {
-    let relayed = relays("handoff");
+    let relayed = relays("owner-handoff");
     assert!(
         relayed.screen.contains("\x1b[?1049l"),
         "{:?}",
@@ -779,19 +780,19 @@ fn control_handoff_restores_the_terminal_and_prints_the_notice() {
 
 #[test]
 fn an_acknowledged_viewer_stays_attached_past_the_attach_deadline() {
-    relays("acknowledged");
+    relays("owner-acknowledged");
 }
 
 #[test]
 fn an_owner_that_never_acknowledges_ends_the_viewer_without_its_input() {
-    let error = relay_case("unacknowledged-owner").error;
+    let error = relay_case("owner-unacknowledged").error;
     assert!(error.contains("did not acknowledge attachment"), "{error}");
     assert!(error.contains("outcome is unknown"), "{error}");
 }
 
 #[test]
 fn an_owner_that_stops_reading_input_ends_the_viewer_with_a_cause() {
-    let error = relay_case("stalled").error;
+    let error = relay_case("owner-stalled").error;
     assert!(error.contains("stopped reading requests"), "{error}");
     assert!(error.contains("later input was not delivered"), "{error}");
     assert!(!error.contains("os error"), "{error}");

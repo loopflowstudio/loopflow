@@ -3255,6 +3255,36 @@ impl<'a> ServerProof<'a> {
         connection
     }
 
+    /// Starts `script` in a held terminal at the fixture's home and returns
+    /// its terminal id.
+    fn start_held(
+        &self,
+        session: Option<loopflow::id::LfSessionId>,
+        request: &str,
+        script: String,
+    ) -> String {
+        let home = self.fixture.home.path();
+        let started = self
+            .connect()
+            .request(loopflow::server::wire::Operation::Server(
+                loopflow::server::wire::ServerOperation::SessionStart {
+                    session,
+                    request: request.into(),
+                    argv: vec!["/bin/sh".into(), "-c".into(), script],
+                    cwd: home.to_path_buf(),
+                    env: vec![
+                        ("PATH".into(), "/usr/bin:/bin".into()),
+                        ("HOME".into(), home.display().to_string()),
+                    ],
+                    rows: 24,
+                    cols: 80,
+                    placement: None,
+                },
+            ))
+            .unwrap();
+        started.result["terminal_id"].as_str().unwrap().to_owned()
+    }
+
     fn request(&self, operation: Value) -> Value {
         self.connect()
             .request(serde_json::from_value(operation).unwrap())
@@ -4562,25 +4592,7 @@ fn held_session_survives_server_restart() {
         "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done; exit 3",
         home = home.display()
     );
-    let started = service
-        .connect()
-        .request(loopflow::server::wire::Operation::Server(
-            loopflow::server::wire::ServerOperation::SessionStart {
-                session: None,
-                request: "held-restart".into(),
-                argv: vec!["/bin/sh".into(), "-c".into(), script],
-                cwd: home.to_path_buf(),
-                env: vec![
-                    ("PATH".into(), "/usr/bin:/bin".into()),
-                    ("HOME".into(), home.display().to_string()),
-                ],
-                rows: 24,
-                cols: 80,
-                placement: None,
-            },
-        ))
-        .unwrap();
-    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let terminal = service.start_held(None, "held-restart", script);
     let agent: libc::pid_t = {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
@@ -4732,22 +4744,7 @@ fn a_held_view_meeting_another_build_reopens_as_the_installed_lf() {
         "echo $$ > {home}/agent.pid; i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
         home = home.display()
     );
-    let started = service
-        .connect()
-        .request(loopflow::server::wire::Operation::Server(
-            loopflow::server::wire::ServerOperation::SessionStart {
-                session: None,
-                request: "held-other-build".into(),
-                argv: vec!["/bin/sh".into(), "-c".into(), script],
-                cwd: home.to_path_buf(),
-                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-                rows: 24,
-                cols: 80,
-                placement: None,
-            },
-        ))
-        .unwrap();
-    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let terminal = service.start_held(None, "held-other-build", script);
     let mut view =
         Terminal::spawn(service.command(&["session", "attach", "--terminal", &terminal]));
     view.wait_text("tick:3");
@@ -4850,20 +4847,7 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
         "echo $$ > {home}/agent.pid; i=0; while :; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
         home = home.display()
     );
-    let started = service
-        .connect()
-        .request(Operation::Server(ServerOperation::SessionStart {
-            session: Some(session.clone()),
-            request: "held-stopped".into(),
-            argv: vec!["/bin/sh".into(), "-c".into(), script],
-            cwd: home.to_path_buf(),
-            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-            rows: 24,
-            cols: 80,
-            placement: None,
-        }))
-        .unwrap();
-    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let terminal = service.start_held(Some(session.clone()), "held-stopped", script);
     let deadline = Instant::now() + Duration::from_secs(20);
     let agent: libc::pid_t = loop {
         if let Some(pid) = std::fs::read_to_string(home.join("agent.pid"))
@@ -5004,22 +4988,7 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
     let task = "task_5e55105e000040008000000000000008";
     fixture.shell_task(task);
     fixture.sql().execute("UPDATE tasks SET issue_title='Abandoned held',issue_description='',workspace_slug='task',base_commit='head',updated_at=1 WHERE id=?1", [task]).unwrap();
-    let started = service
-        .connect()
-        .request(loopflow::server::wire::Operation::Server(
-            loopflow::server::wire::ServerOperation::SessionStart {
-                session: None,
-                request: "abandoned".into(),
-                argv: vec!["/bin/sh".into(), "-c".into(), "sleep 600".into()],
-                cwd: home.to_path_buf(),
-                env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-                rows: 24,
-                cols: 80,
-                placement: None,
-            },
-        ))
-        .unwrap();
-    let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+    let terminal = service.start_held(None, "abandoned", "sleep 600".to_owned());
     fixture
         .sql()
         .execute(
@@ -5054,22 +5023,7 @@ fn held_terminals_share_one_holder_and_add_no_server_threads() {
             "while [ ! -e {}/stop ]; do echo tick; sleep 0.1; done",
             home.display()
         );
-        let started = service
-            .connect()
-            .request(loopflow::server::wire::Operation::Server(
-                loopflow::server::wire::ServerOperation::SessionStart {
-                    session: None,
-                    request,
-                    argv: vec!["/bin/sh".into(), "-c".into(), script],
-                    cwd: home.to_path_buf(),
-                    env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-                    rows: 24,
-                    cols: 80,
-                    placement: None,
-                },
-            ))
-            .unwrap();
-        let terminal = started.result["terminal_id"].as_str().unwrap().to_owned();
+        let terminal = service.start_held(None, &request, script);
         let (view, answer) = fixture.held_entrance(&terminal);
         assert_eq!(answer, "hosted");
         (terminal, view)

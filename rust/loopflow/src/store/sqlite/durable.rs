@@ -479,8 +479,8 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: a Graph runs for it while its Task run or ship process
-/// has not exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
+/// what it is doing: its Task run, ship process or a Graph in its work has not
+/// exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
@@ -488,11 +488,17 @@ pub(crate) fn task_state_sql(t: &str) -> String {
          WHEN {t}.planning_completed=1 THEN 'done' \
          WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
+             OR EXISTS({open_processes}) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
          WHEN {t}.worktree IS NULL THEN 'unstarted' \
-         ELSE 'idle' END"
+         ELSE 'idle' END",
+        open_processes = super::task_work::task_open_process_ids(
+            &format!("{t}.id"),
+            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
+                WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
+        )
     )
 }
 

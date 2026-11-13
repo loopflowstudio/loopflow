@@ -2935,6 +2935,7 @@ fn returned_session(output: &Output) -> Value {
 #[test]
 fn resume_json_returns_once_when_it_starts_the_owner() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let path = parented_provider(&fixture);
     let provider = fixture.home.path().join("bin/claude");
     let script = std::fs::read_to_string(&provider)
@@ -3021,6 +3022,7 @@ fn resume_json_returns_after_relay_and_viewer_takeover() {
 
 fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let bin = fixture.home.path().join("bin");
     // The only executable provider is this stand-in; no native turn is sent.
     fixture.provider(
@@ -3153,6 +3155,7 @@ fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
 #[test]
 fn opening_a_prepared_conversation_runs_one_owner_and_one_relay() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let path = parented_provider(&fixture);
     let prepared = fixture
         .command(&["-a", "claude", "session", "resume", "--prepare", "--json"])
@@ -3420,35 +3423,6 @@ fn completed_task_without_checkout_ends_a_conversation_with_typed_input() {
         .text()
         .unwrap()
         .contains("unfinished draft"));
-}
-
-#[test]
-fn quiet_unviewed_conversations_ignore_the_obsolete_detached_limit() {
-    let fixture = Fixture::new();
-    std::fs::write(
-        fixture.home.path().join("config.yaml"),
-        "session: {end_detached_after: 1s}\n",
-    )
-    .unwrap();
-    let owner = fixture.start(&["/bin/sh", "-c", "printf ready; read -r answer"]);
-    let session = fixture.bound_session(&owner);
-    fixture
-        .sql()
-        .execute(
-            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
-            [&session],
-        )
-        .unwrap();
-    let mut viewer = fixture.viewer(&owner, false);
-    until_out(&mut viewer, "ready");
-    drop(viewer);
-    fixture.wait_viewed(&owner, false);
-    std::thread::sleep(Duration::from_secs(5));
-    assert!(fixture.running(&owner));
-    let mut returned = fixture.viewer(&owner, true);
-    returned.input("done\n");
-    returned.finish();
-    fixture.ends(&owner);
 }
 
 /// An upgrade preserves a running provider's saved callback contract and identity.
@@ -5712,11 +5686,11 @@ fn shell_reconnects_and_settles(integrated: bool) {
 }
 
 #[test]
-fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
+fn desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets() {
     let fixture = Fixture::new();
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
-    for cycle in 0..20 {
+    for cycle in 0..3 {
         let id = format!("cycle-{cycle}");
         let base = [
             "desktop",
@@ -5801,7 +5775,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_owned_jobs_or_sockets() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((total, settled), (20, 20));
+    assert_eq!((total, settled), (3, 3));
 }
 
 #[path = "transport/ssh_shells.rs"]
@@ -8409,55 +8383,6 @@ fn a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live() {
         }
     }
     assert_eq!(bytes, 4 * 1024 * 1024);
-}
-
-#[test]
-fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
-    let fixture = Fixture::new();
-    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
-    fixture.wait_file("drawn");
-    let service = ServerProof::start(&fixture, false);
-    let first = service.viewer(&owner);
-    let reconnect = first.reconnect.clone();
-    let received = first.received;
-    drop(first);
-    let mut newer = service.viewer(&owner);
-    newer.input("after outage\n");
-    until_out(&mut newer, "line after outage");
-    // Exercise the production grace without adding a runtime test setting.
-    let deadline = Instant::now() + Duration::from_secs(61);
-    while Instant::now() < deadline {
-        newer.request(json!({"kind":"controlled"}));
-        newer.until_reply();
-        std::thread::sleep(Duration::from_secs(1));
-    }
-    let session = fixture.bound_session(&owner);
-    let socket = loopflow::server::client::attach(
-        &fixture.endpoint("machine"),
-        &session.as_str().into(),
-        None,
-    )
-    .unwrap();
-    let mut back = Viewer::new(socket);
-    back.request(json!({"kind":"resume","reconnect":reconnect,"received":received,"control":false,"own":null,"rows":24,"cols":80}));
-    match back.next().unwrap() {
-        Item::Reply(reply) => assert_eq!(reply["kind"], "reconnect_required"),
-        other => panic!("output arrived before refusal: {other:?}"),
-    }
-    back.request(
-        json!({"kind":"attach","control":false,"replace":false,"own":null,"rows":24,"cols":80}),
-    );
-    let reply = back.until_reply();
-    assert_eq!(reply["owner"], newer.id);
-    back.accept(&reply);
-    let Some(Item::Snapshot(bytes)) = back.next() else {
-        panic!("fresh attach needs a snapshot");
-    };
-    let mut screen = ghostty_vt::Terminal::new(80, 24).unwrap();
-    screen.write(&bytes);
-    assert!(screen.text().unwrap().contains("after outage"));
-    newer.input("done\n");
-    newer.finish();
 }
 
 /// Ends a process the test cannot otherwise reach, including on panic.

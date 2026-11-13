@@ -109,15 +109,49 @@ Use inherited `LF_*` unset, `< /dev/null`, and
 `LOOPFLOW_TEST_LF=$PWD/target/debug/lf`. The after-run also includes
 `test(documented_commands::)` for the fixture guidance in `tests/README.md`.
 
+## Transport timing cuts (third win)
+
+- Replace the standalone
+  `grace_expiry_refuses_bytes_before_repainting_the_terminal_screen` (62.398 s)
+  with the same behavior in `transport::hosted::tests`: advance only a dropped
+  viewer's fixture timestamp, drive real resume/attach requests through
+  `Hosted::pass`, and check refusal before snapshot, current screen contents,
+  and retention of the newer controller. No production timeout or seam changes. The host-level check passed in
+  0.025 s versus 62.398 s in the old integration test.
+- Delete
+  `quiet_unviewed_conversations_ignore_the_obsolete_detached_limit` (5.657 s).
+  `config::tests::obsolete_detached_limit_is_readable_but_not_written` covers
+  the obsolete setting; `a_held_conversation_outlives_its_view` and viewer-hold
+  lifecycle tests cover surviving a closed view.
+- Rename the twenty-shell-lifecycles test to
+  `desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` and run
+  three cycles. Each retains the same full process/session/socket and settlement
+  assertions; seventeen more copies assert the same behavior. Before: 49.975 s.
+- Own the Machine server in the five managed-conversation cases identified below.
+  Server startup stays real and the guard stops it before deleting its home.
+  Focused validation: 18/18 passed in 12.756 s, including the production host
+  tests, obsolete-setting config test, five guarded cases, retained-view checks,
+  and three shell cycles (12.073 s versus 49.975 s for twenty).
+
+Full non-SSH transport filter: 126/126 passed in 134.609 s wall.
+Summed duration: 680.112 s, versus 756.319 s after seeding and 893.027 s
+before seeding (128 tests then; one deleted, one moved to the host unit suite).
+The full run's repeated-shell case took 7.541 s. After the focused and full
+transport runs, `ps` showed no remaining process from this checkout's test CLI.
+`cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+
 ## Cleanup finding
 
 After the two filtered transport runs, ten `target/debug/lf server run` processes
 remained (five per run). `lsof` showed private `lf-7501-*` database homes, all
-already removed by their fixtures. Those ten PIDs were stopped directly.
-Likely missing owners: the resume-JSON new-owner test, the three
+already removed by their fixtures. Sending SIGTERM restarted all ten through launchd. Each job's program/home
+was checked against this checkout and its private fixture path, then the exact
+ten jobs were unloaded with `launchctl bootout`; no other jobs were changed.
+Homes recreated by their restarted servers were removed.
+Fixed missing owners: the resume-JSON new-owner test, the three
 `prepared_thread_json` variants, and the prepared-conversation owner/relay test.
-They start managed conversations without a `MachineServer` guard. Add guards
-and check that a transport run leaves no fixture server alive. This is a fixture
+They had started managed conversations without a `MachineServer` guard.
+Both focused and full transport runs now finish without leaving fixture servers. This is a fixture
 cleanup defect; no product correctness failure has been established.
 
 ## Next work
@@ -139,7 +173,8 @@ cleanup defect; no product correctness failure has been established.
    Codex quiet-runner baseline: 65.720 s (60 s is idle waiting); Claude variants
    use 1 s for the same quiet-before-turn assertion.
    Do not shorten waits that are the behavior being exercised without replacing
-   their coverage. No tests deleted yet; no product bug identified yet.
+   their coverage. Deleted/replaced cases are listed above; no product correctness
+   bug has been established.
 
 ## Limits already on this branch
 

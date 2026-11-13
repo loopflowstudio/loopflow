@@ -4,7 +4,7 @@
 //! Machines: your Task's next entry is written on its Machine when that is one
 //! of yours, otherwise on your Machine for its Wave. An inbound entry never
 //! ends this Machine's own open claim; only its own unclaim or handoff does.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -193,64 +193,103 @@ pub(crate) fn local_label() -> String {
     host.split('.').next().unwrap_or(&host).to_string()
 }
 
-/// A Machine's best known label: this Machine's hostname, then a label you
+/// The Machines you registered with `lf machine add`, each with the name you
+/// gave it. Reading them loads configuration files: read before the write lock.
+pub(super) fn machine_names_in(conn: &Connection) -> StoreResult<HashMap<MachineId, String>> {
+    Ok(crate::config::placement::machine_declarations(conn)
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+        .into_iter()
+        .map(|(name, declaration)| (declaration.id, name))
+        .collect())
+}
+
+/// A Machine's best known label: this Machine's hostname, then the name you
 /// registered, then the label its claimant wrote.
-fn machine_ref_in(
-    conn: &Connection,
+fn machine_ref(
     machine: Option<&MachineId>,
     written: Option<&str>,
-) -> StoreResult<MachineRef> {
-    let Some(machine) = machine else {
-        return Ok(MachineRef {
-            id: None,
-            label: written.map(Into::into),
-        });
+    local: &MachineId,
+    names: &HashMap<MachineId, String>,
+) -> MachineRef {
+    let label = match machine {
+        Some(machine) if machine == local => Some(local_label()),
+        Some(machine) => names.get(machine).cloned().or(written.map(Into::into)),
+        None => written.map(Into::into),
     };
-    let label = if *machine == local_machine_in(conn)? {
-        Some(local_label())
-    } else {
-        super::durable::map_machine_by_id(conn, machine)?
-            .and_then(|machine| machine.label)
-            .or(written.map(Into::into))
-    };
-    Ok(MachineRef {
-        id: Some(machine.clone()),
+    MachineRef {
+        id: machine.cloned(),
         label,
-    })
+    }
 }
 
 /// An owner with their Machine's label as best known here.
-fn resolved_in(conn: &Connection, owner: Option<TaskOwner>) -> StoreResult<Option<TaskOwner>> {
-    owner
-        .map(|mut owner| {
-            owner.machine = machine_ref_in(
-                conn,
-                owner.machine.id.as_ref(),
-                owner.machine.label.as_deref(),
-            )?;
-            Ok(owner)
-        })
-        .transpose()
+fn resolved(
+    owner: Option<TaskOwner>,
+    local: &MachineId,
+    names: &HashMap<MachineId, String>,
+) -> Option<TaskOwner> {
+    owner.map(|mut owner| {
+        owner.machine = machine_ref(
+            owner.machine.id.as_ref(),
+            owner.machine.label.as_deref(),
+            local,
+            names,
+        );
+        owner
+    })
 }
 
 pub(super) fn ownership_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskOwnership> {
+    let names = machine_names_in(conn)?;
+    let local = local_machine_in(conn)?;
     let (rows, reading) = reading_in(conn, task)?;
-    let mut log = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut entry = row.entry;
-        entry.machine_label = machine_ref_in(
-            conn,
-            entry.machine_id.as_ref(),
-            entry.machine_label.as_deref(),
-        )?
-        .label;
-        log.push(entry);
-    }
+    let log = rows
+        .into_iter()
+        .map(|row| {
+            let mut entry = row.entry;
+            entry.machine_label = machine_ref(
+                entry.machine_id.as_ref(),
+                entry.machine_label.as_deref(),
+                &local,
+                &names,
+            )
+            .label;
+            entry
+        })
+        .collect();
     Ok(TaskOwnership {
-        owner: resolved_in(conn, reading.owner)?,
-        superseded_by: resolved_in(conn, reading.superseded_by)?,
+        owner: resolved(reading.owner, &local, &names),
+        superseded_by: resolved(reading.superseded_by, &local, &names),
         log,
     })
+}
+
+/// Unfinished Tasks whose current owner is `machine`, each with that owner as
+/// the log names them. Reads only the store.
+pub(super) fn held_in(
+    conn: &Connection,
+    machine: &MachineId,
+) -> StoreResult<Vec<(TaskId, TaskOwner)>> {
+    let candidates = {
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
+             WHERE o.machine_id=?1 AND t.planning_completed=0 AND t.abandoned_at IS NULL
+             ORDER BY o.task_id",
+        )?;
+        let rows = statement.query_map([machine.as_str()], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let mut held = Vec::new();
+    for task in candidates {
+        let task = TaskId::from_raw(task);
+        let (_, reading) = reading_in(conn, &task)?;
+        if let Some(owner) = reading.owner {
+            if owner.machine.id.as_ref() == Some(machine) {
+                held.push((task, owner));
+            }
+        }
+    }
+    Ok(held)
 }
 
 pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
@@ -258,15 +297,19 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
 }
 
 /// This Machine, or one registered with `lf machine add`.
-fn is_my_machine_in(conn: &Connection, me: &RepoFacts, machine: &MachineId) -> StoreResult<bool> {
-    Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains(machine))
+fn is_my_machine_in(
+    conn: &Connection,
+    me: &OwnershipFacts,
+    machine: &MachineId,
+) -> StoreResult<bool> {
+    Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
 }
 
 /// Whether a holder is you. A holder with a person key (Git `user.email`) is
 /// you exactly when the key is yours, even on a Machine you registered. A
 /// keyless entry, written before keys or recorded before ownership existed, is
 /// yours when it holds one of your Machines. Names are display only.
-fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreResult<bool> {
+fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
     if let Some(key) = &holder.person_key {
         return Ok(me.key.as_ref() == Some(key));
     }
@@ -282,15 +325,15 @@ fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreRes
 /// for the Task's Wave or repository. Reading them spawns `git` and loads
 /// configuration files, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
-pub(crate) struct RepoFacts {
+pub(crate) struct OwnershipFacts {
     key: Option<String>,
     name: Option<String>,
     planning_connected: bool,
-    declared_machines: HashSet<MachineId>,
+    declared_machines: HashMap<MachineId, String>,
     owning_machine: (MachineId, OwningMachineSource),
 }
 
-impl RepoFacts {
+impl OwnershipFacts {
     fn in_scope(
         conn: &Connection,
         repo: &str,
@@ -302,11 +345,7 @@ impl RepoFacts {
             name: crate::config::participant_name()
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?,
             planning_connected: crate::ops::planning_client::connected(repo),
-            declared_machines: crate::config::placement::machine_declarations(conn)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .into_values()
-                .map(|declaration| declaration.id)
-                .collect(),
+            declared_machines: machine_names_in(conn)?,
             owning_machine: super::scope_defaults::owning_machine_in(
                 conn,
                 wave,
@@ -374,7 +413,7 @@ pub(super) fn held_planning_in(
     conn: &Connection,
     machine: &MachineId,
 ) -> StoreResult<HashMap<TaskId, bool>> {
-    super::rentals::tasks_held_in(conn, machine)?
+    held_in(conn, machine)?
         .into_iter()
         .map(|(task, _)| Ok((task.clone(), planning_connected_in(conn, &task)?)))
         .collect()
@@ -386,7 +425,7 @@ pub(super) fn held_planning_in(
 pub(super) fn writer_in(
     conn: &Connection,
     task: &TaskId,
-    me: &RepoFacts,
+    me: &OwnershipFacts,
 ) -> StoreResult<(MachineId, TaskExecutionSource)> {
     let (_, reading) = reading_in(conn, task)?;
     if let Some(holder) = &reading.owner {
@@ -400,7 +439,11 @@ pub(super) fn writer_in(
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 
-fn require_writer_in(conn: &Connection, task: &TaskId, me: &RepoFacts) -> StoreResult<MachineId> {
+fn require_writer_in(
+    conn: &Connection,
+    task: &TaskId,
+    me: &OwnershipFacts,
+) -> StoreResult<MachineId> {
     let local = local_machine_in(conn)?;
     let (writer, _) = writer_in(conn, task, me)?;
     if writer != local {
@@ -416,7 +459,7 @@ fn require_writer_in(conn: &Connection, task: &TaskId, me: &RepoFacts) -> StoreR
 fn my_claim_in(
     conn: &Connection,
     task: &TaskId,
-    me: &RepoFacts,
+    me: &OwnershipFacts,
 ) -> StoreResult<Option<(MachineId, TaskOwner)>> {
     let local = require_writer_in(conn, task, me)?;
     let (_, reading) = reading_in(conn, task)?;
@@ -436,7 +479,7 @@ fn handoff_in(
     conn: &Connection,
     task: &TaskId,
     target: &MachineId,
-    me: &RepoFacts,
+    me: &OwnershipFacts,
 ) -> StoreResult<TaskOwnershipEntry> {
     let Some((local, holder)) = my_claim_in(conn, task, me)? else {
         return Err(StoreError::InvalidAuthority(format!(
@@ -576,7 +619,7 @@ fn append_in(
 pub(super) fn claim_in(
     conn: &Connection,
     task: &TaskId,
-    me: &RepoFacts,
+    me: &OwnershipFacts,
 ) -> StoreResult<Option<TaskOwnershipEntry>> {
     let local = require_writer_in(conn, task, me)?;
     let (_, reading) = reading_in(conn, task)?;
@@ -639,6 +682,7 @@ pub(super) fn ingest_marker_in(
     task: &TaskId,
     body: &str,
     ordered_at: Option<i64>,
+    machine_names: &HashMap<MachineId, String>,
 ) -> StoreResult<bool> {
     let Some(start) = body.find(MARKER) else {
         return Ok(false);
@@ -679,20 +723,26 @@ pub(super) fn ingest_marker_in(
         }
     }
     if inserted && entry.kind == OwnershipKind::Claim {
-        notify_superseded_in(conn, task, &entry)?;
+        notify_superseded_in(conn, task, &entry, machine_names)?;
     }
     Ok(inserted)
 }
 
 /// A later claim that this Machine's open claim outlives reaches live Sessions
 /// as direction. Nothing is cancelled; the claimant decides what to do.
+/// `machine_names` comes from [`machine_names_in`], read before the write.
 fn notify_superseded_in(
     conn: &Connection,
     task: &TaskId,
     entry: &TaskOwnershipEntry,
+    machine_names: &HashMap<MachineId, String>,
 ) -> StoreResult<()> {
-    let ownership = ownership_in(conn, task)?;
-    let (Some(owner), Some(later)) = (&ownership.owner, &ownership.superseded_by) else {
+    let (_, reading) = reading_in(conn, task)?;
+    let local = local_machine_in(conn)?;
+    let (Some(owner), Some(later)) = (
+        resolved(reading.owner, &local, machine_names),
+        resolved(reading.superseded_by, &local, machine_names),
+    ) else {
         return Ok(());
     };
     let text = format!(
@@ -749,12 +799,9 @@ pub(super) fn hand_back_in(
     planning: &HashMap<TaskId, bool>,
 ) -> StoreResult<Vec<TaskId>> {
     let local = local_machine_in(conn)?;
-    let held = super::rentals::tasks_held_in(conn, machine)?;
+    let held = held_in(conn, machine)?;
     let mut tasks = Vec::with_capacity(held.len());
-    for (task, ownership) in held {
-        let (person, person_key) = ownership
-            .owner
-            .map_or((None, None), |owner| (owner.person, owner.person_key));
+    for (task, owner) in held {
         let planning_connected = match planning.get(&task) {
             Some(&connected) => connected,
             None => planning_connected_in(conn, &task)?,
@@ -763,8 +810,8 @@ pub(super) fn hand_back_in(
             conn,
             &task,
             OwnershipKind::Handoff,
-            person,
-            person_key,
+            owner.person,
+            owner.person_key,
             &local,
             planning_connected,
         )?;
@@ -798,7 +845,7 @@ impl SqliteStore {
 
     pub fn claim_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = RepoFacts::of_task_in(&conn, task)?;
+        let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
         let entry = claim_in(&tx, task, &me)?;
@@ -814,7 +861,7 @@ impl SqliteStore {
         target: &MachineId,
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = RepoFacts::of_task_in(&conn, task)?;
+        let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let entry = handoff_in(&tx, task, target, &me)?;
         super::sessions::complete_primary_session_in(
@@ -833,7 +880,7 @@ impl SqliteStore {
         target: &MachineId,
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = RepoFacts::of_task_in(&conn, task)?;
+        let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let entry = handoff_in(&tx, task, target, &me)?;
         tx.commit()?;
@@ -877,9 +924,10 @@ impl SqliteStore {
     pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let planning_connected = planning_connected_in(&conn, task)?;
+        let machine_names = machine_names_in(&conn)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let order = journal_order_in(&tx, task, planning_connected)?;
-        let inserted = ingest_marker_in(&tx, task, marker, order)?;
+        let inserted = ingest_marker_in(&tx, task, marker, order, &machine_names)?;
         tx.commit()?;
         Ok(inserted)
     }
@@ -887,7 +935,7 @@ impl SqliteStore {
     /// End your claim. An unowned Task is already unclaimed and writes nothing.
     pub fn unassign_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = RepoFacts::of_task_in(&conn, task)?;
+        let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let Some((local, holder)) = my_claim_in(&tx, task, &me)? else {
             return Ok(None);

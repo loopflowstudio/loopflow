@@ -4,7 +4,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{MachineId, TaskId, TaskOwnership};
+use crate::durable::{MachineId, TaskId};
 use crate::rental::{
     self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Rental, RentalId,
     RentalState, Usd,
@@ -142,41 +142,6 @@ fn rental_in(conn: &Connection, id: &RentalId) -> StoreResult<Rental> {
     .ok_or(StoreError::NotFound)?
 }
 
-/// Unfinished Tasks whose current owner is this Machine, each with the
-/// ownership that says so.
-pub(super) fn tasks_held_in(
-    conn: &Connection,
-    machine: &MachineId,
-) -> StoreResult<Vec<(TaskId, TaskOwnership)>> {
-    let candidates = {
-        let mut statement = conn.prepare(
-            "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
-             WHERE o.machine_id=?1 AND t.planning_completed=0 AND t.abandoned_at IS NULL
-             ORDER BY o.task_id",
-        )?;
-        let rows = statement.query_map([machine.as_str()], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    let mut held = Vec::new();
-    for task in candidates {
-        let task = TaskId::from_raw(task);
-        let ownership = super::task_ownership::ownership_in(conn, &task)?;
-        if ownership
-            .owner
-            .as_ref()
-            .and_then(|owner| owner.machine.id.as_ref())
-            == Some(machine)
-        {
-            held.push((task, ownership));
-        }
-    }
-    Ok(held)
-}
-
-fn task_ids(held: Vec<(TaskId, TaskOwnership)>) -> Vec<TaskId> {
-    held.into_iter().map(|(task, _)| task).collect()
-}
-
 impl SqliteStore {
     // -- Pools -------------------------------------------------------------
 
@@ -258,7 +223,10 @@ impl SqliteStore {
                     .ok_or(StoreError::NotFound)?;
                 Ok(PoolMachine {
                     ownership: ownership_in(&snapshot, &id)?,
-                    tasks: task_ids(tasks_held_in(&snapshot, &id)?),
+                    tasks: super::task_ownership::held_in(&snapshot, &id)?
+                        .into_iter()
+                        .map(|(task, _)| task)
+                        .collect(),
                     machine,
                 })
             })
@@ -354,9 +322,10 @@ impl SqliteStore {
     pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<(TaskId, i64)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        tasks_held_in(&snapshot, machine)?
+        super::task_ownership::held_in(&snapshot, machine)?
             .into_iter()
-            .map(|(task, ownership)| {
+            .map(|(task, _)| {
+                let ownership = super::task_ownership::ownership_in(&snapshot, &task)?;
                 let since = ownership.since(machine).ok_or_else(|| {
                     StoreError::InvalidData(format!(
                         "Task {task} is owned on {machine} with no log entry naming it"

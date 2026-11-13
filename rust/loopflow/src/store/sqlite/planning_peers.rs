@@ -223,6 +223,7 @@ impl SqliteStore {
         }
         // Reasserting a claim needs the repository's planning configuration.
         let planning_connected = crate::ops::planning_client::connected(repo);
+        let machine_names = super::task_ownership::machine_names_in(&conn)?;
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;
@@ -383,6 +384,7 @@ impl SqliteStore {
                 &task,
                 &body,
                 super::task_ownership::provider_order(created_at.as_deref()),
+                &machine_names,
             )?;
             if inserted.contains(&(table, target)) {
                 let comment = crate::work::task::comment::TaskComment {

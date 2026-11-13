@@ -160,7 +160,7 @@ fn place_task_in(
     worktree: &Path,
     workspace_slug: &str,
     pr: &TaskPr,
-    me: &super::task_ownership::RepoFacts,
+    me: &super::task_ownership::OwnershipFacts,
 ) -> StoreResult<()> {
     let mut task = task_on(conn, task_id)?.ok_or(StoreError::NotFound)?;
     if task.worktree.is_some() {
@@ -232,7 +232,7 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let _admission = self.lock_checkout(worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = super::task_ownership::RepoFacts::of_task_in(&conn, task_id)?;
+        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         place_task_in(&tx, task_id, worktree, workspace_slug, pr, &me)?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
@@ -253,12 +253,12 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = match creation {
-            Some(input) => super::task_ownership::RepoFacts::of_new_task_in(
+            Some(input) => super::task_ownership::OwnershipFacts::of_new_task_in(
                 &conn,
                 &input.repository_id,
                 input.project_id.as_ref(),
             )?,
-            None => super::task_ownership::RepoFacts::of_task_in(&conn, task_id)?,
+            None => super::task_ownership::OwnershipFacts::of_task_in(&conn, task_id)?,
         };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(input) = creation {
@@ -906,9 +906,10 @@ impl SqliteStore {
         task_id: &TaskId,
         observation: &crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let planning_connected = super::task_ownership::planning_connected_in(&conn, task_id)?;
+        let machine_names = super::task_ownership::machine_names_in(&conn)?;
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let existing = transaction
@@ -929,7 +930,12 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for comment in &observation.comments {
-            if !super::task_comments::ingest_task_comment(&transaction, task_id, comment)? {
+            if !super::task_comments::ingest_task_comment(
+                &transaction,
+                task_id,
+                comment,
+                &machine_names,
+            )? {
                 continue;
             }
             if !crate::ops::linear_observe::is_direction_comment(
@@ -2535,7 +2541,7 @@ impl SqliteStore {
             .worktree
             .is_some()
             .then(|| {
-                super::task_ownership::RepoFacts::of_new_task_in(
+                super::task_ownership::OwnershipFacts::of_new_task_in(
                     &conn,
                     &task.repository_id,
                     task.project_id.as_ref(),

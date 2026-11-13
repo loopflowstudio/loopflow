@@ -117,12 +117,13 @@ every growing FK child lookup then plans as `SEARCH`. No existing hot-path test
 was newly flagged. `docs/dev/data.md` § "Query cost and the write lock" states
 the measured-size rule and the schema-wide FK check.
 
-Remaining: the gate checks below.
-
 ## Checks
 
-- qa: `cargo test -p loopflow --lib store::query_plans::` — 9 pass (adds `every_measured_row_names_an_index`); clippy clean
-- `cargo test -p loopflow --lib store::query_plans::` plus `task_work::tests::process_membership_upgrade_probes_cwd_and_session_indexes` — pass at implement (10 tests); clippy clean; gate reruns
-- `server::boundary::tests::boundary_statements_never_scan_tables_that_grow_with_use` — pass at implement; gate reruns
-- `documented_commands::` (docs/dev/data.md changed) — gate
-- migration checks via `uv run python scripts/test.py --reuse-passing` — gate
+Gate, 2026-11-13. `scripts/test.py` stopped at its resource preflight (uv-cache
+inventory deadline, 43 GiB free); its plan ran by hand:
+
+- `scripts/check_migrations.py` — pass (`foreign_key_children.sql` unmerged)
+- `scripts/check_architecture.py`, `cargo fmt --all -- --check` — pass
+- nextest `test(store::query_plans::) | test(store::sqlite::task_work::tests::) | test(server::boundary::) | test(documented_commands::) | binary(two_people) | binary(transport_tests)` — 163/168; the 5 `transport_tests` failures were launch-deadline timeouts and one EAGAIN under Machine load. Four passed on rerun; `bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal` (30 s deadline) then passed twice on the branch (27 s, 18 s) and twice on origin/main (26 s, 21 s), isolated
+- `cargo clippy --all-targets -- -D warnings` — clean
+- `website/dev.py test` with branch `lf` on PATH — 73 passed

@@ -2986,7 +2986,7 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
                 store
                     .add_machine(&peer, "must-not-contact.invalid", "peer")
                     .unwrap();
-                store.handoff_task(&registered.task.id, &peer).unwrap();
+                store.move_claim(&registered.task.id, &peer).unwrap();
             }
             _ => {}
         }

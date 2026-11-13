@@ -1697,7 +1697,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     };
     assert_eq!(
         kinds(&plan.remote),
-        [OwnershipKind::Claim, OwnershipKind::Handoff]
+        [OwnershipKind::Claim, OwnershipKind::Claim]
     );
     plan.to_local();
     assert_eq!(
@@ -1723,7 +1723,7 @@ fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
             kinds(store),
             [
                 OwnershipKind::Claim,
-                OwnershipKind::Handoff,
+                OwnershipKind::Claim,
                 OwnershipKind::Unassign
             ]
         );
@@ -1865,7 +1865,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
         )
     );
     assert!(plan.local.unassign_task(&task).is_err());
-    assert!(plan.local.handoff_task(&task, &mini).is_err());
+    assert!(plan.local.move_claim(&task, &mini).is_err());
     // Claiming writes here; the later claim wins.
     plan.local.claim_task(&task).unwrap().unwrap();
     plan.to_remote();
@@ -2394,6 +2394,79 @@ fn task_move_carries_ownership_graph_and_session() {
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     assert_eq!(resumed["id"], session.as_str());
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
+}
+
+#[test]
+fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "retry-move");
+    at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
+    fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
+    // Mini answers the check, then falls over receiving what was sent.
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            "#!/bin/sh\ncase \"$*\" in *'session receive'*) case \"$*\" in *--check*) ;; *) echo 'mini fell over' >&2; exit 1;; esac;; esac\n",
+            1,
+        ),
+    );
+
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    let name = plan.local.task(&task).unwrap().unwrap().identifier;
+    let retry = format!("lf task move {name} --machine mini");
+    assert!(stderr.contains(&retry), "{stderr}");
+
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Moving to mini since"), "{status}");
+    assert!(status.contains("sent, not arrived"), "{status}");
+    assert!(status.contains(&format!("retry: {retry}")), "{status}");
+
+    // The retry delivers what was sent: nothing is committed or pushed again.
+    executable(&remote_lf, &working);
+    fs::write(worktree.join("notes.txt"), "edited after sending\n").unwrap();
+    let retried = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    let stderr = String::from_utf8_lossy(&retried.stderr);
+    assert!(stderr.contains("as it was sent to mini"), "{stderr}");
+    assert!(!stderr.contains("Committed and pushed"), "{stderr}");
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "retry-move:notes.txt"]
+        ),
+        "sent once"
+    );
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    assert!(plan.local.task_move_sent(&task).unwrap().is_none());
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Runs on mini since"), "{status}");
 }
 
 #[test]

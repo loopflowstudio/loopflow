@@ -705,7 +705,7 @@ fn hand_off(
     if store.sqlite.task_ownership(&task.id)?.owner.is_none() {
         change(repo, issue, OwnershipChange::Claim)?;
     }
-    let ownership = change(repo, issue, OwnershipChange::Handoff(label.to_string()))?;
+    let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
     eprintln!(
         "{}",
         crate::ops::task_ownership::render(&ownership)

@@ -1382,7 +1382,7 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         .add_machine(&peer, "remote.invalid", "Remote")
         .unwrap();
     store.claim_task(&registered.task.id).unwrap();
-    store.handoff_task(&registered.task.id, &peer).unwrap();
+    store.move_claim(&registered.task.id, &peer).unwrap();
     // Remote checkout state is not copied here; the peer decides eligibility.
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()

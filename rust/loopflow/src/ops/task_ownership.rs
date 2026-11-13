@@ -1,4 +1,4 @@
-//! Claim, hand off and unassign a Task. Commands already run on the Task's
+//! Claim, move and unassign a Task. Commands already run on the Task's
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
@@ -10,7 +10,7 @@ use crate::store::sqlite::SqliteStore;
 pub enum OwnershipChange {
     Claim,
     /// A registered Machine label or a Machine id.
-    Handoff(String),
+    Move(String),
     /// Nobody owns it, and Linear shows no assignee.
     Unassign,
 }
@@ -47,11 +47,11 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
             OwnershipChange::Claim => {
                 store.sqlite.claim_task(&task.id).map_err(message)?;
             }
-            OwnershipChange::Handoff(target) => {
+            OwnershipChange::Move(target) => {
                 let target = resolve_machine(&store.sqlite, target)?;
                 store
                     .sqlite
-                    .handoff_task(&task.id, &target)
+                    .move_claim(&task.id, &target)
                     .map_err(message)?;
             }
             OwnershipChange::Unassign => {
@@ -124,6 +124,27 @@ pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String
     Ok(runs_elsewhere(ownership, &local))
 }
 
+/// A move of the Task this Machine sent that has not arrived, with the
+/// command that delivers it: `Moving to mini since Nov 12 10:42: sent, not
+/// arrived`. `None` when no move is in flight.
+pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
+    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
+        return Ok(None);
+    };
+    let Some(sent) = store.sqlite.task_move_sent(task).map_err(message)? else {
+        return Ok(None);
+    };
+    let place = store
+        .sqlite
+        .machine_by_id(&sent.to_machine_id)
+        .map_err(message)?
+        .map_or_else(|| sent.to_machine_id.to_string(), |machine| machine.name());
+    Ok(Some(format!(
+        "Moving to {place} since {}: sent, not arrived\n  retry: lf task move {identifier} --machine {place}",
+        crate::lf::output::format_time(sent.at)
+    )))
+}
+
 pub fn render(ownership: &TaskOwnership) -> String {
     let mut lines = vec![match &ownership.owner {
         Some(owner) => format!("Owner: {owner}"),
@@ -163,6 +184,7 @@ mod tests {
                 person_key: None,
                 machine_id: Some(MachineId::new()),
                 machine_label: Some("lee-mbp".into()),
+                writer_machine_id: None,
                 at: 1_792_600_000,
             }],
         }

@@ -46,7 +46,7 @@ pub(crate) async fn relay(
     };
     receive(store, &moved, Some(target))
         .await
-        .map_err(|error| retry(error, &format!("Session {id}"), &id, target))?;
+        .map_err(|error| retry_session(error, &id, target))?;
     eprintln!("Moved {} to {}", session.title, target.name());
     Ok(())
 }
@@ -129,7 +129,8 @@ impl StoppedRun {
 }
 
 /// Send the Task where it is owned, receive it on `target`, and learn the
-/// handoff here too so this Machine routes it there.
+/// move's claim here too so this Machine routes it there. The move is
+/// recorded as sent until it arrives; the same command delivers it again.
 async fn relay_task(
     store: &SharedStore,
     issue: &str,
@@ -151,34 +152,38 @@ async fn relay_task(
         .map_or(local.clone(), |machine| machine.id.clone());
     let route = store.task_execution_route(&task.id).await?;
     let name = &task.identifier;
-    if route.machine_id == to {
-        anyhow::bail!("{name} already runs on {}", describe(target.as_ref()));
-    }
     let place = describe(target.as_ref());
-    if let Some(target) = &target {
-        ready(store, target, Some((&task, &route.repository_id)), name).await?;
-        eprintln!("Checked {place}: it can take {name}");
-    }
-    let moved: Move = if route.machine_id == local {
-        moves::send_task(store, task.id.as_str(), &to).await?
-    } else {
-        let source = super::ssh::resolve_target(route.machine_id.as_str(), false).await?;
-        let bytes = super::ssh::request(
-            &source,
-            &[
-                "--repo-id".into(),
-                route.repository_id.to_string(),
-                "session".into(),
-                "send".into(),
-                "--task".into(),
-                task.id.to_string(),
-                "--to".into(),
-                to.to_string(),
-            ],
-            None,
-        )
-        .await?;
-        serde_json::from_slice(&bytes).context("read the moved Task")?
+    // A move that was sent but did not arrive is delivered again as it was
+    // sent: nothing is stopped, committed or pushed twice.
+    let resent = store
+        .sqlite
+        .task_move_sent(&task.id)?
+        .filter(|sent| sent.to_machine_id == to);
+    let moved: Move = match &resent {
+        Some(sent) => {
+            eprintln!(
+                "Delivering {name} as it was sent to {place} at {}",
+                crate::lf::output::format_time(sent.at)
+            );
+            serde_json::from_str(&sent.payload).context("read the sent move")?
+        }
+        None => {
+            if route.machine_id == to {
+                anyhow::bail!("{name} already runs on {place}");
+            }
+            if let Some(target) = &target {
+                ready(store, target, Some((&task, &route.repository_id)), name).await?;
+                eprintln!("Checked {place}: it can take {name}");
+            }
+            let moved = send_task(store, &task, &route, &local, &to).await?;
+            store.sqlite.record_move_sent(
+                &task.id,
+                &moved.from_machine_id,
+                &to,
+                &serde_json::to_string(&moved)?,
+            )?;
+            moved
+        }
     };
     let moved_task = moved
         .task
@@ -193,14 +198,16 @@ async fn relay_task(
     let step = from
         .clone()
         .or_else(|| moved_task.graph.as_ref().map(|graph| graph.step.clone()));
-    if moved_task.stopped.is_some() {
-        match &from {
-            Some(step) => eprintln!("Stopped {name} at `{step}`"),
-            None => eprintln!("Stopped {name}'s Graph"),
+    if resent.is_none() {
+        if moved_task.stopped.is_some() {
+            match &from {
+                Some(step) => eprintln!("Stopped {name} at `{step}`"),
+                None => eprintln!("Stopped {name}'s Graph"),
+            }
         }
-    }
-    if let Some(checkout) = &moved.checkout {
-        eprintln!("Committed and pushed {name} on {}", checkout.branch);
+        if let Some(checkout) = &moved.checkout {
+            eprintln!("Committed and pushed {name} on {}", checkout.branch);
+        }
     }
     store
         .sqlite
@@ -208,9 +215,15 @@ async fn relay_task(
     receive(store, &moved, target.as_ref())
         .await
         .map_err(|error| match &target {
-            Some(target) => retry(error, name, &format!("--task {}", task.id), target),
+            Some(target) => retry(error, name, target),
             None => error,
         })?;
+    // A Task received here recorded its arrival as it was taken in.
+    if target.is_some() {
+        store
+            .sqlite
+            .record_move_arrived(&task.id, &moved.from_machine_id, &to)?;
+    }
     let at = step
         .map(|step| format!(" (Graph at `{step}`)"))
         .unwrap_or_default();
@@ -229,6 +242,37 @@ async fn relay_task(
             .map_err(|error| error.to_string()),
     });
     Ok((store.sqlite.task_ownership(&task.id)?, stopped))
+}
+
+/// Send the Task from where it is owned: here, or over SSH from the Machine
+/// holding it.
+async fn send_task(
+    store: &SharedStore,
+    task: &Task,
+    route: &crate::durable::TaskExecutionRoute,
+    local: &MachineId,
+    to: &MachineId,
+) -> Result<Move> {
+    if route.machine_id == *local {
+        return moves::send_task(store, task.id.as_str(), to).await;
+    }
+    let source = super::ssh::resolve_target(route.machine_id.as_str(), false).await?;
+    let bytes = super::ssh::request(
+        &source,
+        &[
+            "--repo-id".into(),
+            route.repository_id.to_string(),
+            "session".into(),
+            "send".into(),
+            "--task".into(),
+            task.id.to_string(),
+            "--to".into(),
+            to.to_string(),
+        ],
+        None,
+    )
+    .await?;
+    serde_json::from_slice(&bytes).context("read the moved Task")
 }
 
 /// Before anything is committed, pushed, stopped or handed off, `target`
@@ -316,11 +360,21 @@ async fn receive_here(args: &[String], input: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn retry(error: anyhow::Error, what: &str, selector: &str, target: &Machine) -> anyhow::Error {
+/// A Session sent by hand is received by hand.
+fn retry_session(error: anyhow::Error, id: &str, target: &Machine) -> anyhow::Error {
     anyhow!(
-        "{error:#}\n{what} was sent but did not arrive on {}; where it lived, retry with\n  lf session send {selector} --to {} | lf --machine {} session receive",
+        "{error:#}\nSession {id} was sent but did not arrive on {}; where it lived, retry with\n  lf session send {id} --to {} | lf --machine {} session receive",
         target.name(),
         target.id,
+        target.name(),
+    )
+}
+
+/// A Task's move is recorded as sent, so the same move delivers it again.
+fn retry(error: anyhow::Error, name: &str, target: &Machine) -> anyhow::Error {
+    anyhow!(
+        "{error:#}\n{name} was sent but did not arrive on {}; retry with\n  lf task move {name} --machine {}",
+        target.name(),
         target.name(),
     )
 }

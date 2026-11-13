@@ -1920,7 +1920,7 @@ pub enum SessionCommand {
     /// Hand a Session to another Machine: commit and push its branch, stop it
     /// here and print the move for `lf session receive` there
     #[command(
-        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session. Run send and receive by hand to retry a move whose receive failed:\n  lf session send <session|--task <task>> --to <machine> | lf --machine <machine> session receive"
+        after_help = "Everyday spelling: `lf --machine <machine> resume <session>` sends, receives and resumes in one step. `lf task move <task> --machine <machine>` moves a Task with its Session; run it again to deliver a Task that was sent but did not arrive. Run send and receive by hand to retry a Session whose receive failed:\n  lf session send <session> --to <machine> | lf --machine <machine> session receive"
     )]
     Send {
         /// Session ID or provider conversation ID
@@ -2499,7 +2499,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Change Task membership, or move the Task to another Machine, preserving its recorded work
     #[command(
-        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and hands it off with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move.\n  lf task move LOO-12 --machine mini"
+        after_help = "`--machine` stops the Task's Graph, commits and pushes its worktree, and moves it with its Session, then continues the Graph on that Machine at the step that was running. The terminal showing the Session prints `lf resume --task <ID>` to open it there. A worktree mid-merge or mid-rebase refuses to move. A move that was sent but did not arrive shows in `lf task status`; the same command delivers it.\n  lf task move LOO-12 --machine mini"
     )]
     Move {
         issue: String,

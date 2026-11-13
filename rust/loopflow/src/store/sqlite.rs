@@ -59,6 +59,7 @@ mod steers;
 mod task_comments;
 mod task_content;
 mod task_details;
+mod task_moves;
 mod task_retirement;
 mod transport;
 pub(crate) use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};

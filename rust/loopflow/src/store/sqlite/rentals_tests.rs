@@ -214,7 +214,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     store.attach_rental(&rental.id, &code_1).unwrap();
     let task = open_task(&store);
     store.claim_task(&task).unwrap();
-    store.handoff_task(&task, &code_1).unwrap();
+    store.move_claim(&task, &code_1).unwrap();
     let person = store.task_ownership(&task).unwrap().owner.unwrap().person;
 
     let (_, returned) = store
@@ -236,8 +236,8 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
         history,
         [
             (OwnershipKind::Claim, local.clone()),
-            (OwnershipKind::Handoff, code_1),
-            (OwnershipKind::Handoff, local),
+            (OwnershipKind::Claim, code_1),
+            (OwnershipKind::Claim, local),
         ]
     );
     // This Machine writes the Task again: `lf task run` stays here.

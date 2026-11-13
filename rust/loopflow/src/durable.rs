@@ -195,23 +195,21 @@ prefixed_uuid_id!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OwnershipKind {
+    /// Puts the Task on `machine_id`. A move is a claim by the same person
+    /// naming another Machine; entries an earlier lf wrote as `handoff`, and
+    /// the never-delivered `recorded` entries, read as claims.
+    #[serde(alias = "handoff", alias = "recorded")]
     Claim,
-    /// Moves the claim to `machine_id`, keeping the person.
-    Handoff,
     /// Stored and sent as `unclaim`, its released spelling.
     #[serde(rename = "unclaim")]
     Unassign,
-    /// What a Machine knew before ownership existed; never delivered.
-    Recorded,
 }
 
 impl OwnershipKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Claim => "claim",
-            Self::Handoff => "handoff",
             Self::Unassign => "unclaim",
-            Self::Recorded => "recorded",
         }
     }
 
@@ -225,7 +223,8 @@ impl OwnershipKind {
 }
 
 /// One immutable entry in a Task's ownership log. `machine_id` names the
-/// claimant, the handoff target, or the unclaiming Machine.
+/// Machine the Task is on after a claim, or the unclaiming Machine;
+/// `writer_machine_id` the Machine that wrote it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOwnershipEntry {
     pub id: OwnershipEntryId,
@@ -237,6 +236,9 @@ pub struct TaskOwnershipEntry {
     pub machine_id: Option<MachineId>,
     /// The Machine's label when written, or as best known on this Machine.
     pub machine_label: Option<String>,
+    /// Absent from entries released lf wrote, which name no writer (Task 538340
+    /// drops `written_here`, after which every entry names one).
+    pub writer_machine_id: Option<MachineId>,
     pub at: i64,
 }
 

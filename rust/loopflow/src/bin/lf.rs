@@ -1132,9 +1132,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 }
                 // A Task another Machine runs is read from its ownership; this
                 // Machine's records are what it left behind.
+                // A move in flight reads as that, with its retry, before ownership.
                 let elsewhere = match (&status.task, &status.ownership) {
                     (Some(task), Some(ownership)) => {
-                        loopflow::ops::task_ownership::runs_elsewhere_here(ownership)?
+                        loopflow::ops::task_ownership::moving_here(&task.id, &task.identifier)?
+                            .or(loopflow::ops::task_ownership::runs_elsewhere_here(
+                                ownership,
+                            )?)
                             .map(|line| format!("{}  {line}", task.identifier))
                     }
                     _ => None,

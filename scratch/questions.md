@@ -416,7 +416,7 @@ left both Machines running it.
 - Compress: `remote_ownership_writer` reads the registry once
   (`remote_task_in`). `machine_commands::claim` 2 passed; clippy clean.
 
-## A stuck move names its way back (fourteenth pass, 2026-11-13)
+## Done (2026-11-13, fourteenth pass): a stuck move names its way back
 
 Status and a failed retry print the same two lines, `retry:` and
 `take back: lf task claim X` (`task_ownership::ways_out`); lists stay one line.

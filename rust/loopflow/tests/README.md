@@ -43,7 +43,7 @@ the cheapest layer that can observe it.
 | Layer | Where | What it proves | Budget |
 |---|---|---|---|
 | Host rules | `transport::hosted::host_tests` (`src/transport/host_tests.rs`) | the viewer protocol: attach, takeover, control and size arbitration, snapshots, resume and spool overflow, heartbeat and grace expiry, holds, input, events | under 100 ms each |
-| Relay rules | `transport::viewer_tests` | what a viewer's terminal sees: reconnect, attach timeout, outage input discarded, exhaustion and Retry, control handoff, pane closure, Move here | under 1 s each |
+| Relay rules | `transport::relay_tests`, `transport::viewer_tests` | what a viewer's terminal sees: reconnect, attach timeout, outage input discarded, exhaustion and Retry, failed setup, pane closure, Move here; snapshot previews and handoff | about 1 s each, mostly the child's startup |
 | Surfaces | `tests/transport_tests.rs` | that each real launch path is wired and cleans up: owner, bare launch, provider exec, headless, CLI open/JSON, build takeover, server relay, held terminals, Desktop and SSH shells | one test per surface |
 
 Host rules drive `Hosted::pass` in-process. `Hosted` serves both owners and held
@@ -54,11 +54,13 @@ arrives. Owner time is already data: to expire a heartbeat or a grace
 period, backdate `Viewer.heartbeat_at`, `Connection::Dropped(at)` or
 `Hosted.exit` and call `pass()`. Never sleep.
 
-Relay rules run `view` in a child of the lib test binary on a real PTY against a
-fake host in the parent test. Relay time is a `#[cfg(test)]` thread-local read
-where the constant is used (heartbeat interval and timeout, attach timeout,
-reconnect backoff), the same pattern as `server::holder::TEST_IDLE`; the child
-sets it before relaying. Release builds keep the constants.
+Relay rules run `view` in a child of the lib test binary on a real PTY. In
+`relay_tests` the child relays a Desktop pane to a held terminal while its own
+threads play the server's entrance and the pane's status socket; the parent owns
+the PTY and types when the child writes `type` in its home. Relay time is
+`transport::Pace`: the child sets the `#[cfg(test)]` thread-local `TEST_PACE`
+(heartbeat, silence, attach acknowledgement, reconnect backoff) before relaying,
+the same pattern as `server::holder::TEST_IDLE`. Release builds use `PACE`.
 
 A surface test exists only for what needs real processes, PTYs, sockets or
 `exec`. It asserts the wiring and the cleanup (recorded exit, socket removal, no
@@ -1015,7 +1017,7 @@ cargo test -p loopflow --test transport_tests server_status_does_not_install_or_
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
 cargo test -p loopflow --test transport_tests server_preserves_owner_and_graph_across_restart
 cargo test -p loopflow --test transport_tests server_reconnect_preserves_newer_viewers_input_and_geometry
-cargo test -p loopflow --lib transport::viewer_tests::   # reconnect, exhaustion, Move here
+cargo test -p loopflow --lib transport::relay_tests::    # reconnect, exhaustion, Move here, pane closure
 cargo test -p loopflow --test transport_tests installed_server_preserves_owner_and_graph_across_replacement -- --ignored
 ```
 

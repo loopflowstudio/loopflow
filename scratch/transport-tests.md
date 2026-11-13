@@ -211,16 +211,29 @@ no test that waits out a production timeout except a named fallback above.
    - Not ported: the bridge process exiting when its owner cuts it
      (`viewer_stream_backpressure_…`, a `stream.rs` rule); the hold released at
      exit (`release_viewer_hold` always computes from no viewers).
-2. Relay re-exec harness with `#[cfg(test)]` timing; move relay heartbeat,
-   attach timeout, outage-input, exhaustion, pane-closure, Move here; delete the
-   server reconnect cluster. Timing sites the `#[cfg(test)]` value replaces:
-   `HEARTBEAT_INTERVAL` at `transport.rs` `view()` (`heartbeat = …` three
-   places), `HEARTBEAT_TIMEOUT` in `view()`'s `last_response.elapsed()` check
-   (the host side, `Viewer::expire_heartbeat` and `Hosted::deadline`, keeps the
-   constant: the bench backdates instead), `ATTACH_TIMEOUT` passed into `view()`
-   by `attach_with_terminal`, and `connection.rs` backoff `100 << attempt.min(5)`
-   with `MAX_ATTEMPTS`. The host bench owns `Hosted` on the test thread; a relay
-   case that needs a real host runs the bench on a thread of its own.
+2. **Done (2026-11-13).** `src/transport/relay_tests.rs`: the child relays a
+   Desktop pane to a held terminal (`Host::Terminal`) on a real PTY; its own
+   threads play the server entrance (`registry::entrance()` under the child's
+   `LF_HOME`) and the pane's status socket, and `LF_BIN` is an installer script.
+   No production seam was needed: `connection::Status` reaches the fake through
+   the entrance path. Relay time is `transport::Pace` (`PACE` in release,
+   `#[cfg(test)]` `TEST_PACE` thread-local); `HEARTBEAT_INTERVAL` and
+   `ATTACH_TIMEOUT` are gone, host-side `HEARTBEAT_TIMEOUT` stays. Seven cases,
+   0.5–3.1 s wall each on a loaded Mac (child startup ≈ 0.5 s; exhaustion and
+   quiet-window cases ≈ 2 s because `Status::wait` polls in 50 ms steps). A
+   mutation disabling the relay's silence check fails the quiet/silent case.
+   Deleted 10 real-process tests, 218.5 s of CI medians; `transport_tests`
+   holds 95. Gaps left on purpose:
+   - Relay cases use only `Host::Terminal`; owner bridging through the server
+     ticket (`bridge_existing`) stays covered by the kept
+     `server_reconnect_preserves_newer_viewers_input_and_geometry` and
+     `server_preserves_owner_and_graph_across_restart`.
+   - Pane closure while a Move here is pending (relay SIGSTOPped) is not
+     ported; the closure case covers a pending reconnect and `take_move`
+     checks `closed()` before consuming.
+   - Local (non-server) relay rules from the design — control handoff notice,
+     a host that stops reading input — are not in `relay_tests` yet; their
+     real-process tests are in the kept local-reconnect set (slice 4 decides).
 3. Non-transport moves (store retention, human_session, server, retirement).
 4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)

@@ -158,17 +158,17 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
   window: no `SCAN` of `session_events` or `processes` in their plans,
   unanalyzed or with measured stats.
 - `bench.sh` reports `same` for every window, 1d ≥ 4× faster, 7d not slower.
-  Open: the implement run measured 1d finished-included at 3.4× (0.51→0.15 s,
-  load avg 57–80) and finished-excluded at 5.5×; the fresh-copy run at gate
-  settles it. Below 4× there, the per-input `ended` evaluation (Exclusions) is
-  what remains.
+  Gate (fresh copy, interleaved, medians of 9 at load avg 260–290): 1d
+  finished-included 1.89→0.37 s (~5×), 7d finished-included 2.10→1.86 s.
 
 ## Checks
 
 - `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass; clippy clean (compress).
 - `bench.sh /tmp/loo866/store.db` (load avg 57–80) — `same` all six windows; 1d 0.55→0.10 s, 0.51→0.15 s; 7d 0.46→0.40 s, 0.61→0.30 s; 30d 1.04→1.55 s; whole 0.93→1.23 s (implement; rerun on a fresh copy for the PR).
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
-- `check_migrations.py`, `documented_commands::` for `docs/dev/data.md` — gate.
+- Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.
+- `check_migrations.py` — `history_window_indexes.sql` unmerged, additive.
+- `bench.sh` on a fresh `VACUUM INTO` copy (load avg 285–290): `same` all six windows (7053/7033/1912/1902/16370/19956 rows); best-of-5 too noisy at this load, so 7d and 1d finished-included were rerun interleaved (Done when).
 
 ## Docs
 

@@ -30,22 +30,49 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   no longer adds a second row). `cargo test --test integration --
   machine_commands::task_move …` 8 passed.
 
+## Done (2026-11-12, second pass): `task_checkouts`
+
+- Table (task, worktree, branch, base_commit, parent_pr_id) in the migration,
+  backfilled from local `tasks` rows; unique `worktree`, `rtrim(worktree,'/')`
+  and `branch` indexes; `task_checkout_to_pr_*` triggers replace
+  `task_placement_to_pr`; revision triggers bump `planning` and `task_updates`.
+- Every production reader and writer moved: `TASK_COLUMNS` LEFT JOINs it,
+  `task_work` membership reads `TASK_CHECKOUTS`, placement/restack/stack,
+  retirement, relocation, location, shipping, process filters, Task state
+  (`unstarted` = no checkout here). `TaskCheckout.machine_id` deleted with its
+  "Machine unknown"/"belongs to another Machine" branches. Old `tasks` columns
+  are no longer written; Task 538340 drops them.
+- Unmigrated readers (`read_task_branches`, `read_task_worktree_ownership`)
+  fall back to the old columns when `task_checkouts` is absent (Task 538340).
+- `lf task status` prints `Not checked out on <host>` (indented under a
+  `Runs on` line) and no path; test
+  `machine_commands::a_machine_without_the_checkout_shows_no_path_for_it`.
+- Wire shapes unchanged: `TaskWorktreeSnapshot.machine_id` and
+  `TaskSnapshot.machine_id` now always name this Machine when present.
+- `task_pr_placement_*` and retirement-cancel triggers recreated against
+  `task_checkouts`; backfill treats a worktree with no Machine as this one's.
+- EXPLAIN QUERY PLAN on a 10,000-Task / 50,000-Process store: every new join
+  searches an index (`task_checkouts_branch`, `task_checkouts_root`, primary
+  key); `TASK_COLUMNS` by repository scans `tasks` as before.
+- Checks (2026-11-13): clippy `--all-targets -D warnings` clean; lib store::,
+  ops::run::, ops::task::, ops::human_session::, waves, desktop, server::events,
+  harness::task_updates, status_tests:: pass (store::tests::,
+  store::migrations::tests:: and harness::task_updates:: stall when their
+  tests run in parallel on this Machine; each passes alone); integration
+  machine_commands::, dto_fixtures::, documented_commands::, global_commands::,
+  work_open_tests::, cli_discovery::, build_cleanup::, performance_tests::,
+  context/settings launch, task_initialization pass; transport_tests and
+  session_lifecycle_tests binaries pass. Gate reruns affected suites once.
+
 ## Remaining
 
-1. **`task_checkouts`** (largest cut): move `tasks.worktree`, `branch`,
-   `base_commit`, `parent_pr_id`, `checkout_machine_id` readers/writers to a
-   Machine-local row. ~30 files name `checkout_machine_id`; `store/sqlite/task_work.rs`,
-   `children.rs`, `repositories.rs`, `task_retirement.rs` hold the SQL. Triggers
-   to carry over: `task_placement_to_pr` (branch/base/parent → `task_prs`),
-   `task_update_tasks_update` (worktree/machine → `task_updates`), unique worktree
-   index. Then `relocated_task_processes` folds in (path updated in place).
-   Acceptance: `lf --machine mini task status X` on a Machine that never had X
-   prints `Not checked out on mini` and no path.
-2. **`task_ship_events`**: replace the seven `ship_*` columns with an approval/stop
+1. **`task_ship_events`**: replace the seven `ship_*` columns with an approval/stop
    log (who, when, process); the move carries the latest approval.
-3. **`pool_machines`**: move `machines.pool`, `cost_usd`, `expires_at`.
-4. **`people`**: one row per person, keyed by planning-provider identity.
-5. EXPLAIN QUERY PLAN for new joins against a ~10k-Task store.
+2. **`pool_machines`**: move `machines.pool`, `cost_usd`, `expires_at`.
+3. **`people`**: one row per person, keyed by planning-provider identity.
+4. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
+   history, so the receipt is what keeps their membership. Folding needs a
+   path-history column on `task_checkouts`; open whether that is worth it.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -55,6 +82,9 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   Session-only moves (`lf --machine M resume <session>`), which `task_moves`
   (keyed by Task) can't hold, so it stays for now. Does a Session-only move get
   its own record, or does the marker stay?
+- **Parallel stalls.** Whether the stalls of those three groups under the
+  default thread count predate this branch is unchecked; gate's nextest run
+  answers it.
 - **Version skew.** A released lf still running after install reads a move's
   claim (written here, naming mini) as its own claim gone missing and may claim
   again; released lf writes entries with no `writer_machine_id`, which this

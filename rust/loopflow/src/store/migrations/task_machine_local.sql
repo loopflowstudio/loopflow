@@ -38,3 +38,72 @@ CREATE TRIGGER store_revision_task_moves_update AFTER UPDATE ON task_moves
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_task_moves_delete AFTER DELETE ON task_moves
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- Machine-local: the checkout this Machine has for a Task. A row exists only
+-- on the Machine that has the checkout, so no path from another Machine is
+-- stored here. Planning never carried a path, so a checkout that names no
+-- Machine was written here. `tasks.worktree`, `branch`, `base_commit`, `parent_pr_id` and
+-- `checkout_machine_id` stay for released lf until the contract drops them.
+CREATE TABLE task_checkouts (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    worktree TEXT NOT NULL CHECK (worktree != ''),
+    branch TEXT NOT NULL DEFAULT '',
+    base_commit TEXT NOT NULL DEFAULT '',
+    parent_pr_id TEXT REFERENCES task_prs(id)
+);
+INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
+SELECT id,worktree,branch,base_commit,parent_pr_id FROM tasks
+WHERE worktree IS NOT NULL AND worktree != ''
+    AND (checkout_machine_id IS NULL
+        OR checkout_machine_id=(SELECT id FROM machines WHERE is_local=1));
+CREATE UNIQUE INDEX task_checkouts_worktree ON task_checkouts(worktree);
+CREATE INDEX task_checkouts_root ON task_checkouts(rtrim(worktree,'/'));
+CREATE INDEX task_checkouts_branch ON task_checkouts(branch);
+
+-- The current PR follows the checkout's branch, base and parent.
+CREATE TRIGGER task_checkout_to_pr_insert AFTER INSERT ON task_checkouts
+BEGIN
+ UPDATE task_prs SET branch=NEW.branch, base_commit=NEW.base_commit,
+ parent_pr_id=NEW.parent_pr_id WHERE task_id=NEW.task_id AND historical=0
+ AND merge_commit IS NULL AND abandoned_at IS NULL;
+END;
+CREATE TRIGGER task_checkout_to_pr_update AFTER UPDATE OF branch,base_commit,parent_pr_id ON task_checkouts
+BEGIN
+ UPDATE task_prs SET branch=NEW.branch, base_commit=NEW.base_commit,
+ parent_pr_id=NEW.parent_pr_id WHERE task_id=NEW.task_id AND historical=0
+ AND merge_commit IS NULL AND abandoned_at IS NULL;
+END;
+
+CREATE TRIGGER store_revision_task_checkouts_insert AFTER INSERT ON task_checkouts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain IN ('planning','task_updates'); END;
+CREATE TRIGGER store_revision_task_checkouts_update AFTER UPDATE ON task_checkouts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain IN ('planning','task_updates'); END;
+CREATE TRIGGER store_revision_task_checkouts_delete AFTER DELETE ON task_checkouts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain IN ('planning','task_updates'); END;
+
+-- A current PR matches this Machine's checkout; with no checkout here it
+-- carries no placement.
+DROP TRIGGER IF EXISTS task_pr_placement_insert;
+DROP TRIGGER IF EXISTS task_pr_placement_update;
+CREATE TRIGGER task_pr_placement_insert BEFORE INSERT ON task_prs WHEN NEW.historical=0
+AND NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=NEW.task_id AND c.branch=NEW.branch
+    AND c.base_commit=NEW.base_commit AND c.parent_pr_id IS NEW.parent_pr_id)
+AND (EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=NEW.task_id)
+    OR NEW.branch!='' OR NEW.base_commit!='' OR NEW.parent_pr_id IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'Task PR placement differs from Task'); END;
+CREATE TRIGGER task_pr_placement_update BEFORE UPDATE OF branch,base_commit,parent_pr_id ON task_prs
+WHEN NEW.historical=0
+AND NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=NEW.task_id AND c.branch=NEW.branch
+    AND c.base_commit=NEW.base_commit AND c.parent_pr_id IS NEW.parent_pr_id)
+AND (EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=NEW.task_id)
+    OR NEW.branch!='' OR NEW.base_commit!='' OR NEW.parent_pr_id IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'Task PR placement differs from Task'); END;
+
+-- A replaced or removed checkout revokes queued retirement, as reopening does
+-- through `cancel_task_retirement`.
+CREATE TRIGGER cancel_task_retirement_checkout_update
+AFTER UPDATE OF worktree,branch ON task_checkouts
+WHEN NEW.worktree IS NOT OLD.worktree OR NEW.branch IS NOT OLD.branch
+BEGIN DELETE FROM task_retirements WHERE task_id=NEW.task_id; END;
+CREATE TRIGGER cancel_task_retirement_checkout_delete AFTER DELETE ON task_checkouts
+BEGIN DELETE FROM task_retirements WHERE task_id=OLD.task_id; END;

@@ -124,6 +124,15 @@ pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String
     Ok(runs_elsewhere(ownership, &local))
 }
 
+/// `Not checked out on mini`: this Machine has no checkout of the Task, so it
+/// shows no path, whichever Machine runs it.
+pub fn not_checked_out_here() -> String {
+    format!(
+        "Not checked out on {}",
+        crate::store::sqlite::task_ownership::local_label()
+    )
+}
+
 /// A move of the Task this Machine sent that has not arrived, with the
 /// command that delivers it: `Moving to mini since Nov 12 10:42: sent, not
 /// arrived`. `None` when no move is in flight.

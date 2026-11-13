@@ -613,11 +613,13 @@ mod tests {
             .conn
             .lock()
             .unwrap()
-            .execute(
-                "INSERT INTO tasks(repository_id,id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id)
-                 VALUES(?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE is_local=1))",
-                rusqlite::params![repository.as_str(), task.as_str()],
-            )
+            .execute_batch(&format!(
+                "INSERT INTO tasks(repository_id,id,external_issue_id,issue_identifier,created_at)
+                 VALUES('{repository}','{task}','issue','PROOF-1',1);
+                 INSERT INTO task_checkouts(task_id,worktree) VALUES('{task}','/repo/task');",
+                repository = repository.as_str(),
+                task = task.as_str(),
+            ))
             .unwrap();
         let graph = store.test_graph(
             "code",

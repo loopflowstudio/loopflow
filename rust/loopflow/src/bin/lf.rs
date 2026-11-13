@@ -1143,12 +1143,24 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     }
                     _ => None,
                 };
-                if let Some(line) = elsewhere {
+                let checked_out = status
+                    .task
+                    .as_ref()
+                    .is_none_or(|task| task.worktree.is_some());
+                if let Some(line) = &elsewhere {
                     println!("{line}");
-                } else if let Some(execution) = &status.execution {
-                    print_task_snapshot(execution, false)?;
-                } else {
-                    println!("No execution allocated.");
+                }
+                if !checked_out {
+                    let line = loopflow::ops::task_ownership::not_checked_out_here();
+                    match (&elsewhere, &status.task) {
+                        (None, Some(task)) => println!("{}  {line}", task.identifier),
+                        _ => println!("  {line}"),
+                    }
+                } else if elsewhere.is_none() {
+                    match &status.execution {
+                        Some(execution) => print_task_snapshot(execution, false)?,
+                        None => println!("No execution allocated."),
+                    }
                 }
             }
             Ok(())

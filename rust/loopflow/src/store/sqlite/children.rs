@@ -30,8 +30,32 @@ use crate::work::task::{
 
 use super::{SqliteStore, TaskCheckout};
 
-const BRANCH_TASK_IDS: &str = "SELECT id FROM tasks WHERE branch=?1
+const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?1
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
+
+/// Record the checkout this Machine has for a Task, or that it has none.
+fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
+    match &task.worktree {
+        Some(worktree) => conn.execute(
+            "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
+             VALUES(?1,?2,?3,?4,?5) ON CONFLICT(task_id) DO UPDATE SET
+             worktree=excluded.worktree,branch=excluded.branch,
+             base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
+            params![
+                task.id.as_str(),
+                worktree.display().to_string(),
+                task.branch,
+                task.base_commit,
+                task.parent_pr_id.as_ref().map(TaskPrId::as_str)
+            ],
+        )?,
+        None => conn.execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [task.id.as_str()],
+        )?,
+    };
+    Ok(())
+}
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
@@ -174,7 +198,6 @@ fn place_task_in(
     // unowned Task, and refuses one owned on another Machine.
     super::task_ownership::claim_in(conn, task_id)?;
     record_task_branch_in(conn, task_id, &pr.branch)?;
-    let local = super::durable::map_local_machine(conn)?.id;
     task.worktree = Some(worktree.to_path_buf());
     task.workspace_slug = workspace_slug.to_string();
     task.branch = pr.branch.clone();
@@ -182,14 +205,10 @@ fn place_task_in(
     task.parent_pr_id = pr.parent_pr_id.clone();
     validate_initial_task_pr(&task, pr)?;
     conn.execute(
-            "UPDATE tasks SET worktree=?2,workspace_slug=?3,updated_at=?4,branch=?5,base_commit=?6,parent_pr_id=?7,checkout_machine_id=?8 WHERE id=?1",
-            params![
-                task_id.as_str(),
-                worktree.display().to_string(),
-                workspace_slug,
-                now_unix(), task.branch, task.base_commit, task.parent_pr_id.as_ref().map(TaskPrId::as_str), local.as_str()
-            ],
-        )?;
+        "UPDATE tasks SET workspace_slug=?2,updated_at=?3 WHERE id=?1",
+        params![task_id.as_str(), workspace_slug, now_unix()],
+    )?;
+    write_task_checkout_in(conn, &task)?;
     if pr.publication.is_some() {
         insert_task_pr(conn, pr)?;
     }
@@ -555,7 +574,7 @@ impl SqliteStore {
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let query = format!("{TASK_COLUMNS} WHERE t.branch=?1");
+        let query = format!("{TASK_COLUMNS} WHERE c.branch=?1");
         let mut statement = conn.prepare(&query)?;
         let tasks = statement
             .query_map(params![branch], |row| map_task_row(&conn, row))?
@@ -704,14 +723,20 @@ impl SqliteStore {
         clear_parent: bool,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE tasks SET base_commit=?2, parent_pr_id=CASE WHEN ?3 THEN NULL ELSE parent_pr_id END, updated_at=?4 WHERE id=?1",
-            params![task_id.as_str(), new_base, clear_parent, updated_at.unix_timestamp()],
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE task_checkouts SET base_commit=?2, parent_pr_id=CASE WHEN ?3 THEN NULL ELSE parent_pr_id END WHERE task_id=?1",
+            params![task_id.as_str(), new_base, clear_parent],
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        tx.execute(
+            "UPDATE tasks SET updated_at=?2 WHERE id=?1",
+            params![task_id.as_str(), updated_at.unix_timestamp()],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -778,9 +803,18 @@ impl SqliteStore {
                 None => None,
             };
         }
+        if tx.execute(
+            "UPDATE task_checkouts SET parent_pr_id=?2 WHERE task_id=?1",
+            params![child.id.as_str(), parent_id.as_str()],
+        )? == 0
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task is not checked out on this Machine; stack it where it runs".into(),
+            ));
+        }
         tx.execute(
-            "UPDATE tasks SET parent_pr_id=?2, updated_at=?3 WHERE id=?1",
-            params![child.id.as_str(), parent_id.as_str(), now_unix()],
+            "UPDATE tasks SET updated_at=?2 WHERE id=?1",
+            params![child.id.as_str(), now_unix()],
         )?;
         tx.commit()?;
         Ok(())
@@ -1507,10 +1541,10 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             ],
         ),
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,branch=?7,base_commit=?8,parent_pr_id=?9,checkout_machine_id=?10 WHERE id=?1",params![
-        task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
-        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
-    Ok(())
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
+        task.id.as_str(),task.pm_snapshot_synced_at,task.workspace_slug,
+        task.created_at.unix_timestamp(),task.updated_at.unix_timestamp()])?;
+    write_task_checkout_in(conn, task)
 }
 
 /// Seed the Linear observation cursor from the planning directive, in the Task's
@@ -1549,7 +1583,7 @@ pub(super) fn task_checkout_in(
     task: &TaskId,
 ) -> StoreResult<Option<TaskCheckout>> {
     conn.query_row(
-        &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
+        &format!("{TASK_CHECKOUT_COLUMNS} WHERE task_id=?1"),
         [task.as_str()],
         |row| map_task_checkout(row, |id| short_task_id(conn, id)),
     )
@@ -1557,8 +1591,7 @@ pub(super) fn task_checkout_in(
     .map_err(Into::into)
 }
 
-const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
-    FROM tasks WHERE worktree IS NOT NULL";
+const TASK_CHECKOUT_COLUMNS: &str = "SELECT task_id, worktree FROM task_checkouts";
 
 fn map_task_checkout(
     row: &rusqlite::Row<'_>,
@@ -1568,15 +1601,10 @@ fn map_task_checkout(
     let issue_identifier = short(&task_id)
         .map_err(|error| invalid_column(0, error))?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    let machine: Option<String> = row.get(2)?;
     Ok(TaskCheckout {
         task_id,
         issue_identifier,
         worktree: PathBuf::from(row.get::<_, String>(1)?),
-        machine_id: machine
-            .map(|id| crate::durable::MachineId::parse(&id))
-            .transpose()
-            .map_err(|error| invalid_column(2, error))?,
     })
 }
 
@@ -1690,7 +1718,7 @@ pub(super) fn cached_short_task_id(
 
 const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     t.issue_title, t.issue_description,
-    p.wave_id, t.worktree, t.workspace_slug,
+    p.wave_id, c.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
     COALESCE((SELECT json_object('state','pending','operation',
         CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
@@ -1699,9 +1727,10 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
-    t.project_id, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
+    t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
     t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
-    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
+    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+    LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
@@ -2522,15 +2551,10 @@ impl SqliteStore {
             insert_task_row(&tx, task)?;
         } else {
             tx.execute(
-                "UPDATE tasks SET worktree=?2,workspace_slug=?3,branch=?4,base_commit=?5,parent_pr_id=?6,checkout_machine_id=?7 WHERE id=?1",
-                params![
-                    task.id.as_str(),
-                    task.worktree.as_ref().map(|p| p.display().to_string()),
-                    task.workspace_slug,
-                    task.branch, task.base_commit, task.parent_pr_id.as_ref().map(|id| id.as_str()),
-                    task.worktree.as_ref().map(|_| super::durable::map_local_machine(&tx).map(|machine| machine.id.to_string())).transpose()?
-                ],
+                "UPDATE tasks SET workspace_slug=?2 WHERE id=?1",
+                params![task.id.as_str(), task.workspace_slug],
             )?;
+            write_task_checkout_in(&tx, task)?;
         }
         insert_task_pr(&tx, pr)?;
         if task.worktree.is_some() {
@@ -2603,7 +2627,13 @@ mod local_planning_tests {
                 VALUES(?1,?2,1,?3,?3,'base',1,1)", params![format!("pr-{n}"),task.as_str(),branch]).unwrap();
         }
         let read = || {
-            let mut query = conn.prepare(super::BRANCH_TASK_IDS).unwrap();
+            // The lookup as `retired_work_lookup` shipped, before `task_checkouts`.
+            let mut query = conn
+                .prepare(
+                    "SELECT id FROM tasks WHERE branch=?1
+                     UNION SELECT task_id FROM task_prs WHERE branch=?1",
+                )
+                .unwrap();
             let ids = query
                 .query_map(["retired-0"], |row| row.get::<_, String>(0))
                 .unwrap()
@@ -2677,7 +2707,12 @@ mod local_planning_tests {
         }
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE tasks SET worktree='/retained',branch='old/branch',external_issue_id='pending-export' WHERE id=?1", [task.id.as_str()]).unwrap();
+            conn.execute(
+                "UPDATE tasks SET external_issue_id='pending-export' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch) VALUES(?1,'/retained','old/branch')", [task.id.as_str()]).unwrap();
             conn.execute(
                 "UPDATE agent_sessions SET title=?1 WHERE id='generated'",
                 [format!(
@@ -2809,7 +2844,7 @@ mod local_planning_tests {
     }
 
     #[test]
-    fn task_checkout_read_distinguishes_unplaced_and_unknown_machine() {
+    fn task_checkout_reads_this_machines_checkout() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
         let task = store
@@ -2829,7 +2864,7 @@ mod local_planning_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET worktree='/retained/checkout' WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/retained/checkout')",
                 [task.id.as_str()],
             )
             .unwrap();
@@ -2839,21 +2874,6 @@ mod local_planning_tests {
         assert_eq!(
             checkout.worktree,
             std::path::Path::new("/retained/checkout")
-        );
-        assert!(checkout.machine_id.is_none());
-        let local = store.local_machine().unwrap().id;
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-                params![task.id.as_str(), local.as_str()],
-            )
-            .unwrap();
-        assert_eq!(
-            store.task_checkout(&task.id).unwrap().unwrap().machine_id,
-            Some(local)
         );
     }
 

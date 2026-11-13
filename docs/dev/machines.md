@@ -239,8 +239,9 @@ MTG-321  Runs on laptop since Nov 12 09:15
   Not checked out on mini
 ```
 
-Ownership changes move no checkout and start no process; a Machine that loses a
-Task keeps its row until `lf wt prune` removes the worktree. Status, file access
+Ownership changes move no checkout and start no process. A Machine that loses a
+Task keeps its row after `lf wt prune` removes the worktree, so the Task's
+history on that Machine still finds its Sessions and Processes. Status, file access
 and checkout-based Session/Process membership read this Machine's row. Explicit
 Session bindings retain membership without one.
 

@@ -207,8 +207,8 @@ fn process_query(
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
-            WHERE tw.worktree!=''
-              AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
+            JOIN task_checkouts c ON c.task_id=tw.id
+            WHERE op.cwd=rtrim(c.worktree,'/') OR instr(op.cwd,rtrim(c.worktree,'/')||'/')=1
         )"
         ));
     }
@@ -2189,7 +2189,7 @@ mod discovery_tests {
             .unwrap();
             // A Graph process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
-                "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) WHERE id=?1",
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.first') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
                 [first.as_str()],
             )
             .unwrap();

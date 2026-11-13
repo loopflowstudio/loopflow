@@ -469,11 +469,7 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
     assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
-        .query_row(
-            "SELECT worktree FROM tasks WHERE worktree IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT worktree FROM task_checkouts", [], |row| row.get(0))
         .unwrap();
     assert!(Path::new(&worktree).is_dir(), "{worktree}");
     let calls = std::fs::read_to_string(log).unwrap();
@@ -1387,7 +1383,7 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "UPDATE tasks SET worktree=NULL WHERE id=?1",
+            "DELETE FROM task_checkouts WHERE task_id=?1",
             [registered.task.id.as_str()],
         )
         .unwrap();

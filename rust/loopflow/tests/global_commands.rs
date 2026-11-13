@@ -1145,9 +1145,11 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
     assert!(received.ends_with(&format!("{url}\n")));
     let conn = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let worktree: Option<String> = conn
-        .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT (SELECT worktree FROM task_checkouts WHERE task_id=?1)",
+            [id],
+            |row| row.get(0),
+        )
         .unwrap();
     assert!(worktree.is_none());
 }
@@ -2692,12 +2694,9 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
     // Recorded work stays put while its planning membership can change.
     db.execute(
-        "UPDATE tasks SET worktree=?2,checkout_machine_id=?3 WHERE id=?1",
-        rusqlite::params![
-            task.id.as_str(),
-            repo.path().to_str().unwrap(),
-            store.local_machine().unwrap().id.as_str()
-        ],
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+         ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
+        rusqlite::params![task.id.as_str(), repo.path().to_str().unwrap()],
     )
     .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
@@ -2964,18 +2963,18 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     let checkout = repo.path().join("missing-checkout");
-    db.execute("UPDATE tasks SET worktree=?1", [checkout.to_str().unwrap()])
-        .unwrap();
+    db.execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+         ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
+        [registered.task.id.as_str(), checkout.to_str().unwrap()],
+    )
+    .unwrap();
     let store = SqliteStore::new(&path).unwrap();
-    let local = store.local_machine().unwrap().id;
     let peer = loopflow::durable::MachineId::new();
     // A handoff is append-only, so the remote owner comes last.
     for condition in ["absent", "occupied", "terminal", "remote"] {
-        db.execute(
-            "UPDATE tasks SET planning_state=NULL,checkout_machine_id=?1",
-            [local.as_str()],
-        )
-        .unwrap();
+        db.execute("UPDATE tasks SET planning_state=NULL", [])
+            .unwrap();
         match condition {
             "occupied" => fs::create_dir(&checkout).unwrap(),
             "terminal" => {
@@ -3205,7 +3204,8 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
         );
         let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
         db.execute(
-            "UPDATE tasks SET worktree=?1 WHERE id=?2",
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?2,?1)
+             ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
             rusqlite::params![checkout.to_str().unwrap(), registered.task.id.as_str()],
         )
         .unwrap();
@@ -3225,7 +3225,8 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
                 let alias = root.path().join("alias");
                 std::os::unix::fs::symlink(&checkout, &alias).unwrap();
                 db.execute(
-                    "UPDATE tasks SET worktree=?1 WHERE id=?2",
+                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?2,?1)
+                     ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
                     rusqlite::params![alias.to_str().unwrap(), registered.task.id.as_str()],
                 )
                 .unwrap();

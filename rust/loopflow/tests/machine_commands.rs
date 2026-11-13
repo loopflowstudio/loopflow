@@ -2470,6 +2470,35 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
 }
 
 #[test]
+fn a_machine_without_the_checkout_shows_no_path_for_it() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let (task, worktree) = placed_task(&plan, "laptop-only");
+    plan.to_remote();
+    let output = fixture
+        .command(&["--machine", "mini", "task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let status = String::from_utf8_lossy(&output.stdout);
+    assert!(status.contains("Not checked out on "), "{status}");
+    assert!(
+        !status.contains(worktree.to_str().unwrap()),
+        "mini shows the laptop's path:\n{status}"
+    );
+    // The laptop still has it.
+    let here = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&here);
+    let here = String::from_utf8_lossy(&here.stdout);
+    assert!(!here.contains("Not checked out on "), "{here}");
+}
+
+#[test]
 fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);

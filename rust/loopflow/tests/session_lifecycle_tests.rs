@@ -332,7 +332,8 @@ fn task_conversation_starts_at_launch_not_creation() {
         };
         let stored: (Option<String>, Option<String>) = db
             .query_row(
-                "SELECT primary_session_id,worktree FROM tasks WHERE id=?1",
+                "SELECT primary_session_id,c.worktree FROM tasks
+                 LEFT JOIN task_checkouts c ON c.task_id=tasks.id WHERE tasks.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -2594,7 +2595,7 @@ fn promotion_plain_creation_leaves_existing_work_alone_with_or_without_run() {
                         let checkout: String = fixture
                             .db()
                             .query_row(
-                                "SELECT worktree FROM tasks WHERE id=?1",
+                                "SELECT worktree FROM task_checkouts WHERE task_id=?1",
                                 [&task_id],
                                 |row| row.get(0),
                             )
@@ -3288,7 +3289,7 @@ fn promotion_worktree_only_records_pr_and_recovers_owner() {
     let owner: String = fixture
         .db()
         .query_row(
-            "SELECT id FROM tasks WHERE worktree=?1",
+            "SELECT task_id FROM task_checkouts WHERE worktree=?1",
             [root.to_str().unwrap()],
             |row| row.get(0),
         )

@@ -411,7 +411,8 @@ fn seed_persisted_merge_request_without_copy(home: &Path) {
         .expect("move persisted Task into the current PM Project");
     connection.execute(
         "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
-         SELECT 'pr-copy-fixture',id,1,workspace_slug,branch,base_commit,?2,?2 FROM tasks WHERE id=?1",
+         SELECT 'pr-copy-fixture',tasks.id,1,workspace_slug,coalesce(c.branch,''),coalesce(c.base_commit,''),?2,?2
+         FROM tasks LEFT JOIN task_checkouts c ON c.task_id=tasks.id WHERE tasks.id=?1",
         rusqlite::params![PERSISTED_TASK_ID, now],
     ).unwrap();
     connection
@@ -882,8 +883,9 @@ fn reserved_session_does_not_claim_task_in_status_and_roadmap() {
             connection
                 .execute(
                     "INSERT INTO agent_sessions(id,title,title_source,task_id,wave_id,created_at,cwd,input_published)
-                     SELECT ?1,'Reserved work','generated',t.id,p.wave_id,1,t.worktree,0
-                     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?2",
+                     SELECT ?1,'Reserved work','generated',t.id,p.wave_id,1,c.worktree,0
+                     FROM tasks t JOIN projects p ON p.id=t.project_id
+                     LEFT JOIN task_checkouts c ON c.task_id=t.id WHERE t.id=?2",
                     rusqlite::params![uuid::Uuid::new_v4().simple().to_string().as_str(), PERSISTED_TASK_ID],
                 )
                 .unwrap();

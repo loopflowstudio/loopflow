@@ -737,7 +737,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     rusqlite::Connection::open(&fixture.database_path)
         .unwrap()
         .execute(
-            "UPDATE tasks SET base_commit=?2 WHERE id=?1",
+            "UPDATE task_checkouts SET base_commit=?2 WHERE task_id=?1",
             rusqlite::params![fixture.task.id.as_str(), pr.base_commit],
         )
         .unwrap();
@@ -861,17 +861,11 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
 }
 
 #[test]
-fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
+fn task_without_a_local_checkout_never_reads_a_local_path() {
     let repo = loopflow_test_support::TestRepo::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
     std::fs::write(repo.path().join("note.md"), "local file").unwrap();
-    let remote = crate::durable::MachineId::new();
-    fixture
-        .store
-        .sqlite
-        .add_machine(&remote, "remote", "remote")
-        .unwrap();
     let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
     connection
         .execute(
@@ -890,48 +884,42 @@ fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
             ],
         )
         .unwrap();
-    for machine in [None, Some(remote.as_str())] {
-        connection
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=?1 WHERE id=?2",
-                rusqlite::params![machine, fixture.task.id.as_str()],
-            )
-            .unwrap();
-        crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
-            crate::ops::linear::LinearTestContext {
-                path: fixture.database_path.clone(),
-                store: fixture.store.clone(),
-                graphql_url: "http://127.0.0.1:1".into(),
-            },
-            || {
-                let expected = if machine.is_none() {
-                    "Machine is unknown"
-                } else {
-                    "belongs to Machine"
-                };
-                assert!(super::task_file("LOCATION-1", "note.md", false)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                assert!(super::task_changes("LOCATION-1", "head", None)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                assert!(super::task_files("LOCATION-1", "", None, false)
-                    .unwrap_err()
-                    .to_string()
-                    .contains(expected));
-                let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
-                assert_eq!(
-                    work.sessions
-                        .iter()
-                        .map(|s| s.id.as_str())
-                        .collect::<Vec<_>>(),
-                    ["bound"]
-                );
-            },
-        );
-    }
+    connection
+        .execute(
+            "DELETE FROM task_checkouts WHERE task_id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
+    crate::ops::linear::LINEAR_TEST_CONTEXT.sync_scope(
+        crate::ops::linear::LinearTestContext {
+            path: fixture.database_path.clone(),
+            store: fixture.store.clone(),
+            graphql_url: "http://127.0.0.1:1".into(),
+        },
+        || {
+            let expected = "not checked out on this Machine";
+            assert!(super::task_file("LOCATION-1", "note.md", false)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            assert!(super::task_changes("LOCATION-1", "head", None)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            assert!(super::task_files("LOCATION-1", "", None, false)
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+            let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+            assert_eq!(
+                work.sessions
+                    .iter()
+                    .map(|s| s.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["bound"]
+            );
+        },
+    );
     assert_eq!(
         std::fs::read_to_string(repo.path().join("note.md")).unwrap(),
         "local file"
@@ -1216,35 +1204,24 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
 }
 
 #[tokio::test]
-async fn checkout_resolution_respects_machine_identity() {
+async fn checkout_resolution_reads_only_this_machines_checkouts() {
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("LOCATION-1", repo.path().canonicalize().unwrap()).await;
-    let peer = crate::durable::MachineId::new();
-    fixture
-        .store
-        .add_machine(&peer, "peer", "peer")
+    let resolved = super::task_for_checkout(&fixture.store, repo.path())
         .await
+        .unwrap()
         .unwrap();
+    assert_eq!(resolved.id, fixture.task.id);
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-        "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-        rusqlite::params![fixture.task.id.as_str(), peer.as_str()],
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        [fixture.task.id.as_str()],
     )
     .unwrap();
     assert!(super::task_for_checkout(&fixture.store, repo.path())
         .await
         .unwrap()
         .is_none());
-    conn.execute(
-        "UPDATE tasks SET checkout_machine_id=NULL WHERE id=?1",
-        [fixture.task.id.as_str()],
-    )
-    .unwrap();
-    assert!(super::task_for_checkout(&fixture.store, repo.path())
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("Machine is unknown"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1516,7 +1493,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
     rusqlite::Connection::open(database_path)
         .unwrap()
         .execute(
-            "UPDATE tasks SET branch=?2 WHERE id=?1",
+            "UPDATE task_checkouts SET branch=?2 WHERE task_id=?1",
             rusqlite::params![task.id.as_str(), pr.branch],
         )
         .unwrap();

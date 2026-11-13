@@ -1313,17 +1313,14 @@ async fn roadmap_snapshot(
 /// of a plan does not grow by a statement per Task.
 #[derive(Debug)]
 struct SharedTaskReads {
-    checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
 }
 
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
-        let checkouts = store.task_checkouts().await?;
         let local_machine = store.local_machine().await?.id;
         Ok(Self {
-            checkouts,
             machines: store.machines().await?,
             local_machine,
         })
@@ -1822,15 +1819,9 @@ async fn snapshot_task_detail(
     let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
     let provider = agent.map(|agent| crate::config::parse_agent(&agent).0);
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
-    let machine_id = shared
-        .checkouts
-        .iter()
-        .find(|row| row.task_id == task.id)
-        .and_then(|row| row.machine_id.clone());
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
         Some(task),
-        machine_id,
         &shared.machines,
         &shared.local_machine,
     );
@@ -2224,19 +2215,18 @@ fn derive_task_condition(
     }
 }
 
+/// A Task's workspace is its checkout on this Machine, if it has one.
 fn task_reference(
     issue_url: Option<String>,
     task: Option<&Task>,
-    machine_id: Option<crate::durable::MachineId>,
     machines: &[crate::durable::Machine],
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.and_then(|task| {
         let task_worktree = task.worktree.as_ref()?;
         let branch = Some(task.branch.clone());
-        let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
-        let worktree = if local && crate::observe::is_dir(task_worktree) {
+        let worktree = if crate::observe::is_dir(task_worktree) {
             crate::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -2247,16 +2237,14 @@ fn task_reference(
         Some(TaskWorktreeSnapshot {
             machine_label: machines
                 .iter()
-                .find(|machine| Some(&machine.id) == machine_id.as_ref())
+                .find(|machine| &machine.id == local_machine)
                 .and_then(|machine| machine.label.clone()),
-            machine_id,
+            machine_id: Some(local_machine.clone()),
             slug: task.workspace_slug.clone(),
             branch,
             base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
-            local_exists: local
-                .then(|| crate::observe::try_exists(&worktree).ok())
-                .flatten(),
+            local_exists: crate::observe::try_exists(&worktree).ok(),
         })
     });
     TaskReferenceSnapshot {
@@ -3060,7 +3048,7 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[tokio::test]
-    async fn task_reference_names_recorded_checkout_machine_and_its_renames() {
+    async fn task_reference_names_only_this_machines_checkout() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3093,18 +3081,22 @@ mod tests {
             .await
             .unwrap();
         let task = store.list_tasks(Some(wave.id())).await.unwrap().remove(0);
-        let owner = crate::durable::MachineId::new();
-        let assigned = crate::durable::MachineId::new();
-        for (id, label) in [(&owner, "build-server"), (&assigned, "new-default")] {
-            store
-                .add_machine(id, &format!("{label}.invalid"), label)
-                .await
-                .unwrap();
-        }
+        let peer = crate::durable::MachineId::new();
+        store
+            .add_machine(&peer, "build-server.invalid", "build-server")
+            .await
+            .unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        assert!(detail.reference.workspace.is_none());
+
         let db = rusqlite::Connection::open(&database).unwrap();
         db.execute(
-            "UPDATE tasks SET worktree='/remote/checkout',checkout_machine_id=?2 WHERE id=?1",
-            rusqlite::params![task.id.as_str(), owner.as_str()],
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/local/checkout')",
+            [task.id.as_str()],
         )
         .unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
@@ -3114,21 +3106,12 @@ mod tests {
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
-        assert_eq!(workspace.machine_id, Some(owner.clone()));
-        assert_eq!(workspace.machine_label.as_deref(), Some("build-server"));
-        assert_eq!(workspace.local_exists, None);
-        store
-            .rename_machine("build-server", "renamed-server")
-            .await
-            .unwrap();
-        let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
-            .await
-            .unwrap();
-        let workspace = detail.reference.workspace.unwrap();
-        assert_eq!(workspace.machine_id, Some(owner));
-        assert_eq!(workspace.machine_label.as_deref(), Some("renamed-server"));
+        assert_eq!(
+            workspace.machine_id,
+            Some(store.local_machine().await.unwrap().id)
+        );
+        assert_eq!(workspace.worktree, "/local/checkout");
+        assert_eq!(workspace.local_exists, Some(false));
     }
 
     #[tokio::test]

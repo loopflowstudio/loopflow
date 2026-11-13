@@ -167,3 +167,8 @@ A Graph runs *for* a Task (or a Wave, or nothing); the launch already decides
 which, and the store now records that decision. A Graph run with an explicit
 `--wave` inside a Task's checkout no longer counts as the Task's. Writers are
 the launch (`graph.rs` execute), `World::graph` and test fixtures.
+
+Second pass (2026-11-13): nothing to change. A Graph's Wave stays derived (its
+Task's Wave, which `lf task move` can change, else its steps' captures), so
+only the Task is recorded. The adoption choice in `scratch/questions.md` gained
+its sharpest case: a Graph still running when the checkout is adopted.

@@ -82,9 +82,10 @@ an unmanaged Session) start no owner: the provider runs as the terminal's
 foreground process-group leader with only the context hooks, and closing the
 terminal ends it. `os_process::foreground` hands the terminal over before exec
 and takes it back after; a provider stopped with Ctrl+Z stops lf too, and `fg`
-continues both. Commands naming Work and reopens of managed Sessions keep the
-holder. Headless runs, bare Graphs, and Desktop surfaces waiting for a relay
-keep their host.
+continues both. A bare Graph typed at a terminal (`lf graph …`) runs the same
+way, in the foreground. Commands naming Work and reopens of managed Sessions
+keep the holder. Headless (`-b`) and piped runs, and Desktop surfaces waiting
+for a relay, start an owner.
 
 `lf task run`, `lf ship`, and explicit checkout start an unopened Task conversation
 detached beside its Graph; `lf resume` reattaches it. Preparation alone does not
@@ -346,8 +347,8 @@ one libghostty-vt terminal per held terminal, viewers, viewing records, queued
 input, the child's control requests and exit settlement. Everything above
 about viewers, control, ownership, lifetime and repainting holds for a held
 terminal with "the server" in place of "the owner", except where this section
-says otherwise. Owners remain for bare launches, piped and `-b` executions
-and Desktop Task shells.
+says otherwise. Owners remain for piped and `-b` executions and Desktop
+Task shells; a bare launch at a terminal has neither.
 
 `transport::managed` is the one place that decides:
 

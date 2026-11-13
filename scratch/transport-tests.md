@@ -205,3 +205,13 @@ no test that waits out a production timeout except a named fallback above.
 - gate: `cargo nextest run -p loopflow --lib --test transport_tests -E 'test(transport::) | binary(transport_tests) | test(human_session::) | test(server::) | test(task_retirement) | test(retirement_tests::)' --test-threads 6` all pass; report summed seconds per group before/after (local before: run once at slice 1 start).
 - `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`: Linux CI only (macOS sshd sandbox).
 - CI: compare `transport_tests` summed medians with the 1,646 s baseline.
+
+## Docs (written ahead of slices 1–4)
+
+- `rust/loopflow/tests/README.md`: new "Transport tests" section (three layers,
+  time seams, forbidden shortcuts); transport paragraphs and the server command
+  list now point at kept or moved tests. Each slice checks the names it ships
+  against this text.
+- `rust/loopflow/src/transport/README.md`: bare Graphs at a terminal run in the
+  foreground; bare launches have no owner. (This is the "README line ~87" fix.)
+- `scripts/testing.md`: store-wide changes run `test(transport::)` too.

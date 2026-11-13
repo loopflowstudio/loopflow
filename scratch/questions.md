@@ -444,7 +444,7 @@ Report: `scratch/qa.html`. Fixed: the hints named `lf repo --bind`/`--relocate`,
 - `cargo test -p loopflow --test integration machine_commands::a_move_retried_on_its_target` — 1 passed (qa)
 - `cargo test -p loopflow --lib rental::` — 25 passed (qa)
 - `documented_commands::` — 4 passed; clippy `--all-targets -D warnings` clean (qa)
-- Target check presentation is addressed in the iteration below. Owner still reads the target before arrival, as the ownership log does.
+- QA's last gap (mini's status hid a move it checked) is built under "Target check presentation". Owner still reads the target before arrival, as the ownership log does.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -504,3 +504,4 @@ DTO, documented-command, and static-analysis checks.
 - `EXPLAIN QUERY PLAN` for `task_move_check` over 10,000 move rows — primary-key lookup plus covering `task_moves_task` index, no scan (implement).
 - `cargo fmt`, `git diff --check`, `lf context` — clean; scratch remains within both limits (implement). Wider checks remain with gate.
 - Compress: status and the unknown-target refusal on mini print the same check and retry (`task_ownership::describe_check`); the refusal's own wording is gone. `cargo test -p loopflow --test integration -- machine_commands::a_move_retried_on_its_target machine_commands::a_move_checked_on_its_target` — 2 passed. Gate runs clippy and `documented_commands::` (machines.md).
+- Realign after syncing main (727b18f633, which seeds fixture stores in `machine_commands.rs`): the same two tests — 2 passed. The demo direction in `scratch/demo-decision.md` is built; nothing remains from it.

@@ -3,7 +3,7 @@
 No hands-on demo happened: this run is headless and nobody is available.
 No reactions or approval were collected. No demo processes were launched.
 
-Decision: return to implement. Second-round QA demonstrated fresh-target moves
+Decision: return to implement (built; see "Target check presentation" in `scratch/questions.md`). Second-round QA demonstrated fresh-target moves
 and repaired recovery commands, including retrying from the target. Its remaining
 target-side status gap is concrete: mini records a `checked` move but status
 shows `Unowned` / `Not checked out` with no way to continue it.

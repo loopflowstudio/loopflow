@@ -69,3 +69,14 @@ all before the transaction). The 709e0298b6 merge after it is a ruff bump only.
 
 - `cargo test -p loopflow --lib store::sqlite::rentals::tests::`: 10/10 pass, including `hand_back_writes_nothing_when_a_claim_lacks_planning_facts`.
 - Still to run at gate for fae6f73a1a: `cargo clippy --all-targets -- -D warnings` and the rental/ownership nextest filter above. The gate results above predate it.
+
+## Concept review (2026-11-13, HEAD 4c6a32ee3d)
+
+Reviewed fae6f73a1a against the `OwnershipFacts` rule. It fits: `hand_back_in`
+writes only from facts read before `BEGIN`, and stale facts end the attempt
+instead of triggering a config read. No `planning_client::connected` or
+`machine_declarations` call is reachable after `BEGIN` in a Task ownership
+write; the other in-store callers (`project_planning_sync`,
+`task_planning_syncs_in`, `task_comments`) are reads in savepoints. No design
+change, no open product choice. The two Machine pool/on-demand writes listed
+under open choices stay out of scope.

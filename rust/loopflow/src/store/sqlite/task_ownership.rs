@@ -335,14 +335,16 @@ fn is_my_machine_in(
     Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
 }
 
-/// Whether a holder is you. A holder and you both named by a `people` id are
-/// the same person exactly when the ids match. Otherwise a holder with a person key (Git `user.email`) is
-/// you exactly when the key is yours, even on a Machine you registered. A
-/// keyless entry, written before keys or recorded before ownership existed, is
-/// yours when it holds one of your Machines. Names are display only.
+/// Whether a holder is you. A holder named by your `people` id is you.
+/// Different ids don't prove different people: connecting Linear moves this
+/// Machine from `journal:<key>` to `linear:<viewer>`, and earlier claims keep
+/// the journal id. So a holder with a person key (Git `user.email`) is you
+/// exactly when the key is yours, even on a Machine you registered. A keyless
+/// entry, written before keys or recorded before ownership existed, is yours
+/// when it holds one of your Machines. Names are display only.
 fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
-    if let (Some(id), Some(mine)) = (&holder.person_id, &me.person.id) {
-        return Ok(id == mine);
+    if holder.person_id.is_some() && holder.person_id == me.person.id {
+        return Ok(true);
     }
     if let Some(key) = &holder.person_key {
         return Ok(me.person.key.as_ref() == Some(key));
@@ -1320,6 +1322,30 @@ mod tests {
             ownership.owner.unwrap().person_id.as_deref(),
             Some("linear:lee")
         );
+    }
+
+    #[test]
+    fn connecting_linear_keeps_journal_era_claims_yours() {
+        let (dir, store, task) = store_with_unowned_task();
+        for args in [&["init", "-q"][..], &["config", "user.email", "a@x"]] {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        store.record_local_person("journal:k", None).unwrap();
+        let claim = store.claim_task(&task).unwrap().unwrap();
+        assert_eq!(claim.person_id.as_deref(), Some("journal:k"));
+        assert_eq!(claim.person_key.as_deref(), Some("a@x"));
+
+        store.record_local_person("linear:v", Some("Lee")).unwrap();
+        let ownership = store.task_ownership(&task).unwrap();
+        assert_eq!(ownership.superseded_by, None);
+        assert!(store.unassign_task(&task).unwrap().is_some());
+        assert!(store.claim_task(&task).unwrap().is_some());
     }
 
     #[test]

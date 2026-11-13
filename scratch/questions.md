@@ -424,21 +424,17 @@ Compress: one function builds both lines.
 `machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it`
 and clippy pass; `documented_commands::` passes.
 
-## Next (concept review, 2026-11-13): different person ids don't prove different people
+## Fixed (2026-11-13): different person ids don't prove different people
 
-`is_mine_in` (store/sqlite/task_ownership.rs) returns `id == mine` whenever
-the holder and this Machine both carry a `people` id. One person has two ids
-once Linear connects: `record_local_person` moves the Machine from
-`journal:<key>` to `linear:<viewer>`, and their earlier claims keep
-`journal:<key>`. Those Tasks then read as another person's, although the Git
-email matches, which main's key check would have accepted. The open question
-"A person with both" covers merging the rows. It doesn't cover this regression.
+`is_mine_in` returns "you" when the holder's `people` id is yours; different
+ids fall through to the Git key, then the Machine, so it is never worse than
+main. Connecting Linear (`journal:<key>` → `linear:<viewer>`) keeps
+journal-era claims yours. Test
+`task_ownership::tests::connecting_linear_keeps_journal_era_claims_yours`.
 
-Direction: matching ids are enough to say "you". Different ids fall through to
-the person key, then to the Machine, as before. Never worse than main, which
-had only the key. Test: claim under `journal:k` with key `a@x`, record the
-local person `linear:v`, and the Task stays yours (`lf task status` shows no
-other owner; claim and unassign are allowed).
+- `cargo test -p loopflow --lib store::sqlite::task_ownership::` — 12 passed (implement)
+- `cargo test -p loopflow --test integration machine_commands::claim` — 2 passed (implement)
+- `cargo clippy --all-targets -- -D warnings` — clean (implement)
 
 ## Open questions (each reversible; the simpler option is built)
 

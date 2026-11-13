@@ -48,7 +48,8 @@ see [setting precedence](config.md). Use `default_agent:` in either definition
 for a fallback: every applicable `agent:` choice wins before any fallback,
 then source, scope and target decide within each class. A step on a fallback
 moves through [`agents`](config.md#keep-going-when-a-provider-runs-out) when a
-usage limit refuses it; a step with `agent:` stays on its provider. Builtin skills recommend
+usage limit or unavailable model refuses it; a step with `agent:` stays on its
+provider and keeps its model when one is named. Builtin skills recommend
 no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown

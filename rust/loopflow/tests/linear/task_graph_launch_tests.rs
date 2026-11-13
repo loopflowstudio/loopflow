@@ -1844,6 +1844,11 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         rusqlite::params![waiting, recorded],
     )
     .unwrap();
+    // Convert the ordinary failure into a capacity wait. A real wait retains
+    // the end-to-end Graph's approval; the repeated failure above withdrew it.
+    if graph == "held" {
+        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
+    }
     // A failed ship waits before restarting; that wait has passed too.
     db.execute(
         "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
@@ -1948,7 +1953,7 @@ sys.exit(code)
     let output = command(
         task.repo.path(),
         task.home.path(),
-        &["task", "run", "INF-123", "held-review"],
+        &["-b", "task", "run", "INF-123", "held-review"],
     )
     .env("LF_BIN", &lf)
     .output()
@@ -1957,24 +1962,40 @@ sys.exit(code)
     assert!(!ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains(
-            "stopped on a usage limit at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
         ),
         "{}",
         ran.text
     );
     assert!(!ran.text.contains("starting it again"), "{}", ran.text);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let graphs: i64 = db
-        .query_row("SELECT COUNT(*) FROM graph_processes", [], |row| row.get(0))
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    // `-b` approved Auto-Ship; a ship restart would only meet the same refusal.
+    let shipped_at: Option<i64> = db
+        .query_row("SELECT shipped_at FROM tasks", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(graphs, 1);
-    let status = task.text_status();
-    assert!(status.contains("stopped on a usage limit"), "{status}");
-    assert!(status.contains("there is no `agents` list"), "{status}");
-    assert!(
-        status.contains("`lf task run INF-123` starts the run again at it"),
-        "{status}"
-    );
+    assert!(shipped_at.is_none());
+    // Cross ship's retry deadline so reads would restart an approval left behind.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let status = task.text_status();
+        assert!(!status.contains("Ship failed"), "{status}");
+        assert!(!status.contains("Auto-Ship approved"), "{status}");
+        assert!(
+            status.contains("stopped after a provider refusal"),
+            "{status}"
+        );
+        assert!(status.contains("there is no `agents` list"), "{status}");
+        assert!(
+            status.contains("`lf task run INF-123` starts the run again at it"),
+            "{status}"
+        );
+    }
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 
     // Once capacity is available, a manual run picks up the refused step.
     fs::write(

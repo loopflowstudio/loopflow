@@ -351,8 +351,9 @@ lf task status LOO-1
 | Every eligible account is held back and `agents` has a next entry (`agents: [claude:fable, claude:opus, codex]`) | Continues on that entry: the same conversation on another model of its provider; on another provider, seeded with the conversation so far, as `lf session new -a` does |
 | Every eligible account is held back, no `agents` order is behind it and its harness was named bare (`claude`) | Continues the same conversation on another model of that harness: Opus, then Sonnet, then Haiku |
 | The provider refuses the launch itself with a usage limit, before any turn | The same moves: next login, then the next entry in `agents`. If another entry takes the step, the run continues; if the order runs out, it stops once |
+| The provider reports that the model is unavailable | Moves directly to the next allowed entry, without spending the login’s quota. An explicit model pin stops once with advice to change the pin |
 | Nothing it may use is free, and an account has a known reset | Waits, checking each minute, and continues at the first reset |
-| A usage limit refuses it and no agent it may use is left | Stops once, without automatic retries. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude`. After a reset or an `agents` change, `lf task run <ID>` starts at that step; earlier steps stay done |
+| A usage limit or unavailable model refuses it and no agent it may use is left | Stops once, without automatic retries. The stop line and `lf task status` say what would let it move, such as `lf set --global agents codex,claude`. After a reset or an `agents` change, `lf task run <ID>` starts at that step; earlier steps stay done |
 | Its Process ends during a wait | `lf task run` starts the run again at that step, and earlier steps stay done. An assigned Task that nothing else blocks restarts by itself after the reset, on the `-a` the run was given; no automatic restart starts it sooner |
 
 Only accounts in the resolved route take a step on. An `agent` choice or `-a`

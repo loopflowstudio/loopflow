@@ -151,9 +151,8 @@ record and never changes; the table stays append-only. Tasks are never deleted
 Built: migration `graph_process_task.sql` (fixture `graph_process_task_released.sql`,
 test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
 indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
-recording the deepest checkout's Task. Left: the gate's store-copy comparison.
-
-- `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13; rerun at realign after merging origin/main 87f0e3c60a: same, `running 14 tests` then stopped). Gate or CI runs them; nothing on the branch has executed these tests yet.
+recording the deepest checkout's Task. Left: the store-copy comparison against a
+`.backup` of the live store (QA compared a private 0.15.3-written store), and CI.
 
 - QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished` and `plan.list` latest Graph pair correctly. Focused tests stopped in `TN` again; gate or CI runs them.
 

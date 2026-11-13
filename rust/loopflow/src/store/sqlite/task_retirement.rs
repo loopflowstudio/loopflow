@@ -134,25 +134,31 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let owner = owner.into();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Viewers report on every poll and nearly every report repeats the
+        // last one: read first and take no write lock when nothing changes.
+        if !viewer_hold_changes(&conn, owner, hold)?
+            && viewer_retirements(&conn, owner, hold)?.is_empty()
+        {
+            return Ok(());
+        }
         let tx = conn.transaction()?;
-        tx.execute(
-            &format!(
-                "UPDATE {} SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4
-             WHERE id=?1 AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4)",
-                owner.table()
-            ),
-            params![
-                owner.as_str(),
-                hold.map(ViewerHold::as_str),
-                hold.map(ViewerHold::at),
-                matches!(hold, Some(ViewerHold::Viewed(_))),
-            ],
-        )?;
-        match hold {
-            Some(ViewerHold::Viewed(_)) => hold_viewer_retirements(&tx, owner, None)?,
-            // A return and departure can both reach the recorder between polls.
-            Some(ViewerHold::Absent(at)) => hold_viewer_retirements(&tx, owner, Some(at))?,
-            None => {}
+        if viewer_hold_changes(&tx, owner, hold)? {
+            tx.execute(
+                &format!(
+                    "UPDATE {} SET viewer_hold=?2,viewer_hold_at=?3,viewed=?4 WHERE id=?1",
+                    owner.table()
+                ),
+                params![
+                    owner.as_str(),
+                    hold.map(ViewerHold::as_str),
+                    hold.map(ViewerHold::at),
+                    matches!(hold, Some(ViewerHold::Viewed(_))),
+                ],
+            )?;
+        }
+        let reason = matches!(hold, Some(ViewerHold::Viewed(_))).then_some(VIEWED);
+        for task in viewer_retirements(&tx, owner, hold)? {
+            hold_retirement(&tx, &task, reason)?;
         }
         tx.commit()?;
         Ok(())
@@ -200,20 +206,26 @@ impl SqliteStore {
 
     pub(crate) fn pending_retirements(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // Start from the few live hosts, then probe their checkouts by index:
+        // joining every Task to every Session took half a second at 1,200
+        // Tasks and 16,000 Sessions.
         let mut query = conn.prepare(&format!(
-            "SELECT task_id FROM task_retirements WHERE phase!='retired'
-             UNION SELECT t.id FROM tasks t JOIN task_checkouts c ON c.task_id=t.id
-               WHERE t.abandoned_at IS NOT NULL
-               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=t.id)
-             UNION SELECT tw.id FROM tasks tw JOIN agent_sessions s ON ({members})
-               LEFT JOIN processes p ON p.id=s.transport_lf_process_id
-               LEFT JOIN held_terminals t ON t.id=s.held_terminal_id
-               WHERE (tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL)
-                 AND s.completed_at IS NULL AND s.interactive=1
-                 AND ((p.id IS NOT NULL AND p.completed_at IS NULL)
-                     OR (t.id IS NOT NULL AND t.ended_at IS NULL))
+            "WITH hosted AS MATERIALIZED (
+                 SELECT s.cwd,s.task_id,s.primary_scope FROM processes p INDEXED BY processes_unfinished
+                     CROSS JOIN agent_sessions s ON s.transport_lf_process_id=p.id
+                     WHERE p.completed_at IS NULL AND s.completed_at IS NULL AND s.interactive=1
+                 UNION SELECT s.cwd,s.task_id,s.primary_scope FROM held_terminals t
+                     CROSS JOIN agent_sessions s ON s.held_terminal_id=t.id
+                     WHERE t.ended_at IS NULL AND s.completed_at IS NULL AND s.interactive=1)
+             SELECT task_id FROM task_retirements WHERE phase!='retired'
+             UNION SELECT a.id FROM tasks a INDEXED BY tasks_abandoned
+               CROSS JOIN task_checkouts c ON c.task_id=a.id
+               WHERE a.abandoned_at IS NOT NULL
+               AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=a.id)
+             UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON tw.id IN ({members})
+               WHERE tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL
              ORDER BY 1",
-            members = super::task_work::session_membership("s")
+            members = super::task_work::session_tasks("h")
         ))?;
         let tasks = query
             .query_map([], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
@@ -327,33 +339,58 @@ fn host(owner: Option<LfProcessId>, terminal: Option<TerminalId>) -> StoreResult
     }
 }
 
-/// Use current Session membership, never shell receipts or input ownership.
-/// The caller records viewing and revokes cleanup in the same transaction.
-fn hold_viewer_retirements(
+fn viewer_hold_changes(
     conn: &Connection,
     owner: Transport<'_>,
-    absent_since: Option<i64>,
-) -> StoreResult<()> {
+    hold: Option<ViewerHold>,
+) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1
+             AND (viewer_hold IS NOT ?2 OR viewer_hold_at IS NOT ?3 OR viewed IS NOT ?4))",
+            owner.table()
+        ),
+        params![
+            owner.as_str(),
+            hold.map(ViewerHold::as_str),
+            hold.map(ViewerHold::at),
+            matches!(hold, Some(ViewerHold::Viewed(_))),
+        ],
+        |row| row.get(0),
+    )?)
+}
+
+/// The retirements this hold resets and does not already show reset. Uses
+/// current Session membership, never shell receipts or input ownership.
+fn viewer_retirements(
+    conn: &Connection,
+    owner: Transport<'_>,
+    hold: Option<ViewerHold>,
+) -> StoreResult<Vec<TaskId>> {
+    // A return and departure can both reach the recorder between polls.
+    let (absent_since, reason) = match hold {
+        Some(ViewerHold::Viewed(_)) => (None, Some(VIEWED)),
+        Some(ViewerHold::Absent(at)) => (Some(at), None),
+        None => return Ok(Vec::new()),
+    };
     let mut query = conn.prepare(&format!(
-        "WITH owned AS MATERIALIZED (
-             SELECT task_id,cwd,primary_scope FROM agent_sessions WHERE {}=?1
-         )
-         SELECT h.task_id FROM task_retirements h WHERE h.phase!='retired'
-         AND (?2 IS NULL OR h.due_at < ?2+?3)
-         AND h.task_id IN (SELECT tw.id FROM owned s JOIN tasks tw ON ({}))",
+        // CROSS JOIN starts from the host's own Sessions.
+        "SELECT DISTINCT h.task_id FROM agent_sessions s CROSS JOIN task_retirements h
+         ON h.task_id IN ({1}) AND h.phase!='retired'
+         WHERE s.{0}=?1 AND (?2 IS NULL OR h.due_at < ?2+?3)
+         AND (h.due_at IS NOT NULL OR h.phase!='waiting' OR h.reason IS NOT ?4
+              OR h.retry_at IS NOT NULL OR h.failures!=0)
+         ORDER BY h.task_id",
         owner.session_column(),
-        super::task_work::session_membership("s")
+        super::task_work::session_tasks("s")
     ))?;
     let tasks = query
         .query_map(
-            params![owner.as_str(), absent_since, WORKSPACE_GRACE],
+            params![owner.as_str(), absent_since, WORKSPACE_GRACE, reason],
             |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for task in tasks {
-        hold_retirement(conn, &task, absent_since.is_none().then_some(VIEWED))?;
-    }
-    Ok(())
+    Ok(tasks)
 }
 
 // A returning viewer resets checkout cleanup, including its retry deadline.

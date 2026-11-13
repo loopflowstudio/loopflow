@@ -124,6 +124,23 @@ pub(crate) async fn execution_of_latest_graph(
     Ok((snapshot, Some(graph.detail(entry))))
 }
 
+/// Ends a recorded limit reason when the step moved to another agent rather
+/// than another account; the agent follows.
+pub(crate) const MOVED_TO: &str = "; continuing on ";
+
+/// Ends a recorded limit reason when a provider refused the step and no
+/// agent it may use was left; what would let it move follows.
+pub(crate) const STOPPED: &str = "; stopped: ";
+
+/// The limit that stopped a step and what would let it move, as one sentence.
+/// The current `lf task run` does not retry such a run automatically.
+pub(crate) fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
+    let (reason, advice) = recovery.reason.rsplit_once(STOPPED)?;
+    // Providers often end their own words with a period.
+    let reason = reason.trim_end_matches('.');
+    Some(format!("{reason}. {advice}"))
+}
+
 /// A step recovering from a limit says so. One that died waiting is where the
 /// next `lf task run` starts; status promises that happens by itself only when
 /// the recovery sweep would do it (`restarts_by_itself`).
@@ -145,8 +162,12 @@ fn apply_limit_recovery(
             );
         }
         (TaskExecutionState::Running, None) => {
-            snapshot.reason =
-                format!("{label} went on under another {provider} account after: {reason}");
+            snapshot.reason = match reason.rsplit_once(MOVED_TO) {
+                Some((reason, agent)) => format!("{label} went on under {agent} after: {reason}"),
+                None => {
+                    format!("{label} went on under another {provider} account after: {reason}")
+                }
+            };
         }
         (TaskExecutionState::Blocked, Some(retry_at)) => {
             snapshot.state = TaskExecutionState::Waiting;
@@ -156,6 +177,12 @@ fn apply_limit_recovery(
             } else {
                 format!("{label} ended while waiting for {provider} capacity until {after}; `lf task run {issue}` starts the run again at it")
             };
+        }
+        (TaskExecutionState::Blocked, None) => {
+            if let Some(stop) = limit_stop(recovery) {
+                snapshot.reason =
+                    format!("{label} stopped after a provider refusal: {stop}; `lf task run {issue}` starts the run again at it");
+            }
         }
         _ => {}
     }
@@ -331,10 +358,41 @@ mod tests {
         assert_eq!(retrying.state, TaskExecutionState::Running);
         assert!(retrying.reason.contains("another claude account"));
 
+        let mut moved = snapshot(TaskExecutionState::Running);
+        let codex = AgentLimitRecovery {
+            provider: "codex".into(),
+            reason: format!(
+                "codex_error: You've hit your usage limit{}claude",
+                super::MOVED_TO
+            ),
+            ..recovery(None)
+        };
+        apply_limit_recovery(&mut moved, &codex, "LOO-1", || true);
+        assert_eq!(
+            moved.reason,
+            "implement went on under claude after: codex_error: You've hit your usage limit"
+        );
+
         // A step that moved accounts and then failed for its own reasons failed.
         let mut failed = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut failed, &recovery(None), "LOO-1", || true);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
+
+        // A limit with nowhere to go says what would let the step move.
+        let mut stopped = snapshot(TaskExecutionState::Blocked);
+        let nowhere = AgentLimitRecovery {
+            reason: format!(
+                "codex_error: You've hit your usage limit.{}no `agents` list is set",
+                super::STOPPED
+            ),
+            ..recovery(None)
+        };
+        apply_limit_recovery(&mut stopped, &nowhere, "LOO-1", || true);
+        assert_eq!(stopped.state, TaskExecutionState::Blocked);
+        assert_eq!(
+            stopped.reason,
+            "implement stopped after a provider refusal: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
+        );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);
         apply_limit_recovery(&mut ended, &recovery(Some(1_900_000_000)), "LOO-1", || true);

@@ -1844,6 +1844,11 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         rusqlite::params![waiting, recorded],
     )
     .unwrap();
+    // Convert the ordinary failure into a capacity wait. A real wait retains
+    // the end-to-end Graph's approval; the repeated failure above withdrew it.
+    if graph == "held" {
+        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
+    }
     // A failed ship waits before restarting; that wait has passed too.
     db.execute(
         "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
@@ -1906,6 +1911,142 @@ fn a_shipping_tasks_restarted_wait_keeps_its_explicit_agent() {
         restart_of_a_finished_wait("held", Some("claude:opus")),
         "--agent claude:opus --task INF-123 ship||{}"
     );
+}
+
+/// November 12: a step refused by a usage limit, with no agent to move to, was
+/// relaunched three times into the same refusal.
+#[test]
+fn a_run_stopped_by_a_usage_limit_is_not_started_again() {
+    let task = GraphTask::new();
+    // The failing step ends having recorded that a limit left it nowhere to go.
+    let reason = format!(
+        "codex_error: You've hit your usage limit{}there is no `agents` list",
+        crate::ops::task_execution::STOPPED
+    );
+    let lf = task.home.path().join("lf-limit-fixture");
+    fs::write(
+        &lf,
+        format!(
+            r#"#!/usr/bin/env python3
+import os, sqlite3, subprocess, sys
+binary = {binary}
+if sys.argv[-3:] != ['graph', 'show', 'late']:
+    os.execv(binary, [binary, *sys.argv[1:]])
+code = subprocess.call([binary, *sys.argv[1:]])
+db = sqlite3.connect(os.path.join(os.environ['LF_HOME'], 'loopflow.db'), timeout=30)
+with db:
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at) "
+        "SELECT p.id,'codex',?,1 FROM processes p WHERE p.parent_lf_process_id="
+        "(SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1) "
+        "ORDER BY p.rowid DESC LIMIT 1",
+        [{reason}],
+    )
+sys.exit(code)
+"#,
+            binary = serde_json::to_string(&loopflow_test_support::lf_binary()).unwrap(),
+            reason = serde_json::to_string(&reason).unwrap(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "held-review"],
+    )
+    .env("LF_BIN", &lf)
+    .output()
+    .unwrap();
+    let ran = task.ran(output);
+    assert!(!ran.success(), "{}", ran.text);
+    assert!(
+        ran.text.contains(
+            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+        ),
+        "{}",
+        ran.text
+    );
+    assert!(!ran.text.contains("starting it again"), "{}", ran.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    // `-b` approved Auto-Ship; a ship restart would only meet the same refusal.
+    let shipped_at: Option<i64> = db
+        .query_row("SELECT shipped_at FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    assert!(shipped_at.is_none());
+    // Cross ship's retry deadline so reads would restart an approval left behind.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let status = task.text_status();
+        assert!(!status.contains("Ship failed"), "{status}");
+        assert!(!status.contains("Auto-Ship approved"), "{status}");
+        assert!(
+            status.contains("stopped after a provider refusal"),
+            "{status}"
+        );
+        assert!(status.contains("there is no `agents` list"), "{status}");
+        assert!(
+            status.contains("`lf task run INF-123` starts the run again at it"),
+            "{status}"
+        );
+    }
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+
+    // Once capacity is available, a manual run picks up the refused step.
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2);
+    assert_eq!(graphs[0].1.len(), 2);
+    assert_eq!(graphs[1].1.len(), 1);
+    assert_eq!(
+        graphs[1].1[0]["argv"],
+        serde_json::json!(["graph", "show", "late"])
+    );
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
+#[test]
+fn a_run_that_failed_after_moving_agents_starts_again_from_where_it_began() {
+    let task = GraphTask::new();
+    let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
+    assert!(!failed.success(), "{}", failed.text);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
+         SELECT p.id,'codex',?1,1 FROM processes p WHERE p.parent_lf_process_id=
+             (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
+         ORDER BY p.rowid DESC LIMIT 1",
+        [format!(
+            "codex_error: You've hit your usage limit{}claude",
+            crate::ops::task_execution::MOVED_TO
+        )],
+    )
+    .unwrap();
+    fs::write(
+        task.repo.path().join(".lf/graphs/late.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    let graphs = support::recorded_graphs(task.home.path());
+    let steps = &graphs.last().unwrap().1;
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+    assert_eq!(
+        steps[1]["argv"],
+        serde_json::json!(["graph", "show", "late"])
+    );
+    assert_eq!(task.graph()["position"], at("review"));
 }
 
 #[test]

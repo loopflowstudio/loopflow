@@ -7,7 +7,7 @@
 //! Machine's own open claim; only a later entry this Machine wrote does.
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
     MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskExecutionSource, TaskId, TaskOwner,
@@ -262,14 +262,68 @@ fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool>
 /// you exactly when the key is yours, even on a Machine you registered. A
 /// keyless entry, written before keys or recorded before ownership existed, is
 /// yours when it holds one of your Machines. Names are display only.
-fn is_mine_in(conn: &Connection, task: &TaskId, holder: &TaskOwner) -> StoreResult<bool> {
+fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreResult<bool> {
     if let Some(key) = &holder.person_key {
-        return Ok(my_key_in(conn, task)?.as_ref() == Some(key));
+        return Ok(me.key.as_ref() == Some(key));
     }
     match &holder.machine.id {
         Some(machine) => is_my_machine_in(conn, machine),
         None => Ok(false),
     }
+}
+
+/// What an ownership write needs from outside the store: you in the Task's
+/// repository (Git `user.email` is your person key) and whether the repository
+/// has a remote planning provider. Reading them spawns `git` and loads
+/// configuration, so callers read them before they take the write lock.
+#[derive(Debug, Clone)]
+pub(crate) struct RepoFacts {
+    key: Option<String>,
+    name: Option<String>,
+    planning_connected: bool,
+}
+
+impl RepoFacts {
+    fn in_repo(repo: &str) -> StoreResult<Self> {
+        Ok(Self {
+            key: crate::config::participant_email(std::path::Path::new(repo)),
+            name: crate::config::participant_name()
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            planning_connected: crate::ops::planning_client::connected(repo),
+        })
+    }
+
+    pub(crate) fn planning_connected(&self) -> bool {
+        self.planning_connected
+    }
+
+    /// You in the Task's repository.
+    pub(crate) fn of_task_in(conn: &Connection, task: &TaskId) -> StoreResult<Self> {
+        Self::in_repo(&task_repo_in(conn, task)?)
+    }
+
+    /// You in a repository by its planning identity.
+    pub(crate) fn of_repository_in(
+        conn: &Connection,
+        repository: &crate::durable::RepositoryId,
+    ) -> StoreResult<Self> {
+        let repo: Option<String> = conn
+            .query_row(
+                "SELECT repo FROM repository_plans WHERE id=?1",
+                [repository.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Self::in_repo(&repo.ok_or(StoreError::NotFound)?)
+    }
+}
+
+/// Loads planning configuration. Read before the write transaction when the
+/// Task is known; reassertion and ended-Machine handbacks discover it inside.
+fn planning_connected_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(crate::ops::planning_client::connected(&task_repo_in(
+        conn, task,
+    )?))
 }
 
 fn task_repo_in(conn: &Connection, task: &TaskId) -> StoreResult<String> {
@@ -278,14 +332,8 @@ fn task_repo_in(conn: &Connection, task: &TaskId) -> StoreResult<String> {
         [task.as_str()],
         |row| row.get(0),
     )
-    .map_err(Into::into)
-}
-
-/// Your person key in the Task's repository: its Git `user.email`.
-fn my_key_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<String>> {
-    Ok(crate::config::participant_email(std::path::Path::new(
-        &task_repo_in(conn, task)?,
-    )))
+    .optional()?
+    .ok_or(StoreError::NotFound)
 }
 
 /// The one Machine of yours that writes the Task's next entry: the owner's,
@@ -294,11 +342,12 @@ fn my_key_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<String>> {
 pub(super) fn writer_in(
     conn: &Connection,
     task: &TaskId,
+    me: &RepoFacts,
 ) -> StoreResult<(MachineId, TaskExecutionSource)> {
     let (_, reading) = reading_in(conn, task)?;
     if let Some(holder) = &reading.owner {
         if let Some(machine) = &holder.machine.id {
-            if is_mine_in(conn, task, holder)? && is_my_machine_in(conn, machine)? {
+            if is_mine_in(conn, me, holder)? && is_my_machine_in(conn, machine)? {
                 return Ok((machine.clone(), TaskExecutionSource::Owner));
             }
         }
@@ -317,9 +366,9 @@ pub(super) fn writer_in(
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 
-fn require_writer_in(conn: &Connection, task: &TaskId) -> StoreResult<MachineId> {
+fn require_writer_in(conn: &Connection, task: &TaskId, me: &RepoFacts) -> StoreResult<MachineId> {
     let local = local_machine_in(conn)?;
-    let (writer, _) = writer_in(conn, task)?;
+    let (writer, _) = writer_in(conn, task, me)?;
     if writer != local {
         return Err(StoreError::InvalidAuthority(format!(
             "Task {task} ownership is written on Machine {writer}; run the command there"
@@ -330,12 +379,16 @@ fn require_writer_in(conn: &Connection, task: &TaskId) -> StoreResult<MachineId>
 
 /// A move and an unclaim end your own claim; someone else's stays theirs.
 /// `None` when nobody owns the Task.
-fn my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<(MachineId, TaskOwner)>> {
-    let local = require_writer_in(conn, task)?;
+fn my_claim_in(
+    conn: &Connection,
+    task: &TaskId,
+    me: &RepoFacts,
+) -> StoreResult<Option<(MachineId, TaskOwner)>> {
+    let local = require_writer_in(conn, task, me)?;
     let (_, reading) = reading_in(conn, task)?;
     match reading.owner {
         None => Ok(None),
-        Some(holder) if !is_mine_in(conn, task, &holder)? => {
+        Some(holder) if !is_mine_in(conn, me, &holder)? => {
             Err(StoreError::InvalidAuthority(format!(
                 "Task {task} is claimed by {}; claim it to take it over",
                 holder.person.as_deref().unwrap_or("someone else")
@@ -350,8 +403,9 @@ fn move_in(
     conn: &Connection,
     task: &TaskId,
     target: &MachineId,
+    me: &RepoFacts,
 ) -> StoreResult<TaskOwnershipEntry> {
-    let Some((local, holder)) = my_claim_in(conn, task)? else {
+    let Some((local, holder)) = my_claim_in(conn, task, me)? else {
         return Err(StoreError::InvalidAuthority(format!(
             "Task {task} is unowned"
         )));
@@ -368,11 +422,8 @@ fn move_in(
         holder.person,
         holder.person_key,
         target,
+        me.planning_connected,
     )
-}
-
-fn person() -> StoreResult<Option<String>> {
-    crate::config::participant_name().map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
 /// Published text names only what the entry carries: a public name, else the
@@ -408,6 +459,7 @@ fn append_in(
     person: Option<String>,
     person_key: Option<String>,
     machine: &MachineId,
+    planning_connected: bool,
 ) -> StoreResult<TaskOwnershipEntry> {
     let local = local_machine_in(conn)?;
     let entry = TaskOwnershipEntry {
@@ -426,8 +478,7 @@ fn append_in(
         writer_machine_id: Some(local.clone()),
         at: time::OffsetDateTime::now_utc().unix_timestamp(),
     };
-    let remote = remote_planning_in(conn, task)?;
-    let ordered_at = journal_order_in(conn, task, remote)?;
+    let ordered_at = journal_order_in(conn, task, planning_connected)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
              at,ordered_at,writer_machine_id,written_here)
@@ -464,7 +515,7 @@ fn append_in(
         },
     )?;
     // A move keeps the person, so planning's assignee and state stay.
-    if remote {
+    if planning_connected {
         match kind {
             OwnershipKind::Claim if *machine == local => {
                 let state: Option<String> = conn.query_row(
@@ -494,8 +545,9 @@ fn append_in(
 pub(super) fn claim_in(
     conn: &Connection,
     task: &TaskId,
+    me: &RepoFacts,
 ) -> StoreResult<Option<TaskOwnershipEntry>> {
-    let local = require_writer_in(conn, task)?;
+    let local = require_writer_in(conn, task, me)?;
     let (_, reading) = reading_in(conn, task)?;
     let owned_here = reading.superseded_by.is_none()
         && reading
@@ -506,7 +558,7 @@ pub(super) fn claim_in(
     if owned_here {
         return Ok(None);
     }
-    let key = my_key_in(conn, task)?.ok_or_else(|| {
+    let key = me.key.clone().ok_or_else(|| {
         StoreError::InvalidData(
             "claiming needs your Git user.email, which identifies you to teammates; \
              run `git config --global user.email you@example.com`"
@@ -517,17 +569,12 @@ pub(super) fn claim_in(
         conn,
         task,
         OwnershipKind::Claim,
-        person()?,
+        me.name.clone(),
         Some(key),
         &local,
+        me.planning_connected,
     )
     .map(Some)
-}
-
-fn remote_planning_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(crate::ops::planning_client::connected(&task_repo_in(
-        conn, task,
-    )?))
 }
 
 /// Without a remote provider, the planning journal is the provider and an
@@ -655,6 +702,7 @@ pub(super) fn reassert_in(
         holder.person,
         holder.person_key,
         &local_machine_in(conn)?,
+        planning_connected_in(conn, task)?,
     )
     .map(Some)
 }
@@ -676,6 +724,7 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
             person,
             person_key,
             &local,
+            planning_connected_in(conn, &task)?,
         )?;
         tasks.push(task);
     }
@@ -707,9 +756,10 @@ impl SqliteStore {
 
     pub fn claim_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = RepoFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
-        let entry = claim_in(&tx, task)?;
+        let entry = claim_in(&tx, task, &me)?;
         tx.commit()?;
         Ok(entry)
     }
@@ -718,8 +768,9 @@ impl SqliteStore {
     /// completed, and the target admits its own on first connect.
     pub fn move_claim(&self, task: &TaskId, target: &MachineId) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = RepoFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let entry = move_in(&tx, task, target)?;
+        let entry = move_in(&tx, task, target, &me)?;
         super::sessions::complete_primary_session_in(
             &tx,
             &crate::session::PrimaryScope::Task(task.clone()),
@@ -736,8 +787,9 @@ impl SqliteStore {
         target: &MachineId,
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = RepoFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let entry = move_in(&tx, task, target)?;
+        let entry = move_in(&tx, task, target, &me)?;
         tx.commit()?;
         Ok(entry)
     }
@@ -751,6 +803,7 @@ impl SqliteStore {
         sent: &TaskOwnershipEntry,
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let planning_connected = planning_connected_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let (rows, _) = reading_in(&tx, task)?;
         if rows.last().map(|row| &row.id) != Some(&sent.id) {
@@ -766,6 +819,7 @@ impl SqliteStore {
             sent.person.clone(),
             sent.person_key.clone(),
             &local_machine_in(&tx)?,
+            planning_connected,
         )?;
         tx.commit()?;
         Ok(entry)
@@ -776,8 +830,9 @@ impl SqliteStore {
     /// the claim that arrives with a move outranks this Machine's earlier ones.
     pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let planning_connected = planning_connected_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let order = journal_order_in(&tx, task, remote_planning_in(&tx, task)?)?;
+        let order = journal_order_in(&tx, task, planning_connected)?;
         let inserted = ingest_marker_in(&tx, task, marker, order)?;
         tx.commit()?;
         Ok(inserted)
@@ -786,12 +841,21 @@ impl SqliteStore {
     /// End your claim. An unowned Task is already unclaimed and writes nothing.
     pub fn unassign_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let me = RepoFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+        let Some((local, holder)) = my_claim_in(&tx, task, &me)? else {
             return Ok(None);
         };
-        let key = my_key_in(&tx, task)?.or(holder.person_key);
-        let entry = append_in(&tx, task, OwnershipKind::Unassign, person()?, key, &local)?;
+        let key = me.key.or(holder.person_key);
+        let entry = append_in(
+            &tx,
+            task,
+            OwnershipKind::Unassign,
+            me.name,
+            key,
+            &local,
+            me.planning_connected,
+        )?;
         tx.commit()?;
         Ok(Some(entry))
     }

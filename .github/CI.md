@@ -55,6 +55,12 @@ workflow on first-parent commits and opens an unarmed revert PR for the culprit.
 
 ## Rust and Swift caches
 
+Every job that builds Rust or replays the migration catalog needs a full
+checkout (`fetch-depth: 0`) and `origin/main`. This includes lint, architecture,
+installation and native app builds. Without merge history, slug migrations
+fall back to name order, which can apply a trigger before its columns exist.
+When adding one of these jobs, follow `rust-build`'s checkout and history fetch.
+
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes shared caches. The

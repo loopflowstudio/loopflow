@@ -116,9 +116,22 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             sessions_by_task.entry(task).or_default().push(session);
         }
     }
+    // State, publication and ownership for every Task in a fixed number of
+    // statements: a query per Task costs thousands on a large repository.
+    let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
+    let task_states = super::task_details::states_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(|id| id.as_str())),
+    )?;
+    let published = super::project_adoption::published_in(conn, &ids)?;
+    let owners = super::task_ownership::owners_in(conn, &ids)?;
     for task in tasks {
-        let started = super::project_adoption::task_started_or_published_in(conn, &task.id)?;
-        let state = super::durable::task_state_in(conn, &task.id)?;
+        let state = *task_states
+            .get(&task.id)
+            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
+        let owned = owners.contains_key(&task.id);
+        // Started as `task_started_or_published_in` defines it.
+        let started = owned || published.contains(&task.id);
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
         if open {
@@ -132,11 +145,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Shipping => SelectionState::Shipping,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
-        let section = TaskSection::of(
-            state,
-            super::task_ownership::owned_in(conn, &task.id)?,
-            task.state.as_deref(),
-        );
+        let section = TaskSection::of(state, owned, task.state.as_deref());
         states.insert(match section {
             TaskSection::Backlog => SelectionState::Backlog,
             TaskSection::Working => SelectionState::Working,
@@ -617,16 +626,17 @@ impl SqliteStore {
         if id.0.is_empty() {
             return Err(invalid("Dashboard ID must be nonempty"));
         }
+        let stale = || StoreError::Stale("Dashboard changed; read it again before editing".into());
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let catalog = catalog_in(&tx, repository)?;
+        // The Work read takes seconds in a large repository, so it reads a
+        // snapshot; the write transaction only checks the revision and writes.
+        let snapshot = conn.savepoint()?;
+        let catalog = catalog_in(&snapshot, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(StoreError::Stale(
-                "Dashboard changed; read it again before editing".into(),
-            ));
+            return Err(stale());
         }
-        let work = work_in(&tx, repository)?;
+        let work = work_in(&snapshot, repository)?;
         let mut definitions = definitions(&catalog);
         definitions.insert(id.clone(), selection.clone());
         // Any cycle introduced by this edit must pass through this selection.
@@ -635,7 +645,7 @@ impl SqliteStore {
             .resolve(repository.as_str(), &work, &definitions)
             .map_err(StoreError::from)?;
         let expression_key = selection.expression_key();
-        let mut expected = arrangement_in(&tx, repository, id, &expression_key)?
+        let mut expected = arrangement_in(&snapshot, repository, id, &expression_key)?
             .map(|(_, arrangement)| arrangement)
             .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
             .unwrap_or_else(|| Arrangement::automatic(&[]));
@@ -662,6 +672,20 @@ impl SqliteStore {
             selection: selection.clone(),
             arrangement,
         };
+        drop(snapshot);
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Every Dashboard write advances the revision, so an unchanged one
+        // means the catalog and arrangement read above are still current.
+        let current: Option<i64> = tx
+            .query_row(
+                "SELECT revision FROM dashboards WHERE repository_id=?1 AND id=?2",
+                params![repository.as_str(), id.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current != expected_revision {
+            return Err(stale());
+        }
         tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
             params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
         tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
@@ -736,27 +760,43 @@ impl SqliteStore {
         to: &str,
     ) -> StoreResult<Vec<String>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_in(&tx, repository)?;
-        let resolution = repository_default()
-            .resolve(repository.as_str(), &work, &BTreeMap::new())
-            .map_err(StoreError::from)?;
-        let mut order = resolution.task_ids();
-        let from = order
-            .iter()
-            .position(|id| id == task)
-            .ok_or(StoreError::NotFound)?;
-        let target = order
-            .iter()
-            .position(|id| id == to)
-            .ok_or(StoreError::NotFound)?;
-        move_into_place(&mut order, from, target);
-        tx.execute(
-            "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
-            params![repository.as_str(), serde_json::to_string(&order)?],
-        )?;
-        tx.commit()?;
-        Ok(order)
+        // The Work read takes seconds in a large repository, so it reads a
+        // snapshot. The write lands only on the order it read; a concurrent
+        // reorder sends this one back to read again.
+        for _ in 0..3 {
+            let (read, order) = {
+                let snapshot = conn.savepoint()?;
+                let read = task_order_in(&snapshot, repository)?;
+                let work = work_in(&snapshot, repository)?;
+                let resolution = repository_default()
+                    .resolve(repository.as_str(), &work, &BTreeMap::new())
+                    .map_err(StoreError::from)?;
+                let mut order = resolution.task_ids();
+                let from = order
+                    .iter()
+                    .position(|id| id == task)
+                    .ok_or(StoreError::NotFound)?;
+                let target = order
+                    .iter()
+                    .position(|id| id == to)
+                    .ok_or(StoreError::NotFound)?;
+                move_into_place(&mut order, from, target);
+                (read, order)
+            };
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if task_order_in(&tx, repository)? != read {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
+                params![repository.as_str(), serde_json::to_string(&order)?],
+            )?;
+            tx.commit()?;
+            return Ok(order);
+        }
+        Err(StoreError::Stale(
+            "the Task order kept changing; read it again before reordering".into(),
+        ))
     }
 
     /// Move `work`'s visible occurrence into `to`'s place in a Dashboard's order,

@@ -241,13 +241,28 @@ failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
 An exhausted subscription takes a different path: lf marks that login
-unavailable until its reported reset and moves to your next login with room.
+unavailable until its reported reset and moves to your next login with room,
+then to the next provider in `agents`. A limit that refuses the launch itself
+moves on the same way. A model-unavailable refusal skips directly to the next
+allowed entry in `agents`, without marking the login’s quota spent. An explicit
+model pin stays put and stops with advice to change the pin.
 
 ```bash
-lf account                           # every login, its capacity and when it resets
-lf gate -a codex                     # run this one on another harness
-lf --only-account claude=work@ gate  # stay inside the logins you name
+lf account                         # every login, its capacity and when it resets
+lf set --global agents claude,codex # let headless steps move to Codex when Claude is out
+lf gate -a codex                    # run this one on another harness
+lf --only-account claude=work@ gate # stay inside the logins you name
 ```
+
+A step with nowhere left to move stops its run once, without automatic retries.
+The stop line and `lf task status` say whether its order ran out or it had no
+next entry. Use
+`lf config settings --skill <name> --explain` to inspect the order and any
+`agent` choice or `-a` that pins its provider.
+Change the pin to select another model or provider, or remove it to allow `agents`
+fallbacks. Add entries if the list is missing or has only one entry.
+After a reset or an `agents` change, `lf task run <ID>` starts the run again
+at the stopped step; earlier steps stay done.
 
 `--account` prefers a login and still falls back; `--only-account` never leaves
 the logins it names.

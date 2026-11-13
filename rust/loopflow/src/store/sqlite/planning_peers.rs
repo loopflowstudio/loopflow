@@ -165,13 +165,24 @@ impl SqliteStore {
         repo: &str,
         destination: &str,
     ) -> StoreResult<PlanningSnapshot> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_destination(&tx, repo, destination)?;
-        route_repository(&tx, repo, destination)?;
-        let snapshot = export_in(&tx, repo, destination, true)?;
-        tx.commit()?;
-        Ok(snapshot)
+        // The export reads current ownership, so routing is bookkeeping for later
+        // moves: it takes the write lock only when an owned change is unrouted, and
+        // decoding happens after the connection is free.
+        let rows = {
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let tx = conn.transaction()?;
+            require_destination(&tx, repo, destination)?;
+            let unrouted = has_unrouted_changes(&tx, repo, destination)?;
+            let rows = export_rows(&tx, repo, destination, true)?;
+            tx.commit()?;
+            if unrouted {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                route_repository(&tx, repo, destination)?;
+                tx.commit()?;
+            }
+            rows
+        };
+        decode_snapshot(rows)
     }
     pub fn import_peer_planning(
         &self,
@@ -180,16 +191,58 @@ impl SqliteStore {
         revision: &str,
         incoming: &PlanningSnapshot,
     ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Every running agent acquires each second and the remote rarely
+        // moves. A revision already imported with nothing left in conflict
+        // would merge to what is stored; skip it before taking the write lock.
+        let (imported, in_conflict): (bool, bool) = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3),
+                    EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            params![repo, destination, revision],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if imported && !in_conflict {
+            return Ok(());
+        }
         let incoming = incoming.canonicalized().map_err(invalid)?;
         incoming.validate().map_err(invalid)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // A moved revision repeats the whole exchanged history. Changes already
+        // routed from this destination are in the local export, so merging
+        // them again changes nothing: only the records the rest touch are
+        // written. Active conflicts are recomputed from every record.
+        let unseen = if in_conflict {
+            incoming.clone()
+        } else {
+            unseen_in(&conn, repo, destination, &incoming)?
+        };
+        // Registering a repository reads its Git locator; do it before the lock.
+        if super::repositories::repository_id_in(&conn, repo)?.is_none() {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            super::repositories::ensure_repository_in(&tx, repo)?;
+            tx.commit()?;
+        }
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;
+        if unseen.changes.is_empty() {
+            tx.execute("INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![repo,destination,revision])?;
+            tx.commit()?;
+            return Ok(());
+        }
         let merged = export_in(&tx, repo, destination, true)?
-            .merge(&incoming)
+            .merge(&unseen)
             .map_err(invalid)?;
-        for (id, change) in &incoming.changes {
+        let records: BTreeSet<_> = unseen
+            .changes
+            .values()
+            .map(|change| {
+                (
+                    planning_write::table(&change.edit.change),
+                    change.edit.target.as_str(),
+                )
+            })
+            .collect();
+        for (id, change) in &unseen.changes {
             planning_write::retain(&tx, id, change)?;
             tx.execute(
                 "INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
@@ -199,6 +252,9 @@ impl SqliteStore {
         let edits: Vec<_> = merged
             .winners()
             .map(|(_, change)| change.edit.clone())
+            .filter(|edit| {
+                records.contains(&(planning_write::table(&edit.change), edit.target.as_str()))
+            })
             .collect();
         let grouped = planning_write::grouped(&edits);
         let mut pending: Vec<_> = grouped
@@ -352,6 +408,7 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+
     pub fn peer_planning_status(
         &self,
         repo: &str,
@@ -509,28 +566,82 @@ fn route_repository(conn: &Connection, repo: &str, destination: &str) -> StoreRe
     )?;
     Ok(())
 }
+fn has_unrouted_changes(conn: &Connection, repo: &str, destination: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "{OWNED_CHANGES}
+            SELECT EXISTS(SELECT 1 FROM planning_peer_changes c
+                JOIN owned o ON o.record_table=c.record_table AND o.object_id=c.object_id
+                WHERE NOT EXISTS(SELECT 1 FROM planning_peer_routes r
+                    WHERE r.mutation_id=c.id AND r.repo=?1 AND r.destination=?2))"
+        ),
+        params![repo, destination],
+        |row| row.get(0),
+    )?)
+}
+
+/// The incoming history of every field with a change not yet routed from
+/// this destination. A change's predecessors edit the same field, so the
+/// result is closed under causality and merges like the whole document would
+/// for those fields.
+fn unseen_in(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    incoming: &PlanningSnapshot,
+) -> StoreResult<PlanningSnapshot> {
+    let mut routed = conn.prepare_cached(
+        "SELECT 1 FROM planning_peer_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
+    )?;
+    let mut fields = BTreeSet::new();
+    for (id, change) in &incoming.changes {
+        if !routed.exists(params![repo, destination, id])? {
+            fields.insert(change.edit.key());
+        }
+    }
+    Ok(PlanningSnapshot {
+        changes: incoming
+            .changes
+            .iter()
+            .filter(|(_, change)| fields.contains(&change.edit.key()))
+            .map(|(id, change)| (id.clone(), change.clone()))
+            .collect(),
+    })
+}
+
 fn export_in(
     conn: &Connection,
     repo: &str,
     destination: &str,
     include_current: bool,
 ) -> StoreResult<PlanningSnapshot> {
+    decode_snapshot(export_rows(conn, repo, destination, include_current)?)
+}
+
+fn export_rows(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    include_current: bool,
+) -> StoreResult<Vec<(String, String)>> {
     let mut query = conn.prepare(
         &format!("{OWNED_CHANGES}
             SELECT c.id,c.mutation FROM planning_peer_changes c
             WHERE c.id IN (SELECT mutation_id FROM planning_peer_routes WHERE repo=?1 AND destination=?2)
             OR (?3 AND EXISTS(SELECT 1 FROM owned o WHERE o.record_table=c.record_table AND o.object_id=c.object_id))"),
     )?;
-    let changes = query
-        .query_and_then(
-            params![repo, destination, include_current],
-            |row| -> StoreResult<_> {
-                Ok((
-                    row.get(0)?,
-                    serde_json::from_str::<PlanningMutation>(&row.get::<_, String>(1)?)?,
-                ))
-            },
-        )?
+    let rows = query
+        .query_map(params![repo, destination, include_current], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+fn decode_snapshot(rows: Vec<(String, String)>) -> StoreResult<PlanningSnapshot> {
+    let changes = rows
+        .into_iter()
+        .map(|(id, mutation)| Ok((id, serde_json::from_str::<PlanningMutation>(&mutation)?)))
         .collect::<StoreResult<BTreeMap<_, _>>>()?;
     let snapshot = PlanningSnapshot { changes };
     snapshot.validate().map_err(invalid)?;

@@ -378,7 +378,14 @@ home cannot get without real OAuth (`--import` checks the token against
 Anthropic). To drive real headless Task runs anyway, run a throwaway
 `rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
 `tests/session_steers.rs`'s `connect_fixture_account` does, against the private
-store, then delete it. Do not repeat this with release 0.15.3: its
+store, then delete it. Put `tests/support/mod.rs`'s `FAKE_SECURITY` first on
+`PATH` as `security` and set `USER`: signing the login in goes through the
+Keychain. Never run `lf account` there: it checks the token with Anthropic and
+marks the fixture login "needs a login"; register it again if it did. A
+stand-in's usage-limit result cools the only login for 15 minutes, so the
+step waits for capacity rather than stopping. Starting a private server
+resumes every Task whose Auto-Ship was approved: abandon old QA Tasks first.
+Do not repeat this with release 0.15.3: its
 launch from a private home tries to write a Claude Keychain item. Dead
 AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
 Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder
@@ -454,6 +461,15 @@ missing migration SQL to the copy with `sqlite3`. Never open the copy with
 from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
+
+Read changes on a large private repository: `lf task create` takes seconds
+each, so create hundreds in parallel batches with `--request-id` (twelve at a
+time held up), claiming and completing some. For a "before" binary, run
+`--version` on sibling worktrees' `target/debug/lf` and pick a build that
+descends from the branch's base with no `store/migrations/` diff; it reads the
+same private store. Compare `jq -S` output of both binaries, then time them in
+interleaved rounds, since other worktrees' builds make the Machine's load swing.
+`lf server status` prints JSON without `--json`.
 
 ## Waking idle conversations
 

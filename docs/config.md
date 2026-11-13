@@ -22,11 +22,98 @@ skill:
 ```
 
 Use `agent` for a choice you want applied. Use `default_agent` for a fallback
-that lets another applicable `agent` choose differently. A `default_agent` list
-(`claude,codex`) launches its first entry and lets a headless Graph step fall
-through to the next when every account for the first is held back by a usage
-limit; an explicit `agent` never changes provider. The examples below are
-separate setups; combine the pieces that fit your work.
+that lets another applicable `agent` choose differently. Use `agents` for the
+providers Loopflow may use and the order it tries them in. The examples below
+are separate setups; combine the pieces that fit your work.
+
+## Keep going when a provider runs out
+
+```bash
+lf set --global agents claude,codex
+lf set --global skill.compress.default_agent codex
+```
+
+```yaml
+# ~/.lf/config.yaml
+agents: [claude, codex]
+skill:
+  compress:
+    default_agent: codex
+```
+
+Work starts on Claude; compress tries Codex first and keeps Claude behind it.
+`claude,codex` and `[claude, codex]` are the same ordered list, on the command
+line and in a file.
+
+Entries are `harness[:model]`, so the same list orders models:
+
+```yaml
+agents: [claude:opus, codex, claude:fable]   # Opus, then Codex, then Fable
+```
+
+A bare entry (`codex`) runs that provider's configured model and is a different
+entry from `codex:o3`. With more than one entry, each is tried as written and
+nothing the list lacks is tried. A lone bare `claude` (`agents: claude`) has no
+next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
+Haiku.
+
+When a usage limit refuses a headless step, it tries your next login for that
+provider, then the next entry in `agents`. If the provider reports that the
+model is unavailable, the step moves directly to the next entry without marking
+the login’s quota spent. An explicit model pin stops instead.
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: codex_error: You've hit your usage limit
+```
+
+| Setting | Compress tries | Everything else tries |
+| --- | --- | --- |
+| `agents: [claude, codex]` | Claude, then Codex | Claude, then Codex |
+| plus `skill.compress.default_agent: codex` | Codex, then Claude | Claude, then Codex |
+| plus `skill.compress.agent: codex` | Codex only | Claude, then Codex |
+| `default_agent: claude` plus `skill.compress.agents: [codex]` | Codex only | Claude only |
+| `lf -a codex graph code` | Codex only | Codex only |
+
+An `agent` choice or `-a` pins one provider: the step changes login, never
+provider. It waits for a known reset; with no reset or next entry, it stops
+once. Neither choice is checked against `agents`, so `-a pi` runs Pi for that
+command whatever the list says.
+The list covers what Loopflow picks by itself.
+
+A narrower `agents` replaces the wider one whole, so a repository, Wave or
+skill can shorten or reorder it:
+
+```bash
+lf set agents codex,claude                   # this repository: Codex first
+lf --wave frontend set agents claude         # this Wave: Claude only
+lf set --global skill.review.agents codex    # review: Codex only, everywhere
+```
+
+`default_agent` leads a list only when its declaration ranks at least as high
+as the list's, by source, then scope, then target (see
+[Which value wins](#which-value-wins)). A higher list is the whole order: with
+a global `default_agent: claude`, review above still runs Codex only, while
+`skill.compress.default_agent` leads a global `agents`. A repository
+`default_agent`, general or per skill, does not lead a personal list, because
+personal configuration outranks the repository's.
+
+A `default_agent` moves its exact entry to the front, or adds it there if
+absent, only where its declaration applies:
+
+| `agents` | `default_agent` | Order |
+| --- | --- | --- |
+| `[claude:opus, codex, claude:fable]` | `claude:fable` | Fable, Opus, Codex |
+| `[claude, codex]` | `codex:o3` | Codex o3, Claude, Codex |
+| `[claude, codex]` | `pi` | Pi, Claude, Codex |
+
+With no `agents` at all, `default_agent: claude` runs Claude alone, moving
+through its models like a one-entry list.
+
+The older comma list, `default_agent: claude,codex`, still reads as
+`agents: [claude, codex]` with `default_agent: claude`, and warns with the
+file and the replacement. [When an account runs out](subscriptions.md#when-an-account-runs-out)
+has each move a step makes.
 
 ## Let a repository choose its exceptions
 
@@ -138,8 +225,8 @@ A repository Graph can make a choice for one occurrence:
 - step: {name: implement, id: fix-review, agent: claude}
 ```
 
-That shared choice beats every fallback. A personal `agent` choice still wins.
-For Graph authoring, see [Orchestration](orchestration.md).
+That shared choice beats every fallback and pins the step to Claude. A personal
+`agent` choice still wins. For Graph authoring, see [Orchestration](orchestration.md).
 
 ## Override one launch
 
@@ -253,8 +340,9 @@ Agents and context appear first, followed by Machines, Accounts, Desktop,
 Planning, Release and Loopflow. Empty sections are hidden. These feature groups
 also organize catalogue browsing; each row keeps its actual configuration path.
 Use `--explain` for each candidate, its authored key, file and winning reason.
-`default_agent` appears within the explanation for `agent`, never as a separate
-table row, including with `--all`.
+`default_agent` and `agents` appear within the explanation for `agent`, never as
+separate table rows, including with `--all`. The agent row shows the whole
+order a step would try, such as `codex, then claude`.
 `--json` always includes every setting and candidate, unchanged by display filtering.
 
 Inspection shows the effective value, authored key, source, scope, target and file
@@ -326,7 +414,10 @@ settings. A more specific target does not outrank a higher source.
 
 Agent selection first separates **choices** from **fallbacks**: every applicable
 `agent` beats every `default_agent`. Apply source, scope and target ordering within
-each class. A command-line `default_agent` is still a fallback.
+each class. A command-line `default_agent` is still a fallback. `agents` then
+supplies what a fallback may move to: the applicable list, with the winning
+`default_agent` first unless the list ranks higher by source, scope and target.
+Then the list is the whole order, and `--explain` marks `default_agent` unused.
 
 | Declarations | Selected agent |
 | --- | --- |
@@ -334,11 +425,16 @@ each class. A command-line `default_agent` is still a fallback.
 | Personal implement `agent: codex`; repository occurrence `agent: claude` | Codex |
 | Personal implement `default_agent: codex`; repository general `agent: claude` | Claude |
 | Explicit `-a codex`; repository occurrence `agent: claude` | Codex |
+| Personal `agents: [claude, codex]`; nothing else | Claude, then Codex |
+| Personal `agents: [claude, codex]`; personal implement `default_agent: codex` | Codex, then Claude |
+| Personal `agents: [claude, codex]`; repository implement `default_agent: codex` | Claude, then Codex |
+| Personal global `default_agent: claude`; personal review `agents: [codex]` | Codex |
+| Personal `agents: [claude, codex]`; repository `agents: [codex]` | Claude, then Codex |
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
 `context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. Account lists preserve
-order and replace as a unit. `planning` replaces its complete tagged provider
+clears earlier contributions. Keyed maps merge by key. Account lists and `agents`
+preserve order and replace as a unit. `planning` replaces its complete tagged provider
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target
@@ -673,13 +769,14 @@ or filter its searches or Git commands.
 
 ### Agent
 
-Choose a harness, with an optional model. Use `default_agent` for a fallback.
+Choose a harness, with an optional model. Use `default_agent` for a fallback and
+`agents` for the ordered list a fallback may move through.
 
 | | |
 |---|---|
 | **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (uses applicable authored fallbacks, then the sole installed harness) |
+| **Default** | unset (uses applicable authored fallbacks, then the first of `agents`, then the sole installed harness) |
 
 ```yaml
 agent: codex          # harness default
@@ -689,12 +786,16 @@ skill:
     agent: claude:opus
 ```
 
+See [Keep going when a provider runs out](#keep-going-when-a-provider-runs-out)
+for model ordering, list replacement and `default_agent` precedence.
+
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
-Built-in skills recommend no harness. With no authored choice or fallback,
-Loopflow selects automatically only when exactly one supported harness is installed.
-With multiple harnesses, save your choice with `lf set --global default_agent claude`
-or select one command with `-a claude`. Start setup with `lf -a claude init` to
+Built-in skills recommend no harness. With no authored choice, fallback or
+`agents` list, Loopflow selects automatically only when exactly one supported
+harness is installed. With multiple harnesses, save your choice with
+`lf set --global default_agent claude`, or your order with
+`lf set --global agents claude,codex`, or select one command with `-a claude`. Start setup with `lf -a claude init` to
 choose and save a personal default. Installation order and remaining usage do not
 choose a harness.
 Inspection still works without a choice; a new launch explains how to select one.
@@ -702,7 +803,7 @@ Existing Sessions retain their recorded provider when resumed.
 A personal `skill.implement.agent: codex` beats a repository occurrence's
 `agent: claude`; changing that personal key to `default_agent` lets the repository
 choice win, even if it is general. `-a` explicitly selects the invocation's agent.
-Both keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
+All three keys work in CLI `--setting`, `LF_SETTINGS`, personal and shared files,
 LF-owned skill metadata, and Graph occurrence settings.
 
 Bare `claude` uses the [saved Claude model](#claude-model) when set; otherwise,
@@ -737,7 +838,8 @@ team. The setting follows [normal precedence](#which-value-wins); inspect it
 with `lf config settings --explain`. `lf unset --global claude.model` removes
 the global declaration. With no applicable value, Claude chooses its own model.
 
-Account routing checks capacity for the starting model. Bare `claude` retains
+Account routing checks capacity for the starting model. A bare `claude` with
+nothing behind it in `agents` retains
 [capacity fallthrough](subscriptions.md#when-an-account-runs-out) to other models;
 `claude:opus` pins Opus.
 

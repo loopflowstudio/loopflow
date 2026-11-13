@@ -69,6 +69,17 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   `retry_task`. `cargo test --test integration -- machine_commands::` 50 passed;
   clippy clean.
 
+## Sync onto main 87f0e3c (2026-11-13)
+
+- Conflicts in `children.rs`, `task_ownership.rs`, `task_retirement.rs`:
+  main's `RepoFacts` (`me`, `planning_connected`) kept, branch names
+  (`move_claim`, `move_in`) kept; the retirement sweep's abandoned-checkout
+  arm joins `task_checkouts` inside main's `hosted` CTE.
+- Main's `store/query_plans.rs` fixture now writes `task_checkouts`;
+  `task_checkouts` joins `GROWING`, with stats from the measured 838 checkouts.
+- Main's `tasks_abandoned_checkout` index (`workload_indexes.sql`) indexes
+  columns nothing reads now; Task 538340 drops it with them.
+
 ## Remaining
 
 1. **`task_ship_events`**: replace the seven `ship_*` columns with an approval/stop

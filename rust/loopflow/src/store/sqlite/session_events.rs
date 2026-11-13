@@ -513,8 +513,14 @@ impl SqliteStore {
         payload: &Value,
     ) -> StoreResult<i64> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let payload = serde_json::to_string(payload)?;
+        // Providers replay receipts they have sent before; a retained one
+        // answers without the write lock.
+        if let Some(seq) = retained_event_in(&conn, session, thread, turn, kind, &payload)? {
+            return Ok(seq);
+        }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let seq = record_event_in(&tx, session, thread, turn, kind, payload)?;
+        let seq = record_event_in(&tx, session, thread, turn, kind, &payload)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -661,7 +667,7 @@ impl SqliteStore {
             thread,
             turn,
             SessionEventKind::Started,
-            &serde_json::json!({}),
+            "{}",
         )?;
         // An uncorrelated observation can acquire its origin once. Repeated
         // evidence must match every field, including an explicitly absent bind.
@@ -851,15 +857,16 @@ const INSERT_NATIVE_EVENT: &str = "INSERT INTO session_events(session_id,provide
     VALUES(?1,?2,?3,?4,?5,?6,?7)";
 
 /// Insert only the observation. Work and capture require correlated origin evidence.
-fn record_event_in(
-    tx: &rusqlite::Transaction<'_>,
+/// The retained receipt's sequence, or an error when it says something else.
+fn retained_event_in(
+    conn: &rusqlite::Connection,
     session: &str,
     thread: &AgentSessionId,
     turn: &str,
     kind: SessionEventKind,
-    payload: &Value,
-) -> StoreResult<i64> {
-    let existing: Option<(i64, String)> = tx
+    payload: &str,
+) -> StoreResult<Option<i64>> {
+    let existing: Option<(i64, String)> = conn
         .query_row(
             "SELECT seq,payload FROM session_events
              WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind=?4 AND receipt_key=''",
@@ -867,15 +874,26 @@ fn record_event_in(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    let payload = serde_json::to_string(payload)?;
-    if let Some((seq, saved)) = existing {
-        if saved == payload {
-            return Ok(seq);
-        }
-        return Err(StoreError::InvalidData(format!(
+    match existing {
+        None => Ok(None),
+        Some((seq, saved)) if saved == payload => Ok(Some(seq)),
+        Some(_) => Err(StoreError::InvalidData(format!(
             "Conflicting {} receipt for conversation {session}, turn {turn}",
             kind.as_str()
-        )));
+        ))),
+    }
+}
+
+fn record_event_in(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    thread: &AgentSessionId,
+    turn: &str,
+    kind: SessionEventKind,
+    payload: &str,
+) -> StoreResult<i64> {
+    if let Some(seq) = retained_event_in(tx, session, thread, turn, kind, payload)? {
+        return Ok(seq);
     }
     tx.execute(
         INSERT_NATIVE_EVENT,

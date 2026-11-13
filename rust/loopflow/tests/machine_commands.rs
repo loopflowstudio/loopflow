@@ -1822,28 +1822,11 @@ fn task_ownership_never_routes_to_another_persons_machine() {
     let mini = plan.remote.local_machine().unwrap().id;
     // Kim claims on mini, a Machine this laptop also has registered. Her
     // person key, not the Machine, says whose claim it is.
-    let entry = serde_json::json!({
-        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
-        "task_id": task.as_str(), "kind": "claim", "person": "Kim",
-        "person_key": "kim@example.com",
-        "machine_id": mini.as_str(),
-        "at": time::OffsetDateTime::now_utc().unix_timestamp(),
-    });
-    plan.remote
-        .append_task_comment(
-            &task,
-            &loopflow::work::task::comment::TaskComment {
-                id: uuid::Uuid::new_v4().to_string(),
-                body: format!("Kim claimed this\n\n<!-- loopflow-ownership:{entry} -->"),
-                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
-                created_at: Some(
-                    time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap(),
-                ),
-            },
-        )
-        .unwrap();
+    git(
+        &plan.remote_path,
+        &["config", "user.email", "kim@example.com"],
+    );
+    plan.remote.claim_task(&task).unwrap().unwrap();
     plan.to_local();
     assert_eq!(
         plan.local
@@ -1851,9 +1834,9 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             .unwrap()
             .owner
             .unwrap()
-            .person
+            .person_key
             .as_deref(),
-        Some("Kim")
+        Some("kim@example.com")
     );
     // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
     let route = plan.local.task_execution_route(&task).unwrap();

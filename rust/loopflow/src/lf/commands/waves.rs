@@ -4224,8 +4224,11 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
+        // Remove the column's dependents so the planning read, not this setup, fails.
         conn.execute_batch(
-            "DROP INDEX tasks_ship_process; ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
+            "DROP INDEX tasks_ship_process;
+             DROP TRIGGER store_revision_tasks_update;
+             ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
         )
         .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();

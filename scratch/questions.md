@@ -81,3 +81,25 @@ write; the other in-store callers (`project_planning_sync`,
 `task_planning_syncs_in`, `task_comments`) are reads in savepoints. No design
 change, no open product choice. The two Machine pool/on-demand writes listed
 under open choices stay out of scope.
+
+## Gate (2026-11-13, HEAD c85f6c729a)
+
+Reviewed the full origin/main diff, including rental retry, ownership fact
+construction, marker ingestion and planning/Linear callers. No code repair
+needed. The retry checks all held Tasks before appending any handoff; dropping
+its transaction on `continue` rolls the rental update back before preflight.
+
+- `scripts/test.py --list`: architecture, Rust and website selected; Rust filter covers ownership, rentals, Linear observation, planning peers, comments, selections, query plans, documented commands and `two_people`.
+- `uv run python scripts/test.py --reuse-passing --rust-filter <above modules>`: stopped before product checks; 25.0 GiB free below the 32.0 GiB emergency reserve, and uv-cache inventory exceeded its 15-second deadline. Recovery reclaimed nothing; this checkout has no incremental cache and only 3.5 GiB of build outputs. No compilation bypass of the reserve.
+- `uv run python scripts/check_architecture.py`: pass, no unexplained owners or stale vocabulary.
+- `uv run --no-sync python scripts/check_rust_test_inventory.py`: pass.
+- `cargo +stable fmt --all -- --check`: pass (rustup stable 1.100.0; ambient Homebrew is 1.98.1).
+- `git diff --check origin/main...HEAD -- ':!scratch'`: pass; scratch contains raw QA logs with original whitespace.
+- `PATH=<checkout>/target/debug:$PATH uv run python dev.py test` in `website/`: 73/73 pass in 53.60 s; generated reference names the candidate CLI. Initial invocation used a wrong PATH and was interrupted, then corrected.
+- Fresh CLI build, filtered nextest (including `documented_commands::` and `binary(two_people)`) and `cargo +stable clippy --all-targets -- -D warnings`: deferred to CI or a host above the disk reserve. Integration binaries are absent locally. Earlier passes remain historical, not coverage of the final sync and retry repair.
+
+An overly broad process listing exposed an `LF_CAPTURE_KEY` in logged command
+arguments during this run. Rotate the exposed capture credential; no value is
+copied here. Later process inspection used only PID, parent, state, elapsed
+time and executable name.
+- `LOOPFLOW_TEST_LF=$PWD/target/debug/lf uv run --no-sync python scripts/test_network.py $PWD/target/debug/deps/loopflow-1ee21f543bd89a58 store::sqlite::task_ownership:: store::sqlite::rentals:: store::sqlite::children::linear_observation_tests:: store::sqlite::planning_peers:: store::sqlite::task_comments:: store::sqlite::selections:: ops::linear_observe:: store::query_plans:: --test-threads=2`: 54/54 pass in 113.80 s, external network denied, inherited `LF_*` cleared. Cached library binary built at 08:24:51 after the changed sources (latest 08:23:06), includes the new regression, and no Rust source changed after fae6f73a1a. This is a cached-binary run, not a fresh build or nextest result.

@@ -388,6 +388,18 @@ pub(crate) fn observe<'a>(
     Ok(())
 }
 
+/// The repository's planning identity. Registering one reads its Git
+/// locator, so only an unregistered repository pays that under the lock.
+fn registered_repository_in(
+    conn: &Connection,
+    repo: &str,
+) -> StoreResult<crate::durable::RepositoryId> {
+    match super::repositories::repository_id_in(conn, repo)? {
+        Some(id) => Ok(id),
+        None => super::repositories::ensure_repository_in(conn, repo),
+    }
+}
+
 pub(crate) fn ensure_record(
     conn: &Connection,
     repo: &str,
@@ -395,9 +407,6 @@ pub(crate) fn ensure_record(
     id: &str,
     edits: &[WorkEdit],
 ) -> StoreResult<bool> {
-    if table == "waves" {
-        super::repositories::ensure_repository_in(conn, repo)?;
-    }
     let exists = conn.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", table),
         [id],
@@ -410,6 +419,7 @@ pub(crate) fn ensure_record(
     match table {
         "waves" => {
             crate::id::WaveId::parse(id).map_err(|e| StoreError::InvalidData(e.to_string()))?;
+            registered_repository_in(conn, repo)?;
             let name = edits
                 .iter()
                 .rev()
@@ -459,7 +469,7 @@ pub(crate) fn ensure_record(
                     _ => None,
                 })
                 .ok_or_else(missing)?;
-            let repository = super::repositories::ensure_repository_in(conn, repo)?;
+            let repository = registered_repository_in(conn, repo)?;
             conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {

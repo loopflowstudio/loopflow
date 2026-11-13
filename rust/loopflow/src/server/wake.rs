@@ -116,7 +116,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
     } = conversation;
     let delivered = (|| -> Result<()> {
         let session = &adapter.session;
-        if store.session_steers(session, 0, 1)?.pending == 0
+        if !store.has_undelivered_steers(session)?
             && crate::harness::task_updates::read(store, session)?.is_none()
         {
             return Ok(());

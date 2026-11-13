@@ -153,6 +153,58 @@ old writers stop and before promotion. The binary has no old-layout discovery or
 import command. Rehearse on a database backup and copied captures; never point a
 branch binary at the installed Machine.
 
+## Query cost and the write lock
+
+```bash
+sqlite3 ~/.lf/loopflow.db ".backup /tmp/lf-plan.db"
+sqlite3 /tmp/lf-plan.db "ANALYZE; EXPLAIN QUERY PLAN
+  SELECT steer_id FROM session_steers WHERE session_id = 'x' AND applicable = 1;"
+cargo test -p loopflow --lib store::query_plans::
+```
+
+```text
+QUERY PLAN
+`--SEARCH session_steers USING INDEX sqlite_autoindex_session_steers_1 (session_id=?)
+```
+
+One Machine runs hundreds of agents over about 10,000 Tasks, and every one of
+them shares one SQLite write lock. A query that is fast on a fresh store can be
+a full scan on that one, so plan statements against a `.backup` copy of a real
+store, never the live file.
+
+Every statement on a path that runs per hook, per server request, per Desktop
+read, per Work projection or per Graph step plans as `SEARCH` or reads a fixed
+small table. `SCAN` of a table that grows with use (`steers`, `session_steers`,
+`steer_deliveries`, `agent_sessions`, `session_events`, `processes`, `tasks`
+and their peers) is a bug. Filters an index cannot serve are the usual cause: an `OR`
+across columns, a function wrapped around an indexed column, a correlated `IN`
+subquery, or a per-row query inside a loop where one query would do. Fix it
+with an index in the Task's migration or by rewriting the filter. Reads that
+feed a screen take a `LIMIT`.
+
+While a write transaction is open, every other writer on the Machine waits:
+
+- Read first; open no write transaction when nothing changes.
+- Keep process spawns, network calls, file IO and large reads outside it.
+- Never hold one across an `await`, a request or a provider call.
+
+`store::query_plans` traces what a hot path executes on a fixture store, then
+plans each statement twice: unanalyzed, and with `sqlite_stat1` measured on a
+Machine at that size. A `SCAN` of a growing table fails the test; walking a
+partial index, which holds only its live subset, does not. A new hot path gets
+a test there (`server::boundary` uses the same helpers). Foreign keys count:
+deleting a parent row looks up its children, so a child column on a growing
+table needs an index.
+
+The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
+PRAGMA optimize=0x10002` once when it starts and about once a day after, never
+per connection or per command. A store that never ran a server stays
+unanalyzed, which is why the guard plans both ways.
+
+When a write still holds the lock past 3 s, the connection writes `held the
+store write lock` with its call site to `logs/lf.log`, and `lf doctor` groups
+those lines by binary.
+
 ## Planning and external transitions
 
 A Wave's selected Project holds its Tasks, KRs and targets. Project rows own saved

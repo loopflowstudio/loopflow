@@ -15,37 +15,35 @@ pre{overflow-x:auto;padding:.8rem;border:1px solid var(--line);border-radius:4px
 table{border-collapse:collapse;width:100%;font-size:.95rem}td,th{border-top:1px solid var(--line);padding:.4rem .5rem;text-align:left;vertical-align:top}
 </style></head><body><main>
 <header>
-<h1>LOO-874: what is left between the brief and the build</h1>
-<p>Task LOO-874 · concept-review (second pass, headless) · 2026-11-13</p>
-<p>Built from <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/session_move.rs</code>, <code>rust/loopflow/src/ops/human_session/moves.rs</code>, <code>rust/loopflow/src/store/sqlite/task_moves.rs</code>, <code>swift/Loopflow/Models/WaveWorkMap.swift</code></p>
+<h1>LOO-874: a Task's conversation has two addresses</h1>
+<p>Task LOO-874 · concept-review (third pass, headless) · 2026-11-13</p>
+<p>Built from <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/work_route.rs</code>, <code>rust/loopflow/src/ops/human_session/moves.rs</code>, <code>rust/loopflow/src/store/sqlite/sessions.rs</code>, <code>rust/loopflow/src/store/sqlite/task_ownership.rs</code>, <code>rust/loopflow/src/store/sqlite/rentals.rs</code></p>
 </header>
 
-<p><strong>Decision needed:</strong> none. The data model matches the brief; three gaps follow from it and go back to implement.</p>
+<p><strong>Decision needed:</strong> none. The brief already says the move record replaces "the moved-to marker on Sessions"; one path still reads it for Task conversations. That goes back to implement.</p>
 
-<h2>Biggest mismatch: the move record lives on the wrong Machine</h2>
-<p>The brief: a half-finished move "is a row you can see and retry". Today the row is written by whichever Machine ran <code>lf task move</code>, after the send answers.</p>
-<pre>laptop$ lf task move LOO-9 --machine mini     # LOO-9 is owned on rental
-  rental: stop Graph, push, complete conversation
-  rental → laptop reply <span class="old">lost</span>
-  laptop: <span class="old">no task_moves row</span>; rental: <span class="old">no row</span>
-laptop$ lf task move LOO-9 --machine mini     # repeat
-  arrives on mini <span class="old">without its conversation</span></pre>
-<p class="new">Proposed: <code>moves::send_task</code> on the leaving Machine writes <code>sent</code> with the payload before replying, and a repeat to the same target returns it. <code>relay_task</code> loses its own lookup; the local case is the same call.</p>
+<h2>Biggest mismatch: resume asks the Session, not the Task</h2>
+<p>The brief: "where does this Task run" has one answer, the ownership log. <code>work_route::forward</code> checks <code>moved_session</code> first, which reads <code>agent_sessions.moved_to_machine_id</code>, and <code>send_task</code> still writes it.</p>
+<pre>laptop$ lf task move LOO-9 --machine rental
+  laptop: LOO-9 conversation <span class="old">moved_to = rental</span>
+rental ends → hand_back_in: ownership says <span class="new">laptop</span>
+laptop$ lf task status LOO-9      # Runs on laptop
+laptop$ lf resume &lt;its session&gt;   # <span class="old">forwards to rental (gone)</span></pre>
+<p class="new">Proposed: a Session that belongs to a Task resumes where the Task runs. <code>send_task</code> stops writing the marker; <code>moved_session</code> skips Task conversations, which route like <code>resume --task</code> and reopen here when the Task runs here. The migration clears the marker on Task conversations.</p>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
 <tr><th>Action</th><th>Concept</th><th>Change</th></tr>
-<tr><td><code>lf task move X --machine M</code>, repeated</td><td>Move record (<code>task_moves</code>)</td><td class="new">written where the Task leaves; send is idempotent per target</td></tr>
-<tr><td><code>lf --machine M resume &lt;session&gt;</code> on a Task's second conversation</td><td>The Task's conversation</td><td class="new">the named Session travels and becomes primary on M (today the primary travels and the resume fails)</td></tr>
-<tr><td>Desktop shows an owner</td><td>Person (<code>people</code>)</td><td class="new">Swift <code>TaskOwner</code> decodes required-nullable <code>person_id</code></td></tr>
+<tr><td><code>lf resume &lt;session&gt;</code>, Task conversation</td><td>Ownership log</td><td class="new">routes by <code>task_execution_route</code>; marker ignored</td></tr>
+<tr><td><code>lf resume &lt;session&gt;</code>, no Task</td><td>Session marker</td><td>unchanged: <code>moved_to_machine_id</code> is the only record</td></tr>
+<tr><td><code>lf task move X --machine M</code></td><td>Move record (<code>task_moves</code>)</td><td class="new">completes the conversation here without a marker</td></tr>
 </table>
 
-<h2>Unchanged and settled by the build</h2>
-<p><code>task_checkouts</code>, <code>task_ship_events</code>, <code>pool_machines</code>, <code>people</code>, <code>task_primary_sessions</code>, writer-stamped ownership entries with <code>claim | unclaim</code>. <code>session_moves</code> and <code>relocated_task_processes</code> stay: neither crosses Machines. LOO-877 drops the replaced columns.</p>
+<h2>Settled by the build</h2>
+<p><code>task_checkouts</code>, <code>task_moves</code>, <code>task_ship_events</code>, <code>pool_machines</code>, <code>people</code>, <code>task_primary_sessions</code>, writer-stamped <code>claim | unclaim</code> entries. <code>session_moves</code> (agent switch at Stop) and <code>relocated_task_processes</code> (directory moved on disk) stay: the brief grouped them with Machine moves, but neither crosses Machines. LOO-877 drops the replaced columns.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Should the laptop that ran the command also keep a copy of the <code>sent</code> row so its <code>lf task status</code> shows the stuck move? (a) no, the source's status shows it; (b) yes, a copy.</li>
-<li>When a second conversation is resumed on M, should the former primary stay the Task's conversation here as history? (a) it stays, ended; (b) it moves too.</li>
+<li>When a handed-back Task's conversation reopens here, its turns on the ended Machine are gone. (a) reopen from what this Machine has; (b) start a fresh thread seeded from the log (<code>lf session new</code>).</li>
 </ol>
 </main></body></html>

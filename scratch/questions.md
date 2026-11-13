@@ -55,3 +55,5 @@ listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
   other checkouts compiling). No test started; CI's `rust-test` owns the result.
 - `cargo clippy --all-targets -- -D warnings`: not run (queued behind nextest); CI `rust-lint` owns it.
 - Before the merge of 4b84a0dc9e, QA ran the same lib modules: 22 of 22 passed.
+- PR #1909 CI (head 9054cb90f1): every proof job skipped. `ci.yml` runs them only once `scratch/` is clear, which happens at `lf pr submit`. Until then, nothing has checked the test binaries or clippy after the merge of 4b84a0dc9e.
+- Implement pass (2026-11-13): no code change; load 330, no local rerun.

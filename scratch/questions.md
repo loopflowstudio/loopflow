@@ -368,6 +368,29 @@ which names mini from the claim on.
 - Compress: nothing to cut; `runs_here` is one ownership check, and the two
   forwarded-move tests share only their command line.
 
+## Next implement direction (concept review, 2026-11-13): a later entry ends a move
+
+The ownership log decides where a Task runs, and `hand_back` already states
+the rule for a move: until it arrives, nothing may follow its claim in the log.
+Read the other way, any later entry ends the move. Today only
+`begin_task_move` and `hand_back` delete `task_moves` rows, so a move sent to
+a mini that never answers stays in flight after `lf task claim MTG-321` (or
+`unassign`, or an ingested later claim) on the laptop: status and both lists
+keep printing `Moving to mini …: sent, not arrived` with a retry line over
+"runs here", `runs_here` still routes `lf --machine mini task move …` to the
+laptop, and the retry delivers the old payload, whose marker mini then takes
+in as the owner while the laptop also claims it.
+
+Direction: keep `claim_id` on the `sent` row (`record_move_sent` stops nulling
+it; stage comes from `state`), and have `task_move_in_flight` return a move
+only while its claim is the Task's last ownership entry (one savepoint read,
+like `hand_back`'s check). No new writer deletes rows; a superseded row is
+history. machines.md Failures gains one sentence: if mini is gone, `lf task
+claim MTG-321` on the laptop takes the Task back and ends the move. Test: send
+to an unreachable mini, claim on the laptop, then `lf task status` shows no
+move line and `lf task move MTG-321 --machine mini` begins a new move rather
+than redelivering. Check the `task_moves_task` plan for the added join.
+
 ## Open questions (each reversible; the simpler option is built)
 
 - **Mini's ownership log.** After a move, mini's `lf task status` log does

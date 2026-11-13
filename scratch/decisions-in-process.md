@@ -86,10 +86,14 @@ planning one case per connection mode.
    adoption decision table beside `ops/task/adoption.rs`; delete the moved
    integration tests and the moved cases inside kept ones. Focused test:
    `cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'`.
-2. Session launch contract: config precedence (personal vs repo vs
-   `--setting`, chrome unset/on/off, yolo, model fallback, headless schema)
-   as rows from repo/personal config → `prepare_process_prompt` →
-   `build_session_command`. Keep one launch and one resume per harness.
+2. **Done: session launch contract.** Rows in
+   `lf/commands/run/launch_policy_tests.rs` (`run::build_prompt` with a
+   Clap-parsed `Cli` → `build_session_command`; resume: `select_invocation`
+   + `resolve_session_config(session, &Cli::default())`, as `bin/lf.rs` and
+   `resume_session_with_env` do). Deleted `resume_fallback_…`,
+   `personal_true_overrides_…`, `unset_chrome_leaves_…`; trimmed the
+   override resume from `terminal_launch_and_resume_…` and the schema/chrome
+   checks from `headless_launch_and_graph_…`. Kept list in `tests/README.md`.
 3. Task Graph run and `global_commands` explain tests: rows against the three
    explain functions and `CapturedGraph`; keep the two Graph runs.
 4. Machine commands: parsing and failure-text rows; keep one dispatch and the
@@ -175,13 +179,22 @@ Measure each group's "before" on this branch's base before changing it. Per grou
 |---|---|---|
 | Promotion/bind, `session_lifecycle_tests` | 14, 194.5, 0 | 4, 43.2, 0 |
 | Promotion/bind rows, `adoption::tests` | — | 8, 17.9, 0 (1.3–3.3 s each) |
-| session_launch_contract | 30, ?, ? | |
+| session_launch_contract | 30, 254.3, 0 | 27, 244.7, 0 |
+| Launch/resume rows, `run::launch_policy_tests` | — | 5, 6.0, 1 (0.6–1.5 s each) |
 
 Promotion, 2026-11-13, Mac debug, load average 545–600 from other
 checkouts: before and after ran back to back. An earlier baseline at lower
 load summed 163.8 s for the same 14. Promotion total 194.5 → 61.1 s. Rows
 miss the <1 s target: each adopting row pays `TestRepo` worktree + `prepare`
 git (~0.4 s unloaded, per the probe), and families hold three to six.
+
+Launch, 2026-11-13, load average 415–470, back to back: 254.3 → 250.7 s
+with rows. Small, because the moved tests were the cheap ones (2.4–6.6 s);
+`task_conversation_preparation_is_passive_…` alone is 70–71 s, over a minute
+of it unexplained by its five launches (a wait, not a decision; not
+investigated). The `--output-schema` refusal on `session resume` is a check
+in `lf/commands/session.rs` `resume`, before `resolve_session_config`, so it
+stays in the previews test.
 
 ## Done when
 
@@ -200,3 +213,4 @@ git (~0.4 s unloaded, per the probe), and families hold three to six.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings` — before commit
 - full suites — CI
 - compress, 2026-11-13: `adoption::tests::` 8/8 passed (1.3–3.3 s each); clippy `--all-targets` clean
+- implement slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5; `session_launch_contract` 27/27; `documented_commands::` ok; clippy clean

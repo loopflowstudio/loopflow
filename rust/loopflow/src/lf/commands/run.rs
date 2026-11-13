@@ -2128,3 +2128,6 @@ for line in sys.stdin:
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
     }
 }
+
+#[cfg(test)]
+mod launch_policy_tests;

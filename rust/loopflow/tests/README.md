@@ -32,22 +32,26 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
 ## Decision rows and full-Machine tests
 
-Changing how promotion picks a Session, checkout or Task? Run the decision
-table first. Each family answers in one to three seconds:
+Changing how promotion picks a Session, checkout or Task, or how a launch
+resolves its settings? Run the decision table first. Each family answers in
+one to three seconds:
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'
+cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
+cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
 ```
 
-The first command checks every decision as a table row. The second runs the
+The library filters check every decision as a table row. The last runs the
 few full-Machine tests (seeded store, `lf server run`, stand-in providers,
-spawned `lf`) that prove the decision reaches people through the CLI.
+spawned `lf`) that prove the decision reaches people through the CLI; the
+tables below name each surface's.
 
 A decision is checked once, as a row. Each row calls the function the CLI
 handler calls (`engine::creation::create`, `ops::human_session::bind`,
-`preview_binding`, `primary::ensure`), with the store and checkout the CLI
-would see:
+`preview_binding`, `primary::ensure`; `run::build_prompt` and
+`resolve_session_config` for launch settings, with a Clap-parsed `Cli`), with
+the store and checkout the CLI would see:
 
 - `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
   `open_ephemeral_store` (it copies the prepared store image);
@@ -83,6 +87,22 @@ Promotion and binding (`session_lifecycle_tests`):
 | `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | binding leaves the live provider's attachment alone; the bound directory reaches the next provider launch, not the running child |
 | `promotion_background_run_does_not_claim_primary` | plain `task create` with a background run's `LF_AGENT_CALLER` files new work and claims neither the checkout nor its Task's conversation |
 | `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
+
+Launch and resume settings (`session_launch_contract`), one launch and one
+resume per harness:
+
+| Test | Wiring it proves |
+|---|---|
+| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode server: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
+| `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
+| `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |
+| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach the server |
+| `pi_public_headless_skill_delivers_context`, `pi_native_callbacks_retain_identity_final_output_and_usage` | Pi launch and its native callbacks |
+| `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
+| `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
+
+The rest of `session_launch_contract` covers accounts, provider switches,
+OpenCode diagnostics and Machine dispatch.
 
 ## Boundary checks
 

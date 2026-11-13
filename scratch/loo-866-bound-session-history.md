@@ -200,5 +200,9 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
 
 ## Docs
 
-- `docs/dev/data.md` query plan paragraph: plans as prepared, `LIVE_SUBSETS`
-  exemption. No user-facing docs: history output is unchanged.
+- `docs/dev/data.md` query plan paragraph, written to main's row-count rule
+  (example, `MEASURED` instruction) plus "as prepared, parameters unbound" and
+  kind-partial indexes as history range-scanned by `observed_at`. `LIVE_SUBSETS`
+  is gone from the doc. On merge, keep this paragraph and take main's
+  foreign-key text after "A new hot path gets a test there".
+- No user-facing docs: `lf session history` output is unchanged.

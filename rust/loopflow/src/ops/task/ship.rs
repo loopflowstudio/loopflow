@@ -576,7 +576,8 @@ pub(super) fn restart_lf_in(
 }
 
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
+/// and owned by this Machine whose ship process has exited. Unassigned,
+/// moved and finished Tasks wait.
 /// After a failure the restart waits, longer each time in a row; a process
 /// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
@@ -586,8 +587,20 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
-                || !store.sqlite.task_owned(&id).map_err(task_error)?
+                || !store.sqlite.task_claimed_here(&id).map_err(task_error)?
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
+            {
+                continue;
+            }
+            // A run another `lf task run` carries, such as one a move continued
+            // on this Machine, ships once it stops.
+            if store
+                .sqlite
+                .task_graph(&id)
+                .map_err(task_error)?
+                .is_some_and(|graph| {
+                    matches!(graph.position, TaskGraphPosition::Run { running: true, .. })
+                })
             {
                 continue;
             }

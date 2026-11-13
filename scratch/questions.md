@@ -389,6 +389,36 @@ execution routing (`writer_in`) is unchanged. machines.md gained the sentence.
   rather than copying it into SQL, and the CLI (`forward`) and served
   (`engine::task::ownership`) routes were already two before this pass.
 
+## Next implement: claiming back asks the target first (concept review, 2026-11-13)
+
+`sent, not arrived` covers two cases: mini never received the move, or mini
+took the Task in and its answer was lost. Since the twelfth pass, `lf task
+claim X` on the laptop writes the claim on the laptop whenever a move is in
+flight, without contacting mini. In the lost-answer case mini is already
+running the Graph from the move claim, the laptop starts it too, and both
+push to one branch until the laptop's later entry reaches mini through
+planning. Before that pass the claim was forwarded to mini, so this
+double-run path is new on this branch.
+
+Direction: a claim or unassign while a move is in flight reconciles the move
+first, as a retry does. It asks the target, best-effort, whether the move
+arrived:
+- **Arrived there:** record `arrived` here. The Task runs on mini, and the
+  command routes like any ownership command on a Task that runs elsewhere.
+  Status then reads `Runs on mini`; `lf task move X --machine laptop` brings
+  it back.
+- **Not arrived, or no answer:** write the entry here as now, which ends the
+  move. The doc's "If mini is gone" case is unchanged.
+
+Concurrency limit: one writer holds whenever mini answers. When mini is
+unreachable and had in fact taken the Task in, the later entry still wins
+once it syncs. Whether mini stops a running Graph when a later claim from
+another Machine reaches it is pre-existing claim behaviour, outside this Task.
+
+Test: in the lost-answer fixture (mini took the Task in, the laptop holds
+`sent`), `lf task claim` on the laptop leaves exactly one Machine owning the
+Task, and the laptop's status reads `Runs on mini`.
+
 ## Open questions (each reversible; the simpler option is built)
 
 - **Mini's ownership log.** After a move, mini's `lf task status` log does

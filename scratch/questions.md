@@ -23,6 +23,9 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   `revisions::`, `store::migrations::`, `server::schema::tests::`, `lf::tests::`;
   integration `dto_fixtures::`, `documented_commands::`, the move/ownership cases
   in `machine_commands::` incl. the new retry test; clippy; all pass.
+- Swift has no mirror to change: no Swift type decodes ownership entries
+  (`swift/` names neither `writer_machine_id` nor `handoff`); only
+  `tests/fixtures/dto/task_status.json` and `task_lifecycle.json` changed.
 - Compress: a move received on this Machine records `arrived` once (the sender
   no longer adds a second row). `cargo test --test integration --
   machine_commands::task_move …` 8 passed.

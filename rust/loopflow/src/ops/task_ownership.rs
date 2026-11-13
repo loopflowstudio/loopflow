@@ -160,6 +160,36 @@ pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>>
         .map_err(message)
 }
 
+/// [`describe_check`], read against this Machine's registry.
+pub fn checked_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
+    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
+        return Ok(None);
+    };
+    describe_check(&store.sqlite, task, identifier).map_err(message)
+}
+
+/// A move of the Task another Machine checked with this one, and the command
+/// that asks that Machine for it: `Checked move from laptop at Nov 12 10:42`.
+/// A past check: the source may have taken the Task back since.
+pub(crate) fn describe_check(
+    store: &SqliteStore,
+    task: &TaskId,
+    identifier: &str,
+) -> StoreResult<Option<String>> {
+    let Some(check) = store.task_move_check(task)? else {
+        return Ok(None);
+    };
+    let from = &check.from_machine_id;
+    let from = store
+        .machine_by_id(from)?
+        .map_or_else(|| from.to_string(), |machine| machine.name());
+    Ok(Some(format!(
+        "Checked move from {from} at {}\n  retry: lf task move {identifier} --machine {}",
+        crate::lf::output::format_time(check.at),
+        crate::store::sqlite::task_ownership::local_label(),
+    )))
+}
+
 /// [`moving_here`]'s lines for `moving`.
 pub(crate) fn describe_move(
     store: &SqliteStore,

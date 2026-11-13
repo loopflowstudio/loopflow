@@ -1146,6 +1146,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if let Some(line) = &elsewhere {
                     println!("{line}");
                 }
+                if let Some(task) = &status.task {
+                    if let Some(check) =
+                        loopflow::ops::task_ownership::checked_here(&task.id, &task.identifier)?
+                    {
+                        println!("{}  {check}", task.identifier);
+                    }
+                }
                 match status.task.as_ref().filter(|task| task.worktree.is_none()) {
                     // Under the line naming where it runs, indented; alone, by name.
                     Some(task) => println!(

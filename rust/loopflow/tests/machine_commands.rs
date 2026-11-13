@@ -2694,6 +2694,15 @@ fn a_leaving_move_forwarded_to_its_target_carries_on() {
 /// laptop for it and delivers it there.
 #[test]
 fn a_move_retried_on_its_target_asks_the_machine_it_comes_from() {
+    checked_move_on_target(false);
+}
+
+#[test]
+fn a_move_checked_on_its_target_stays_a_past_check_after_source_claim_back() {
+    checked_move_on_target(true);
+}
+
+fn checked_move_on_target(claim_back: bool) {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let mini = plan.remote.local_machine().unwrap().id;
@@ -2755,28 +2764,79 @@ fn a_move_retried_on_its_target_asks_the_machine_it_comes_from() {
     assert!(!failed.status.success());
     executable(&remote_lf, &working);
 
+    let check = plan.remote.task_move_check(&task).unwrap().unwrap();
     assert_eq!(
-        plan.remote.task_move_checked_from(&task).unwrap(),
-        Some(plan.local.local_machine().unwrap().id)
+        check.from_machine_id,
+        plan.local.local_machine().unwrap().id
     );
+    let status = on_mini(&["task", "status", task.as_str()]);
+    assert_success(&status);
+    let status = String::from_utf8(status.stdout).unwrap();
+    let checked_line = format!(
+        "Checked move from laptop at {}",
+        chrono::DateTime::from_timestamp(check.at, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%b %-d %H:%M")
+    );
+    assert!(status.contains(&checked_line), "{status}");
+    assert!(status.contains("Unowned"), "{status}");
+    assert!(status.contains("Not checked out on "), "{status}");
+    assert!(!status.contains("Moving to"), "{status}");
+    let retry = status
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("retry: lf "))
+        .unwrap_or_else(|| panic!("{status}"));
+    let identifier = plan.remote.task(&task).unwrap().unwrap().identifier;
+    assert!(
+        retry.starts_with(&format!("task move {identifier} --machine ")),
+        "{status}"
+    );
+    if claim_back {
+        let claimed = fixture
+            .command(&["task", "claim", task.as_str()])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&claimed);
+        assert_eq!(
+            plan.local
+                .task_ownership(&task)
+                .unwrap()
+                .owner
+                .unwrap()
+                .machine
+                .id,
+            Some(plan.local.local_machine().unwrap().id)
+        );
+        let after = on_mini(&["task", "status", task.as_str()]);
+        assert_success(&after);
+        let after = String::from_utf8(after.stdout).unwrap();
+        assert!(after.contains(&checked_line), "{after}");
+        assert!(after.contains(retry), "{after}");
+        assert!(after.contains("Unowned"), "{after}");
+        assert!(after.contains("Not checked out on "), "{after}");
+        assert!(!after.contains("Moving to"), "{after}");
+        assert!(plan.remote.task_ownership(&task).unwrap().owner.is_none());
+        return;
+    }
     // The laptop's retry line names mini by the laptop's label; on mini the
-    // refusal names the command that works there, which the person runs.
+    // refusal prints the check and the command that works there.
     let laptop_line = on_mini(&["task", "move", task.as_str(), "--machine", "mini"]);
     assert!(!laptop_line.status.success());
     let refusal = String::from_utf8_lossy(&laptop_line.stderr);
-    let here = refusal
-        .lines()
-        .last()
-        .and_then(|line| line.trim().strip_prefix("lf "))
-        .unwrap_or_else(|| panic!("{refusal}"));
-    assert!(here.starts_with("task move"), "{refusal}");
-    let retried = on_mini(&here.split(' ').collect::<Vec<_>>());
+    assert!(refusal.contains(&checked_line), "{refusal}");
+    assert!(refusal.contains(retry), "{refusal}");
+    let retried = on_mini(&retry.split(' ').collect::<Vec<_>>());
     assert_success(&retried);
     let stderr = String::from_utf8_lossy(&retried.stderr);
     assert!(stderr.contains("move to"), "{stderr}");
     let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
     assert_eq!(owner.machine.id, Some(mini));
-    assert_eq!(plan.remote.task_move_checked_from(&task).unwrap(), None);
+    assert_eq!(plan.remote.task_move_check(&task).unwrap(), None);
+    let arrived_status = on_mini(&["task", "status", task.as_str()]);
+    assert_success(&arrived_status);
+    assert!(!String::from_utf8_lossy(&arrived_status.stdout).contains("Checked move from"));
     // The laptop heard it arrived.
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     assert_eq!(

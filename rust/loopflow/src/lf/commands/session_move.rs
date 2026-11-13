@@ -170,12 +170,14 @@ async fn relay_task(
         Ok(target) => target,
         // The retry line the laptop printed names this Machine by the
         // laptop's label, which need not be a name here.
-        Err(error) if store.sqlite.task_move_checked_from(&task.id)?.is_some() => bail!(
-            "{error}\n{name} is moving to this Machine; carry the move on here with\n  lf task move {name} --machine {here}",
-            name = task.identifier,
-            here = crate::store::sqlite::task_ownership::local_label(),
-        ),
-        Err(error) => return Err(error.into()),
+        Err(error) => match crate::ops::task_ownership::describe_check(
+            &store.sqlite,
+            &task.id,
+            &task.identifier,
+        )? {
+            Some(check) => bail!("{error}\n{check}"),
+            None => return Err(error.into()),
+        },
     };
     let target = if target == local {
         None
@@ -300,8 +302,8 @@ fn sender(
     task: &crate::durable::TaskId,
     to: &MachineId,
 ) -> Result<Option<MachineId>> {
-    if let Some(from) = store.task_move_checked_from(task)? {
-        return Ok(Some(from));
+    if let Some(check) = store.task_move_check(task)? {
+        return Ok(Some(check.from_machine_id));
     }
     if store.task_move_arrived_on(task, to)? {
         return Ok(None);

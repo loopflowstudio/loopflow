@@ -36,6 +36,14 @@ pub enum MoveStage {
     Sent { payload: String },
 }
 
+/// A past check that this Machine could take a Task from another Machine.
+/// It does not establish ownership or whether the source still plans to send it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveCheck {
+    pub from_machine_id: MachineId,
+    pub at: i64,
+}
+
 impl SqliteStore {
     /// The move stopped the Task's Graph: keep it, so carrying on leaving
     /// continues the step it stopped.
@@ -84,19 +92,23 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The Machine a move of the Task checked here comes from, when that is
-    /// this Machine's latest record of it.
-    pub fn task_move_checked_from(&self, task: &TaskId) -> StoreResult<Option<MachineId>> {
+    /// The past check's source and time, when the check is this Machine's
+    /// latest move record for the Task.
+    pub fn task_move_check(&self, task: &TaskId) -> StoreResult<Option<MoveCheck>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT from_machine_id FROM task_moves WHERE task_id=?1
+                "SELECT from_machine_id,at FROM task_moves WHERE task_id=?1
                  AND id=(SELECT max(id) FROM task_moves WHERE task_id=?1) AND state='checked'",
                 [task.as_str()],
-                |row| row.get::<_, String>(0),
+                |row| {
+                    Ok(MoveCheck {
+                        from_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
+                        at: row.get(1)?,
+                    })
+                },
             )
-            .optional()?
-            .map(MachineId::from_raw))
+            .optional()?)
     }
 
     /// The Task arrived on `to`: the sender's record keeps only that, and the

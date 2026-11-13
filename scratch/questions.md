@@ -444,7 +444,7 @@ Report: `scratch/qa.html`. Fixed: the hints named `lf repo --bind`/`--relocate`,
 - `cargo test -p loopflow --test integration machine_commands::a_move_retried_on_its_target` — 1 passed (qa)
 - `cargo test -p loopflow --lib rental::` — 25 passed (qa)
 - `documented_commands::` — 4 passed; clippy `--all-targets -D warnings` clean (qa)
-- Open: mini's status shows nothing for a move it checked (a later laptop take-back never reaches mini's `checked` row); Owner reads the target before arrival.
+- Target check presentation is addressed in the iteration below. Owner still reads the target before arrival, as the ownership log does.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -478,3 +478,29 @@ Report: `scratch/qa.html`. Fixed: the hints named `lf repo --bind`/`--relocate`,
   `task_ship_events`, `people`, `pool_machines`. `leaving` stays a third
   `task_moves` state beside the brief's "sent or arrived";
   the payloadless-`sent` alternative is in `294de82873:scratch/concept-review.html`.
+
+## Target check presentation (2026-11-13)
+
+Design: `scratch/demo-decision.md`. Status shows `Checked move from <source> at
+<time>` and a retry naming this Machine's hostname, independently of ownership
+and checkout. It describes a past check even after a source claim-back; retry
+asks the source. Arrival removes the check line. Lists retain their existing
+ownership/move semantics.
+
+Delete — do not maintain (completed): `task_move_checked_from`'s source-only
+read, replaced by `task_move_check` (source and time). Retry and refusal readers
+use it, with the same latest-record rule and checked/arrived persistence.
+No schema or ownership change.
+
+Assumption: show the check on detailed text status only, as the demo direction
+specifies. No network lookup during status and no claim that a check is active.
+
+Focused coverage: `machine_commands::a_move_retried_on_its_target` exercises the
+printed retry through arrival; `machine_commands::a_move_checked_on_its_target`
+keeps the check as history after source claim-back. Gate owns the wider status,
+DTO, documented-command, and static-analysis checks.
+
+- `cargo test -p loopflow --test integration machine_commands::a_move_ -- --test-threads=1 --skip a_move_killed_while_leaving --skip a_move_that_did_not_arrive` — 2 passed; the two skipped existing cases passed before the test-only identifier correction (implement). Linker emitted its existing `__eh_frame` size warning.
+- `EXPLAIN QUERY PLAN` for `task_move_check` over 10,000 move rows — primary-key lookup plus covering `task_moves_task` index, no scan (implement).
+- `cargo fmt`, `git diff --check`, `lf context` — clean; scratch remains within both limits (implement). Wider checks remain with gate.
+- Compress: status and the unknown-target refusal on mini print the same check and retry (`task_ownership::describe_check`); the refusal's own wording is gone. `cargo test -p loopflow --test integration -- machine_commands::a_move_retried_on_its_target machine_commands::a_move_checked_on_its_target` — 2 passed. Gate runs clippy and `documented_commands::` (machines.md).

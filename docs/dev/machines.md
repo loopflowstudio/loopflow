@@ -340,10 +340,25 @@ MTG-321  Moving to mini since Nov 12 10:42: not sent
 Once sent, the stage after the colon reads `sent, not arrived`; `since` stays
 when the move began.
 
+On mini, status shows its recorded check separately from ownership and checkout:
+
+```console
+$ lf task status MTG-321
+…
+MTG-321  Checked move from laptop at Nov 12 10:42
+  retry: lf task move MTG-321 --machine mini-host
+MTG-321  Not checked out on mini-host
+```
+
+The retry names mini's own hostname. This is a past check: the laptop may have
+claimed the Task back since then. It establishes no ownership or active arrival;
+retrying asks the source for the current move. Once the Task arrives, the check
+line disappears.
+
 Running the same move again, from any Machine, asks the Machine the Task left.
 Run on mini, it asks the Machine mini checked the move with, so mini needs that
 Machine added (`lf machine add`). Mini may not know itself by the laptop's
-label; then the refusal prints the move with a name mini does know. Addressed to mini from the laptop
+label; then the refusal prints the same check and retry. Addressed to mini from the laptop
 (`lf --machine mini task move MTG-321 --machine mini`), a move the laptop began
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent

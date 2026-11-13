@@ -30,7 +30,7 @@ const PATIENCE: Duration = Duration::from_secs(5);
 
 /// What a viewer receives: replies, stream bytes and the events riding in
 /// stream 1 under its nonce.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 enum Item {
     Reply(Value),
     Snapshot(Vec<u8>),
@@ -40,7 +40,7 @@ enum Item {
 }
 
 /// One test viewer, by its place in the bench.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 struct V(usize);
 
 struct Peer {
@@ -158,22 +158,6 @@ impl IndexMut<V> for Bench {
     }
 }
 
-fn host(terminal: bool, watchers: &Watchers) -> (Hosted, UnixStream) {
-    let (waker, wake) = UnixStream::pair().unwrap();
-    waker.set_nonblocking(true).unwrap();
-    wake.set_nonblocking(true).unwrap();
-    let host = Hosted::new(
-        Host::Owner(LfProcessId::new()),
-        terminal,
-        None,
-        KEY.into(),
-        waker,
-        watchers,
-    )
-    .unwrap();
-    (host, wake)
-}
-
 fn pipe() -> (File, File) {
     let mut fds = [0; 2];
     // SAFETY: pipe writes two new descriptors into a live two-element array.
@@ -185,9 +169,6 @@ fn pipe() -> (File, File) {
 impl Bench {
     /// A program on a PTY, as `lf session serve --terminal` runs one.
     fn terminal() -> Self {
-        let ledger = TestLedgerGuard::new();
-        let watchers = Watchers::spawn();
-        let (host, wake) = host(true, &watchers);
         let (master, slave) = terminal_pair().unwrap();
         // SAFETY: tcgetattr and tcsetattr read and write a live termios on the slave.
         unsafe {
@@ -208,22 +189,11 @@ impl Bench {
             err: None,
             typed: Vec::new(),
         };
-        Self::new(
-            host,
-            wake,
-            watchers,
-            ledger,
-            vec![(1, master)],
-            input,
-            program,
-        )
+        Self::new(true, vec![(1, master)], input, program)
     }
 
     /// A program on pipes, as a piped or `-b` execution runs one.
     fn pipes() -> Self {
-        let ledger = TestLedgerGuard::new();
-        let watchers = Watchers::spawn();
-        let (host, wake) = host(false, &watchers);
         let (out_reader, out) = pipe();
         let (err_reader, err) = pipe();
         let (program_input, input) = pipe();
@@ -237,25 +207,28 @@ impl Bench {
             typed: Vec::new(),
         };
         Self::new(
-            host,
-            wake,
-            watchers,
-            ledger,
+            false,
             vec![(1, out_reader), (2, err_reader)],
             input,
             program,
         )
     }
 
-    fn new(
-        host: Hosted,
-        wake: UnixStream,
-        watchers: Watchers,
-        ledger: TestLedgerGuard,
-        readers: Vec<(u8, File)>,
-        input: File,
-        program: Program,
-    ) -> Self {
+    fn new(terminal: bool, readers: Vec<(u8, File)>, input: File, program: Program) -> Self {
+        let ledger = TestLedgerGuard::new();
+        let watchers = Watchers::spawn();
+        let (waker, wake) = UnixStream::pair().unwrap();
+        waker.set_nonblocking(true).unwrap();
+        wake.set_nonblocking(true).unwrap();
+        let host = Hosted::new(
+            Host::Owner(LfProcessId::new()),
+            terminal,
+            None,
+            KEY.into(),
+            waker,
+            &watchers,
+        )
+        .unwrap();
         let (exits, exit) = mpsc::channel();
         Self {
             host,
@@ -405,10 +378,24 @@ impl Bench {
     fn attach(&mut self, request: Value) -> V {
         let viewer = self.connect();
         self.request(viewer, request);
-        let attached = self.until_reply(viewer);
-        assert_eq!(attached["kind"], "attached", "{attached}");
-        self[viewer].accept(&attached);
+        self.attached(viewer);
         viewer
+    }
+
+    /// The reply to an attach or resume, which this peer now speaks as.
+    #[track_caller]
+    fn attached(&mut self, viewer: V) -> Value {
+        let reply = self.until_reply(viewer);
+        assert_eq!(reply["kind"], "attached", "{reply}");
+        self[viewer].accept(&reply);
+        reply
+    }
+
+    /// A resume of `from`'s stream at everything it received; taking
+    /// ownership also claims input.
+    fn resume(&self, from: V, own: Option<&str>, rows: u16, cols: u16) -> Value {
+        json!({"kind":"resume","reconnect":self[from].reconnect,"received":self[from].received,
+            "control":own.is_some(),"own":own,"rows":rows,"cols":cols})
     }
 
     #[track_caller]
@@ -642,9 +629,7 @@ fn a_claim_after_the_controller_disconnects_takes_control() {
         waiting,
         json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}),
     );
-    let attached = bench.until_reply(waiting);
-    assert_eq!(attached["kind"], "attached", "{attached}");
-    bench[waiting].accept(&attached);
+    bench.attached(waiting);
     assert!(bench[waiting].token.is_some());
     assert_ne!(bench[waiting].token, token);
     bench.input(waiting, "reconnected\n");
@@ -833,8 +818,6 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
     let last_seq = events(&initial, "theme")[0]["seq"].as_u64().unwrap();
     bench.print(b"line one\r\n");
     bench.until_out(first, "line one\r\n");
-    let received = bench[first].received;
-    let reconnect = bench[first].reconnect.clone();
     bench.lose(first);
     let second = bench.viewer(true);
     bench.request(second, json!({"kind":"theme","theme":light()}));
@@ -843,14 +826,10 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
     bench.until_out(second, "line two\r\n");
     // Three bytes short of what it had: the stream resumes with exactly them.
     let resumed = bench.connect();
-    bench.request(
-        resumed,
-        json!({"kind":"resume","reconnect":reconnect,"received":received - 3,
-            "control":false,"own":null,"rows":24,"cols":80}),
-    );
-    let reply = bench.until_reply(resumed);
-    assert_eq!(reply["kind"], "attached", "{reply}");
-    bench[resumed].accept(&reply);
+    let mut resume = bench.resume(first, None, 24, 80);
+    resume["received"] = json!(bench[first].received - 3);
+    bench.request(resumed, resume);
+    let reply = bench.attached(resumed);
     let items = bench.until_out(resumed, "line two\r\n");
     assert!(
         items.iter().all(|item| !matches!(item, Item::Snapshot(_))),
@@ -889,19 +868,13 @@ fn a_resume_in_the_same_pass_as_its_loss_reclaims_input_and_size() {
     let first = bench.viewer(true);
     bench.until_event(first, "owner");
     let resumed = bench.connect();
-    let (reconnect, received) = (bench[first].reconnect.clone(), bench[first].received);
     bench.lose(first);
-    bench.request(
-        resumed,
-        json!({"kind":"resume","reconnect":reconnect,"received":received,
-            "control":true,"own":"take","rows":35,"cols":110}),
-    );
-    let reply = bench.until_reply(resumed);
+    bench.request(resumed, bench.resume(first, Some("take"), 35, 110));
+    let reply = bench.attached(resumed);
     assert!(
         !reply["token"].is_null(),
         "resume did not regain input: {reply}"
     );
-    bench[resumed].accept(&reply);
     let items = bench.until_event(resumed, "owner");
     assert_eq!(events(&items, "resize")[0]["rows"], 35);
     assert_eq!(bench.size(), (35, 110));
@@ -916,17 +889,10 @@ fn resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims() {
         let first = bench.viewer(true);
         bench.until_event(first, "owner");
         let back = bench.connect();
-        let (reconnect, received) = (bench[first].reconnect.clone(), bench[first].received);
-        bench.request(
-            back,
-            json!({"kind":"resume","reconnect":reconnect,"received":received,
-                "control":true,"own":own,"rows":35,"cols":110}),
-        );
-        let reply = bench.until_reply(back);
-        assert_eq!(reply["kind"], "attached");
+        bench.request(back, bench.resume(first, Some(own), 35, 110));
+        let reply = bench.attached(back);
         assert_eq!(reply["viewer"], bench[first].id);
         assert!(!reply["token"].is_null());
-        bench[back].accept(&reply);
         assert_eq!(bench.size(), (35, 110), "{own}");
         // Closing the superseded socket cannot release the replacement's claims.
         bench.lose(first);
@@ -938,14 +904,8 @@ fn resume_supersedes_its_open_socket_without_taking_a_newer_viewers_claims() {
         bench.until_event(newer, "resize");
         assert_eq!(bench.size(), (40, 120), "{own}");
         let again = bench.connect();
-        let (reconnect, received) = (bench[back].reconnect.clone(), bench[back].received);
-        bench.request(
-            again,
-            json!({"kind":"resume","reconnect":reconnect,"received":received,
-                "control":true,"own":own,"rows":20,"cols":70}),
-        );
-        let reply = bench.until_reply(again);
-        assert_eq!(reply["kind"], "attached");
+        bench.request(again, bench.resume(back, Some(own), 20, 70));
+        let reply = bench.attached(again);
         assert!(reply["token"].is_null(), "{reply}");
         assert_eq!(reply["owner"], bench[newer].id);
         bench.lose(back);
@@ -960,7 +920,6 @@ fn a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints() {
     let mut bench = Bench::terminal();
     let first = bench.viewer(true);
     bench.until_event(first, "owner");
-    let (reconnect, received) = (bench[first].reconnect.clone(), bench[first].received);
     bench.lose(first);
     let second = bench.viewer(true);
     let line = [b'x'; 1023];
@@ -970,18 +929,13 @@ fn a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints() {
     }
     bench.until_out(second, "x\n");
     let back = bench.connect();
-    bench.request(
-        back,
-        json!({"kind":"resume","reconnect":reconnect,"received":received,
-            "control":false,"own":null,"rows":24,"cols":80}),
-    );
+    bench.request(back, bench.resume(first, None, 24, 80));
     assert_eq!(bench.until_reply(back)["kind"], "reconnect_required");
     bench.request(
         back,
         json!({"kind":"attach","control":false,"replace":true,"own":null,"rows":24,"cols":80}),
     );
-    let attached = bench.until_reply(back);
-    assert_eq!(attached["kind"], "attached");
+    bench.attached(back);
     assert!(matches!(bench.next(back), Some(Item::Snapshot(_))));
 }
 
@@ -1007,18 +961,13 @@ fn viewer_holds_follow_connected_viewers_and_a_lost_connection_starts_absence() 
         bench.host.observed_hold,
         Some(ViewerHold::Viewed(_))
     ));
-    let (reconnect, received) = (bench[passive].reconnect.clone(), bench[passive].received);
     bench.lose(passive);
     bench.pass_until("absence", |bench| {
         matches!(bench.host.observed_hold, Some(ViewerHold::Absent(_)))
     });
     let resumed = bench.connect();
-    bench.request(
-        resumed,
-        json!({"kind":"resume","reconnect":reconnect,"received":received,
-            "control":false,"own":null,"rows":24,"cols":80}),
-    );
-    assert_eq!(bench.until_reply(resumed)["kind"], "attached");
+    bench.request(resumed, bench.resume(passive, None, 24, 80));
+    bench.attached(resumed);
     assert!(matches!(
         bench.host.observed_hold,
         Some(ViewerHold::Viewed(_))
@@ -1065,13 +1014,8 @@ fn heartbeat_expiry_drops_only_the_silent_viewer_while_output_continues() {
     });
     // Replay grace and the unchanged execution still permit a reconnect.
     let resumed = bench.connect();
-    let (reconnect, received) = (bench[lost].reconnect.clone(), bench[lost].received);
-    bench.request(
-        resumed,
-        json!({"kind":"resume","reconnect":reconnect,"received":received,
-            "control":true,"own":"take","rows":24,"cols":80}),
-    );
-    assert_eq!(bench.until_reply(resumed)["kind"], "attached");
+    bench.request(resumed, bench.resume(lost, Some("take"), 24, 80));
+    bench.attached(resumed);
     let items = bench.until_out(resumed, "after");
     assert!(
         String::from_utf8_lossy(&out(&items)).contains("tock"),
@@ -1288,7 +1232,6 @@ fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
     let expired = bench.viewer(false);
     bench.print(b"stale output");
     bench.until_out(expired, "stale output");
-    let reconnect = bench[expired].reconnect.clone();
     bench.lose(expired);
     bench.pass_until("the lost connection", |bench| {
         bench.hosted(expired).connection.is_dropped()
@@ -1299,11 +1242,9 @@ fn grace_expiry_refuses_bytes_before_repainting_the_terminal_screen() {
     bench.hosted(expired).connection = Connection::Dropped(Instant::now() - GRACE);
 
     let returning = bench.connect();
-    bench.request(
-        returning,
-        json!({"kind":"resume","reconnect":reconnect,"received":0,
-            "control":false,"own":null,"rows":24,"cols":80}),
-    );
+    let mut resume = bench.resume(expired, None, 24, 80);
+    resume["received"] = json!(0);
+    bench.request(returning, resume);
     let Some(Item::Reply(refused)) = bench.next(returning) else {
         panic!("refusal must precede output");
     };

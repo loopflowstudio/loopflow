@@ -198,6 +198,9 @@ no test that waits out a production timeout except a named fallback above.
    grace test moved in. Deleted 22 real-process tests (184 s of CI medians);
    `transport_tests` now holds 105 tests. A mutation (`resume.control` ignoring a
    newer claim) fails `resume_supersedes_…` in the bench.
+   Compressed: `Bench::new` builds its own host; `attached`/`resume` helpers
+   replace eight hand-built resume requests. `cargo nextest run -p loopflow
+   --lib -E 'test(transport::hosted::host_tests::)'`: 21/21, 0.252 s.
    Left from this slice:
    - `viewers_enter_the_execution_directory_and_later_ones_the_selected_directory`
      stays real-process: the bench covers reported directories, but the

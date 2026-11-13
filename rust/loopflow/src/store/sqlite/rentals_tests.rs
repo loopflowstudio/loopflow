@@ -245,6 +245,44 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
 }
 
 #[test]
+fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
+    let _env = crate::journal::test_env_lock();
+    let (dir, store) = store();
+    let _home =
+        crate::lf::commands::graph::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+    let machine = MachineId::new();
+    store.add_machine(&machine, "lf@pod", "pod").unwrap();
+    let first = open_task(&store);
+    store.claim_task(&first).unwrap();
+    store.handoff_task(&first, &machine).unwrap();
+    let planning =
+        super::super::task_ownership::held_planning_in(&store.conn.lock().unwrap(), &machine)
+            .unwrap();
+
+    // Another writer claims a Task after preflight but before BEGIN.
+    let second = open_task(&store);
+    store.claim_task(&second).unwrap();
+    store.handoff_task(&second, &machine).unwrap();
+    {
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        assert_eq!(
+            super::super::task_ownership::hand_back_in(&tx, &machine, &planning).unwrap(),
+            None
+        );
+        // Even committing this attempt must leave both claims untouched.
+        tx.commit().unwrap();
+    }
+    for task in [&first, &second] {
+        let ownership = store.task_ownership(task).unwrap();
+        assert_eq!(ownership.owner.unwrap().machine.id, Some(machine.clone()));
+        assert_eq!(ownership.log.len(), 2);
+    }
+}
+
+#[test]
 fn hardware_rented_before_spot_existed_reads_as_on_demand() {
     use crate::store::migrations::{apply_before_migration, migration_section_sql};
 

@@ -43,7 +43,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let restored = edit("2026-07-15T02:00:00.000Z", &task.title, &task.description);
     let observation = edit("2026-07-15T01:00:00.000Z", "New title", "New body");
     let outcome = store
-        .apply_linear_observation(&task.id, &observation, now)
+        .apply_linear_observation(&task.id, &observation, now, false)
         .unwrap();
     assert!(!outcome.baselined);
     assert!(outcome.content_steer_applied);
@@ -52,7 +52,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(steers[0].text.contains("New title"));
     assert!(
         !store
-            .apply_linear_observation(&task.id, &observation, now)
+            .apply_linear_observation(&task.id, &observation, now, false)
             .unwrap()
             .content_steer_applied
     );
@@ -68,7 +68,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     });
     for expected in [1, 0] {
         let outcome = store
-            .apply_linear_observation(&task.id, &observation, now)
+            .apply_linear_observation(&task.id, &observation, now, false)
             .unwrap();
         assert_eq!(outcome.follow_ups_created.len(), expected);
     }
@@ -83,7 +83,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let stale = edit("2026-07-15T00:30:00.000Z", &task.title, &task.description);
     assert!(
         !store
-            .apply_linear_observation(&task.id, &stale, now)
+            .apply_linear_observation(&task.id, &stale, now, false)
             .unwrap()
             .content_steer_applied
     );
@@ -92,7 +92,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert_eq!(cursor.last_revision, "2026-07-15T01:00:00.000Z");
     assert!(
         store
-            .apply_linear_observation(&task.id, &restored, now)
+            .apply_linear_observation(&task.id, &restored, now, false)
             .unwrap()
             .content_steer_applied
     );

@@ -12,19 +12,20 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
-pub fn selects_current_machine(target: &str) -> anyhow::Result<bool> {
+/// Whether `lf --machine <target> <args>` runs on this Machine: the target is
+/// this Machine, or the command is `task move X --machine <target>` and this
+/// Machine sent X there without it arriving. Run here, that move delivers what
+/// was sent; forwarded, the target would see a move from a Machine the
+/// forwarded personal settings do not name.
+pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     let Some(store) = crate::store::read_existing_registry()? else {
         return Ok(false);
     };
-    let selected = crate::ops::task_ownership::resolve_machine(&store.sqlite, target)?;
-    Ok(selected == store.sqlite.local_machine()?.id)
-}
-
-/// `lf --machine M task move X --machine M` where this Machine sent X to M
-/// and it has not arrived. Run here, it delivers what was sent, as the same
-/// move run without `--machine M` does; forwarded, M would see a move from a
-/// Machine that the forwarded personal settings do not name.
-pub fn delivers_sent_move(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
+    let store = &store.sqlite;
+    let target = crate::ops::task_ownership::resolve_machine(store, target)?;
+    if target == store.local_machine()?.id {
+        return Ok(true);
+    }
     let Ok(cli) = parse_remote_command(lf_args) else {
         return Ok(false);
     };
@@ -39,11 +40,6 @@ pub fn delivers_sent_move(target: &str, lf_args: &[String]) -> anyhow::Result<bo
     else {
         return Ok(false);
     };
-    let Some(store) = crate::store::read_existing_registry()? else {
-        return Ok(false);
-    };
-    let store = &store.sqlite;
-    let target = crate::ops::task_ownership::resolve_machine(store, target)?;
     if crate::ops::task_ownership::resolve_machine(store, machine)? != target {
         return Ok(false);
     }

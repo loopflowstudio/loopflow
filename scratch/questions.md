@@ -343,21 +343,22 @@ which names mini from the claim on.
 
 - `lf --machine mini task move X --machine mini` from the laptop, while the
   laptop holds X's `sent` move to mini, runs on the laptop instead of forwarding
-  (`ssh::delivers_sent_move`, checked in `bin/lf.rs` beside
-  `selects_current_machine`). It redelivers what was sent; forwarded profile
+  (`ssh::runs_here`, which `bin/lf.rs` asks before forwarding). It redelivers what was sent; forwarded profile
   semantics are unchanged. Test
   `machine_commands::a_sent_move_forwarded_to_its_target_delivers_what_was_sent`
   (fails with QA's "did not send it" refusal when the check is off).
   machines.md drops the refusal sentence.
 - Checks: integration `machine_commands::a_` 10 ok, `documented_commands::` 4 ok;
   clippy `--all-targets -D warnings` clean.
+- Compress: `runs_here` replaced `selects_current_machine` +
+  `delivers_sent_move`, opening the store once.
 
 ## Open questions (each reversible; the simpler option is built)
 
 - **Forwarded retry of a leaving move.** Only a `sent` move runs locally when
   forwarded; a forwarded retry of a move still `leaving` on the laptop still
   reaches mini and refuses with "did not send it". Running any in-flight move
-  locally (drop the stage match in `delivers_sent_move`) would also cover it;
+  locally (drop the stage match in `runs_here`) would also cover it;
   kept to `sent` as directed.
 - **Parallel stalls.** Whether the stalls of those three groups under the
   default thread count predate this branch is unchecked; gate's nextest run

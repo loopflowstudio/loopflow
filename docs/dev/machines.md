@@ -341,10 +341,11 @@ Running the same move again, from any Machine, asks the Machine the Task left.
 Run on mini, it asks the Machine mini checked the move with, so mini needs that
 Machine added (`lf machine add`). Addressed to mini from the laptop
 (`lf --machine mini task move MTG-321 --machine mini`), a move the laptop sent
-runs on the laptop, which holds what it sent. A leaving move carries on: it commits, pushes and takes the conversation, which
-are safe to repeat. A sent move is delivered as it was sent, conversation
-included, without committing or pushing again. Either way the Graph continues
-on mini at the step it was on. If the Graph does not start on mini, the move still stands and the last line prints
+runs on the laptop, which holds what it sent. A leaving move carries on: it
+commits, pushes and takes the conversation, which are safe to repeat. A sent
+move is delivered as it was sent, conversation included, without committing or
+pushing again. Either way the Graph continues on mini at the step it was on. If
+the Graph does not start on mini, the move still stands and the last line prints
 `lf task run MTG-321 --from 'implement'`, which starts it at that step on the
 Task's owner.
 

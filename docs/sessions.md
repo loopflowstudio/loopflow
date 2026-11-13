@@ -39,7 +39,7 @@ resend input.
 
 | The conversation is… | `lf resume` |
 |---|---|
-| running with no terminal showing it (`detached`) | reattaches |
+| running with no terminal showing it (listed as `detached`) | reattaches |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
@@ -167,8 +167,8 @@ lf task run LOO-12 --json          # the same, answering {state, graph_process, 
 
 Headless work is a plain process. `lf -b <skill>` runs its agent as a child
 and waits for it. Work commands (a Graph, `lf -b task run`, a landing watcher,
-`lf ship`) run detached in their own process group, writing the log the
-command names; `lf -b task run` prints that log as it grows and exits with the
+`lf ship`) run in a process of their own that outlives the command that
+started it, writing the log the command names; `lf -b task run` prints that log as it grows and exits with the
 Graph. Nothing hosts either: no server, no holder.
 
 | | |
@@ -345,6 +345,10 @@ session_21fe…   active    Repository  Agent platform craft   turn running 2m14
 0199a213-81c0…  active    raw claude  ~/src/app              turn running 41s
 session_675c…   detached  LOO-472     CI under five          last turn ended 3m ago · 41.2k in (38.0k cached) · 1.1k out
 ```
+
+`detached` in this list means a running conversation no terminal is showing;
+`lf resume` shows it again. It says nothing about headless work, which never
+has a terminal.
 
 This works for every conversation on the Machine: a Task's, one a bare
 `lf implement` started, and a plain `claude`, `codex`, `pi` or `opencode` lf

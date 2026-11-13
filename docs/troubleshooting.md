@@ -395,9 +395,9 @@ else belongs to a single conversation or view.
 | In `ps` | What it is | Stopping it loses |
 |---|---|---|
 | `lf holder run` | Holds the terminals of every Task, Wave and repository conversation and Desktop shell opened on its build | Every agent and shell it holds; `lf resume` continues each conversation from history |
-| `lf … task run`, `lf … graph run`, `lf … ship` | A Graph, landing watcher or ship running detached | The step in flight; `lf task status`, then `lf task run` what remains |
+| `lf … task run`, `lf … graph run`, `lf … ship` | A Graph, landing watcher or ship running in a process of its own | The step in flight; `lf task status`, then `lf task run` what remains |
 | `lf -b <skill>` | A headless run, a child of whatever started it | That run; its caller sees it fail |
-| `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running detached |
+| `lf session attach` | A terminal showing that conversation | Nothing; the conversation keeps running with no terminal showing it |
 | `lf session serve <ID>` | A conversation an earlier build opened | The running agent and any turn in flight; `lf resume <ID>` ends it and continues from history |
 | `lf session observe-status <ID>` | Records one conversation-status reading; it exits once written | Nothing; one that keeps running is from an older Desktop and stays until every terminal pane that Desktop opened has exited |
 | `lf __codex-observe` | Records a Codex conversation's turns beside its client | Turn and usage records for that conversation; the conversation itself keeps going |

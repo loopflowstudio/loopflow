@@ -181,3 +181,65 @@ passes.
 ## Sync check (2026-11-12)
 
 - `cargo test -p loopflow --lib -- store::sqlite::task_retirement::tests:: store::query_plans::tests::` (LF variables unset, stdin closed): compiled after converting main's query-plan fixture to held terminals; linker warned about the large `__eh_frame` section. The test process stalled before main (`sample`: `_dyld_start`, 112K footprint, no test output) and was terminated with SIGTERM. Gate/CI must run these tests; no assertions ran.
+
+## Concept review with Jack (2026-11-13): open
+
+Page: `scratch/concept-review.html`. Monitoring follow-up is LOO-879 (product
+Wave, `feature` graph), whose brief starts with this review.
+
+Jack Heart, 2026-11-13: "to be clear, i want to concept-reivew this diff so i
+can review."
+
+Unanswered, numbered as on the page:
+
+1. Upgrading with conversations running: as built (quit and `lf resume` each),
+   a bulk "end idle conversations on superseded builds" before landing, or
+   that action inside LOO-879. Seen: `lf ps` lists live processes on 17
+   superseded builds on this Machine.
+2. `-b` Work commands outlive their caller (as built), or only Graphs,
+   landing watchers and `lf ship` detach.
+3. An earlier build's bare conversation resumed from a terminal: restarts in
+   that terminal (as built) or held.
+4. "Detached" as both a Session state and a place: leave, or rename the place.
+5. Desktop shells: Close ends at once and shells need the Machine server.
+
+## Review direction, Jack Heart, 2026-11-13 (not yet implemented)
+
+On "Start a Task's Graph … Returns after one line naming the Graph and its
+log; the Graph is a plain process": "hmm i dont think i like this".
+
+"specifically what i am concerned about is:
+- no watching backgroudn runs for headless graphs skills. this nice to have
+  but i dont see why we cant have it
+- when you have interactive steps in a graph, they should be have like a
+  normal bare lf interactive skil"
+
+"i dont want it to be held, i just want it to be bare if its coming from a
+terminal / non held env"
+
+As built: `transport::delegate` holds any non-`-b` Work launch at a terminal,
+so an interactive step of a Task's Graph (`lf -i task run`, `lf --task X graph
+G`, an interactive `lf ship` step) opens in a new held terminal behind an `lf`
+relay, and `lf task run` typed at a terminal is itself held before it lets its
+launcher go. Nothing follows a Graph already running; only `lf -b task run`
+prints the log, from the start.
+
+Jack Heart, 2026-11-13, on whether such a step keeps Work hooks: "the way
+skills are supposed to work is that if you do lf task run ... its held, but
+even from a task worktree, lf <skill> is not and do not get task update hooks.
+graphs should be the same."
+
+So the command decides, for Graphs as for Skills: `lf task run` is held Work;
+`lf graph <g>`, like `lf <skill>`, is bare even in a Task's worktree: its
+steps run here, interactive ones as the terminal's foreground agent, with the
+two bare hooks and no Task updates. `transport::delegate` already places a
+bare Graph and its steps here; no placement change follows from this. The
+earlier idea of running a Task run's interactive step in the caller's
+terminal is withdrawn. Worth one check before landing: a bare `lf graph` with
+an interactive step, run from a Task's worktree, opens that step as the
+terminal's own agent with bare hooks.
+
+Still wanted:
+- Watching is following: a Graph's log is the view. `lf task run` at a
+  terminal follows it and Ctrl-C lets go; one command follows a Graph already
+  running. No PTY, no host.

@@ -192,6 +192,10 @@ typed in a Task's checkout is not. A terminal decides between Held and Detached:
 someone views is held, Work nobody views is detached. Nothing wraps a headless
 run in a terminal, and nothing hosts a conversation in a process of its own.
 
+Detached is a place a launch runs. `lf session list` also prints `detached`
+as a Session state, meaning a held conversation no view is showing; the two
+are unrelated, and user docs keep the word for the Session state only.
+
 Hooks follow Work, not the place. A bare agent gets two, which print the
 context block at start and after compaction from files in the checkout. An
 agent launched for a Task or Wave (a held conversation, or a Graph step, which

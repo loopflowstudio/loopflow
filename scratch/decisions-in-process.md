@@ -33,34 +33,16 @@ Written for this slice (intended behavior, before the code exists):
 
 ## Approach
 
-Each moved decision is checked by calling the function the CLI handler
-calls, with the store and checkout the CLI would see, in the library test
-build:
-
-- Home: `SessionHome` (`src/ops/human_session/tests.rs`) sets `LF_HOME`/`LF_BIN`
-  under `test_ambient::EnvGuard` and opens `open_ephemeral_store`, which copies
-  the prepared image. Promote it to a shared `#[cfg(test)]` helper when a second
-  module needs it; `task_create` reads its store from `LF_HOME`
-  (`ops/planning_sync.rs` `planning_store`), so this is the only way in without
-  a test-only parameter.
-- Git: `loopflow_test_support::TestRepo` (bare origin included), since
-  adoption reads branch, worktree root and default branch from real git.
-- Sessions: record them the way a launch does, through
-  `session_record::SessionRecorder::begin_at` (as
-  `resume_refuses_a_run_and_leaves_its_provider_running` does), not raw
-  `INSERT INTO agent_sessions`. This is the answer to "seeded rows drift from
-  what a real launch writes": the row comes from the launch's own writer.
-  Caller identity (`LF_AGENT_CALLER`) is set through the env guard from
-  `session_attachment(..).caller(..)`, the same value the fixture passes today.
-- Shape: one table-driven test per decision family. Each row names its case
-  and asserts on results (Task id, primary, bound Task, cwd, error text), never
-  on calls.
+The row recipe (home, `TestRepo`, `SessionRecorder::begin_at`, result
+assertions) is in `rust/loopflow/tests/README.md`; `SessionHome`
+(`ops/human_session/tests.rs`) is the shared home, since `task_create` reads
+its store from `LF_HOME` (`ops/planning_sync.rs` `planning_store`).
 
 Seams per surface (all in the CLI's call path):
 
 | Surface | Functions the CLI calls |
 |---|---|
-| Promotion / binding | `engine::creation::create` (CLI and served `task create`; normalizes the directory, checks the receipt, then `ops::task::task_create` → `adoption::resolve_source`/`save`), `ops::human_session::bind`, `preview_binding`, `primary::ensure_task`; `lf::commands::session::prepared(cli, dir)` for `resume --prepare`, fed a Clap-parsed `Cli` so selector wiring stays covered |
+| Promotion / binding | `engine::creation::create` (CLI and served `task create`; normalizes the directory, checks the receipt, then `ops::task::task_create` → `adoption::resolve_source`/`save`), `ops::human_session::bind`, `preview_binding`, `primary::ensure`; `lf::commands::session::prepared(cli, dir)` for `resume --prepare`, fed a Clap-parsed `Cli` so selector wiring stays covered |
 | Launch policy | `prompt::process::prepare_process_prompt` → `AgentConfig` → `agent::session::build_session_command`; resume: `resolve_session_config` |
 | Task Graph run | `ops::task::explain::explain_task_run`, `checkout_explain::explain_task_checkout`, `planning_explain::explain_task_planning`, `task_graph::CapturedGraph` |
 | Machine dispatch | `lf::navigation::machine_invocation`, `ssh::parse_remote_command`, `machine::transport_failure`, `work_route::forward` |
@@ -176,11 +158,9 @@ and the slow `config::migrate`/`store::tests` are outside this pattern.
 
 ## Forbidden
 
-- A test-only flag, parameter or env switch to skip planning sync or git
-  fetches. Remove the origin in the fixture instead.
-- The same decision checked both as a row and as a full-Machine test. A kept
-  test asserts wiring; its decision assertions go to the rows.
-- Raw `INSERT INTO agent_sessions` where a launch writer exists.
+The README's rules hold: no test-only switch to skip sync or fetches, no
+decision checked both as a row and a full-Machine test, no raw
+`INSERT INTO agent_sessions` where a launch writer exists.
 
 Six months out, the way this fails: rows pass while `lf task create
 --session` breaks between Clap and `engine::creation::create`, because the
@@ -217,3 +197,4 @@ git (~0.4 s unloaded, per the probe), and families hold three to six.
 - kept integration filter per surface — implement, each slice
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings` — before commit
 - full suites — CI
+- compress, 2026-11-13: `adoption::tests::` 8/8 passed (1.3–3.3 s each); clippy `--all-targets` clean

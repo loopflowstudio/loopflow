@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::creation::{self, TaskCreation};
+use crate::id::LfSessionId;
 use crate::ops::human_session::tests::SessionHome;
 use crate::session::{LfSession, SessionWork, WorkSource};
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
@@ -121,25 +122,23 @@ impl Machine {
     }
 
     fn session(&self, session: &LfSession) -> LfSession {
-        self.session_by_id(session.id.as_str())
-    }
-
-    fn session_by_id(&self, id: &str) -> LfSession {
-        self.store.sqlite.session(id).unwrap().unwrap()
+        self.store
+            .sqlite
+            .session(session.id.as_str())
+            .unwrap()
+            .unwrap()
     }
 
     fn task(&self, id: &TaskId) -> Task {
         self.store.sqlite.task(id).unwrap().unwrap()
     }
 
-    fn primary(&self, task: &Task) -> Option<String> {
-        self.db()
-            .query_row(
-                "SELECT primary_session_id FROM tasks WHERE id=?1",
-                [task.id.as_str()],
-                |row| row.get(0),
-            )
+    fn primary(&self, task: &Task) -> Option<LfSessionId> {
+        self.store
+            .sqlite
+            .task_primary(&task.id)
             .unwrap()
+            .map(|session| session.id)
     }
 
     fn count(&self, table: &str) -> i64 {
@@ -202,10 +201,7 @@ fn creation_adopts_only_the_selected_work() {
     // An exact selection finds the checkout's Task and becomes its conversation.
     let selected = machine.create("Prototype", Some(&research), None).unwrap();
     assert_eq!(selected.id, adopted.id);
-    assert_eq!(
-        machine.primary(&adopted).as_deref(),
-        Some(research.id.as_str())
-    );
+    assert_eq!(machine.primary(&adopted), Some(research.id.clone()));
     assert_eq!(machine.session(&research).cwd, root);
     assert_eq!(machine.session(&newer).task_id.as_ref(), Some(&other.id));
     assert_eq!(machine.count("tasks"), 3);
@@ -229,7 +225,7 @@ fn creation_from_a_conversation_keeps_its_directory() {
     let task = machine.create("Research", Some(&linked), None).unwrap();
     assert_eq!(task.worktree.as_deref(), Some(root.as_path()));
     assert_eq!(task.branch, "prototype");
-    assert_eq!(machine.primary(&task).as_deref(), Some(linked.id.as_str()));
+    assert_eq!(machine.primary(&task), Some(linked.id.clone()));
     assert_eq!(machine.session(&linked).task_id.as_ref(), Some(&task.id));
     assert_eq!(machine.session(&linked).cwd, root);
     assert_eq!(
@@ -252,7 +248,7 @@ fn creation_from_a_conversation_keeps_its_directory() {
             research,
             "assigned={assigned}"
         );
-        assert_eq!(machine.primary(&task).as_deref(), Some(session.id.as_str()));
+        assert_eq!(machine.primary(&task), Some(session.id.clone()));
     }
 
     // Main checkout: the conversation moves to the Task; the checkout stays shared.
@@ -261,7 +257,7 @@ fn creation_from_a_conversation_keeps_its_directory() {
         .create("Keep conversation", Some(&main), None)
         .unwrap();
     assert!(kept.worktree.is_none());
-    assert_eq!(machine.primary(&kept).as_deref(), Some(main.id.as_str()));
+    assert_eq!(machine.primary(&kept), Some(main.id.clone()));
     assert_eq!(machine.session(&main).cwd, machine.main());
     assert_eq!(
         machine
@@ -276,48 +272,40 @@ fn creation_from_a_conversation_keeps_its_directory() {
 fn a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one() {
     for wave in [None, Some("infrastructure")] {
         let machine = Machine::new(false);
-        let ensure = || {
+        let store = &machine.store;
+        if let Some(name) = wave {
             machine
                 .runtime
-                .block_on(async {
-                    if let Some(name) = wave {
-                        crate::work::wave::ensure_wave_row(
-                            &machine.store,
-                            machine.repo.path(),
-                            name,
-                        )
-                        .await
-                        .unwrap();
-                    }
-                    crate::ops::human_session::primary::ensure(
-                        &machine.store,
-                        machine.repo.path(),
-                        wave,
-                    )
-                    .await
-                })
-                .unwrap()
-                .0
+                .block_on(crate::work::wave::ensure_wave_row(
+                    store,
+                    machine.repo.path(),
+                    name,
+                ))
+                .unwrap();
+        }
+        let ensure = || {
+            let (record, _) = machine
+                .runtime
+                .block_on(crate::ops::human_session::primary::ensure(
+                    store,
+                    machine.repo.path(),
+                    wave,
+                ))
+                .unwrap();
+            store.sqlite.session(record.id.as_str()).unwrap().unwrap()
         };
-        let before = ensure();
-        let session = machine.session_by_id(before.id.as_str());
-        let scope = machine
-            .store
-            .sqlite
-            .primary_scope(session.id.as_str())
-            .unwrap();
-        assert!(scope.is_some());
+        let scope = |session: &LfSession| store.sqlite.primary_scope(session.id.as_str()).unwrap();
+
+        let session = ensure();
+        let shared = scope(&session);
+        assert!(shared.is_some());
         let task = machine
             .create("Continue research", Some(&session), None)
             .unwrap();
         assert!(task.worktree.is_none(), "wave={wave:?}");
-        assert_eq!(machine.primary(&task).as_deref(), Some(session.id.as_str()));
+        assert_eq!(machine.primary(&task), Some(session.id.clone()));
         assert_eq!(
-            machine
-                .store
-                .sqlite
-                .primary_scope(session.id.as_str())
-                .unwrap(),
+            scope(&session),
             Some(crate::session::PrimaryScope::Task(task.id.clone()))
         );
         assert_eq!(machine.session(&session).cwd, session.cwd);
@@ -328,17 +316,10 @@ fn a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one() {
                 .id,
             task.id
         );
-        let replacement = machine.session_by_id(ensure().id.as_str());
+        let replacement = ensure();
         assert_ne!(replacement.id, session.id);
         assert_eq!(replacement.cwd, session.cwd);
-        assert_eq!(
-            machine
-                .store
-                .sqlite
-                .primary_scope(replacement.id.as_str())
-                .unwrap(),
-            scope
-        );
+        assert_eq!(scope(&replacement), shared);
     }
 }
 
@@ -370,7 +351,7 @@ fn binding_selects_the_task_conversation() {
         let task = machine.task(&filed.id);
         assert_eq!(task.worktree.as_deref(), Some(root.as_path()));
         assert_eq!(task.branch, "prototype");
-        assert_eq!(machine.primary(&task).as_deref(), Some(session.id.as_str()));
+        assert_eq!(machine.primary(&task), Some(session.id.clone()));
         assert_eq!(machine.session(&session).cwd, root);
     }
     assert_eq!(
@@ -400,10 +381,7 @@ fn binding_selects_the_task_conversation() {
     // Selecting another primary leaves this conversation's directory.
     let later = machine.conversation(&destination, "tui", None);
     machine.bind(later.id.as_str(), &delivery).unwrap();
-    assert_eq!(
-        machine.primary(&delivery).as_deref(),
-        Some(later.id.as_str())
-    );
+    assert_eq!(machine.primary(&delivery), Some(later.id.clone()));
     assert_eq!(machine.session(&moving).cwd, destination);
 }
 
@@ -466,10 +444,7 @@ fn binding_a_done_task_keeps_it_done() {
                 destination.clone().unwrap_or_else(|| origin.clone()),
                 "shared={shared}, placed={placed}"
             );
-            assert_eq!(
-                machine.primary(&created).as_deref(),
-                Some(session.id.as_str())
-            );
+            assert_eq!(machine.primary(&created), Some(session.id.clone()));
             let current = machine.task(&created.id);
             assert_eq!(current.completed_at, completed.completed_at);
             assert_eq!(current.state, completed.state);

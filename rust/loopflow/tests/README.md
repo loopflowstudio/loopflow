@@ -46,7 +46,7 @@ spawned `lf`) that prove the decision reaches people through the CLI.
 
 A decision is checked once, as a row. Each row calls the function the CLI
 handler calls (`engine::creation::create`, `ops::human_session::bind`,
-`preview_binding`, `primary::ensure_task`), with the store and checkout the CLI
+`preview_binding`, `primary::ensure`), with the store and checkout the CLI
 would see:
 
 - `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
@@ -58,8 +58,8 @@ would see:
   writer a launch uses. Never `INSERT INTO agent_sessions` directly.
 
 Rows assert on results: Task id, primary Session, bound Task, cwd, error text.
-Group rows by decision family, two to four each, so one test stays near
-1–2 s. A new case is a new row, not a new fixture.
+Group rows by decision family so one test stays near 1–3 s. A new case is a
+new row, not a new fixture.
 
 Don't skip planning sync or git fetches with a flag, parameter or variable;
 remove the fixture's origin instead. A row only protects the CLI if the

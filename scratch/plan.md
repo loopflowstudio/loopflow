@@ -9,10 +9,13 @@ for the repository's Task list instead of three queries per Task. This covers
 
 Remaining:
 - Gate.
-- Measure the win: the brief's baseline is about 2,250 statements and
-  180–220 ms warm for a 750-Task repository on a store copy. Time `work_in` on
-  the same kind of copy after the change and put the number in the PR.
+- Measure the win in-process: the brief's baseline is about 2,250 statements and
+  180–220 ms warm for a 750-Task repository on a store copy. QA (scratch/qa.html)
+  measured only whole-CLI debug wall time at load ~68: 751 Tasks, `desktop view list`
+  min 378→299 ms, median 551→440 ms; `view show query:qa` min 322→266 ms, median 717→558 ms.
+  Output was identical to the base build. A quiet-Machine release number is still missing.
 
+QA: scratch/qa.html (real CLI and served subscription; nothing broken) → done.
 Check: `target/debug/deps/loopflow-* store::sqlite::selections::` → 22 passed (implement).
 On 2026-11-12 an outside SIGSTOP repeatedly stopped test binaries here and in other
 worktrees (state `T`, even under `setsid` with no terminal; source not found in

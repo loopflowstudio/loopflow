@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-869 QA: Work selection reads</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#222}
+pre{background:#f5f5f3;padding:.8rem;overflow-x:auto;font-size:13px}
+table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
+h2{margin-top:2rem}
+</style>
+<h1>LOO-869 QA: Work selection reads</h1>
+<p>Branch <code>lf 0.15.3+e84d2d8a0</code>, built with <code>cargo build -p loopflow --bin lf</code>, on a private Machine under
+<code>/tmp/lf-qa-869</code> (isolated <code>HOME</code>, <code>LF_HOME</code>, provider homes; local bare origin;
+<code>planning: {provider: git, personal: true}</code>). Scripts: <code>scratch/qa/*.sh</code>, <code>scratch/qa/sub.py</code>.
+No code changes were needed.</p>
+
+<h2>1. Every Task state through the selection path</h2>
+<p>Tasks created with <code>lf task create</code>, then moved with real commands: <code>claim</code>, <code>complete</code>,
+<code>abandon</code>, <code>unassign</code>, <code>checkout</code>. Read with <code>lf desktop view show "kind:task state:&lt;s&gt;" --json</code>.</p>
+<pre>open       Owned Checkout
+unstarted  Unstarted Owned Published
+idle       Checkout
+backlog    Unstarted Owned Published
+done       Done Abandoned</pre>
+<p><code>lf task list --json</code> puts the same Tasks in the same sections. Unstarted, Owned (claimed, never run) and
+Published (claimed, then unassigned) are <code>backlog</code>; Checkout is <code>working</code>/<code>idle</code>. Owned is open and
+in backlog at once, which is what <code>TaskSection::of</code> says for an owned unstarted Task. A Task that is published
+but has no owner needs a recorded PR publication, which takes GitHub. It wasn't reached here. The unit test
+<code>a_published_pr_opens_a_task_that_waits_in_backlog_until_claimed</code> covers it.</p>
+<p>Dashboard: <code>lf desktop dashboard query qa 'state:open or state:done'</code> → revision 1. <code>lf desktop view list --json</code>
+gave the default plan 1 member (Checkout) and <code>qa</code> 4 members (Owned, Checkout, Done, Abandoned).</p>
+
+<h2>2. 751 Tasks: same answers as the base build</h2>
+<p>744 more Tasks: every 3rd claimed, every 15th completed (0 failures). For the base binary I used the
+<code>loo-873</code> worktree's build (31d2fc6d2, which descends from this branch's base dfbea8cf). It has no migration
+changes and no changes under <code>store/sqlite/</code> or <code>work/</code>. Its uncommitted edits are in agent and Graph code.
+Both binaries read the same store:</p>
+<pre>same  desktop view list --json
+same  desktop view show kind:task --json
+same  desktop view show query:qa --json
+same  desktop view show state:open --json      (201 Tasks)
+same  desktop view show state:backlog --json   (699)
+same  desktop view show state:done --json      (51)
+same  desktop view show state:idle --json      (1)</pre>
+<p>Output was compared byte for byte after <code>jq -S</code>.</p>
+
+<h2>3. Timing</h2>
+<p>15 interleaved rounds per read, base then branch, debug builds, whole CLI process. Load average was about 68 from
+other worktrees' builds, so these numbers are noisy:</p>
+<table>
+<tr><th>read (751 Tasks)</th><th>base min / median</th><th>branch min / median</th></tr>
+<tr><td><code>desktop view list --json</code></td><td>378 / 551 ms</td><td>299 / 440 ms</td></tr>
+<tr><td><code>desktop view show query:qa --json</code></td><td>322 / 717 ms</td><td>266 / 558 ms</td></tr>
+</table>
+<p>With 6 Tasks, the branch's <code>query:qa</code> median was 207 ms, so the branch's read time no longer grows
+noticeably with Task count. Debug CLI wall time includes process start, so it is not the in-process
+<code>work_in</code> time the brief quoted (180–220 ms warm on a store copy). That number still needs a quiet Machine and
+a release build.</p>
+
+<h2>4. Served subscription (what Desktop reads)</h2>
+<p>Raw newline JSON over the private server socket: <code>hello</code> (revision 5, desktop client), then
+<code>subscribe</code> to <code>desktop.view.list</code> for the repository. After the first reading, I ran
+<code>lf task claim</code> on unowned "Bulk 1":</p>
+<pre>reading 1 at 0.55s: {'default': (1, False), 'qa': (252, False)}
+claimed 0 at 6.03s
+reading 2 at 6.04s: {'default': (1, False), 'qa': (253, True)}</pre>
+<p>The claimed Task joined the <code>state:open</code> Dashboard in the next reading, about 10 ms after the command returned.</p>
+
+<h2>Cleanup</h2>
+<p>Task checkout registered <code>com.loopflow.server.8bc67bcb074a42c6</code> and started a holder and two Codex processes
+for the Checkout Task. The launchd label was booted out, the holder and Codex processes (checked by <code>LF_HOME</code>)
+were stopped, and no process from the private Machine remains.</p>
+
+<h2>Result</h2>
+<ul>
+<li>Works: every reachable state and section through <code>view show</code>, <code>view list</code> and a saved Dashboard; output
+identical to the base build at 751 Tasks; a live subscription updates after a CLI claim.</li>
+<li>Not reached: a published, unowned Task (needs a GitHub PR publication; covered by a unit test); a mounted Desktop
+window (headless run); an in-process <code>work_in</code> timing on a quiet Machine.</li>
+<li>Still wrong: nothing found.</li>
+</ul>

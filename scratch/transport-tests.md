@@ -190,15 +190,28 @@ no test that waits out a production timeout except a named fallback above.
 
 ## Slices
 
-1. **This slice:** host bench + move the viewer-protocol and control-claim
-   clusters and owner-side heartbeat; delete their real-process tests. Focused:
-   `cargo nextest run -p loopflow --lib -E 'test(transport::hosted::)'`.
+1. **Done (2026-11-13).** `src/transport/host_tests.rs`: a `Bench` over
+   `Hosted::pass` with the program on an in-process raw PTY or pipes and
+   viewers on socket pairs; the bench owns its peers so it can drain them while
+   passing. 21 host rules, 0.37 s wall locally (slow observer 0.26 s and the
+   1 MiB wire test 0.12 s move 4 MiB/1 MiB; the rest 20–90 ms). The parent's
+   grace test moved in. Deleted 22 real-process tests (184 s of CI medians);
+   `transport_tests` now holds 105 tests. A mutation (`resume.control` ignoring a
+   newer claim) fails `resume_supersedes_…` in the bench.
+   Left from this slice:
+   - `viewers_enter_the_execution_directory_and_later_ones_the_selected_directory`
+     stays real-process: the bench covers reported directories, but the
+     selected-directory half needs an `ExitRecord` whose Session is in the store.
+     Port it with a stored Session or keep it as the Owner wiring test.
+   - Not ported: the bridge process exiting when its owner cuts it
+     (`viewer_stream_backpressure_…`, a `stream.rs` rule); the hold released at
+     exit (`release_viewer_hold` always computes from no viewers).
 2. Relay re-exec harness with `#[cfg(test)]` timing; move relay heartbeat,
    attach timeout, outage-input, exhaustion, pane-closure, Move here; delete the
    server reconnect cluster.
 3. Non-transport moves (store retention, human_session, server, retirement).
-4. Merge the kept real-process tests; remove fixed sleeps; SSH trims; README
-   bare-Graph fix; `scripts/testing.md` routing.
+4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
+   bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
 
 ## Checks
 

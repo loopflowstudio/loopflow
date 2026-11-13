@@ -42,14 +42,15 @@ the cheapest layer that can observe it.
 
 | Layer | Where | What it proves | Budget |
 |---|---|---|---|
-| Host rules | `transport::hosted::tests` (`src/transport/host_tests.rs`) | the viewer protocol: attach, takeover, control and size arbitration, snapshots, resume and spool overflow, heartbeat and grace expiry, holds, input, events | under 100 ms each |
+| Host rules | `transport::hosted::host_tests` (`src/transport/host_tests.rs`) | the viewer protocol: attach, takeover, control and size arbitration, snapshots, resume and spool overflow, heartbeat and grace expiry, holds, input, events | under 100 ms each |
 | Relay rules | `transport::viewer_tests` | what a viewer's terminal sees: reconnect, attach timeout, outage input discarded, exhaustion and Retry, control handoff, pane closure, Move here | under 1 s each |
 | Surfaces | `tests/transport_tests.rs` | that each real launch path is wired and cleans up: owner, bare launch, provider exec, headless, CLI open/JSON, build takeover, server relay, held terminals, Desktop and SSH shells | one test per surface |
 
 Host rules drive `Hosted::pass` in-process. `Hosted` serves both owners and held
-terminals, so one host test covers both real paths. The bench feeds program
-output through a pipe, admits viewers as `UnixStream` pairs and sends `Request`s
-from the test. Owner time is already data: to expire a heartbeat or a grace
+terminals, so one host test covers both real paths. The test plays the program
+on the far side of an in-process PTY or pipes, and its viewers on `UnixStream`
+pairs speaking the wire protocol; the bench passes until what a test waits for
+arrives. Owner time is already data: to expire a heartbeat or a grace
 period, backdate `Viewer.heartbeat_at`, `Connection::Dropped(at)` or
 `Hosted.exit` and call `pass()`. Never sleep.
 

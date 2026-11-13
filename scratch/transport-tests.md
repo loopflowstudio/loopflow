@@ -22,10 +22,15 @@ tests, ~117 s (registry 63 s, viewer 38 s, lifetime 14 s).
 Done when:
 - `transport_tests` holds at most 35 tests and sums under 400 s on CI (Linux),
   with no test waiting out a production timeout (30 s heartbeat, 60 s grace,
-  5 s attach, a full 12.7 s reconnect cycle) except the one named below.
+  5 s attach, a full 12.7 s reconnect cycle). No fallback was needed
+  (slice 2 reached the fake server without a seam). One kept test still waits a
+  production interval on purpose: `server_mobile_changes_…`, the mobile
+  manager's 5 s retry after a Tailscale outage.
 - Every rule a deleted real-process test asserted is asserted by a named
   in-process test (table below) or deliberately dropped with a reason.
-- New host-rule tests each run under 100 ms; relay-rule cases under 1 s.
+- New host-rule tests each run under 100 ms; relay-rule cases under 1 s,
+  except five that must span a window (setup, unacknowledged, outage, move,
+  quiet: 1.5–3.4 s under load), kept at those times in slice 6.
 - No production signature, trait or parameter exists only for tests;
   timing overrides are `#[cfg(test)]` only (the `server::holder::TEST_IDLE`
   pattern).
@@ -170,7 +175,7 @@ Unused fixture helpers go with them. `lifetime.rs` `POLL` is a `#[cfg(test)]` va
 
 No env var or CLI flag that shortens a production timeout; no factory trait or
 clock trait; no second protocol host for tests (the bench is `Hosted` itself);
-no test that waits out a production timeout except a named fallback above.
+no test that waits out a production timeout except the one named above.
 
 ## Slices
 
@@ -330,7 +335,9 @@ no test that waits out a production timeout except a named fallback above.
    - Frozen leg → `ops::human_session::tests::a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles`
      (0.04–0.12 s). The owner is a `/bin/sleep` child (another executable than
      `LF_BIN`), it holds a live turn and its socket never answers: `attaches`
-     is true, the owner is not signalled and the attachment is unchanged.
+     is true, the owner is not signalled and `session_attachment` is unchanged.
+     Capture, provider thread and Task binding are not read separately: only
+     a takeover writes them, and none runs (read from the code, not asserted).
      The relay half (no acknowledgement → exit with the cause, typed input not
      delivered) is the existing `owner-unacknowledged` relay case. A mutation
      dropping the `LiveTurn` early return fails the test.
@@ -362,6 +369,9 @@ no test that waits out a production timeout except a named fallback above.
    unmeasured until gate.
 
 ## Checks
+
+Left for gate/CI: the `transport_tests` CI sum against 400 s, relay case times
+on CI, and the SSH cases (Linux only).
 
 - gate: `cargo nextest run -p loopflow --lib --test transport_tests -E 'test(transport::) | binary(transport_tests) | test(human_session::) | test(server::) | test(task_retirement) | test(retirement_tests::)' --test-threads 6` all pass; report summed seconds per group before/after (local before: run once at slice 1 start).
 - `cargo test -p loopflow --test transport_tests ssh_shells:: -- --ignored`: Linux CI only (macOS sshd sandbox).

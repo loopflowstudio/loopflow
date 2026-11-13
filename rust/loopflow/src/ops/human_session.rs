@@ -906,7 +906,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
     if capture_is_prepared(input)? {
         command.env(PREPARED_CAPTURE_ENV, input.as_str());
     }
-    // The launch runs inside this execution's terminal owner, not a nested one.
+    // The launch runs inside this execution's held terminal, not a nested one.
     crate::transport::carry_across_exec(&mut command);
     pass_launch_lock(&mut command, &launch_lock)?;
     crate::journal::finish_before_exec();

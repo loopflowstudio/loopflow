@@ -27,10 +27,10 @@ Run `lf server run` in the foreground and read its socket from `lf server status
 the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
 newline JSON protocol, disconnect before an answer, then look up
 `lf server receipt qa-report --json` before retrying identical content.
-Stop every server and terminal owner launched for the walkthrough.
-`lf session serve --terminal -- /bin/sh` prints its owner ID and keeps running;
-the first line is readiness, not process exit. Attach with `lf session attach
-<owner-id>`. Use a real shell for input and resize checks without provider login.
+Stop every server and holder launched for the walkthrough: a private home's
+`lf holder run` outlives its server, and the providers it holds are its direct
+children. For input and resize checks without a provider login, hold a real
+shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
 
 A packaged Desktop must use its signed bundled `lf` for the QA server too:
 signing the bundle changes the CLI hash. Set `LF_DESKTOP` to the QA bundle ID
@@ -186,10 +186,10 @@ dashboard can have no members for that Task.
 
 Task checkout can also start a background primary conversation when the provider
 CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
-`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find its
-`lf session serve --terminal` owners by their disposable checkout cwd and stop
-their descendant processes too; stopping the foreground server alone leaves
-those conversations running.
+`CLAUDE_CONFIG_DIR` inside the private HOME. After the Graph ends, find those
+conversations' providers by their disposable checkout cwd and stop them with
+their descendants; they are children of the private home's `lf holder run`, so
+stopping the foreground server alone leaves them running.
 
 ## Loopflow served launches
 
@@ -436,9 +436,9 @@ short identifier resolves through Linear.
 To count every `lf` a provider starts, point `LF_BIN` at a `/bin/sh` wrapper
 that appends its argv to a file and execs the branch binary; plugins run
 `spec.executable`, which comes from `LF_BIN`. A `ps` sampler misses short
-processes. Each `lf -i` leaves a `session serve` owner after its PTY closes:
-stop owners whose argv names the private Task, with their descendants, after
-every run. Freeze the private server by the PID its `nohup` recorded, never by
+processes. An `lf -i --task` conversation stays held after its PTY
+closes: stop providers whose cwd is the private Task's checkout, with their
+descendants, after every run. Freeze the private server by the PID its `nohup` recorded, never by
 `pgrep -f 'lf server run'`, which matches other worktrees' servers.
 
 A Task launch with no server runs `lf install server`, which registers

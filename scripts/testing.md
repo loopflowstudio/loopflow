@@ -41,6 +41,11 @@ Changes to server protocol types or their doc comments also run
 the generated schema; regenerate its checked-in fixture using the command in
 [the server README](../rust/loopflow/src/server/README.md) when it changes.
 
+Server startup or background store maintenance changes also run
+`binary(served_reads)`, including configuration access with an unreadable store.
+Seed corrupt databases before starting SQLite readers or writers; overwriting
+only a live database's main file can leave readable pages in its WAL.
+
 Changes to compile-time embedded files also run
 `cargo package --locked --allow-dirty -p loopflow`. The extracted source archive
 must compile without access to files outside the crate. Server examples shared

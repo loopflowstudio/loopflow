@@ -191,16 +191,58 @@ impl SqliteStore {
         revision: &str,
         incoming: &PlanningSnapshot,
     ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Every running agent acquires each second and the remote rarely
+        // moves. A revision already imported with nothing left in conflict
+        // would merge to what is stored; skip it before taking the write lock.
+        let (imported, in_conflict): (bool, bool) = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3),
+                    EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            params![repo, destination, revision],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if imported && !in_conflict {
+            return Ok(());
+        }
         let incoming = incoming.canonicalized().map_err(invalid)?;
         incoming.validate().map_err(invalid)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // A moved revision repeats the whole exchanged history. Changes already
+        // routed from this destination are in the local export, so merging
+        // them again changes nothing: only the records the rest touch are
+        // written. Active conflicts are recomputed from every record.
+        let unseen = if in_conflict {
+            incoming.clone()
+        } else {
+            unseen_in(&conn, repo, destination, &incoming)?
+        };
+        // Registering a repository reads its Git locator; do it before the lock.
+        if super::repositories::repository_id_in(&conn, repo)?.is_none() {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            super::repositories::ensure_repository_in(&tx, repo)?;
+            tx.commit()?;
+        }
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;
+        if unseen.changes.is_empty() {
+            tx.execute("INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![repo,destination,revision])?;
+            tx.commit()?;
+            return Ok(());
+        }
         let merged = export_in(&tx, repo, destination, true)?
-            .merge(&incoming)
+            .merge(&unseen)
             .map_err(invalid)?;
-        for (id, change) in &incoming.changes {
+        let records: BTreeSet<_> = unseen
+            .changes
+            .values()
+            .map(|change| {
+                (
+                    planning_write::table(&change.edit.change),
+                    change.edit.target.as_str(),
+                )
+            })
+            .collect();
+        for (id, change) in &unseen.changes {
             planning_write::retain(&tx, id, change)?;
             tx.execute(
                 "INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
@@ -210,6 +252,9 @@ impl SqliteStore {
         let edits: Vec<_> = merged
             .winners()
             .map(|(_, change)| change.edit.clone())
+            .filter(|edit| {
+                records.contains(&(planning_write::table(&edit.change), edit.target.as_str()))
+            })
             .collect();
         let grouped = planning_write::grouped(&edits);
         let mut pending: Vec<_> = grouped
@@ -363,6 +408,7 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+
     pub fn peer_planning_status(
         &self,
         repo: &str,
@@ -532,6 +578,35 @@ fn has_unrouted_changes(conn: &Connection, repo: &str, destination: &str) -> Sto
         params![repo, destination],
         |row| row.get(0),
     )?)
+}
+
+/// The incoming history of every field with a change not yet routed from
+/// this destination. A change's predecessors edit the same field, so the
+/// result is closed under causality and merges like the whole document would
+/// for those fields.
+fn unseen_in(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    incoming: &PlanningSnapshot,
+) -> StoreResult<PlanningSnapshot> {
+    let mut routed = conn.prepare_cached(
+        "SELECT 1 FROM planning_peer_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
+    )?;
+    let mut fields = BTreeSet::new();
+    for (id, change) in &incoming.changes {
+        if !routed.exists(params![repo, destination, id])? {
+            fields.insert(change.edit.key());
+        }
+    }
+    Ok(PlanningSnapshot {
+        changes: incoming
+            .changes
+            .iter()
+            .filter(|(_, change)| fields.contains(&change.edit.key()))
+            .map(|(id, change)| (id.clone(), change.clone()))
+            .collect(),
+    })
 }
 
 fn export_in(

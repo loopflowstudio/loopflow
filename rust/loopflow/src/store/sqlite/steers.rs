@@ -487,6 +487,61 @@ fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
     Ok(())
 }
 
+/// Whether [`reconcile`] would write nothing: every receipt's applicability is
+/// current, every applicable steer has a receipt, and nothing is left to cancel
+/// or delete.
+fn reconciled(conn: &Connection, session: &str) -> StoreResult<bool> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+        [session],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::NotFound);
+    }
+    Ok(conn.query_row(
+        &format!(
+            "{} SELECT NOT (
+            EXISTS(SELECT 1 FROM session_steers s WHERE s.session_id=?1
+                AND s.applicable!=(s.steer_id IN applicable))
+            OR EXISTS(SELECT 1 FROM applicable a WHERE NOT EXISTS(
+                SELECT 1 FROM session_steers s WHERE s.session_id=?1 AND s.steer_id=a.id))
+            OR EXISTS(SELECT 1 FROM steer_batches b WHERE b.session_id=?1 AND b.evidence='prepared'
+                AND EXISTS(SELECT 1 FROM steer_deliveries d JOIN session_steers s
+                    ON s.session_id=d.session_id AND s.steer_id=d.steer_id
+                    WHERE d.batch_id=b.id AND s.applicable=0))
+            OR EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
+                WHERE d.session_id=?1 AND b.evidence='cancelled')
+            OR EXISTS(SELECT 1 FROM session_steers s WHERE s.session_id=?1 AND s.applicable=0
+                AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
+                    WHERE d.session_id=?1 AND d.steer_id=s.steer_id)))",
+            scopes()
+        ),
+        [session],
+        |row| row.get(0),
+    )?)
+}
+
+/// Read a Session's receipts after reconciling them. The write lock is taken
+/// only when reconciliation has something to change.
+fn read_reconciled<T>(
+    conn: &mut Connection,
+    session: &str,
+    read: impl Fn(&Connection) -> StoreResult<T>,
+) -> StoreResult<T> {
+    {
+        let snapshot = conn.savepoint()?;
+        if reconciled(&snapshot, session)? {
+            return read(&snapshot);
+        }
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    reconcile(&tx, session)?;
+    let result = read(&tx)?;
+    tx.commit()?;
+    Ok(result)
+}
+
 fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
     Ok(conn.query_row(
         "SELECT count(*) FROM session_steers s WHERE s.session_id=?1 AND s.applicable=1
@@ -587,6 +642,15 @@ impl SqliteStore {
         Ok(steer)
     }
 
+    /// Whether `session` has a steer to emit. The server asks for every idle
+    /// conversation whenever a revision moves; nearly always the answer is no,
+    /// and it takes no write lock.
+    pub(crate) fn has_undelivered_steers(&self, session: &str) -> StoreResult<bool> {
+        self.recover_prepared_steers(session)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        undelivered(&conn, session)
+    }
+
     pub fn session_steers(
         &self,
         session: &str,
@@ -596,9 +660,8 @@ impl SqliteStore {
         let limit = limit.clamp(1, 100);
         self.recover_prepared_steers(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        let mut items = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
+        read_reconciled(&mut conn, session, |tx| {
+            let mut items = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
             FROM session_steers s JOIN steers p ON p.id=s.steer_id
             LEFT JOIN steer_deliveries d ON d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt
             LEFT JOIN steer_batches b ON b.id=d.batch_id WHERE s.session_id=?1 AND p.seq>?2 ORDER BY p.seq LIMIT ?3"))?
@@ -613,14 +676,14 @@ impl SqliteStore {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let next_after = if items.len() > limit {
-            items.truncate(limit);
-            items.last().map(|item| item.steer.sequence)
-        } else {
-            None
-        };
-        let pending = pending_count(&tx, session)?;
-        let capability: String = tx.query_row("SELECT CASE
+            let next_after = if items.len() > limit {
+                items.truncate(limit);
+                items.last().map(|item| item.steer.sequence)
+            } else {
+                None
+            };
+            let pending = pending_count(tx, session)?;
+            let capability: String = tx.query_row("SELECT CASE
             WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
             WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
             WHEN a.activated_at IS NULL THEN 'capability reserved; the Machine server has recorded no callback from this conversation'
@@ -628,12 +691,12 @@ impl SqliteStore {
             FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
             LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
             [session], |row| row.get(0))?;
-        tx.commit()?;
-        Ok(SessionSteerPage {
-            items,
-            next_after,
-            pending,
-            capability,
+            Ok(SessionSteerPage {
+                items,
+                next_after,
+                pending,
+                capability,
+            })
         })
     }
 
@@ -643,10 +706,8 @@ impl SqliteStore {
         id: &crate::id::SteerId,
     ) -> StoreResult<Steer> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        let result = tx
-            .query_row(
+        read_reconciled(&mut conn, session, |tx| {
+            tx.query_row(
                 &format!(
                     "SELECT {COLUMNS} FROM steers p
             JOIN session_steers s ON s.steer_id=p.id WHERE s.session_id=?1 AND p.id=?2"
@@ -655,9 +716,8 @@ impl SqliteStore {
                 read_steer,
             )
             .optional()?
-            .ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(result)
+            .ok_or(StoreError::NotFound)
+        })
     }
 
     pub fn retry_session_steer(

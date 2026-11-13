@@ -1,6 +1,0 @@
-- `cargo test -p loopflow --test integration machine_commands::task_move_carries_ownership_graph_and_session -- --exact` (LF_* unset, stdin closed): passed, 1 test, 152.72s; macOS linker warned about unwind-table size; broader checks remain with gate/CI.
-- After syncing 78bb9f5564: `LOOPFLOW_MIGRATION_ORDER=<empty> cargo check -p loopflow --lib` (shallow name order) passes with `workload_indexes`; CI failed it as `query_cost_indexes`.
-- `cargo test -p loopflow --test integration machine_commands::task_ownership`: 4 pass (never_routes failed before the test fix, reproduced locally at machine_commands.rs:1878; passed with full-history import, which isolated the cause).
-- `check_migrations.py`: ok (unmerged: workload_indexes.sql). `cargo fmt --check`, architecture, test inventory: ok.
-- nextest `task_ownership:: | planning_peers:: | query_plans:: | store::migration | machine_commands::`: 196/198 pass in 317 s at load ~250; the 2 failures were the fixture's 20 s "mini unreachable" SSH deadline and passed on rerun (10–11 s, load ~100).
-- `cargo clippy --all-targets -- -D warnings`: clean. Swift/iOS/website unchanged since the last gate: CI.

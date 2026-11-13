@@ -50,8 +50,8 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
    - Reproduce each failure locally and make the smallest correct fix.
    - Run focused checks first; broaden only when needed. Don't skip tests or
      push an empty commit to force a rerun.
-   - When a missing local check let the failure reach CI, fix that in the gate
-     guidance or repository conventions too.
+   - A failure reaching CI is normal. Add a local check to gate guidance or
+     repository conventions only when it is cheap and would have caught it.
 
 4. **Publish and arm.**
    - Read the whole diff and keep unrelated work out.

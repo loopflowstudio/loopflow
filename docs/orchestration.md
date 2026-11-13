@@ -80,9 +80,11 @@ Mechanical steps ride along as commands:
 
 ```yaml
 # .lf/graphs/deliver.yaml (the builtin)
-- gate
+- gate                        # publish so CI starts, then review while it runs
 - cmd: land --wait-and-fix    # merge, repairing CI until it lands
 ```
+
+[What gate does and reports](ops.md#review-while-ci-runs).
 
 ## Loops and branches
 

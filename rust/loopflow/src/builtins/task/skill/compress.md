@@ -31,8 +31,8 @@ and change, without losing required behavior. The output is a diff.
 5. Build changed code and run its focused test when behavior changed. No edits
    means no rerun. Fix real failures. A check that can't run headless goes to
    gate or CI; don't block the Graph on it. Ask for a judgment you need when
-   someone is in the conversation; headless, leave it for demo. Gate runs the
-   affected suites.
+   someone is in the conversation; headless, leave it for demo. Gate selects a
+   few high-risk tests; CI runs the suites.
 
 Keep rationale beside the code or in the plan, plus one command/result line.
 If nothing needs reducing, say so. Realign reconciles the plan.

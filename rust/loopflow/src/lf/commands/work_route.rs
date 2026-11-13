@@ -349,7 +349,9 @@ pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> 
 }
 
 /// The other Machine that writes the Task's ownership: where it runs, unless
-/// a move from here has not arrived, which leaves the next entry here.
+/// a move from here has not arrived, which leaves the next entry here. A sent
+/// move's target is asked first: one that took the Task in, its answer lost,
+/// writes it like any Task that runs there.
 pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
     let Some(route) = remote_task(selector)? else {
         return Ok(None);
@@ -357,10 +359,15 @@ pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecu
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    Ok(store
-        .task_move_in_flight(&route.task_id)?
-        .is_none()
-        .then_some(route))
+    let Some(moving) = store.task_move_in_flight(&route.task_id)? else {
+        return Ok(Some(route));
+    };
+    let sent = matches!(
+        moving.stage,
+        crate::store::sqlite::task_moves::MoveStage::Sent { .. }
+    );
+    let arrived = sent && super::session_move::arrived_on(&route.task_id, &moving.to_machine_id)?;
+    Ok(arrived.then_some(route))
 }
 
 /// What `lf <args> --json` prints on the route's Machine: its API's value.

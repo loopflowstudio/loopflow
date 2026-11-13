@@ -1963,6 +1963,10 @@ pub enum SessionCommand {
         /// The Machine the Task moves from, which a retry here asks for it
         #[arg(long, requires = "task")]
         from: Option<crate::durable::MachineId>,
+        /// Read no move; exit non-zero unless this Task's last move arrived
+        /// here. A Machine that sent it asks before taking it back.
+        #[arg(long, hide = true, value_name = "TASK", conflicts_with = "check")]
+        arrived: Option<crate::durable::TaskId>,
         #[arg(long)]
         json: bool,
     },

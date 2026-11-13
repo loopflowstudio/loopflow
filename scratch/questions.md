@@ -308,7 +308,8 @@ Left for gate, collected from the passes above:
 `task_graph_launch_tests` (fixtures changed); a nextest run that answers the
 parallel-stall question below. `server::schema::tests::` (ninth pass) and
 `documented_commands::` (eleventh pass, after its machines.md edit)
-passed after their last relevant change; gate's suite run covers them again.
+passed after their last relevant change; the thirteenth pass changed both
+again (machines.md, a hidden `session receive` flag), so gate reruns them.
 
 ## QA (2026-11-13)
 
@@ -389,35 +390,28 @@ execution routing (`writer_in`) is unchanged. machines.md gained the sentence.
   rather than copying it into SQL, and the CLI (`forward`) and served
   (`engine::task::ownership`) routes were already two before this pass.
 
-## Next implement: claiming back asks the target first (concept review, 2026-11-13)
+## Done (2026-11-13, thirteenth pass): claiming back asks the target first
 
-`sent, not arrived` covers two cases: mini never received the move, or mini
-took the Task in and its answer was lost. Since the twelfth pass, `lf task
-claim X` on the laptop writes the claim on the laptop whenever a move is in
-flight, without contacting mini. In the lost-answer case mini is already
-running the Graph from the move claim, the laptop starts it too, and both
-push to one branch until the laptop's later entry reaches mini through
-planning. Before that pass the claim was forwarded to mini, so this
-double-run path is new on this branch.
+Concept review found a double-run path: `sent, not arrived` is also mini having
+taken the Task in with its answer lost, and the twelfth pass's local claim then
+left both Machines running it.
 
-Direction: a claim or unassign while a move is in flight reconciles the move
-first, as a retry does. It asks the target, best-effort, whether the move
-arrived:
-- **Arrived there:** record `arrived` here. The Task runs on mini, and the
-  command routes like any ownership command on a Task that runs elsewhere.
-  Status then reads `Runs on mini`; `lf task move X --machine laptop` brings
-  it back.
-- **Not arrived, or no answer:** write the entry here as now, which ends the
-  move. The doc's "If mini is gone" case is unchanged.
-
-Concurrency limit: one writer holds whenever mini answers. When mini is
-unreachable and had in fact taken the Task in, the later entry still wins
-once it syncs. Whether mini stops a running Graph when a later claim from
-another Machine reaches it is pre-existing claim behaviour, outside this Task.
-
-Test: in the lost-answer fixture (mini took the Task in, the laptop holds
-`sent`), `lf task claim` on the laptop leaves exactly one Machine owning the
-Task, and the laptop's status reads `Runs on mini`.
+- `work_route::remote_ownership_writer` (both the CLI and served claim/unassign
+  reach it): for a `sent` move in flight it calls `session_move::arrived_on`,
+  which asks the target `lf session receive --arrived <task>` (hidden; exits
+  non-zero unless the Task's last move arrived there). Yes: record `arrived`
+  here and route the command to mini like any Task that runs there. No, no
+  answer, or a `leaving` move: write here as before, which ends the move.
+  `forward` still reads records only.
+- Limit, as the review said: mini unreachable after taking the Task in still
+  leaves the later entry winning once it syncs.
+- docs/dev/machines.md: the claim-back paragraph says claim asks mini first.
+- Test `machine_commands::claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target`
+  (mini's receive runs, then the answer is dropped): mini owns the Task on
+  both stores, no move in flight, laptop status `Runs on mini since`.
+- Checks: integration `machine_commands::` claiming/move/resume/`a_` 21 passed;
+  clippy `--all-targets -D warnings` clean. Gate: `documented_commands::`
+  (machines.md) and `server::schema::tests::` (hidden `session receive` flag).
 
 ## Open questions (each reversible; the simpler option is built)
 

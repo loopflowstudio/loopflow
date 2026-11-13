@@ -286,6 +286,18 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
+        SessionCommand::Receive {
+            arrived: Some(task),
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let here = store.sqlite.local_machine()?.id;
+            anyhow::ensure!(
+                store.sqlite.task_move_arrived_on(task, &here)?,
+                "Task {task} did not arrive here"
+            );
+            Ok(())
+        }
         SessionCommand::Receive { check: true, .. } => {
             open_shared_store().await?;
             Ok(())

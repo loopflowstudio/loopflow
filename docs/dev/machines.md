@@ -349,8 +349,10 @@ the Graph does not start on mini, the move still stands and the last line prints
 `lf task run MTG-321 --from 'implement'`, which starts it at that step on the
 Task's owner.
 
-If mini is gone, `lf task claim MTG-321` on the laptop takes the Task back and
-ends the move.
+`lf task claim MTG-321` on the laptop first asks mini whether the move arrived.
+If it did, its answer lost, the Task runs on mini and the claim is written
+there. If it did not, or mini is gone, the laptop takes the Task back and the
+move ends.
 
 Auto-Ship approval travels with the move, as the Graph position does. Each
 Machine keeps approvals and stops as a log (who, when, which process). The continued run is a plain

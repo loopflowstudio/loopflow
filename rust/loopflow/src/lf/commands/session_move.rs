@@ -309,6 +309,29 @@ fn sender(
         .filter(|writer| writer != to))
 }
 
+/// Whether `to` says the Task's last move arrived there; if so, this Machine
+/// records the arrival. Best-effort: a Machine out of reach, or one that
+/// cannot tell, answers no.
+pub(crate) fn arrived_on(task: &crate::durable::TaskId, to: &MachineId) -> Result<bool> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let asked = async {
+            let target = super::ssh::resolve_target(to.as_str(), false).await?;
+            let args = ["session", "receive", "--arrived", task.as_str()].map(String::from);
+            super::ssh::request(&target, &args, None).await
+        };
+        if let Err(error) = asked.await {
+            tracing::info!("{to} did not say Task {task} arrived there: {error:#}");
+            return Ok(false);
+        }
+        let store = crate::store::open_existing_store()
+            .await?
+            .context("machine commands need an initialized local store")?;
+        let here = store.sqlite.local_machine()?.id;
+        store.sqlite.record_move_arrived(task, &here, to)?;
+        Ok(true)
+    })
+}
+
 /// The Machine the Task left keeps its move as sent until it hears it
 /// arrived. The move already happened, so a Machine out of reach only leaves
 /// that record stale, which its next arrival there clears.

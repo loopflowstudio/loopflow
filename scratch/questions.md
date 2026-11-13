@@ -26,15 +26,18 @@
 
 - QA rerun at HEAD 3cd3700868 (2026-11-13, branch `lf`): claim/unassign walkthrough, FIFO lock probe (0 of 136 config opens under the write lock), malformed config and concurrent claims all as before. `scratch/qa.html` §5.
 
-## Concept review (2026-11-12)
+## Concept review (2026-11-13)
 
-The change has a clear concept: `OwnershipFacts` is everything an ownership
-write needs from outside the store (Git identity, planning connection,
-declared Machines, the scope's owning Machine). It is read before `BEGIN` and
-passed in as values. Read-only paths (`ownership_in`, `held_in`) load
-nothing inside a write. No naming or model change is called for, and no
-product choice is open. The remaining in-write config load is the one already
-listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
+`OwnershipFacts` still holds: everything an ownership write needs from outside
+the store is read before `BEGIN` and passed in as values. The merge of
+87f0e3c60a touched no ownership code; no product choice is open. The one
+remaining in-write config load is `hand_back_in`'s fallback, listed above.
+
+Next implement: one Machine-name reader. This branch added
+`task_ownership::machine_names_in`, but `owners_in` (from main, read by
+`task_details`) still builds the same `MachineId -> name` map inline from
+`machine_declarations`. Make `owners_in` call `machine_names_in`, so the
+declarations-to-names mapping and its error conversion live once.
 
 ## Gate (2026-11-13, HEAD e282904291, base 87f0e3c60a = origin/main)
 

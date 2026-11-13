@@ -239,6 +239,10 @@ remaining mentions are pre-migration fixtures.
 - Checks: integration `machine_commands::` resume/move/sent 15 passed; lib
   `ops::human_session` + `store::migrations::` 181 passed; clippy
   `--all-targets -D warnings` clean (covers the post-295f257b8e sync).
+- Compress: the slice was already minimal (`complete_task_conversation` keeps
+  its Task binding; a pruned checkout otherwise loses the mapping). Only
+  `moved_session` tidied. `machine_commands::a_handed_back` + `resuming_a_task`
+  3 passed; clippy clean.
 
 `session_moves` (an agent switch at the Stop hook) and
 `relocated_task_processes` (a repository directory moved on disk) stay: the

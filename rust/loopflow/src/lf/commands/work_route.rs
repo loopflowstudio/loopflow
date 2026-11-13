@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
+use crate::ops::human_session::moves::conversation_task;
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -417,13 +418,13 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let canonical = crate::id::canonical_session(id);
-    let machine = match crate::ops::human_session::moves::conversation_task(&store, &canonical)? {
+    let id = crate::id::canonical_session(id);
+    let machine = match conversation_task(&store, &id)? {
         Some(task) => {
             let runs_on = store.task_execution_route(&task)?.machine_id;
             (runs_on != store.local_machine()?.id).then_some(runs_on)
         }
-        None => store.session_moved_to(id)?,
+        None => store.session_moved_to(&id)?,
     };
     Ok(machine.map(|machine| Forward {
         machine,

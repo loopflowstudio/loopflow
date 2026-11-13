@@ -43,3 +43,15 @@ passed in as values. Read-only paths (`ownership_in`, `held_in`) load
 nothing inside a write. No naming or model change is called for, and no
 product choice is open. The remaining in-write config load is the one already
 listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
+
+## Gate (2026-11-12/13, tree cb38c1949b)
+
+- `scripts/test.py --reuse-passing`: stopped at resource preflight (`~/.cache/uv`
+  inventory deadline, 42.7 GiB free). Plan run by hand instead:
+- `check_architecture.py`: pass. `check_rust_test_inventory.py`: pass. `cargo fmt --check`: pass.
+- `cargo build -p loopflow --bin lf`: pass (16 m 36 s, load ~70).
+- nextest `test(store::sqlite::{task_ownership,rentals,children::linear_observation_tests,planning_peers,task_comments}::) | test(ops::linear_observe::) | test(store::query_plans::) | test(documented_commands::) | binary(two_people)`:
+  not run. Compiling the test binaries outlasted the 2 h limit (load 140–190,
+  other checkouts compiling). No test started; CI's `rust-test` owns the result.
+- `cargo clippy --all-targets -- -D warnings`: not run (queued behind nextest); CI `rust-lint` owns it.
+- Before the merge of 4b84a0dc9e, QA ran the same lib modules: 22 of 22 passed.

@@ -151,8 +151,9 @@ record and never changes; the table stays append-only. Tasks are never deleted
 Built: migration `graph_process_task.sql` (fixture `graph_process_task_released.sql`,
 test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
 indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
-recording the deepest checkout's Task. Left: the store-copy comparison against a
-`.backup` of the live store (QA compared a private 0.15.3-written store), and CI.
+recording the deepest checkout's Task. Left: CI.
+
+- Store copy 2026-11-13: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's `task_graph_pairs` over every Task, then the branch migration. 2,141 pairs on 434 Tasks both ways, 0 differences, 0 Graphs with more than one Task.
 
 - QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished` and `plan.list` latest Graph pair correctly. Focused tests stopped in `TN` again; gate or CI runs them.
 
@@ -167,7 +168,7 @@ recording the deepest checkout's Task. Left: the store-copy comparison against a
 
 Updated for launch-recorded Graph Tasks: `docs/dev/data.md`, `docs/dev/planning.md`,
 `docs/dev/reference-models.md`, `docs/dev/index.md` (and regenerated
-`docs/dev/index.html`). No user-facing docs change: `lf task status` output is the same.
+`docs/dev/index.html`). `lf task status` output is the same. User-facing: `docs/work.md` (Keep work already in progress) says an adopted checkout's earlier Graphs stay unattached.
 
 ## Concept review (2026-11-13)
 

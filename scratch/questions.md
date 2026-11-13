@@ -123,7 +123,17 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 
 ## Remaining
 
-1. (done) Third-pass drop list added to LOO-877 as a comment.
+The third-pass drop list is on LOO-877 as a comment.
+
+1. `tasks.primary_session_id` is still on `tasks`, though the brief lists it
+   with the checkout fields and `agent_sessions` rows are Machine-local. It has
+   ~10 readers/writers in `store/sqlite/sessions.rs` (`primary_session` reads,
+   the Task-Session bind updates, the cwd-follow update) plus
+   `task_work.rs` and `selections.rs` tests; moving it to `task_checkouts`
+   (and to LOO-877's drop list) is the last Machine-local column this Task
+   named. A move already carries the conversation (`MovedSession.primary`,
+   `ops/human_session/moves.rs`) and arrival binds it with
+   `ensure_primary_session`, so the arriving Machine writes its own row.
 2. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
    history, so the receipt is what keeps their membership. Folding needs a
    path-history column on `task_checkouts`; open whether that is worth it.

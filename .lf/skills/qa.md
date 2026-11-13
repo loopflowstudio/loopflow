@@ -627,6 +627,11 @@ origin and `planning: {provider: git, personal: true}` are enough; the move's
 check clones the repository on mini. To leave a move `sent, not arrived`, swap
 mini's `lf` for a wrapper that exits 1 on `session receive` without `--check`,
 then read `lf task status`, `lf task list` and `lf machine list` before
-restoring it and repeating the move. Both homes share the host name, so mini
-labels the laptop's claim by its own host name; moving back needs an SSH route
-from mini to the laptop's home, which this one-way stand-in does not give.
+restoring it and repeating the move. A wrapper that runs the real receive and
+then exits 255 loses the arrival answer. Both homes share the host name, so mini
+labels the laptop's claim by its own host name. For mini to reach the laptop
+(retries on mini, moves back), route the stand-in by host: when an argument is
+`laptop`, run under the laptop's `HOME` and `LF_HOME`; then `lf machine add
+laptop` on mini, from outside its clone. Running `lf` inside a clone on mini
+before the first move mints mini's own planning key, and the move's check then
+refuses; start mini's home over.

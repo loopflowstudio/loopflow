@@ -13,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 // Identities are shared with the runtime; ordering runs only here (and in the
 // runtime's tests).
 #[path = "src/store/migration_build.rs"]
@@ -162,7 +164,6 @@ fn emit_migration_catalog(
     let fixture = out_dir.join("test-store.db");
     let _ = fs::remove_file(&fixture);
     for (index, entry) in catalog.iter().enumerate() {
-        use sha2::{Digest, Sha256};
         let sql = fs::read(&entry.path).expect("read fixture migration");
         let checksum = format!("{:x}", Sha256::digest(&sql));
         connection

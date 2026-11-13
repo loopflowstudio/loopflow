@@ -51,6 +51,10 @@ Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
 
+Run `lf incident` in a Task checkout to investigate a failure, including after
+the Task is done. A named Graph keeps the checkout's Task context and records
+its own run; it leaves the Task's Graph position and completion unchanged.
+
 ### Recover a creation whose reply was lost
 
 ```bash

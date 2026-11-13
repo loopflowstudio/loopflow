@@ -534,6 +534,36 @@ mod tests {
     }
 
     #[test]
+    fn every_measured_row_names_an_index() {
+        // SQLite reads a row for a missing index as the table's row count, so a
+        // dropped index's row makes its table look tiny to every plan.
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+            .unwrap();
+        conn.execute_batch(MEASURED).unwrap();
+        let stale: Vec<String> = conn
+            .prepare(
+                "SELECT s.tbl || '.' || s.idx FROM sqlite_stat1 s
+                 WHERE s.idx IS NOT NULL AND s.idx != s.tbl
+                     AND NOT EXISTS (SELECT 1 FROM sqlite_master m
+                                     WHERE m.type = 'index' AND m.name = s.idx)
+                 ORDER BY 1",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            stale.is_empty(),
+            "MEASURED names indexes the schema no longer has: {}",
+            stale.join(", ")
+        );
+    }
+
+    #[test]
     fn foreign_key_children_on_growing_tables_are_indexed() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();

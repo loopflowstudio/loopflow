@@ -30,6 +30,60 @@ CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
+## Decision rows and full-Machine tests
+
+Changing how promotion picks a Session, checkout or Task? Run the decision
+table first. It answers in about a second per family:
+
+```bash
+cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'
+cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
+```
+
+The first command checks every decision as a table row. The second runs the
+few full-Machine tests (seeded store, `lf server run`, stand-in providers,
+spawned `lf`) that prove the decision reaches people through the CLI.
+
+A decision is checked once, as a row. Each row calls the function the CLI
+handler calls (`engine::creation::create`, `ops::human_session::bind`,
+`preview_binding`, `primary::ensure_task`), with the store and checkout the CLI
+would see:
+
+- `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
+  `open_ephemeral_store` (it copies the prepared store image);
+- a `loopflow_test_support::TestRepo` with its origin removed, unless the row
+  is about the remote. One `TestRepo` per table; each row gets a fresh linked
+  worktree;
+- Sessions recorded through `session_record::SessionRecorder::begin_at`, the
+  writer a launch uses. Never `INSERT INTO agent_sessions` directly.
+
+Rows assert on results: Task id, primary Session, bound Task, cwd, error text.
+Group rows by decision family, two to four each, so one test stays near
+1–2 s. A new case is a new row, not a new fixture.
+
+Don't skip planning sync or git fetches with a flag, parameter or variable;
+remove the fixture's origin instead. A row only protects the CLI if the
+handler makes the same call; name that call in the test module's header.
+Whatever the handler resolves before it (selectors, cwd normalization) stays
+with a full-Machine test.
+
+### Full-Machine tests
+
+Each kept test proves one piece of wiring a row can't: a value crossing Clap
+into ops, the owner/PTY/provider argv, a native conversation surviving resume,
+or receipt JSON. Its decision assertions live in the rows. Before cutting one,
+check what wiring it carries here; if a row "covers it", the wiring is what
+goes untested.
+
+Promotion and binding (`session_lifecycle_tests`):
+
+| Test | Wiring it proves |
+|---|---|
+| `promotion_selects_session_in_owned_and_shared_checkouts` | `LF_AGENT_CALLER` reaches creation from `task create --session` inside the conversation; `resume --task` continues the same native conversation in the recorded cwd |
+| `promotion_sets_directory_immediately_and_resumes_same_native_conversation` | the bound directory reaches the next provider launch, not the running child |
+| `promotion_background_run_does_not_claim_primary` | a real `-b` run's Session never becomes primary |
+| `promotion_explicit_sources_with_run_keep_the_selected_work` | `task create --run` opens through ordinary admission into the adopted checkout |
+
 ## Boundary checks
 
 For migration changes, run `uv run python scripts/check_migrations.py` before

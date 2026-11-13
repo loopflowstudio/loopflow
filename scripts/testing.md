@@ -107,6 +107,11 @@ uv run pytest python/tests/test_gate_bounded.py          # one Python file
 
 Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 
+Promotion and binding decisions run as library rows
+(`cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'`); run
+those before the surface's full-Machine tests. Both lists are in
+[the Rust tests README](../rust/loopflow/tests/README.md#decision-rows-and-full-machine-tests).
+
 ## Gate: a few named tests; CI runs the suites
 
 Gate publishes the candidate first ([CI.md](../.github/CI.md)) and CI's

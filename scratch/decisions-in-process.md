@@ -22,6 +22,15 @@ cargo nextest run -p loopflow --test integration -E 'test(session_lifecycle_test
 
 plus the before/after table below with real numbers.
 
+## Docs
+
+Written for this slice (intended behavior, before the code exists):
+
+- `rust/loopflow/tests/README.md` "Decision rows and full-Machine tests":
+  the row recipe and the promotion kept list. Later slices add their table
+  under "Full-Machine tests".
+- `scripts/testing.md` "Implement: one focused test": points at the rows.
+
 ## Approach
 
 Each moved decision is checked by calling the function the CLI handler

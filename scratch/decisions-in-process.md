@@ -119,6 +119,25 @@ Slices 5 and 6 go beyond Done-when; take them only if this Task continues.
 Transport is LOO-887. Deliberate sleeps in `ops::linear::task_planning_tests`
 and the slow `config::migrate`/`store::tests` are outside this pattern.
 
+## Next implement direction (concept review, 2026-11-13)
+
+Rename the row fixture `struct Machine` in `ops/task/adoption/tests.rs`,
+`lf/commands/run/launch_policy_tests.rs` and `ops/task/explain/tests.rs` to
+`Table`. The README's two concepts are the decision table (one `TestRepo`,
+one home, rows) and the full-Machine test (server, spawned `lf`, providers);
+the row fixture is the first, and naming it `Machine` says the second. In
+the dispatch and ownership rows `Machine` is the domain noun (`Pair` holds
+one `Side` per Machine), so the name can't carry both meanings. The README's
+"One `TestRepo` per table" already uses `Table`. No behavior change.
+
+Row speed reads as met: the brief's "Each decision is checked once,
+in-process, in well under 1 s" is per decision, and a row costs ~0.4 s
+adopting a checkout, under 0.1 s refusing or binding (probe above); the
+1.3–3.3 s is a family test holding three to six rows. One nextest test per
+row (option b) adds fixture setup per row for no decision coverage. Cutting
+`prepare`'s foreground fetch (option c) changes what people wait for on
+`lf task create --session`, so it is its own Task, not this one.
+
 ## Promotion slice notes
 
 - Rows cover what the ten deleted tests checked except: plain `--run`
@@ -230,9 +249,8 @@ build), not product failures.
 ## Done when
 
 - Promotion/binding, launch policy, Task Graph explain and Machine dispatch
-  decisions each run as in-process rows. Done: all four. The brief asks "well under 1 s"
-  per decision; promotion rows cost ~0.4 s each but their family tests take
-  1.3–3.3 s (open, `scratch/questions.md`).
+  decisions each run as in-process rows. Done: all four, each row under
+  1 s (~0.4 s adopting, under 0.1 s refusing); family tests 1.3–3.3 s.
 - `tests/README.md` lists each surface's kept full-Machine tests with the
   wiring each proves.
 - The table above has before/after for every touched group.

@@ -2593,7 +2593,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         let name = graph.name.clone();
         let facts = store
             .sqlite
-            .graph_execution_facts([&graph])
+            .graph_execution_facts([&graph], &[&task.id])
             .map_err(task_error)?;
         let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
             &store.sqlite,

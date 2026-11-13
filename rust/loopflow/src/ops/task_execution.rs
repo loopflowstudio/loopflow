@@ -47,7 +47,7 @@ pub(crate) async fn task_execution(
     task: &Task,
 ) -> StoreResult<TaskExecutionSnapshot> {
     let graph = store.sqlite.task_graphs(&task.id)?.pop();
-    let facts = store.sqlite.graph_execution_facts(&graph)?;
+    let facts = store.sqlite.graph_execution_facts(&graph, &[&task.id])?;
     Ok(
         execution_of_latest_graph(&store.sqlite, task, graph.as_ref(), &facts)
             .await?
@@ -65,7 +65,7 @@ pub(crate) async fn execution_of_latest_graph(
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
         return Ok((
-            open_graph_execution(sqlite, &task.id)?.unwrap_or(TaskExecutionSnapshot {
+            open_graph_execution_from_facts(&task.id, facts).unwrap_or(TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,
                 reason: "No Task Graph has run; independent Sessions may still be active"
                     .to_string(),
@@ -125,7 +125,7 @@ pub(crate) async fn execution_of_latest_graph(
         snapshot.state,
         TaskExecutionState::Idle | TaskExecutionState::Blocked
     ) {
-        if let Some(open) = open_graph_execution(sqlite, &task.id)? {
+        if let Some(open) = open_graph_execution_from_facts(&task.id, facts) {
             snapshot = open;
         }
     }
@@ -138,29 +138,36 @@ pub(crate) fn open_graph_execution(
     sqlite: &SqliteStore,
     task: &TaskId,
 ) -> StoreResult<Option<TaskExecutionSnapshot>> {
-    for process in sqlite.task_open_processes(task)? {
-        let Some(lf) = process.as_lf() else {
-            continue;
+    let facts = sqlite.graph_execution_facts([], &[task])?;
+    Ok(open_graph_execution_from_facts(task, &facts))
+}
+
+fn open_graph_execution_from_facts(
+    task: &TaskId,
+    facts: &GraphExecutionFacts,
+) -> Option<TaskExecutionSnapshot> {
+    for (graph, process) in facts.open_processes.get(task).into_iter().flatten() {
+        let receipt = match facts.receipts.get(&process.id) {
+            Some(path) => crate::journal::read_process_receipt(path),
+            None => Ok(None),
         };
-        // The Graph process itself, or one of its steps.
-        let graph = match lf.parent_lf_process_id.as_ref() {
-            _ if sqlite.runs_graph(&lf.id)? => &lf.id,
-            Some(parent) if sqlite.runs_graph(parent)? => parent,
-            _ => continue,
-        };
-        let state = match crate::journal::process_entry_evidence(sqlite, &process) {
+        let state = match crate::journal::lf_process_evidence(
+            process,
+            &receipt,
+            crate::journal::process_identity_evidence,
+        ) {
             ProcessIdentityEvidence::Live => TaskExecutionState::Running,
             ProcessIdentityEvidence::Unknown => TaskExecutionState::Unknown,
             ProcessIdentityEvidence::Dead => continue,
         };
-        return Ok(Some(TaskExecutionSnapshot {
+        return Some(TaskExecutionSnapshot {
             state,
             reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
             step: None,
             captured: None,
-        }));
+        });
     }
-    Ok(None)
+    None
 }
 
 /// Ends a recorded limit reason when the step moved to another agent rather

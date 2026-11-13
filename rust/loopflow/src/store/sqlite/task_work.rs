@@ -522,17 +522,25 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
 /// Match unfinished Processes through checkout, Session history and attachments.
 /// Start from the small unfinished inventory and retain the attachment partial index.
 pub(super) fn task_open_process_ids(selector: &str, filter: &str) -> String {
+    format!(
+        "SELECT process FROM ({})",
+        task_open_process_pairs(selector, filter)
+    )
+}
+
+/// Unfinished Processes paired with every selected Task whose work contains them.
+pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
     let session = session_membership("a");
     format!(
-        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id={selector}),
+        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id IN ({selector})),
         open AS MATERIALIZED (SELECT p.id,p.cwd,p.agent_session_id,p.attached_lf_process_id FROM processes p INDEXED BY processes_unfinished
             WHERE p.completed_at IS NULL AND ({filter})),
         sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
             UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
             UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
-        SELECT open.id FROM open JOIN task_scope tw ON {}
-        UNION SELECT s.process FROM sessions s CROSS JOIN agent_sessions a ON a.id=s.session
+        SELECT tw.id AS task_id,open.id AS process FROM open JOIN task_scope tw ON {}
+        UNION SELECT tw.id,s.process FROM sessions s CROSS JOIN agent_sessions a ON a.id=s.session
             JOIN task_scope tw ON ({session})",
         relocated_process_membership("open")
     )

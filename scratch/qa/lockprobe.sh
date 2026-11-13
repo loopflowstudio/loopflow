@@ -11,7 +11,7 @@ rm -f $LF_HOME/config.yaml; mkfifo $LF_HOME/config.yaml
 $B task "$@" $T < /dev/null > $ROOT/probe.out 2>&1 &
 pid=$!
 rm -f $ROOT/probe.stop
-(while [ ! -e $ROOT/probe.stop ]; do
+(trap "" PIPE; while [ ! -e $ROOT/probe.stop ]; do
   exec 3>$LF_HOME/config.yaml
   if sqlite3 -cmd '.timeout 0' $LF_HOME/loopflow.db 'BEGIN IMMEDIATE; ROLLBACK;' >/dev/null 2>&1; then print free; else print HELD; fi
   print -n -- "$good" >&3; exec 3>&-

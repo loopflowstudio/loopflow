@@ -48,6 +48,17 @@ come from remote routing, which this branch doesn't touch (see "still wrong").</
 <p>With <code>machines: [not, a, map</code>, <code>lf task unassign</code> warns, skips the entry and succeeds. Afterwards the store accepts writes and nothing is left locked.
 Two concurrent <code>lf task claim</code> on an unowned Task both exit 0 and the log gains exactly one <code>claim</code> row.</p>
 
+<h2>5. Rerun at HEAD 3cd3700868 (after merging 4b84a0dc9e and 87f0e3c60a)</h2>
+<p>Rebuilt <code>lf</code> at the current tree (9 m 15 s) and repeated sections 1, 2 and 4 in a fresh <code>/tmp/lf-qa-867</code>.
+Logs: <code>scratch/qa/s1.head.log</code>, <code>lockprobe.head.log</code>, <code>s4.head.log</code>.</p>
+<table><tr><th>check</th><th>result</th></tr>
+<tr><td>create → unassign → claim → claim again</td><td class="ok">Same output as section 2; second claim writes nothing</td></tr>
+<tr><td>FIFO probe, unassign/claim/unassign/claim</td><td class="ok">28, 33, 38, 37 opens; 0 with write lock held; each command changed the log</td></tr>
+<tr><td>malformed <code>machines:</code>, then claim/unassign</td><td class="ok">unassign warns and succeeds; store writable afterwards</td></tr>
+<tr><td>two concurrent claims</td><td class="ok">both exit 0, one <code>claim</code> row</td></tr></table>
+<p>The probe needed a fix: its feeder subshell died of SIGPIPE when lf closed one open before the write, leaving lf blocked in
+<code>open()</code> on the FIFO (sampled). <code>lockprobe.sh</code> now runs the feeder with <code>trap "" PIPE</code>. A first, aborted
+attempt overlapped two probes on one FIFO (interleaved YAML, one HELD from the other lf's write); it is discarded.</p>
 <h2>What works now</h2>
 <ul>
 <li>Claim and unassign take the store's write lock only after every config load (FIFO probe, section 1).</li>
@@ -67,7 +78,7 @@ All 22 passed here (627 s at load average ~155; <code>scratch/qa/tests.log</code
 <h2>Still wrong, worst first</h2>
 <ol>
 <li>Claiming for a declared Machine that has no connection prints <code>machine "": unreachable</code> with an empty SSH host. That's the remote-routing layer, outside this change.</li>
-<li>One CLI command loads the personal config many times. With a malformed file, the warning prints 19 times per unassign on the branch, against 12 on 0.15.3
+<li>One CLI command loads the personal config many times. With a malformed file, the warning prints 19 times per unassign on the branch (21 at HEAD 3cd3700868), against 12 on 0.15.3
 (claim: 19 vs 15; show: 12 vs 11). 0.15.3 is older than origin/main, so this isn't a clean before/after. Part of the increase is that
 <code>OwnershipFacts</code> now loads Machine names and the owning Machine on every write, even when the holder is already yours. Each load happens outside the lock.</li>
 </ol>

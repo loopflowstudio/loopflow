@@ -1,0 +1,20 @@
+opens:   28 free 
+lf task unassign -> exit 0
+Unowned
+  Nov 13 03:06  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+opens:   33 free 
+lf task claim -> exit 0
+  Nov 13 03:06  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+opens:   38 free 
+lf task unassign -> exit 0
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+opens:   37 free 
+lf task claim -> exit 0
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2

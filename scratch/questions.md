@@ -24,6 +24,7 @@
 
 ## Checks
 
+- QA rerun at HEAD 3cd3700868 (2026-11-13, branch `lf`): claim/unassign walkthrough, FIFO lock probe (0 of 136 config opens under the write lock), malformed config and concurrent claims all as before. `scratch/qa.html` §5.
 - `cargo check -p loopflow --lib --tests` and `cargo fmt`: clean.
 - QA (2026-11-12, before the merge of 4b84a0dc9e): focused lib tests
   (`store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}`),

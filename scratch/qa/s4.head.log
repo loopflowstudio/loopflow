@@ -1,0 +1,60 @@
+### malformed personal config
+$ lf task unassign task_1a4b343887e24618bde01ddfe0c8c387
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+warning: /private/tmp/lf-qa-867/lfhome/config.yaml:1: skipping malformed YAML entry and its indented contents
+Unowned
+  Nov 13 03:06  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  unassign  QA Person on Jacks-MacBook-Pro-2
+(exit 0)
+### store writable afterwards
+$ lf task claim task_1a4b343887e24618bde01ddfe0c8c387
+Owner: QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:06  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  claim  QA Person on Jacks-MacBook-Pro-2
+(exit 0)
+$ lf task unassign task_1a4b343887e24618bde01ddfe0c8c387
+Unowned
+  Nov 13 03:06  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:17  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  unassign  QA Person on Jacks-MacBook-Pro-2
+(exit 0)
+### two claims at once
+a exit 0
+b exit 0
+### last log rows
+  Nov 13 03:18  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 13 03:18  claim  QA Person on Jacks-MacBook-Pro-2

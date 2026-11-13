@@ -385,6 +385,9 @@ execution routing (`writer_in`) is unchanged. machines.md gained the sentence.
   integration `machine_commands::` 57 passed (incl.
   `claiming_a_task_back_ends_a_move_that_never_arrived`);
   `documented_commands::` 4 passed; clippy clean.
+- Compress: nothing to cut; the in-flight read reuses `logs_in`'s ordering
+  rather than copying it into SQL, and the CLI (`forward`) and served
+  (`engine::task::ownership`) routes were already two before this pass.
 
 ## Open questions (each reversible; the simpler option is built)
 

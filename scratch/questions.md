@@ -59,12 +59,13 @@ The gate below ran at e282904291, before that commit.
 
 - Changed doc: `docs/dev/data.md` (write-transaction rules: config loads before `BEGIN`). No user-facing behavior changes, so no README or guide edits.
 
-## Stale-preflight repair (uncommitted at 9efef8b859)
+## Stale-preflight repair (fae6f73a1a)
 
-Delete — do not maintain: the in-write `planning_connected_in` fallback in
-`hand_back_in`. It now returns `None` when a held Task lacks planning facts,
-and `set_rental_state` rolls back and retries. `RepoFacts` and
-`rentals::tasks_held_in` stay removed.
+`hand_back_in` returns `None` without writing when a held Task lacks planning
+facts; `set_rental_state` rolls back, rereads `held_planning_in` outside the
+write and retries. No `planning_connected_in` call remains after `BEGIN`
+(remaining callers: `held_planning_in`, `hand_back`, `ingest_ownership_marker`,
+all before the transaction). The 709e0298b6 merge after it is a ruff bump only.
 
-- `cargo test -p loopflow --lib store::sqlite::rentals::tests::`: 10/10 pass after compress, including `hand_back_writes_nothing_when_a_claim_lacks_planning_facts`.
-- Gate reruns the rental/ownership suites and clippy; results above predate this repair.
+- `cargo test -p loopflow --lib store::sqlite::rentals::tests::`: 10/10 pass, including `hand_back_writes_nothing_when_a_claim_lacks_planning_facts`.
+- Still to run at gate for fae6f73a1a: `cargo clippy --all-targets -- -D warnings` and the rental/ownership nextest filter above. The gate results above predate it.

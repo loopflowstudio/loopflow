@@ -221,14 +221,15 @@ mod tests {
         tempfile::TempDir,
         SqliteStore,
         TaskId,
-        crate::id::LfProcessId,
+        crate::id::TerminalId,
     ) {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let repo = store.ensure_repository("/repo").unwrap();
         let task = TaskId::new();
-        let viewer = store.test_lf_process();
+        let viewer = crate::id::TerminalId::new();
+        store.create_terminal(&viewer, "build").unwrap();
         store.test_session("viewed", &crate::session_record::new_artifact_key());
         {
             let conn = store.conn.lock().unwrap();
@@ -240,7 +241,7 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1,transport_lf_process_id=?1
+                "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1,held_terminal_id=?1
                  WHERE id='viewed'",
                 [&viewer],
             )
@@ -261,13 +262,13 @@ mod tests {
         let traced = statements(&store, || {
             assert!(store.pending_retirements().unwrap().contains(&task));
             store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+                .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
                 .unwrap();
             store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+                .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
                 .unwrap();
             store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
+                .record_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
                 .unwrap();
         });
         let scans = growing_scans(&store, &traced);
@@ -278,7 +279,7 @@ mod tests {
     fn an_unchanged_viewer_poll_does_not_wait_for_another_write() {
         let (home, store, task, viewer) = fixture();
         store
-            .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+            .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
             .unwrap();
         store
             .conn
@@ -289,15 +290,15 @@ mod tests {
         let writer = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
         store
-            .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+            .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
             .unwrap();
         // A changed hold needs the write lock.
         assert!(store
-            .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
+            .record_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
             .is_err());
         writer.execute_batch("ROLLBACK").unwrap();
         store
-            .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
+            .record_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
             .unwrap();
         let due: Option<i64> = store
             .conn

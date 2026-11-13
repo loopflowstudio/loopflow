@@ -177,3 +177,7 @@ questions.md); `end_earlier_owner` now shows "Ending the earlier lf (pid N)…"
 as the startup stage before its up-to-10 s wait. Checks: fmt, clippy
 `--all-targets` clean; `resume_ends_an_earlier_builds_owner_and_continues_held`
 passes.
+
+## Sync check (2026-11-12)
+
+- `cargo test -p loopflow --lib -- store::sqlite::task_retirement::tests:: store::query_plans::tests::` (LF variables unset, stdin closed): compiled after converting main's query-plan fixture to held terminals; linker warned about the large `__eh_frame` section. The test process stalled before main (`sample`: `_dyld_start`, 112K footprint, no test output) and was terminated with SIGTERM. Gate/CI must run these tests; no assertions ran.

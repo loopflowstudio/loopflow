@@ -96,12 +96,11 @@ or turn.
   immutable and `ended` has three sources.
 - The wide-window regression is taken for now: only manual reads (`--since
   30d`, `context_cost` from `FIRST_WEEK_START`, `bind_attribution`,
-  `ops/run.rs` at 0) pay it. Measured options to narrow it, for implement:
-  widening `session_turn_events` with `captured_event` (30d native branch
-  1.0 → 0.76 s; makes the old full scan covering too) and
+  `ops/run.rs` at 0) pay it. Measured options that narrow it and were not
+  taken because 7d is already faster: widening `session_turn_events` with
+  `captured_event` (30d native branch 1.0 → 0.76 s) and
   `session_events_process(lf_process_id, session_id, kind, captured_event)`
-  (30d finished 1.52 → 1.22 s; 7d ~15%). Take either only if `bench.sh` shows
-  it on 7d.
+  (30d finished 1.52 → 1.22 s; 7d ~15%).
 
 ## Implemented (Nov 13)
 
@@ -124,8 +123,6 @@ Beyond the prototype:
 - Unanalyzed plans also scanned `agent_sessions s` in the final join and
   `tasks t` in the project filter; both now `CROSS JOIN` from the small side
   (`eligible`, `projects`), here and in `session_events.rs`'s event reader.
-- Wide-window options (widened `session_turn_events`, `session_events_process`)
-  not taken: 7d is already faster.
 
 ## Exclusions
 
@@ -141,6 +138,10 @@ Beyond the prototype:
   window: no `SCAN` of `session_events` or `processes` in their plans,
   unanalyzed or with measured stats.
 - `bench.sh` reports `same` for every window, 1d ≥ 4× faster, 7d not slower.
+  Open: the implement run measured 1d finished-included at 3.4× (0.51→0.15 s,
+  load avg 57–80) and finished-excluded at 5.5×; the fresh-copy run at gate
+  settles it. Below 4× there, the per-input `ended` evaluation (Exclusions) is
+  what remains.
 
 ## Checks
 

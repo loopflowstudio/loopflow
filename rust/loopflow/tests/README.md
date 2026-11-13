@@ -827,6 +827,10 @@ changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered 
 Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 
+Ordinary fixture setup calls `support::seed_store(home)` before its first `lf`.
+It copies the build's migrated empty database and assigns a fresh local Machine
+identity. Bootstrap and upgrade proofs construct their own starting store.
+
 Every integration test binary except the deliberate real-provider `codex_live_smoke` links
 `rust/loopflow/tests/support`, whose pre-main initializer removes inherited
 `CODEX_HOME` and `CLAUDE_CONFIG_DIR`: agent shells export the developer's real

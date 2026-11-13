@@ -71,6 +71,10 @@ Session while retaining the saved provider thread and completes again on exit.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+Fixture database seeding changes include
+`test(concurrent_copies_share_one_initialized_machine)` and
+`test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:
+concurrent first opens must retain one Machine identity and every writer's rows.
 Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_workflow_readable)`
 for Task schema or trigger changes: its missing-column fixture checks that a
 planning read failure still leaves the Wave and stored Workflow readable.
@@ -133,7 +137,7 @@ fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
 calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
-`local_planning`) and can exhaust the Rust phase's 2400 s budget; name modules.
+`local_planning`) and can exhaust the Rust phase's 1800 s budget; name modules.
 Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
 pin/build reach both Desktop build paths: run `--swift --loopflow`. Desktop
 talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
@@ -158,11 +162,10 @@ the docs check on the candidate's command tree inside that boundary.
 Before gate, regenerate the portable architecture page after edits to
 `docs/dev/index.md` or its rendering, following [website/README.md](../website/README.md#testing).
 Include `docs/dev/index.html` in the change; the website suite checks it for drift.
-A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
-(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
-unless the diff reaches them; together they exceed the 2400 s Rust budget, and
-CI's partitions run them. In filtersets `-` binds tighter than `|`, so wrap
-the union first: `(test(a::) | test(b::)) - test(slow)`; without the
+A filter reaching `ops::linear::` subtracts its long on-demand fixture
+(`- test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
+unless the diff reaches it; CI's partitions run it. In filtersets `-` binds
+tighter than `|`, so wrap the union first: `(test(a::) | test(b::)) - test(slow)`; without the
 parentheses the subtraction applies only to the last term.
 A filter matching only `#[ignore]` tests (the loopback-SSH `ssh_shells::`
 suite) runs nothing and fails with `no tests to run`; run those by name with
@@ -176,10 +179,10 @@ Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 - The runner stops at sustained `syspolicyd` pressure, which can last as long
   as other checkouts keep compiling. Run its printed Rust plan by hand (build,
   the `nextest` line with the same `-E` filter, clippy), then each suite's
-  command, and record that the runner's pressure stop was bypassed. The same
-  applies when its resource preflight fails with "cannot measure
-  ~/.cache/uv: 15-second inventory deadline exceeded" while disk is ample: a
-  cold `du` of a large uv cache outlasts the deadline. In zsh, clear `LF_*`
+  command, and record that the runner's pressure stop was bypassed. A run by
+  hand keeps nextest's limits from `.config/nextest.toml`: a test is killed at
+  five minutes and the run at twenty. Don't raise them or wait past them; a
+  test that times out only under load goes to CI. In zsh, clear `LF_*`
   inline with `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /')`; a
   variable holding those flags is passed as one word and clears nothing.
 - `served_reads` compares paths, and macOS temp directories are symlinks: run it

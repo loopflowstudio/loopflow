@@ -49,10 +49,9 @@ The Rust phase builds the fixture CLI once and supplies it through
 `LOOPFLOW_TEST_LF`, so test processes run no Cargo build of their own.
 
 On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
-a test that runs past 2 minutes fails on that PR and names itself. The merge
-queue and main use `default`, which only reports slow tests. Tests that were
-already slower are listed there with their own allowance; make one fast, then
-delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
+a test that runs past 2 minutes fails on that PR and names itself. Everywhere
+else, local runs included, `default` kills a test at 5 minutes and stops the
+run at 20. Reproduce a PR failure locally with `cargo nextest run --profile pr`.
 
 Fixtures still create their own disposable Homes; a test never alters an
 installed database.

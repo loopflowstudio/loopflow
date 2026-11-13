@@ -19,6 +19,7 @@ struct Fixture {
 impl Fixture {
     fn new(provider: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(&home.path().join("machine"));
         let fixture = Self {
             _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),

@@ -1598,6 +1598,38 @@ mod tests {
     }
 
     #[test]
+    fn graph_process_task_backfills_the_read_time_pairing() {
+        let conn = open();
+        apply_before_migration(&conn, "graph_process_task");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/graph_process_task_released.sql"
+        ))
+        .unwrap();
+        apply_pending_migrations(&conn);
+
+        let tasks: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT lf_process_id,task_id FROM graph_processes ORDER BY lf_process_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let expected = [
+            ("graph-deep", Some("task_inner")),
+            ("graph-moved", Some("task_bound")),
+            ("graph-outside", None),
+            ("graph-session", Some("task_bound")),
+            ("graph-sibling", Some("task_sibling")),
+        ]
+        .map(|(graph, task)| (graph.to_string(), task.map(str::to_string)));
+        assert_eq!(tasks, expected);
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn a_newer_tail_changes_nothing_this_build_validates() {
         for sql in [
             "CREATE TABLE newer_table (id TEXT);",

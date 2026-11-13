@@ -1667,7 +1667,10 @@ impl<'a> DetailReads<'a> {
         let graphs = store
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
-        let execution = store.sqlite.graph_execution_facts(graphs.values())?;
+        let execution = store.sqlite.graph_execution_facts(
+            graphs.values(),
+            &tasks.iter().map(|task| &task.id).collect::<Vec<_>>(),
+        )?;
         let mut defaults = HashMap::<_, (String, Option<crate::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();

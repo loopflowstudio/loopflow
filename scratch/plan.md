@@ -4,7 +4,7 @@
 (`project_adoption::published_in`) and owners (`task_ownership::owners_in`) once
 for the repository's Task list instead of three queries per Task.
 
-Remaining: gate.
+Remaining: gate. Compress: README reflow only, no code change.
 
 Check: `target/debug/deps/loopflow-* store::sqlite::selections::` → 22 passed (implement).
 On 2026-11-12 an outside SIGSTOP repeatedly stopped test binaries here and in other

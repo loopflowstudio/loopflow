@@ -437,7 +437,7 @@ writes! {
     WaveSync { directory: PathBuf, wave: String } => Option<crate::lf::commands::waves::WaveDetailSnapshot>;
     { wave, .. } => {
         let refreshed = super::ops::refresh_status(directory, Some(wave))?;
-        super::waves::desktop_status(directory, refreshed.as_deref().unwrap_or(wave))?
+        super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
     },
 
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project

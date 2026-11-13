@@ -165,13 +165,24 @@ impl SqliteStore {
         repo: &str,
         destination: &str,
     ) -> StoreResult<PlanningSnapshot> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_destination(&tx, repo, destination)?;
-        route_repository(&tx, repo, destination)?;
-        let snapshot = export_in(&tx, repo, destination, true)?;
-        tx.commit()?;
-        Ok(snapshot)
+        // The export reads current ownership, so routing is bookkeeping for later
+        // moves: it takes the write lock only when an owned change is unrouted, and
+        // decoding happens after the connection is free.
+        let rows = {
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let tx = conn.transaction()?;
+            require_destination(&tx, repo, destination)?;
+            let unrouted = has_unrouted_changes(&tx, repo, destination)?;
+            let rows = export_rows(&tx, repo, destination, true)?;
+            tx.commit()?;
+            if unrouted {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                route_repository(&tx, repo, destination)?;
+                tx.commit()?;
+            }
+            rows
+        };
+        decode_snapshot(rows)
     }
     pub fn import_peer_planning(
         &self,
@@ -555,6 +566,19 @@ fn route_repository(conn: &Connection, repo: &str, destination: &str) -> StoreRe
     )?;
     Ok(())
 }
+fn has_unrouted_changes(conn: &Connection, repo: &str, destination: &str) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        &format!(
+            "{OWNED_CHANGES}
+            SELECT EXISTS(SELECT 1 FROM planning_peer_changes c
+                JOIN owned o ON o.record_table=c.record_table AND o.object_id=c.object_id
+                WHERE NOT EXISTS(SELECT 1 FROM planning_peer_routes r
+                    WHERE r.mutation_id=c.id AND r.repo=?1 AND r.destination=?2))"
+        ),
+        params![repo, destination],
+        |row| row.get(0),
+    )?)
+}
 
 /// The incoming history of every field with a change not yet routed from
 /// this destination. A change's predecessors edit the same field, so the
@@ -591,22 +615,33 @@ fn export_in(
     destination: &str,
     include_current: bool,
 ) -> StoreResult<PlanningSnapshot> {
+    decode_snapshot(export_rows(conn, repo, destination, include_current)?)
+}
+
+fn export_rows(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    include_current: bool,
+) -> StoreResult<Vec<(String, String)>> {
     let mut query = conn.prepare(
         &format!("{OWNED_CHANGES}
             SELECT c.id,c.mutation FROM planning_peer_changes c
             WHERE c.id IN (SELECT mutation_id FROM planning_peer_routes WHERE repo=?1 AND destination=?2)
             OR (?3 AND EXISTS(SELECT 1 FROM owned o WHERE o.record_table=c.record_table AND o.object_id=c.object_id))"),
     )?;
-    let changes = query
-        .query_and_then(
-            params![repo, destination, include_current],
-            |row| -> StoreResult<_> {
-                Ok((
-                    row.get(0)?,
-                    serde_json::from_str::<PlanningMutation>(&row.get::<_, String>(1)?)?,
-                ))
-            },
-        )?
+    let rows = query
+        .query_map(params![repo, destination, include_current], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+fn decode_snapshot(rows: Vec<(String, String)>) -> StoreResult<PlanningSnapshot> {
+    let changes = rows
+        .into_iter()
+        .map(|(id, mutation)| Ok((id, serde_json::from_str::<PlanningMutation>(&mutation)?)))
         .collect::<StoreResult<BTreeMap<_, _>>>()?;
     let snapshot = PlanningSnapshot { changes };
     snapshot.validate().map_err(invalid)?;

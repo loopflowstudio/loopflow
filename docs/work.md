@@ -248,6 +248,15 @@ In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline
 commands save locally and deliver on the next connected command;
 `lf task sync LOO-12` retries one Task.
 
+A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
+stay local and `lf wave sync` shows them without asking Linear, until
+`lf wave plan connect billing` connects one:
+
+```text
+$ lf wave sync billing
+billing: no Linear Initiative; showing local planning (lf wave plan connect billing)
+```
+
 ## Waves
 
 A Wave keeps a longer objective moving across many Tasks: a goal, the memory
@@ -444,7 +453,8 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
 it with its saved ID when absent; between syncs, every `lf` command looks for an
 uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave sync` refreshes from Linear first.
+changes after reading the tracker again. `lf wave sync` refreshes from Linear
+first; a Wave with no Initiative skips the refresh and still succeeds.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

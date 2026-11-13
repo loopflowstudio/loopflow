@@ -615,12 +615,12 @@ mod tests {
                     "kickoff",
                     "write-docs",
                     "implement",
-                    "compress",
                     "sync",
                     "realign",
                     "loop-or-next",
                     "concept-review",
                     "loop-or-next",
+                    "compress",
                     "qa",
                     "loop-or-next",
                     "pr-publish",
@@ -698,12 +698,12 @@ mod tests {
                 "kickoff",
                 "write-docs",
                 "implement",
-                "compress",
                 "sync",
                 "realign",
                 "loop-or-next",
                 "concept-review",
                 "loop-or-next",
+                "compress",
                 "qa",
                 "loop-or-next",
                 "pr-publish",
@@ -718,8 +718,8 @@ mod tests {
         assert_eq!(
             returns,
             [
-                (compiled.steps[6].key, &implement),
-                (compiled.steps[8].key, &implement),
+                (compiled.steps[5].key, &implement),
+                (compiled.steps[7].key, &implement),
                 (compiled.steps[10].key, &implement)
             ]
         );
@@ -729,7 +729,7 @@ mod tests {
             .steps
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
-        assert_eq!(compiled.steps[5].sources, ["pursue", "refresh"]);
+        assert_eq!(compiled.steps[4].sources, ["pursue", "refresh"]);
     }
 
     #[test]

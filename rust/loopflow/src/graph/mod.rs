@@ -1575,8 +1575,8 @@ mod tests {
         assert_eq!(
             edges(&pursue),
             [
-                ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 6),
+                ("loop-or-next".to_string(), 3),
+                ("loop-or-next".to_string(), 5),
                 ("loop-or-next".to_string(), 8)
             ]
         );

@@ -1,11 +1,11 @@
 - kickoff
 - write-docs
 - implement
-- compress
 - graph: refresh
 - loop: implement
 - concept-review
 - loop: implement
+- compress
 - qa
 - loop: implement
 - pr-publish

@@ -83,6 +83,19 @@ reading  graph_processes=6
 <tr><td>Ended 379998f7, then <code>lf -b task run &lt;T11&gt;</code></td><td class="ok">New Graph 64616986 recorded with T11's id; 379998f7 stays NULL. qa-normal Auto-Shipped; T11 done.</td></tr>
 </table>
 <p>The run started a private server under launchd (<code>com.loopflow.server.92378ac7b6480337</code>) and a <code>task-session</code> Codex stand-in; both booted out and killed afterwards.</p>
+<h2>7. Header state repair, re-walked (HEAD 7eac8cef01)</h2>
+<p>2026-11-13. Rebuilt <code>cargo build -p loopflow --bin lf</code> on this head.
+Same private Machine, fresh checkout <code>repo.live12</code>; launched
+<code>lf -b -a claude graph qa-slow</code>, then adopted it with
+<code>lf task create --worktree</code>. Task <code>0b0198</code>, Graph <code>91498d57-b08c-48be-b68d-0d1c077ee72c</code>.</p>
+<table><tr><th>Reading</th><th>Result</th></tr>
+<tr><td><code>lf task status 0b0198</code> while the Graph runs</td><td class="ok">Header <code>moving</code>; action <code>no_action</code>, with the existing-worker history command.</td></tr>
+<tr><td><code>lf task run 0b0198</code></td><td class="ok">Exit 1, same existing-worker sentence; exactly one Graph recorded in the checkout.</td></tr>
+<tr><td>Terminated the stand-in, waited for the Graph to exit, then read status again</td><td class="ok">Header <code>idle</code>; action <code>run</code>; latest Graph: &ldquo;No Task Graph has run&rdquo;.</td></tr>
+<tr><td>Both <code>--json</code> readings and the stored association</td><td class="ok">Task state <code>moving</code> then <code>idle</code>; <code>graph_processes: []</code> throughout; Graph <code>task_id</code> remains NULL.</td></tr>
+</table>
+<p>No private server or conversation started; the Graph and stand-in exited, and no CLI process from this checkout remains.
+This resolves section 6's header discrepancy. Gate and CI retain the deferred checks.</p>
 <h2>Fixed</h2>
 <p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
 (<code>lf -b graph</code> in an adopted checkout).</p>
@@ -99,9 +112,7 @@ other worktrees' test binaries sit in <code>TN</code> as well. Killed only this 
 
 <h2>Still wrong</h2>
 <ol>
-<li>While an unattached Graph runs in an adopted checkout, the status header reads <code>idle</code> even though <code>execution.state</code> is <code>running</code> and the action is <code>no_action</code>. The Task state is derived from the Task's own Graphs, so the line contradicts the one under it. Minor; the action and refusal are right.</li>
-<li>After the stand-in was killed, its <code>claude -p</code> Process stays <code>unknown</code> and the board's <code>condition.unresolved_execution</code> stays true for T10, while <code>action</code> is <code>run</code>. Same reading on any Task whose provider dies by signal; not from this change.</li>
-<li>Earlier Graphs in an adopted checkout don't count as the Task's. This is the intended semantic change.</li>
+<li value="2">After the stand-in was killed, its <code>claude -p</code> Process stays <code>unknown</code> and the board's <code>condition.unresolved_execution</code> stays true for T10, while <code>action</code> is <code>run</code>. Same reading on any Task whose provider dies by signal; not from this change.</li>
 </ol>
 <p>Fixed since section 5: adoption mid-Graph no longer recommends <code>run</code> or allows a second Graph.</p>
 </body></html>

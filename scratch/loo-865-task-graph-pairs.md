@@ -161,7 +161,7 @@ record and never changes; the table stays append-only. Tasks are never deleted
 
 Built and behind PR #1910 (CI green on the pre-adoption-repair head,
 2026-11-13). Every "Done when" item is implemented; the adopted-mid-Graph
-Task state has a focused test but no real-CLI re-walk yet.
+Task state passed its focused test and real-CLI re-walk (QA §7).
 
 - Store copy: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's
   `task_graph_pairs` over every Task, then the branch migration: 2,141 pairs on
@@ -192,14 +192,22 @@ Task state has a focused test but no real-CLI re-walk yet.
   `idle` once Graph and step exit.
 
 Remaining:
-- QA/demo: re-walk QA §6 with the current head and see the `lf task status`
-  header read `moving` while the unattached Graph runs, `idle` after.
 - Gate: affected suites (Task controls, `task_graph_launch_tests`,
   `task_github_cache_tests`, `task_execution`, waves, shared Task-state readers,
   `documented_commands`) plus clippy, on the current head. nextest processes on
   this Machine enter `TN` until SIGCONT; continue only this run's descendants.
 - Not this change: QA §6 "Still wrong" 2 (a signal-killed provider leaves
   `condition.unresolved_execution` true while `action` is `run`).
+
+`cargo build -p loopflow --bin lf` + QA §7 on 7eac8cef01 — passed:
+CLI header and JSON state `moving` → `idle` after Graph exit; history empty,
+recorded Task NULL throughout; second run refused. No walkthrough processes remain.
+
+Compress (after 7eac8cef01): `open_graph_execution` picks its Graph in one
+`match`; nothing else to reduce. The Graph-or-its-step rule stays in two forms,
+SQL in `task_state_sql` and Rust in `open_graph_execution`: sharing it needs a
+second open-Process reader that still has to ask which of the two is the Graph.
+`cargo test -p loopflow --lib -- adopting_a_checkout_with_a_running_graph_prevents_another_run` — 1 pass.
 
 ## Docs
 

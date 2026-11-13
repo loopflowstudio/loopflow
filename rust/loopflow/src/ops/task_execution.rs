@@ -142,15 +142,11 @@ pub(crate) fn open_graph_execution(
         let Some(lf) = process.as_lf() else {
             continue;
         };
-        let graph = if sqlite.runs_graph(&lf.id)? {
-            &lf.id
-        } else if let Some(parent) = lf.parent_lf_process_id.as_ref() {
-            if !sqlite.runs_graph(parent)? {
-                continue;
-            }
-            parent
-        } else {
-            continue;
+        // The Graph process itself, or one of its steps.
+        let graph = match lf.parent_lf_process_id.as_ref() {
+            _ if sqlite.runs_graph(&lf.id)? => &lf.id,
+            Some(parent) if sqlite.runs_graph(parent)? => parent,
+            _ => continue,
         };
         let state = match crate::journal::process_entry_evidence(sqlite, &process) {
             ProcessIdentityEvidence::Live => TaskExecutionState::Running,

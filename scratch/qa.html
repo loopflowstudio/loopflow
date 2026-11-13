@@ -62,6 +62,15 @@ reading  graph_processes=6
 <tr><td>Beta's Graphs</td><td class=ok>4a65a357, 99a35144 (the <code>--task</code> launch from the main checkout)</td></tr>
 </table>
 <p>Short ids resolve through <code>resolve_task_id</code> before reaching the store, so dropping the identifier subquery loses nothing. No private processes left running.</p>
+<h2>5. <code>lf task run</code>, and a Graph running when its checkout is adopted (lf 0.15.3+e2c1bcfce)</h2>
+<p>New private Machine <code>/tmp/lf-qa-865c</code>, same setup. A stand-in <code>claude</code> holds its <code>-p</code> turn open so a skill step stays live.</p>
+<table><tr><th>Did</th><th>Saw</th></tr>
+<tr><td><code>lf -b task run &lt;T1&gt;</code> (Graph <code>qa-normal</code>)</td><td class=ok>Graph 646fa53e recorded with T1's id; <code>lf task status --json</code> lists it</td></tr>
+<tr><td><code>lf -b -a claude graph qa-slow</code> in <code>repo.live2</code>, then while it runs <code>lf task create --worktree repo.live2</code> (T4)</td><td>Graph 5e7ef69d stays <code>task_id</code> NULL. T4: state <code>idle</code>, <code>graph_processes: []</code>, &ldquo;latest Graph: No Task Graph has run&rdquo;, <b>action: run</b>. The Process list shows the running Graph as <code>unknown</code>.</td></tr>
+<tr><td>Followed the recommendation: <code>lf task run &lt;T4&gt;</code></td><td class=no>Started a second Graph 98f62a9f in <code>repo.live2</code> beside the still-running 5e7ef69d. No refusal. (<code>qa-normal</code> has no interactive step, so it Auto-Shipped and marked T4 done.)</td></tr>
+<tr><td>Same with <code>repo.live3</code>/T5, then <code>lf task interrupt &lt;T5&gt;</code></td><td>Falls back to the open Process: &ldquo;interrupt recorded for Process 70f74c32 running `claude -p …`; a Task run or a `--task` Session stops on it&rdquo;. The unattached Graph kept running. The stand-in ignores interrupts, so this doesn't show whether main's Graph would have stopped.</td></tr>
+</table>
+<p>On main the cwd rule made 5e7ef69d T4's latest Graph, so <code>execution_of_latest_graph</code> read Running and the recommended action was <code>no_action</code> (&ldquo;inspect the existing worker&rdquo;, <code>task_actions.rs</code>). From the code, not a main-binary run: the installed 0.15.3 cannot open the branch-migrated store.</p>
 <h2>Fixed</h2>
 <p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
 (<code>lf -b graph</code> in an adopted checkout).</p>
@@ -77,4 +86,7 @@ other worktrees' test binaries sit in <code>TN</code> as well. Killed only this 
 </ul>
 
 <h2>Still wrong</h2>
-<p>Nothing found. Known semantic change, by design: a Task adopting a checkout later does not claim Graphs that ran there earlier (<code>scratch/questions.md</code>).</p>
+<ol>
+<li>Adopting a checkout while a Graph runs there: <code>lf task status</code> recommends <code>run</code>, and <code>lf task run</code> then starts a second Graph in the same checkout. This follows from the open choice in <code>scratch/questions.md</code> (no Graph backfill on adoption). Fixing it means either backfilling on adoption (the plan forbids an UPDATE path) or making status and <code>task run</code> look at live Processes in the checkout. Not changed here.</li>
+<li>Earlier Graphs in an adopted checkout don't count as the Task's. This is the intended semantic change.</li>
+</ol>

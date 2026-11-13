@@ -218,12 +218,15 @@ no test that waits out a production timeout except a named fallback above.
    No production seam was needed: `connection::Status` reaches the fake through
    the entrance path. Relay time is `transport::Pace` (`PACE` in release,
    `#[cfg(test)]` `TEST_PACE` thread-local); `HEARTBEAT_INTERVAL` and
-   `ATTACH_TIMEOUT` are gone, host-side `HEARTBEAT_TIMEOUT` stays. Seven cases,
+   `ATTACH_TIMEOUT` are gone, host-side `HEARTBEAT_TIMEOUT` stays. Six cases,
    0.5–3.1 s wall each on a loaded Mac (child startup ≈ 0.5 s; exhaustion and
    quiet-window cases ≈ 2 s because `Status::wait` polls in 50 ms steps). A
    mutation disabling the relay's silence check fails the quiet/silent case.
    Deleted 10 real-process tests, 218.5 s of CI medians; `transport_tests`
-   holds 95. Gaps left on purpose:
+   holds 95. Compressed: single-use `Peer` helpers inlined into `Server::accept`,
+   setup check shared. `cargo nextest run -p loopflow --lib -E
+   'test(transport::relay_tests::)'`: 7/7, 2.83 s wall (0.7–2.8 s each).
+   Gaps left on purpose:
    - Relay cases use only `Host::Terminal`; owner bridging through the server
      ticket (`bridge_existing`) stays covered by the kept
      `server_reconnect_preserves_newer_viewers_input_and_geometry` and

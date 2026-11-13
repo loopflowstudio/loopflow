@@ -137,11 +137,7 @@ fn outage_and_retry(server: &Server, desktop: &Desktop) {
     server.type_keys(b"after retry\n");
     second.read_input(b"after retry\n");
     second.exit();
-    assert_eq!(
-        std::fs::read_to_string(server.home.join("setup-attempts")).unwrap(),
-        "install server\n",
-        "Retry only reconnects"
-    );
+    server.assert_setup_ran_once();
 }
 
 /// Setup that fails reads unavailable with its diagnostic. Retry reconnects
@@ -169,11 +165,7 @@ fn failed_setup(server: &Server, desktop: &Desktop) {
     desktop.wait("connected", false, 1);
     first.exit();
     assert!(first.input.is_empty(), "{:?}", first.input);
-    assert_eq!(
-        std::fs::read_to_string(server.home.join("setup-attempts")).unwrap(),
-        "install server\n",
-        "Retry only reconnects"
-    );
+    server.assert_setup_ran_once();
 }
 
 /// Closing the pane ends a relay waiting to reconnect, and nothing else.
@@ -243,14 +235,21 @@ impl Server {
         let deadline = Instant::now() + STEP;
         loop {
             match self.entrance.accept() {
-                Ok((socket, _)) => {
+                Ok((mut socket, _)) => {
                     socket.set_nonblocking(false).unwrap();
-                    let mut peer = Peer::new(socket);
-                    peer.named();
-                    peer.socket
+                    // Read the relay's name line, then answer it as hosted.
+                    let mut byte = [0];
+                    while byte[0] != b'\n' {
+                        socket.read_exact(&mut byte).unwrap();
+                    }
+                    socket
                         .write_all(b"{\"answer\":\"hosted\",\"revision\":1}\n")
                         .unwrap();
-                    return peer;
+                    return Peer {
+                        socket,
+                        decoder: Decoder::default(),
+                        input: Vec::new(),
+                    };
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     assert!(Instant::now() < deadline, "the relay did not connect");
@@ -277,6 +276,12 @@ impl Server {
         refused
     }
 
+    /// Retry only reconnects: setup ran for the first connection alone.
+    fn assert_setup_ran_once(&self) {
+        let attempts = std::fs::read_to_string(self.home.join("setup-attempts")).unwrap();
+        assert_eq!(attempts, "install server\n", "Retry only reconnects");
+    }
+
     /// Has the parent type `keys` at the pane's terminal.
     fn type_keys(&self, keys: &[u8]) {
         let typed = self.home.join("typed");
@@ -295,21 +300,6 @@ struct Peer {
 }
 
 impl Peer {
-    fn new(socket: UnixStream) -> Self {
-        Self {
-            socket,
-            decoder: Decoder::default(),
-            input: Vec::new(),
-        }
-    }
-
-    fn named(&mut self) {
-        let mut byte = [0];
-        while byte[0] != b'\n' {
-            self.socket.read_exact(&mut byte).unwrap();
-        }
-    }
-
     /// The next request within `wait`, collecting input frames on the way.
     fn next_request(&mut self, wait: Duration) -> Option<Request> {
         let deadline = Instant::now() + wait;

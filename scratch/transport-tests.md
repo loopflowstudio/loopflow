@@ -235,8 +235,8 @@ no test that waits out a production timeout except a named fallback above.
      ports them to `relay_tests` with `TEST_PACE` or merges them into
      `local_terminal_reconnects_…`. 95 − 35 = 60 tests still have to go in
      slices 3–4.
-3. **Done (2026-11-13), server rows pending.** 24 real-process tests deleted,
-   290.5 s of CI medians; `transport_tests` holds 71 `#[test]`s. In-process homes:
+3. **Done (2026-11-13).** 32 real-process tests deleted, 366.1 s of CI
+   medians; `transport_tests` holds 63 `#[test]`s. In-process homes:
    - `store::sqlite::steers::tests::owner_retention_names_the_graph_run_or_absence_that_holds_an_idle_owner`
      (graph, step, run, completed; request and turn were already the
      `pending_requests_…` and `silent_native_turns_…` cases there).
@@ -273,10 +273,24 @@ no test that waits out a production timeout except a named fallback above.
      are `output.rs`'s `program_status_*` tests.
    Gap: a subagent's Stop (`agent_id`) is ignored by `context.rs:251`, which
    reads the callback from stdin; no in-process test covers that guard.
-   Server rows of the move table (subscriptions, mobile, tickets, held-terminal
-   starts) are being ported to `server/service.rs`, `server/mobile.rs` and
-   `registry_tests`; their real-process tests are still in the file.
-4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
+   - Server rows: `server::service::tests::` `a_task_watch_follows_renames_…`
+     (3.4 s: about 1 s waiting for the portfolio file's refresh),
+     `a_plan_watch_refreshes_…`, `session_attach_tickets_the_current_owner_…`,
+     `continuing_a_session_resumes_exactly_it_…`, and
+     `attach_ticket_bridges_a_second_connection_to_the_owner` extended (72
+     bridges leave client slots free; malformed attach); `server::mobile::tests::`
+     `restoration_keeps_the_saved_address_…`, `offline_disable_keeps_the_approval_…`,
+     `a_saved_approval_does_not_follow_a_new_tailscale_owner`;
+     `registry_tests::a_held_terminal_with_no_view_reports_that_it_waits`.
+     Store-opening tests cost 1.3–1.5 s each (`open_ephemeral` runs every
+     migration). Not ported: the socket read matching `lf desktop view show
+     --json` (both call one function).
+   `server_mobile_changes_preserve_local_connections_and_saved_disable` stays
+   real-process for listener restore, recovery after a Tailscale outage (the
+   manager's 5 s retry), logout closing remote connections, refusing a foreign
+   device and the `server.plist` check; its config branches are now redundant
+   and go in slice 4.
+4. Merge the kept real-process tests (63 → ≤ 35); remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
 
 ## Checks

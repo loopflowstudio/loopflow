@@ -2099,6 +2099,34 @@ mod frontier_tests {
     use std::path::{Path, PathBuf};
 
     #[test]
+    fn concurrent_copies_share_one_initialized_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("store.db");
+        let start = std::sync::Barrier::new(8);
+        let machines = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        super::copy_test_store(&path).unwrap();
+                        rusqlite::Connection::open(&path)
+                            .unwrap()
+                            .query_row("SELECT id FROM machines WHERE is_local=1", [], |row| {
+                                row.get::<_, String>(0)
+                            })
+                            .unwrap()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(machines.iter().all(|machine| machine == &machines[0]));
+    }
+
+    #[test]
     fn test_store_image_matches_migrations_and_copies_are_independent() {
         let migrated = rusqlite::Connection::open_in_memory().unwrap();
         crate::store::migrations::apply_sqlite(&migrated).unwrap();

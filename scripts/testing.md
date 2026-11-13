@@ -71,6 +71,10 @@ Session while retaining the saved provider thread and completes again on exit.
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and detached owner lifetimes
 exercise writers beyond the changed store module.
+Fixture database seeding changes include
+`test(concurrent_copies_share_one_initialized_machine)` and
+`test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:
+concurrent first opens must retain one Machine identity and every writer's rows.
 Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_workflow_readable)`
 for Task schema or trigger changes: its missing-column fixture checks that a
 planning read failure still leaves the Wave and stored Workflow readable.

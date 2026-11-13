@@ -26,7 +26,7 @@ use crate::session::LfSession;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 use crate::store::SharedStore;
 
-struct Machine {
+struct Table {
     repo: loopflow_test_support::TestRepo,
     store: SharedStore,
     home: SessionHome,
@@ -60,7 +60,7 @@ impl Launch {
     }
 }
 
-impl Machine {
+impl Table {
     fn new() -> Self {
         let lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
@@ -161,9 +161,9 @@ fn assert_path_eq(left: &Path, right: &Path) {
 
 #[test]
 fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository() {
-    let machine = Machine::new();
+    let table = Table::new();
     // Claude's own attended mode stays in charge unless lf is told to bypass.
-    machine.claude_settings("auto");
+    table.claude_settings("auto");
     const OFF: &str = "agent: claude\nyolo: false\nchrome: false";
     for (personal, repository, flags, bypass, chrome) in [
         (
@@ -196,12 +196,12 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
             "--chrome",
         ),
     ] {
-        machine.config(personal, repository);
-        let launch = machine.launch(flags).unwrap();
+        table.config(personal, repository);
+        let launch = table.launch(flags).unwrap();
         let row = format!("{personal:?} {repository:?} {flags:?}: {:?}", launch.args);
         assert_eq!(launch.bypass(), bypass, "{row}");
         assert_eq!(launch.chrome(), [chrome], "{row}");
-        assert_path_eq(launch.config.cwd.as_deref().unwrap(), machine.repo.path());
+        assert_path_eq(launch.config.cwd.as_deref().unwrap(), table.repo.path());
     }
     // Every harness reads the same setting; its argv mapping is a row in
     // `agent::session::tests`.
@@ -212,9 +212,9 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
             (false, &["--yolo"], true),
             (true, &["--setting", "yolo=false"], false),
         ] {
-            machine.config(None, &format!("agent: {harness}\nyolo: {repository_yolo}"));
+            table.config(None, &format!("agent: {harness}\nyolo: {repository_yolo}"));
             let flags = [&["-i"][..], flags].concat();
-            let launch = machine.launch(&flags).unwrap();
+            let launch = table.launch(&flags).unwrap();
             assert_eq!(launch.config.agent.as_deref(), Some(harness));
             assert_eq!(
                 launch.config.skip_permissions, expected,
@@ -226,8 +226,8 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
 
 #[test]
 fn unset_chrome_sends_claude_nothing_until_a_choice_is_explicit() {
-    let machine = Machine::new();
-    machine.config(None, "agent: claude");
+    let table = Table::new();
+    table.config(None, "agent: claude");
     for (flags, expected) in [
         (&["-i"][..], &[][..]),
         (&["-b"], &[]),
@@ -235,18 +235,18 @@ fn unset_chrome_sends_claude_nothing_until_a_choice_is_explicit() {
         (&["-i", "--chrome", "on"], &["--chrome"]),
         (&["-b", "--chrome", "on"], &["--chrome"]),
     ] {
-        let launch = machine.launch(flags).unwrap();
+        let launch = table.launch(flags).unwrap();
         assert_eq!(launch.chrome(), expected, "{flags:?}: {:?}", launch.args);
     }
-    let session = machine.conversation("claude", None);
-    assert!(machine.resume(&session, &[]).unwrap().chrome().is_empty());
+    let session = table.conversation("claude", None);
+    assert!(table.resume(&session, &[]).unwrap().chrome().is_empty());
 }
 
 #[test]
 fn headless_launch_carries_the_schema_and_terminal_launch_refuses_it() {
-    let machine = Machine::new();
-    machine.config(None, "agent: claude:sonnet\nyolo: false\nchrome: true");
-    let headless = machine
+    let table = Table::new();
+    table.config(None, "agent: claude:sonnet\nyolo: false\nchrome: true");
+    let headless = table
         .launch(&["-b", "--output-schema", r#"{"type":"object"}"#])
         .unwrap();
     assert_eq!(headless.pair("--input-format"), Some("stream-json"));
@@ -256,7 +256,7 @@ fn headless_launch_carries_the_schema_and_terminal_launch_refuses_it() {
     // Nobody can answer a permission prompt in a headless Run.
     assert!(headless.bypass());
 
-    let error = machine
+    let error = table
         .launch(&["-i", "--output-schema", "{}"])
         .err()
         .unwrap();
@@ -268,9 +268,9 @@ fn headless_launch_carries_the_schema_and_terminal_launch_refuses_it() {
 
 #[test]
 fn resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice() {
-    let machine = Machine::new();
-    machine.config(None, "");
-    let session = machine.conversation("claude", Some("sonnet"));
+    let table = Table::new();
+    table.config(None, "");
+    let session = table.conversation("claude", Some("sonnet"));
     for (flags, expected) in [
         (&[][..], "sonnet"),
         (&["--setting", "default_agent=codex"], "sonnet"),
@@ -278,27 +278,27 @@ fn resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice() {
         (&["--setting", "agents=[codex, claude:haiku]"], "sonnet"),
         (&["--setting", "agents=[claude:haiku, codex]"], "haiku"),
     ] {
-        let resumed = machine.resume(&session, flags).unwrap();
+        let resumed = table.resume(&session, flags).unwrap();
         assert_eq!(
             resumed.config.agent.as_deref(),
             Some(format!("claude:{expected}").as_str()),
             "{flags:?}"
         );
         assert_eq!(resumed.pair("--model"), Some(expected), "{flags:?}");
-        assert_path_eq(resumed.config.cwd.as_deref().unwrap(), machine.repo.path());
+        assert_path_eq(resumed.config.cwd.as_deref().unwrap(), table.repo.path());
     }
 }
 
 #[test]
 fn resume_applies_current_policy_and_command_line_overrides() {
-    let machine = Machine::new();
+    let table = Table::new();
     for (provider, model) in [
         ("claude", "current-model"),
         ("codex", "current-model"),
         ("opencode", "opencode/current-model"),
     ] {
-        let session = machine.conversation(provider, None);
-        machine.config(
+        let session = table.conversation(provider, None);
+        table.config(
             None,
             &format!("agent: {provider}:{model}\nyolo: false\nchrome: false"),
         );
@@ -306,7 +306,7 @@ fn resume_applies_current_policy_and_command_line_overrides() {
             (&[][..], false, "--no-chrome"),
             (&["--yolo", "--chrome", "on"], true, "--chrome"),
         ] {
-            let resumed = machine.resume(&session, flags).unwrap();
+            let resumed = table.resume(&session, flags).unwrap();
             let row = format!("{provider} {flags:?}: {:?}", resumed.args);
             assert_eq!(
                 resumed.config.agent.as_deref(),

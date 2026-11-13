@@ -38,7 +38,7 @@ const GRAPHS: [(&str, &str); 5] = [
 ];
 
 /// One registered Task (`INF-123`) whose checkout is the fixture repository.
-struct Machine {
+struct Table {
     repo: loopflow_test_support::TestRepo,
     store: SharedStore,
     task: Task,
@@ -47,7 +47,7 @@ struct Machine {
     _lock: std::sync::MutexGuard<'static, ()>,
 }
 
-impl Machine {
+impl Table {
     /// `branch` exists locally when `created`; restoration reads it.
     fn new(branch: &str, created: bool) -> Self {
         let lock = crate::journal::test_env_lock();
@@ -201,8 +201,8 @@ fn mentions(reasons: &[String], text: &str) -> bool {
 
 #[test]
 fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
-    let machine = Machine::new("explain-proof", true);
-    machine.wave_config(Some("feature"));
+    let table = Table::new("explain-proof", true);
+    table.wave_config(Some("feature"));
     let none = none_options();
     let rows: [(&str, &TaskProcessOptions, bool, Expected); 4] = [
         (
@@ -231,17 +231,13 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
         ),
     ];
     for (row, options, through, expected) in rows {
-        check(
-            row,
-            &machine.run(Some("INF-123"), options, through),
-            expected,
-        );
+        check(row, &table.run(Some("INF-123"), options, through), expected);
     }
     // Without a Wave default, the repository's `graph:`, else the builtin.
-    machine.wave_config(None);
+    table.wave_config(None);
     for (repository, expected) in [(Some("findings"), "findings"), (None, "code")] {
-        machine.repository_graph(repository);
-        let report = machine.run(Some("INF-123"), &none, false);
+        table.repository_graph(repository);
+        let report = table.run(Some("INF-123"), &none, false);
         assert!(
             matches!(&report.action, Some(TaskRunAction::Run { graph, take_up: true, .. }) if graph == expected),
             "{expected}: {report:?}"
@@ -251,7 +247,7 @@ fn run_takes_up_the_named_else_waves_else_repositorys_else_code_graph() {
 
 #[test]
 fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
-    let machine = Machine::new("explain-proof", true);
+    let table = Table::new("explain-proof", true);
     let rows: [(&str, &str, TaskProcessOptions, bool, Expected); 6] = [
         (
             "nothing after the interactive step it waits at",
@@ -304,23 +300,21 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
         ),
     ];
     for (row, at, options, through, expected) in rows {
-        machine.capture(at);
+        table.capture(at);
         check(
             row,
-            &machine.run(Some("INF-123"), &options, through),
+            &table.run(Some("INF-123"), &options, through),
             expected,
         );
     }
-    machine.capture("end");
-    let text = machine
-        .run(Some("INF-123"), &from("review"), false)
-        .render();
+    table.capture("end");
+    let text = table.run(Some("INF-123"), &from("review"), false).render();
     assert!(
         text.contains("graph captured: wait at review; run nothing"),
         "{text}"
     );
-    machine.capture("review");
-    let text = machine.run(None, &none_options(), false).render();
+    table.capture("review");
+    let text = table.run(None, &none_options(), false).render();
     assert!(
         text.contains("graph captured: nothing remains; reach end"),
         "{text}"
@@ -330,7 +324,7 @@ fn run_on_a_captured_graph_waits_runs_or_ends_from_its_position() {
 
 #[test]
 fn run_names_option_impediments_selection_and_missing_evidence() {
-    let machine = Machine::new("explain-proof", true);
+    let table = Table::new("explain-proof", true);
     let option = |directive: Option<&str>, name: Option<&str>| TaskProcessOptions {
         directive: directive.map(Into::into),
         name: name.map(Into::into),
@@ -345,29 +339,29 @@ fn run_names_option_impediments_selection_and_missing_evidence() {
         ),
         (option(None, Some("invalid/name")), "workspace name"),
     ] {
-        let report = machine.run(Some("INF-123"), &options, false);
+        let report = table.run(Some("INF-123"), &options, false);
         assert!(
             mentions(&report.impediments, expected),
             "{expected}: {report:?}"
         );
     }
     // Named or inferred from the checkout, the same Task and action.
-    let explicit = machine.run(Some("INF-123"), &none_options(), false);
-    let inferred = machine.run(None, &none_options(), false);
+    let explicit = table.run(Some("INF-123"), &none_options(), false);
+    let inferred = table.run(None, &none_options(), false);
     assert_eq!(source(&explicit.resolution.task), "explicit");
     assert_eq!(source(&inferred.resolution.task), "checkout");
     assert_eq!(source(&explicit.resolution.execution_machine), "owner");
     assert_eq!(
         explicit.resolution.task,
-        ContextFact::bound(&machine.task.id, "explicit")
+        ContextFact::bound(&table.task.id, "explicit")
     );
     assert_eq!(
         (&explicit.action, &explicit.impediments),
         (&inferred.action, &inferred.impediments)
     );
     // A Task with no checkout reads definitions before preparation.
-    let unplaced = machine.unplaced();
-    let report = machine.run(Some(unplaced.id.as_str()), &none_options(), false);
+    let unplaced = table.unplaced();
+    let report = table.run(Some(unplaced.id.as_str()), &none_options(), false);
     assert_eq!(
         source(&report.resolution.execution_machine),
         "owning_machine:this_machine"
@@ -412,13 +406,13 @@ fn previews_without_a_readable_registry_are_unavailable_and_create_nothing() {
 
 #[test]
 fn checkout_reuses_a_present_checkout_and_names_option_impediments() {
-    let machine = Machine::new("checkout-proof", true);
-    let explicit = machine.checkout(Some("INF-123"), &none_options());
+    let table = Table::new("checkout-proof", true);
+    let explicit = table.checkout(Some("INF-123"), &none_options());
     let action = explicit.action.clone().unwrap();
     assert_eq!(action.behavior, TaskCheckoutBehavior::Reuse);
     assert!(explicit.impediments.is_empty(), "{explicit:?}");
     assert!(explicit.render().contains("reuse recorded"));
-    let inferred = machine.checkout(None, &none_options());
+    let inferred = table.checkout(None, &none_options());
     assert_eq!(source(&inferred.resolution.task), "checkout");
     assert_eq!(
         (&inferred.action, &inferred.impediments),
@@ -447,7 +441,7 @@ fn checkout_reuses_a_present_checkout_and_names_option_impediments() {
             "has no Task",
         ),
     ] {
-        let report = machine.checkout(Some("INF-123"), &options);
+        let report = table.checkout(Some("INF-123"), &options);
         assert!(
             mentions(&report.impediments, expected),
             "{expected}: {report:?}"
@@ -457,12 +451,12 @@ fn checkout_reuses_a_present_checkout_and_names_option_impediments() {
 
 #[test]
 fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
-    let machine = Machine::new("restore-proof", false);
-    let checkout = machine.repo.path().join("missing-checkout");
-    let db = rusqlite::Connection::open(machine.home.path().join("loopflow.db")).unwrap();
+    let table = Table::new("restore-proof", false);
+    let checkout = table.repo.path().join("missing-checkout");
+    let db = rusqlite::Connection::open(table.home.path().join("loopflow.db")).unwrap();
     db.execute("UPDATE tasks SET worktree=?1", [checkout.to_str().unwrap()])
         .unwrap();
-    let sqlite = &machine.store.sqlite;
+    let sqlite = &table.store.sqlite;
     let local = sqlite.local_machine().unwrap().id;
     let reset = || {
         db.execute(
@@ -471,7 +465,7 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
         )
         .unwrap()
     };
-    let explain = || machine.checkout(Some(machine.task.id.as_str()), &none_options());
+    let explain = || table.checkout(Some(table.task.id.as_str()), &none_options());
 
     reset();
     let report = explain();
@@ -501,7 +495,7 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
     sqlite
         .add_machine(&peer, "must-not-contact.invalid", "peer")
         .unwrap();
-    sqlite.handoff_task(&machine.task.id, &peer).unwrap();
+    sqlite.handoff_task(&table.task.id, &peer).unwrap();
     let report = explain();
     assert!(
         matches!(&report.resolution.execution_machine, ContextFact::Bound { value, .. } if value == peer.as_str()),
@@ -515,9 +509,9 @@ fn checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote() {
 
 #[test]
 fn checkout_proposes_a_path_for_a_task_without_one() {
-    let machine = Machine::new("checkout-proof", true);
-    let unplaced = machine.unplaced();
-    let report = machine.checkout(Some(unplaced.id.as_str()), &none_options());
+    let table = Table::new("checkout-proof", true);
+    let unplaced = table.unplaced();
+    let report = table.checkout(Some(unplaced.id.as_str()), &none_options());
     let action = report.action.clone().unwrap();
     assert_eq!(action.behavior, TaskCheckoutBehavior::Prepare, "{report:?}");
     assert!(report.impediments.is_empty(), "{report:?}");

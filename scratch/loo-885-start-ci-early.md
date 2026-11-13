@@ -107,8 +107,11 @@ Working context after the clear:
 
 ## State (2026-11-13)
 
-Skills and docs are written; no Rust or workflow change. The branch is level
-with origin/main and has no PR, so gate's first `lf pr publish` creates it.
+Skills and docs are written; no Rust or workflow change. Concept review's two
+`.lf/skills/gate.md` edits (headless assumptions go to the report and PR body
+after the clear; the restoring revert stays local while the PR keeps the
+candidate head) are in b9064c3cf4. The branch is 4 ahead of origin/main, not
+behind, and has no PR, so gate's first `lf pr publish` creates it.
 Remaining: packaging and live gate acceptance, both in delivery.
 
 ## Alternatives

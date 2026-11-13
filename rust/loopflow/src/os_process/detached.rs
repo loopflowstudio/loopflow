@@ -88,8 +88,9 @@ pub(crate) struct Launched {
     lines: BufReader<io::PipeReader>,
 }
 
-/// Start `command` in its own session with stdin from `/dev/null`, dropping
-/// every descriptor this process inherited except those `inherit` hands on.
+/// Start `command` in its own session with stdin from `/dev/null` unless
+/// `inherit` sets another, dropping every descriptor this process inherited
+/// except those `inherit` hands on.
 /// The caller sets its output.
 pub(crate) fn spawn(mut command: Command, inherit: &dyn Fn(&mut Command)) -> Result<Launched> {
     let (reader, writer) = io::pipe()?;
@@ -145,9 +146,15 @@ impl Launched {
 }
 
 /// Start `lf` again with `argv` in `cwd`, detached, and print its output here
-/// until it exits or lets this process go. Killing this process leaves the
-/// work running. Returns the exit code to report.
-pub(crate) fn run(argv: &[String], cwd: &Path, inherit: &dyn Fn(&mut Command)) -> Result<u8> {
+/// until it exits or lets this process go. With `input`, what this process
+/// reads on stdin is passed on to the child while this process runs. Killing
+/// this process leaves the work running. Returns the exit code to report.
+pub(crate) fn run(
+    argv: &[String],
+    cwd: &Path,
+    input: bool,
+    inherit: &dyn Fn(&mut Command),
+) -> Result<u8> {
     let directory = crate::transport::private_directory()?;
     let stdout = tempfile::NamedTempFile::new_in(&directory)?;
     let stderr = tempfile::NamedTempFile::new_in(&directory)?;
@@ -161,10 +168,19 @@ pub(crate) fn run(argv: &[String], cwd: &Path, inherit: &dyn Fn(&mut Command)) -
         .current_dir(cwd)
         .stdout(stdout.as_file().try_clone()?)
         .stderr(stderr.as_file().try_clone()?);
-    let launched = spawn(command, inherit)?;
+    let launched = spawn(command, &|command| {
+        inherit(command);
+        if input {
+            command.stdin(Stdio::piped());
+        }
+    })?;
     // The open descriptors keep the output; no file is left behind.
     drop((stdout, stderr));
     let Launched { mut child, lines } = launched;
+    if let Some(mut stdin) = child.stdin.take() {
+        // Ends with this process's stdin or the child's; neither waits on it.
+        std::thread::spawn(move || io::copy(&mut io::stdin().lock(), &mut stdin));
+    }
     let (signal, signals) = mpsc::channel();
     std::thread::spawn(move || {
         for line in lines.lines() {

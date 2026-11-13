@@ -501,8 +501,10 @@ ship restarts read the ID and append the child's output to
 `logs/detached.log`; a pipe that closes without an ID leaves delivery unknown,
 and nothing is launched again. A `-b` or piped Work command prints the child's
 stdout and stderr as they grow and exits with its status, or with success
-once a Task run or ship lets it go after naming its Graph log. Killing that
-caller leaves the work running.
+once a Task run or ship lets it go after naming its Graph log. A piped
+`lf session resume` of a Task conversation also passes its stdin on while it
+waits, so piped input reaches the agent. Killing that caller leaves the work
+running.
 
 No PTY, view protocol or screen is involved. Hooks, turn recording and
 steers work as they do for any headless run; the child's own process records

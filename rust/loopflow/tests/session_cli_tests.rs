@@ -961,9 +961,7 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
 printf 'latest agent message: done\n'
 "#,
         );
-        if provider == "codex" {
-            install_codex_fixture(home.path(), None);
-        }
+        // A bare launch runs plain `codex`, configured by argv like Claude.
         write_script(
             "cmux",
             r#"#!/bin/sh
@@ -1069,7 +1067,6 @@ exit 2
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
-                assert!(args.contains("--remote\n"), "{args}");
             }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);

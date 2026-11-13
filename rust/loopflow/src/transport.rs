@@ -325,7 +325,10 @@ fn delegate(
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
     let cwd = std::env::current_dir()?;
     if place == Place::Detached {
-        let code = crate::os_process::detached::run(&argv, &cwd, &|command| {
+        // A reopened conversation reads what its caller pipes in; other work
+        // never consumes this process's stdin.
+        let input = preview_session.is_some() && !io::stdin().is_terminal();
+        let code = crate::os_process::detached::run(&argv, &cwd, input, &|command| {
             // No terminal shows detached work; it claims none.
             command
                 .env_remove(STREAM_ENV)

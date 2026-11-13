@@ -1108,13 +1108,13 @@ impl SqliteStore {
             let conn = conn.savepoint()?;
             // `windowed` holds every capture that could start or end in the
             // window, read by range from the window indexes; the exact filters
-            // below decide. Each arm is one source of `started` or `ended`.
+            // below decide. Each arm is one source of `started` or `ended`: a
+            // new source below needs its own arm here, or inputs it places in
+            // the window silently drop out of every read.
             // Partial index conditions repeat verbatim so the planner can use
             // them, and `CROSS JOIN` keeps the window as the outer loop. A `+`
             // on an arm's output stops SQLite merging the UNION in index order,
             // which it would get by scanning the whole index instead of the range.
-            // A new source of `started` or `ended` below needs its own arm here,
-            // or inputs it places in the window silently drop out of every read.
             let mut query = conn.prepare("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND kind='captured' AND observed_at>=?5

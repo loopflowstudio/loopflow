@@ -165,12 +165,8 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- store::query_plans:: server::boundary:: store::sqlite::sessions::metadata_tests::history_windows` — pass (implement).
-- `cargo test -p loopflow --lib store::sqlite::session` — 28 pass (implement).
-- `cargo clippy --all-targets -- -D warnings` — clean (implement).
-- `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass (compress).
+- `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass; clippy clean (compress).
 - `bench.sh /tmp/loo866/store.db` (load avg 57–80) — `same` all six windows; 1d 0.55→0.10 s, 0.51→0.15 s; 7d 0.46→0.40 s, 0.61→0.30 s; 30d 1.04→1.55 s; whole 0.93→1.23 s (implement; rerun on a fresh copy for the PR).
-- `cargo test -p loopflow --lib history_windows`, `session_history_reads_plan_by_window`, clippy — pass after the terminal case (implement).
 - `check_migrations.py`, `documented_commands::` for `docs/dev/data.md` — gate.
 
 ## Docs

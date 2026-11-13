@@ -462,7 +462,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) ->
         "claude"
     };
     format!(
-        "Nothing else may take the step: an `agent` choice or `-a` pins it to {provider}, or there is no `agents` list. `lf set --global agents {provider},{another}` lets a step move on"
+        "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
     )
 }
 
@@ -3446,9 +3446,9 @@ trust_level = "trusted"
         assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
         // What it records names the way out; with an order, what was tried.
         let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
-        assert!(
-            advice.contains("`lf set --global agents codex,claude`"),
-            "{advice}"
+        assert_eq!(
+            advice,
+            "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents codex,claude`"
         );
         let ordered = AgentConfig {
             fallback_agents: vec!["claude".into()],

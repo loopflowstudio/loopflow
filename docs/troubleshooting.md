@@ -257,6 +257,8 @@ The stop line and `lf task status` say whether its order ran out or it had no
 next entry. Use
 `lf config settings --skill <name> --explain` to inspect the order and any
 `agent` choice or `-a` that pins its provider.
+Change the pin to select another provider, or remove it to allow `agents`
+fallbacks. Add entries if the list is missing or has only one entry.
 After a reset or an `agents` change, `lf task run <ID>` starts the run again
 at the stopped step; earlier steps stay done.
 

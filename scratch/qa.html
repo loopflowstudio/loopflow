@@ -24,6 +24,7 @@ Stopped: Nothing is left in its order after claude:opus, claude:sonnet; add anot
 Error: agent stopped after account subscription limit. Check …/runs/92/… for details.
 Error: qa-work: claude_result: You've hit your usage limit for sonnet. Upgrade or try again later.</pre>
 <p><code>docs/config.md</code> said bare <code>claude</code> always falls through its other models; that now holds only with nothing behind it in <code>agents</code>. Reworded. <code>cargo test -p loopflow --lib agent::tests::</code>: 45 passed; <code>cargo fmt --check</code> clean.</p>
+<p>At QA time, stop advice for an <code>-a</code> pin suggested <code>lf set --global agents …</code>, which cannot help a pinned command. Corrected afterward: change or remove the pin separately from adding fallback entries; missing and one-entry lists are both named. The focused regression checks this wording.</p>
 
 <h2>Not reached</h2>
 <ul>
@@ -36,5 +37,4 @@ Error: qa-work: claude_result: You've hit your usage limit for sonnet. Upgrade o
 <ol>
 <li>The deprecated-spelling warning prints once per lf process, and a headless Graph runs several: three identical lines in scenario 6. Every config warning behaves this way; LOO-875 deletes this one.</li>
 <li><code>lf set</code> prints <code>saved; NextLaunch</code> (a Debug enum name) for every key. Present before this change.</li>
-<li>Stop advice for an <code>-a</code> pin suggests <code>lf set --global agents …</code>, which cannot help a pinned command (already listed in <code>scratch/questions.md</code>).</li>
 </ol>

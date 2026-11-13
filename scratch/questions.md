@@ -56,9 +56,10 @@ agent needed by automatic restart callers.
 
 ### Remaining verification
 
-- Verify the production recording path through a real provider refusal in
-  demo. The Graph regression injects the stop record; the agent-loop tests
-  script provider results. Neither establishes the whole path together.
+- Demo still needs real managed-login, Codex and Task-path refusal checks.
+  QA exercised Claude refusals through the production Graph recording path
+  using a stream-json stand-in (`scratch/qa.html`); the Task regression
+  injects its stop record. Real-provider checks have not passed.
 - Gate still owns the affected suites below. The four product choices remain
   open for demo; the preceding retry-stop direction did not resolve them.
 
@@ -68,6 +69,15 @@ LOO-875 removes the deprecated `default_agent` comma alias,
 `old_default_agent_warning`, `_split_agent_list`, and their exclusive tests
 once `agents` ships. Keep `config::agent_list`: comma strings are also a
 supported spelling of `agents` in files, `lf set` and `--setting`.
+
+### Delete — do not maintain
+
+This wording pass replaces `_limit_stop_advice`'s claim that configuring
+`agents` alone lets a pinned step move, and its omission of one-entry lists.
+Keep the existing no-fallback and exhausted-order branches and regression;
+no configuration plumbing or additional deletion is needed.
+Compression keeps the advice as two actions: change/remove a pin, then add
+fallback entries if needed. Troubleshooting uses the same distinction.
 
 On 2026-11-12, realign rechecked `origin/main`: `git fetch origin` still found
 `78bb9f5564`, already merged in `d1184a5120`; `git log HEAD..origin/main`
@@ -142,10 +152,9 @@ apply to it and still would not.
   provider account") remains an ordinary failure that can be relaunched. After
   a limit result, it advances through remaining agents before stopping.
 - The agent loop cannot distinguish a pin, an absent list or a one-entry list,
-  so its advice names a pin or absent list even for `agents: [codex]`. A list
-  with fallback entries instead names the entries tried. That advice also
-  needs to be read alongside the pin: adding `agents` does not remove `agent`
-  or `-a`.
+  so its advice covers each condition: change the pin, or remove it and
+  configure fallback entries; without a pin, configure fallbacks for a missing
+  or one-entry list. A list with fallback entries names the entries tried.
 - Status reads moves from the existing `; continuing on <agent>` suffix;
   the stop uses the same record, without a migration.
 
@@ -185,6 +194,7 @@ change. Implement has no new direction.
 
 ## Checks and handoff
 
+- Advice correction and compression: `cargo test -p loopflow --lib agent::tests::a_pinned_agent_refused_at_launch_fails_with_its_limit` (LF variables unset, stdin closed): 1 passed after the shorter wording; existing linker `__eh_frame` advisory. `cargo fmt --check` and `git diff --check` passed. Gate owns affected suites and clippy.
 - Earlier checks (152 implement tests, 67 after compression, formatting and
   clippy) are recorded in `d1184a5120:scratch/questions.md`; those results
   precede the `78bb9f5564` merge. Gate still checks the combined tree.

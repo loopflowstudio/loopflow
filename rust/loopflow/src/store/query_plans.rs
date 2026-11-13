@@ -8,6 +8,8 @@
 
 use std::cell::RefCell;
 
+use rusqlite::OptionalExtension;
+
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
@@ -26,86 +28,103 @@ const GROWING: [&str; 12] = [
     "tasks",
 ];
 
-/// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 16,489
-/// Sessions, 166,864 Processes, 266,075 Session events and 36,055 planning
-/// changes (November 12). `steers` and `task_retirements` are left to the
-/// fixture, which analyzes them as built so partial indexes are measured.
+/// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
+/// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
+/// changes and 3,362 steers (November 13). Indexes newer than that store's
+/// schema were built and analyzed on a copy of it.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
-         'planning_peer_changes','planning_peer_routes','repository_plans');
+         'planning_peer_changes','planning_peer_routes','repository_plans','steers',
+         'task_retirements');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
-         ('agent_sessions','agent_sessions_agent_process','16454 1'),
-         ('agent_sessions','agent_sessions_held_terminal','66 2'),
+         ('agent_sessions','agent_sessions_agent_process','17171 1'),
+         ('agent_sessions','agent_sessions_held_terminal','85 2'),
          ('agent_sessions','agent_sessions_primary_repository','9 1'),
-         ('agent_sessions','agent_sessions_provider_thread','15649 1'),
          ('agent_sessions','agent_sessions_primary_wave','15 1'),
-         ('agent_sessions','agent_sessions_transport','11054 4'),
-         ('agent_sessions','conversation_task_inventory','16489 32 3 1'),
-         ('agent_sessions','open_sessions','620 1 1'),
-         ('agent_sessions','session_inventory','16489 8245 2 2 1'),
-         ('agent_sessions','session_repo_inventory','16489 750 532 2 2 1'),
-         ('agent_sessions','sqlite_autoindex_agent_sessions_1','16489 1'),
-         ('agent_sessions','sqlite_autoindex_agent_sessions_2','16489 1'),
-         ('planning_peer_changes','planning_peer_changes_clock','36055 1'),
-         ('planning_peer_changes','planning_peer_changes_object','36055 7 2'),
-         ('planning_peer_changes','sqlite_autoindex_planning_peer_changes_1','36055 1'),
+         ('agent_sessions','agent_sessions_provider_thread','16361 1'),
+         ('agent_sessions','agent_sessions_transport','11691 4'),
+         ('agent_sessions','agent_sessions_wave','10438 498'),
+         ('agent_sessions','conversation_task_inventory','17206 34 3 1'),
+         ('agent_sessions','open_sessions','644 1 1'),
+         ('agent_sessions','session_inventory','17206 401 3 2 1'),
+         ('agent_sessions','session_repo_inventory','17206 101 58 1 1 1'),
+         ('agent_sessions','sqlite_autoindex_agent_sessions_1','17206 1'),
+         ('agent_sessions','sqlite_autoindex_agent_sessions_2','17206 1'),
+         ('planning_peer_changes','planning_peer_changes_clock','37312 1'),
+         ('planning_peer_changes','planning_peer_changes_object','37312 3 2'),
+         ('planning_peer_changes','sqlite_autoindex_planning_peer_changes_1','37312 1'),
          ('planning_peer_routes','planning_peer_routes_mutation','4220 1'),
-         ('planning_peer_routes','sqlite_autoindex_planning_peer_routes_1','4220 844 704 1'),
-         ('processes','agent_process_attachment','17262 113'),
-         ('processes','agent_process_session','17262 1'),
-         ('processes','agent_process_unfinished','68 1'),
-         ('processes','processes_cwd','166864 159'),
-         ('processes','processes_held_terminal','97 3'),
-         ('processes','processes_parent','166864 7 2 1'),
-         ('processes','processes_receipt_locator','166864 1'),
-         ('processes','processes_recent','166864 2 1'),
-         ('processes','processes_trace','166864 35 2 1'),
+         ('planning_peer_routes','sqlite_autoindex_planning_peer_routes_1','4220 401 267 1'),
+         ('processes','agent_process_attachment','17979 4'),
+         ('processes','agent_process_unfinished','77 1'),
+         ('processes','processes_agent_session','18327 1'),
+         ('processes','processes_attachment_exit','17586 1'),
+         ('processes','processes_cwd','169394 134'),
+         ('processes','processes_held_terminal','135 3'),
+         ('processes','processes_parent','169394 7 1 1'),
+         ('processes','processes_receipt_locator','169394 1'),
+         ('processes','processes_recent','169394 2 1'),
+         ('processes','processes_trace','169394 81 2 1'),
+         ('processes','processes_unfinished','768 2 1'),
          ('processes','processes_unrecorded_ancestry','0 0'),
-         ('processes','processes_unfinished','741 2 1'),
-         ('processes','sqlite_autoindex_processes_1','166864 1'),
+         ('processes','sqlite_autoindex_processes_1','169394 1'),
          ('projects','idx_projects_wave','63 3 1'),
          ('projects','idx_projects_wave_updated','63 3 2'),
          ('projects','sqlite_autoindex_projects_1','63 1'),
          ('projects','sqlite_autoindex_projects_2','63 2'),
          ('repository_plans','repository_selected_plan','53 1'),
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
-         ('session_events','session_capture_caller','16643 15'),
-         ('session_events','session_capture_key','16643 1'),
-         ('session_events','session_event_input','20248 2 2'),
-         ('session_events','session_event_receipt','266075 17 9 8 3 1'),
-         ('session_events','session_events_captured_event','188608 12'),
-         ('session_events','session_events_history','266075 17 1'),
-         ('session_events','session_events_process','61597 4 4'),
-         ('session_events','session_events_provider_session','19846 2'),
-         ('session_events','session_events_task','152437 289'),
-         ('session_events','session_events_turn','266075 17 9 8 1'),
-         ('session_events','session_input_membership','16623 1 1 1'),
-         ('session_events','session_observation_receipt','168288 11 1'),
-         ('session_events','session_process_membership','61597 4 4'),
-         ('session_events','session_turn_events','81144 6 6 4 1 1'),
-         ('session_events','session_events_wave','112013 5092'),
-         ('session_steers','session_steers_steer','43213 24'),
-         ('session_steers','sqlite_autoindex_session_steers_1','43213 6 1'),
-         ('steer_adapters','sqlite_autoindex_steer_adapters_1','13328 1'),
-         ('steer_adapters','sqlite_autoindex_steer_adapters_2','13328 1'),
-         ('steer_batches','sqlite_autoindex_steer_batches_1','11004 1'),
-         ('steer_batches','steer_batches_boundary','10976 2 1'),
-         ('steer_batches','steer_batches_session','11004 2 2 1'),
-         ('steer_deliveries','sqlite_autoindex_steer_deliveries_1','42524 6 1 1'),
-         ('steer_deliveries','steer_deliveries_batch','42524 4'),
-         ('steer_deliveries','steer_deliveries_steer','42524 25'),
-         ('tasks','idx_tasks_issue_identifier','1185 1'),
-         ('tasks','idx_tasks_project','1185 22 1'),
-         ('tasks','idx_tasks_repository','1185 149 21 2'),
-         ('tasks','idx_tasks_updated','1185 2'),
-         ('tasks','idx_tasks_worktree','1185 2'),
-         ('tasks','sqlite_autoindex_tasks_1','1185 1'),
-         ('tasks','sqlite_autoindex_tasks_2','1185 1'),
-         ('tasks','tasks_branch','1185 2'),
-         ('tasks','tasks_checkout_root','838 838 1'),
-         ('tasks','tasks_primary_session','299 1'),
-         ('tasks','tasks_ship_process','156 1'),
+         ('session_events','session_capture_caller','17360 15'),
+         ('session_events','session_capture_key','17360 1'),
+         ('session_events','session_event_input','20942 15 14'),
+         ('session_events','session_event_receipt','278035 51 37 20 7 1'),
+         ('session_events','session_events_captured_event','197461 8'),
+         ('session_events','session_events_history','278035 51 1'),
+         ('session_events','session_events_process','64427 4 4'),
+         ('session_events','session_events_provider_session','20583 2'),
+         ('session_events','session_events_task','159771 81'),
+         ('session_events','session_events_turn','278035 51 37 20 1'),
+         ('session_events','session_events_wave','112829 201'),
+         ('session_events','session_input_membership','17340 2 1 1'),
+         ('session_events','session_observation_receipt','176447 41 1'),
+         ('session_events','session_process_membership','64427 10 3'),
+         ('session_events','session_provider_transitions','3805 1 1'),
+         ('session_events','session_turn_events','84228 45 45 3 1 1'),
+         ('session_steers','session_steers_steer','43400 34'),
+         ('session_steers','sqlite_autoindex_session_steers_1','43400 6 1'),
+         ('steer_adapters','sqlite_autoindex_steer_adapters_1','13914 1'),
+         ('steer_adapters','sqlite_autoindex_steer_adapters_2','13914 1'),
+         ('steer_batches','sqlite_autoindex_steer_batches_1','11143 1'),
+         ('steer_batches','steer_batches_agent_process','11163 2'),
+         ('steer_batches','steer_batches_boundary','11078 2 1'),
+         ('steer_batches','steer_batches_session','11143 5 5 1'),
+         ('steer_deliveries','sqlite_autoindex_steer_deliveries_1','42654 6 1 1'),
+         ('steer_deliveries','steer_deliveries_batch','42654 4'),
+         ('steer_deliveries','steer_deliveries_steer','42654 34'),
+         ('steers','sqlite_autoindex_steers_1','3349 1'),
+         ('steers','sqlite_autoindex_steers_2','3349 1 1'),
+         ('steers','steers_project','1 1'),
+         ('steers','steers_repo','0 0'),
+         ('steers','steers_session','435 3'),
+         ('steers','steers_task','2913 5 1'),
+         ('steers','steers_wave','0 0 0'),
+         ('task_retirements','sqlite_autoindex_task_retirements_1','258 1'),
+         ('task_retirements','task_retirements_unfinished','179 1'),
+         ('tasks','idx_tasks_issue_identifier','1219 1'),
+         ('tasks','idx_tasks_project','1219 20 1'),
+         ('tasks','idx_tasks_repository','1219 134 22 2'),
+         ('tasks','idx_tasks_updated','1219 2'),
+         ('tasks','idx_tasks_worktree','1219 10'),
+         ('tasks','sqlite_autoindex_tasks_1','1219 1'),
+         ('tasks','sqlite_autoindex_tasks_2','1219 1'),
+         ('tasks','tasks_abandoned_checkout','179 179'),
+         ('tasks','tasks_branch','1219 10'),
+         ('tasks','tasks_checkout_machine','1224 612'),
+         ('tasks','tasks_checkout_root','858 401 1'),
+         ('tasks','tasks_parent_pr','11 2'),
+         ('tasks','tasks_primary_session','319 1'),
+         ('tasks','tasks_ship_process','168 1'),
          ('waves','idx_waves_active_locator','61 2 2 1'),
          ('waves','idx_waves_parent','61 61'),
          ('waves','idx_waves_superseded_by','0 0'),
@@ -143,21 +162,18 @@ pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String>
     TRACED.with(|traced| traced.borrow_mut().take().unwrap())
 }
 
+/// A partial index over a live subset (open Sessions, unfinished Processes)
+/// stays this small because concurrency bounds it; one over history does not.
+const LIVE_SUBSET_ROWS: i64 = 1_000;
+
 /// Each plan step of `statements` that scans a growing table, unanalyzed and
-/// then measured. Leaves `store` analyzed.
+/// then measured. Walking a partial index counts as a scan once the index
+/// holds `LIVE_SUBSET_ROWS` in the measured statistics. Leaves `store`
+/// analyzed.
 pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<String> {
     let conn = store.conn.lock().unwrap();
-    // A partial index holds only its live subset (unfinished Processes, open
-    // retirements), so walking it is not a scan of the growing table.
-    let partial: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND sql LIKE '% WHERE %'")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    let plan = |stats: &str| {
-        let mut scans = Vec::new();
+    let plan = |stats: &'static str| {
+        let mut steps = Vec::new();
         for sql in statements {
             let keyword = sql.split_whitespace().next().unwrap_or("");
             if !["SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE"]
@@ -181,8 +197,12 @@ pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<S
                 }
             }
             let mut explain = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            // Lookups planned from the schema keep their `?` placeholders.
+            let unbound = vec![rusqlite::types::Null; explain.parameter_count()];
             let details = explain
-                .query_map([], |row| row.get::<_, String>(3))
+                .query_map(rusqlite::params_from_iter(unbound), |row| {
+                    row.get::<_, String>(3)
+                })
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
@@ -190,28 +210,80 @@ pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<S
                 let table = detail
                     .strip_prefix("SCAN ")
                     .and_then(|rest| rest.split_whitespace().next());
-                let through_partial = detail
-                    .split_whitespace()
-                    .skip_while(|word| *word != "INDEX")
-                    .nth(1)
-                    .is_some_and(|index| partial.iter().any(|name| name == index));
-                if table.is_some_and(|table| growing.contains(&table)) && !through_partial {
-                    scans.push(format!("{stats}: {detail}\n  in {sql}"));
+                if table.is_some_and(|table| growing.contains(&table)) {
+                    let index = detail
+                        .split_whitespace()
+                        .skip_while(|word| *word != "INDEX")
+                        .nth(1)
+                        .map(str::to_owned);
+                    steps.push((stats, detail, index, sql));
                 }
             }
         }
-        scans
+        steps
     };
-    let mut found = plan("unanalyzed");
+    let mut steps = plan("unanalyzed");
     conn.execute_batch("ANALYZE").unwrap();
     conn.execute_batch(MEASURED).unwrap();
-    found.extend(plan("analyzed"));
-    found
+    steps.extend(plan("analyzed"));
+    // An index's size is a property of the data, so both passes judge a walk
+    // by the measured statistics.
+    let partial_rows = |index: &str| -> Option<i64> {
+        conn.query_row(
+            "SELECT CAST(s.stat AS INTEGER) FROM sqlite_master m
+             JOIN sqlite_stat1 s ON s.idx = m.name
+             WHERE m.type = 'index' AND m.name = ?1 AND m.sql LIKE '% WHERE %'",
+            [index],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+    };
+    steps
+        .into_iter()
+        .filter_map(
+            |(stats, detail, index, sql)| match index.as_deref().and_then(partial_rows) {
+                Some(rows) if rows < LIVE_SUBSET_ROWS => None,
+                Some(rows) => Some(format!(
+                    "{stats}: {detail} ({rows} rows measured)\n  in {sql}"
+                )),
+                None => Some(format!("{stats}: {detail}\n  in {sql}")),
+            },
+        )
+        .collect()
+}
+
+/// The lookup SQLite runs for each foreign key whose child table grows when a
+/// parent row is deleted or its key changes. `EXPLAIN QUERY PLAN` never shows
+/// it, so the schema supplies it.
+pub(crate) fn foreign_key_lookups(store: &SqliteStore) -> Vec<String> {
+    let conn = store.conn.lock().unwrap();
+    let mut keys = conn
+        .prepare(
+            "SELECT k.\"table\", group_concat(k.\"from\" || ' = ?', ' AND ')
+             FROM pragma_foreign_key_list(?1) k GROUP BY k.id ORDER BY k.id",
+        )
+        .unwrap();
+    GROWING
+        .iter()
+        .flat_map(|child| {
+            keys.query_map([child], |row| {
+                Ok(format!(
+                    "SELECT 1 FROM {child} WHERE {} -- foreign key to {}",
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(0)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{growing_scans, statements};
+    use super::{foreign_key_lookups, growing_scans, statements, GROWING, MEASURED};
     use crate::durable::TaskId;
     use crate::store::sqlite::{SqliteStore, ViewerHold};
     use rusqlite::params;
@@ -411,6 +483,66 @@ mod tests {
             .into_iter()
             .filter(|scan| scan.contains("planning_peer_changes") || scan.contains("SCAN tasks"))
             .collect();
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn a_walk_of_a_large_partial_index_is_a_scan() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let history = "SELECT session_id FROM session_events WHERE kind='observed'
+             AND json_extract(payload,'$.evidence.provider_session_id')='thread'";
+        let scans = growing_scans(&store, &[history.to_owned()]);
+        assert!(
+            scans
+                .iter()
+                .any(|scan| scan.contains("session_observation_receipt (")
+                    && scan.contains(" rows measured)")),
+            "{}",
+            scans.join("\n")
+        );
+        let live = "SELECT id FROM processes WHERE completed_at IS NULL";
+        let scans = growing_scans(&store, &[live.to_owned()]);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn every_partial_index_on_a_growing_table_is_measured() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+            .unwrap();
+        conn.execute_batch(MEASURED).unwrap();
+        let unmeasured: Vec<String> = conn
+            .prepare(
+                "SELECT m.tbl_name || '.' || m.name FROM sqlite_master m
+                 WHERE m.type = 'index' AND m.sql LIKE '% WHERE %'
+                     AND m.tbl_name IN (SELECT value FROM json_each(?1))
+                     AND m.name NOT IN (SELECT idx FROM sqlite_stat1 WHERE idx IS NOT NULL)
+                 ORDER BY 1",
+            )
+            .unwrap()
+            .query_map([serde_json::to_string(&GROWING).unwrap()], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            unmeasured.is_empty(),
+            "copy each index's sqlite_stat1 row from a Machine store into MEASURED: {}",
+            unmeasured.join(", ")
+        );
+    }
+
+    #[test]
+    fn foreign_key_children_on_growing_tables_are_indexed() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        let lookups = foreign_key_lookups(&store);
+        assert!(lookups
+            .iter()
+            .any(|lookup| lookup.contains("FROM processes WHERE agent_session_id = ?")));
+        let scans = growing_scans(&store, &lookups);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
 }

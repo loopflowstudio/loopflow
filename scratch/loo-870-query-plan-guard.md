@@ -19,7 +19,7 @@ list.
 its measured size, when a statement walks a large partial index:
 
 ```
-analyzed: SCAN session_events USING INDEX session_observation_receipt (168288 rows measured)
+analyzed: SCAN session_events USING INDEX session_observation_receipt (176447 rows measured)
   in SELECT ... WHERE kind='observed' AND json_extract(payload,'$.evidence.provider_session_id')=?1
 ```
 
@@ -120,6 +120,11 @@ linked Task, as LOO-839 did.
    partial index ... does not" with the measured-size rule; say FK child lookups
    are checked from the schema.
 
+## Docs
+
+- `docs/dev/data.md` § "Query cost and the write lock": written ahead of the
+  code (partial-walk rule, measured-row requirement, FK child lookups).
+
 ## Exclusions
 
 - Per-path FK tracing (adding child lookups for each traced parent DELETE/UPDATE).
@@ -132,8 +137,19 @@ A statement that walks a history-sized partial index, or a parent delete that
 would scan a growing child table, fails `store::query_plans` with the index or
 foreign key named; the current schema and hot paths pass.
 
+## Status
+
+Implemented: partial-walk rule (`LIVE_SUBSET_ROWS`), `foreign_key_lookups`
+(NULL-bound placeholders), `MEASURED` regenerated 2026-11-13 from the Machine
+store; indexes newer than its schema (`session_provider_transitions` and this
+branch's) were built and `ANALYZE`d on a `.backup` copy. Migration
+`foreign_key_children.sql` adds the six indexes in the risk table; on that copy
+every growing FK child lookup then plans as `SEARCH`. No existing hot-path test
+was newly flagged.
+
 ## Checks
 
-- `cargo test -p loopflow --lib store::query_plans::` — implement, gate
-- `cargo test -p loopflow --lib server::boundary::tests::boundary_statements_never_scan_tables_that_grow_with_use` — implement, gate
+- `cargo test -p loopflow --lib store::query_plans::` plus `task_work::tests::process_membership_upgrade_probes_cwd_and_session_indexes` — pass at implement (10 tests); clippy clean; gate reruns
+- `server::boundary::tests::boundary_statements_never_scan_tables_that_grow_with_use` — pass at implement; gate reruns
+- `documented_commands::` (docs/dev/data.md changed) — gate
 - migration checks via `uv run python scripts/test.py --reuse-passing` — gate

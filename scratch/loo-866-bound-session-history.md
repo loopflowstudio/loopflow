@@ -94,13 +94,48 @@ or turn.
 - One query, no per-window variant. Rust doesn't pick a plan.
 - Partial indexes over `observed_at`, not a stored start column: captures are
   immutable and `ended` has three sources.
-- The wide-window regression is taken for now: only manual reads (`--since
-  30d`, `context_cost` from `FIRST_WEEK_START`, `bind_attribution`,
-  `ops/run.rs` at 0) pay it. Measured options that narrow it and were not
-  taken because 7d is already faster: widening `session_turn_events` with
-  `captured_event` (30d native branch 1.0 → 0.76 s) and
-  `session_events_process(lf_process_id, session_id, kind, captured_event)`
+- ~~The wide-window regression is taken for now: only manual reads pay it.~~
+  Wrong (concept review, Nov 13): Desktop's Task history view reads the whole
+  store. `RegistryQuery.taskHistory` is `session.usage` with `days: 0`, and
+  `task.context` is `usage::sessions(0, task)`; both reach `pending_inputs` at
+  `since=0` with only `?3` set. `lf usage` defaults to `--days 30`. `ops/run.rs`
+  callers are tests. QA measured whole-store 2.5→8.7 s. See "Next".
+  Measured options that narrow the wide-window cost, not taken: widening
+  `session_turn_events` with `captured_event` (30d native branch 1.0 → 0.76 s)
+  and `session_events_process(lf_process_id, session_id, kind, captured_event)`
   (30d finished 1.52 → 1.22 s; 7d ~15%).
+
+## Next (concept review, Nov 13)
+
+A history read is bounded by its scope, and time is one scope. A Task drill's
+window is the Task, not all time: it should cost what the Task holds. The
+design's own rule ("history reads cost what their window holds") settles
+this; it was applied to `since` and not to `?3`.
+
+Implement direction:
+
+- Add Task arms to `windowed` and `turns`, active when `?3` is set (and the
+  time arms off then, the way `?7` turns them off). Every source of an input's
+  `task_id` is a `session_events` row with `task_id`, readable through
+  `session_events_task`: the capture itself (`i.task_id`), its manifest
+  (`m.task_id` → `captured_event`), and a `started` origin (`origin.task_id` →
+  `captured_event`; with `captured_event IS NULL` it is a native turn for
+  `turns`). Tasks resolve from `tasks` by `id`/`issue_identifier`/
+  `external_issue_id` first, as the outer filter does. The exact `?3` filter
+  stays; the arms are a superset, like the time arms.
+- Check bound Sessions: if a binding (`agent_sessions.task_id`, `bound_at`)
+  attributes inputs whose rows carry no `task_id`, the outer filter misses
+  them today too; the arm need not add them. Confirm with a test rather than
+  assume.
+- Unfiltered `since=0` (`bind_attribution`, `context_cost` from
+  `FIRST_WEEK_START`): if no Task scope applies, an `?5<=0` arm reading every
+  capture once, with the window arms off, keeps whole-store reads at main's
+  cost without a Rust-side variant. Take it only if the bench shows the
+  window arms are what makes `since=0` slower.
+- Done when gains: `taskHistory`/`task.context` for a Task on the store copy
+  read no `SCAN` and are not slower than main; bench adds a Task-drill row
+  (`same` rows, before/after). Plan check joins
+  `session_history_reads_plan_by_window`.
 
 ## Implemented (Nov 13)
 

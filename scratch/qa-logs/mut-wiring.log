@@ -1,0 +1,59 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (bin "lf") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 01s
+────────────
+ Nextest run ID 7e136a15-860d-46dd-a08d-35469c98c27f with nextest profile: default
+    Starting 4 tests across 1 binary (29 tests skipped)
+        PASS [   9.063s] (1/4) loopflow::session_lifecycle_tests promotion_background_run_does_not_claim_primary
+        FAIL [   9.094s] (2/4) loopflow::session_lifecycle_tests promotion_sets_directory_immediately_and_resumes_same_native_conversation
+  stdout ───
+
+    running 1 test
+    test promotion_sets_directory_immediately_and_resumes_same_native_conversation ... FAILED
+
+    failures:
+
+    failures:
+        promotion_sets_directory_immediately_and_resumes_same_native_conversation
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 32 filtered out; finished in 9.08s
+
+  stderr ───
+
+    thread 'promotion_sets_directory_immediately_and_resumes_same_native_conversation' (1459761344) panicked at rust/loopflow/tests/session_lifecycle_tests.rs:2710:9:
+    assertion `left == right` failed
+      left: String("/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp7Epp6a.research")
+     right: "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp7Epp6a.delivery"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [  10.529s] (3/4) loopflow::session_lifecycle_tests promotion_explicit_sources_with_run_keep_the_selected_work
+  stdout ───
+
+    running 1 test
+    test promotion_explicit_sources_with_run_keep_the_selected_work ... FAILED
+
+    failures:
+
+    failures:
+        promotion_explicit_sources_with_run_keep_the_selected_work
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 32 filtered out; finished in 10.52s
+
+  stderr ───
+
+    thread 'promotion_explicit_sources_with_run_keep_the_selected_work' (1459761341) panicked at rust/loopflow/tests/session_lifecycle_tests.rs:2640:13:
+    assertion `left == right` failed
+      left: Null
+     right: "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp6Sf7EG.prototype"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [  11.396s] (4/4) loopflow::session_lifecycle_tests promotion_selects_session_in_owned_and_shared_checkouts
+────────────
+     Summary [  11.396s] 4 tests run: 2 passed, 2 failed, 29 skipped
+        FAIL [   9.094s] (2/4) loopflow::session_lifecycle_tests promotion_sets_directory_immediately_and_resumes_same_native_conversation
+        FAIL [  10.529s] (3/4) loopflow::session_lifecycle_tests promotion_explicit_sources_with_run_keep_the_selected_work
+error: test run failed

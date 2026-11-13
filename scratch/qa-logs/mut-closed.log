@@ -1,0 +1,42 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 15s
+────────────
+ Nextest run ID 73d3a060-971a-4706-b824-71a328ee7e47 with nextest profile: default
+    Starting 8 tests across 1 binary (2878 tests skipped)
+        FAIL [   2.610s] (1/8) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+  stdout ───
+
+    running 1 test
+    test ops::task::adoption::tests::binding_refuses_background_and_closed_sessions ... FAILED
+
+    failures:
+
+    failures:
+        ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2885 filtered out; finished in 2.59s
+
+  stderr ───
+    Saved locally; planning synchronization pending. See `lf planning status`.
+
+    thread 'ops::task::adoption::tests::binding_refuses_background_and_closed_sessions' (1459566065) panicked at rust/loopflow/src/ops/task/adoption/tests.rs:406:9:
+    assertion failed: refusal(table.create("Same work", Some(session),
+                None)).contains("unfinished interactive Session")
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   3.121s] (2/8) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+        PASS [   3.385s] (3/8) loopflow ops::task::adoption::tests::binding_selects_the_task_conversation
+        LEAK [   3.427s] (4/8) loopflow ops::task::adoption::tests::creation_adopts_only_the_selected_work
+        PASS [   3.531s] (5/8) loopflow ops::task::adoption::tests::checkout_adoption_records_its_open_pull_request
+        PASS [   3.921s] (6/8) loopflow ops::task::adoption::tests::creation_from_a_conversation_keeps_its_directory
+        PASS [   4.198s] (7/8) loopflow ops::task::adoption::tests::a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one
+        PASS [   4.483s] (8/8) loopflow ops::task::adoption::tests::binding_a_done_task_keeps_it_done
+────────────
+     Summary [   4.486s] 8 tests run: 7 passed (1 leaky), 1 failed, 2878 skipped
+        FAIL [   2.610s] (1/8) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+error: test run failed

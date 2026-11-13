@@ -261,3 +261,4 @@ build), not product failures.
 - compress slice 4, 2026-11-13: ownership `Pair` holds one `Side` (store, checkout, path) per Machine; `ssh::dispatch_tests:: | task_ownership::tests::` 15/15 in 2.3 s; clippy `--all-targets` clean
 - implement rename, 2026-11-13: `Machine` → `Table` row fixtures; three row filters 20/20 in 4.3 s; fmt, clippy `--all-targets` clean
 - compress rename, 2026-11-13: nothing to reduce; rename is name-only (`Machine` stays in dispatch and ownership rows, where it is the domain noun)
+- qa, 2026-11-13: documented filters 35/35 rows + kept promotion 4/4; one break per family caught (adoption, launch, explain); dispatch missed a command's own `--machine`, row added; `task_create` worktree wiring break caught by kept promotion tests; see `scratch/qa.html`

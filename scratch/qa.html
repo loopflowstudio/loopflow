@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-889 QA: decision rows and kept full-Machine tests</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+table{border-collapse:collapse;width:100%;margin:1em 0}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
+code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f6f6f6;padding:8px;overflow:auto}
+.ok{color:#176f2c}.bad{color:#a11}
+</style>
+<h1>LOO-889 QA</h1>
+<p>2026-11-13, Mac debug build, load average about 650 from other checkouts. This change is for developers, so QA meant arriving as one: run each filter exactly as <code>rust/loopflow/tests/README.md</code> prints it (<code>LF_*</code>/<code>REX_*</code> unset, stdin closed), then break production decisions and wiring on purpose to check that the rows and kept tests notice. Logs are in <code>scratch/qa-logs/</code>.</p>
+
+<h2>1. The documented filters</h2>
+<table>
+<tr><th>Command</th><th>Result</th></tr>
+<tr><td><code>-E 'test(adoption::tests::)'</code></td><td class="ok">8/8, 2.2–4.8 s each</td></tr>
+<tr><td><code>-E 'test(run::launch_policy_tests::)'</code></td><td class="ok">5/5, 0.66–1.16 s</td></tr>
+<tr><td><code>-E 'test(ops::task::explain::tests::)'</code></td><td class="ok">7/7, 0.02–1.41 s</td></tr>
+<tr><td><code>-E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'</code></td><td class="ok">15/15, 0.01–1.81 s</td></tr>
+<tr><td><code>--test session_lifecycle_tests -E 'test(promotion_)'</code> (kept)</td><td class="ok">4/4, 8.0–11.8 s</td></tr>
+</table>
+<p>Each command worked when pasted as written. Rows that adopt a checkout took 2–5 s under this load; the plan's 1.3–3.3 s was measured at lower load.</p>
+
+<h2>2. Break a decision: does its row notice?</h2>
+<p>One <code>sed</code> on production code, run that family's filter, then <code>git checkout -- &lt;file&gt;</code>.</p>
+<table>
+<tr><th>Break</th><th>Filter</th><th>Result</th></tr>
+<tr><td><code>DEFAULT_TASK_GRAPH</code> "code" → "codx" (<code>ops/task.rs</code>)</td><td>explain rows</td><td class="ok">caught: <code>run_takes_up_the_named_else_waves_else_repositorys_else_code_graph</code></td></tr>
+<tr><td>creation from a closed Session no longer refused (<code>ops/task/adoption.rs:72</code>)</td><td>adoption rows</td><td class="ok">caught: <code>binding_refuses_background_and_closed_sessions</code>, <code>assertion failed: …contains("unfinished interactive Session")</code></td></tr>
+<tr><td>unset Chrome sends <code>--no-chrome</code> (<code>agent/mod.rs:834</code>)</td><td>launch rows</td><td class="ok">caught: <code>unset_chrome_sends_claude_nothing_until_a_choice_is_explicit</code></td></tr>
+<tr><td>a command's own <code>--machine</code> treated as transport (<code>lf/navigation.rs:151</code>)</td><td>dispatch rows</td><td class="bad">not caught: 3/3 passed. <b>Fixed</b>: see below</td></tr>
+</table>
+
+<h2>3. Break the CLI wiring: do the kept tests notice?</h2>
+<p>This is the failure the plan names ("rows pass while <code>lf task create --session</code> breaks between Clap and <code>engine::creation::create</code>"). The break makes <code>lf/commands/task_create.rs</code> pass <code>worktree: None</code>. The rows can't see it, and the kept filter caught it:</p>
+<pre>FAIL promotion_sets_directory_immediately_and_resumes_same_native_conversation
+  left: ".tmp7Epp6a.research"   right: ".tmp7Epp6a.delivery"
+FAIL promotion_explicit_sources_with_run_keep_the_selected_work
+  left: Null   right: ".tmp6Sf7EG.prototype"</pre>
+
+<h2>What I fixed</h2>
+<ul>
+<li><b>Missing dispatch row.</b> <code>lf task move LOO-12 --machine mini</code>, the example in the command's own help, names its own <code>--machine</code>. No row checked that it stays local, or that <code>lf --machine laptop task move LOO-12 --machine mini</code> sends the inner flag to the target. This gap existed before the branch too; only the slow <code>machine_commands</code> <code>task_move_*</code> tests covered it. I added both cases to <code>transport_flags_need_a_machine_and_retired_commands_do_not_parse</code> and repeated the break. Now it fails at <code>dispatch_tests.rs:138</code>.</li>
+<li><b>Unreadable launch-row failures.</b> The Chrome break printed Claude's whole argv, including the full system prompt (about 3 KB), before <code>left/right</code>. I dropped <code>launch.args</code> from the two launch row labels. The same failure now reads <code>failed: ["-i"] / left: ["--no-chrome"] / right: []</code>.</li>
+<li><b>QA skill.</b> Added a "Test-only changes" section to <code>.lf/skills/qa.md</code> with this break-one-decision-per-family recipe.</li>
+</ul>
+<p>After the fixes: launch and dispatch rows 8/8 pass, <code>cargo fmt</code> is clean, and <code>cargo clippy -p loopflow --all-targets -- -D warnings</code> is clean.</p>
+
+<h2>Still open, worst first</h2>
+<ul>
+<li>I broke only one decision per family. A row family can still miss a case, as dispatch did. A wider sweep (each <code>Err(task_error(…))</code> in <code>adoption.rs</code>, each <code>machine_invocation</code> branch) would find any others.</li>
+<li>Under heavy load, adoption rows take 2–5 s. That is still per family, about 0.4 s per row by the plan's probe.</li>
+<li>Not reached: the full suites (CI runs them), and the other surfaces' kept lists (launch, explain, Machine dispatch), which take minutes each at this load. Their wiring was not mutation-checked.</li>
+</ul>

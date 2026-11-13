@@ -134,6 +134,23 @@ fn transport_flags_need_a_machine_and_retired_commands_do_not_parse() {
         .unwrap();
     let error = parse_remote_command(&remote).unwrap_err().to_string();
     assert!(error.contains("unexpected argument '--secret'"), "{error}");
+    // A command that names its own `--machine` keeps it and runs here.
+    assert!(invoke(&["task", "move", "LOO-12", "--machine", "mini"])
+        .unwrap()
+        .is_none());
+    let (transport, remote) = invoke(&[
+        "--machine",
+        "laptop",
+        "task",
+        "move",
+        "LOO-12",
+        "--machine",
+        "mini",
+    ])
+    .unwrap()
+    .unwrap();
+    assert_eq!(transport.machine.as_deref(), Some("laptop"));
+    assert_eq!(remote, ["task", "move", "LOO-12", "--machine", "mini"]);
     // Without a Machine there is no dispatch; the local parse refuses.
     assert!(invoke(&["--secret", "EXAMPLE", "status"])
         .unwrap()

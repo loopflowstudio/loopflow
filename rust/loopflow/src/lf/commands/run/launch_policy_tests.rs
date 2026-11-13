@@ -198,7 +198,7 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
     ] {
         table.config(personal, repository);
         let launch = table.launch(flags).unwrap();
-        let row = format!("{personal:?} {repository:?} {flags:?}: {:?}", launch.args);
+        let row = format!("{personal:?} {repository:?} {flags:?}");
         assert_eq!(launch.bypass(), bypass, "{row}");
         assert_eq!(launch.chrome(), [chrome], "{row}");
         assert_path_eq(launch.config.cwd.as_deref().unwrap(), table.repo.path());
@@ -236,7 +236,7 @@ fn unset_chrome_sends_claude_nothing_until_a_choice_is_explicit() {
         (&["-b", "--chrome", "on"], &["--chrome"]),
     ] {
         let launch = table.launch(flags).unwrap();
-        assert_eq!(launch.chrome(), expected, "{flags:?}: {:?}", launch.args);
+        assert_eq!(launch.chrome(), expected, "{flags:?}");
     }
     let session = table.conversation("claude", None);
     assert!(table.resume(&session, &[]).unwrap().chrome().is_empty());

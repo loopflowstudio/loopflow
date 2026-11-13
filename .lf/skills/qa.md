@@ -616,3 +616,16 @@ placeholder `DAYTONA_API_KEY` and an SSH key in the private `HOME`; stub
 `ssh-keygen -R`, which would edit the real `known_hosts`. To land a write between
 a preflight read and its transaction, serve a repository's `.lf/config.yaml`
 through a FIFO and act from another repository at the first open.
+
+## Test-only changes
+
+When the change moves or cuts tests, the people it is for are developers
+running them. Run each filter exactly as `rust/loopflow/tests/README.md`
+prints it, with `LF_*`/`REX_*` unset and stdin closed. Then break the
+production decision on purpose: one `sed` on the line the rows claim to
+check, run that family's filter, `git checkout -- <file>`. Do one for each
+family, plus one Clap → ops wiring break (e.g. drop `worktree` in
+`lf/commands/task_create.rs`) run against the kept full-Machine filter.
+A break no test notices is a missing row; add it, then repeat the break.
+Edit only from one shell, one cargo command at a time, so no other build
+compiles the mutated source.

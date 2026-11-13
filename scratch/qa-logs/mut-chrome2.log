@@ -1,0 +1,39 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 24s
+────────────
+ Nextest run ID 26680ba2-d284-4f44-a0ad-be8ca814f754 with nextest profile: default
+    Starting 5 tests across 1 binary (2881 tests skipped)
+        PASS [   1.224s] (1/5) loopflow lf::commands::run::launch_policy_tests::resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice
+        PASS [   1.371s] (2/5) loopflow lf::commands::run::launch_policy_tests::resume_applies_current_policy_and_command_line_overrides
+        PASS [   1.463s] (3/5) loopflow lf::commands::run::launch_policy_tests::headless_launch_carries_the_schema_and_terminal_launch_refuses_it
+        FAIL [   1.611s] (4/5) loopflow lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit
+  stdout ───
+
+    running 1 test
+    test lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit ... FAILED
+
+    failures:
+
+    failures:
+        lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2885 filtered out; finished in 1.59s
+
+  stderr ───
+
+    thread 'lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit' (1459929979) panicked at rust/loopflow/src/lf/commands/run/launch_policy_tests.rs:239:9:
+    assertion `left == right` failed: ["-i"]
+      left: ["--no-chrome"]
+     right: []
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   1.885s] (5/5) loopflow lf::commands::run::launch_policy_tests::launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository
+────────────
+     Summary [   1.888s] 5 tests run: 4 passed, 1 failed, 2881 skipped
+        FAIL [   1.611s] (4/5) loopflow lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit
+error: test run failed

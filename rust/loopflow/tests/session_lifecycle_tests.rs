@@ -1717,10 +1717,11 @@ fn declared_agent_can_start_another_tasks_graph() {
     );
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
+    // Record only the Graph command; background conversation hooks also use lf.
     std::fs::write(
         bin.join("lf"),
         format!(
-            "#!/bin/sh\nprintf '%s' \"$LF_AS\" >'{}'\nexec '{}' \"$@\"\n",
+            "#!/bin/sh\nif [ \"$#\" -eq 2 ] && [ \"$1\" = sync ] && [ \"$2\" = --plan ]; then\n  printf '%s' \"$LF_AS\" >'{}'\nfi\nexec '{}' \"$@\"\n",
             fixture.home.path().join("step-declaration").display(),
             env!("CARGO_BIN_EXE_lf")
         ),

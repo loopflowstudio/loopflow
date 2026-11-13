@@ -93,7 +93,7 @@ primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find
 Pass `--session` explicitly to keep a conversation. An agent reads its own
 Session ID from its lf context block.
 A Graph belongs to the Task it was started for. Graphs that ran in an adopted
-checkout before the Task existed stay unattached; `lf task status` lists the
+checkout before the Task adopted it stay unattached; `lf task status` lists the
 Graphs launched for the Task from then on.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.

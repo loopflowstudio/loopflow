@@ -57,9 +57,10 @@ when the seed names the exact wave, Task or Project; never infer it.
    feedback on a fix, to reproduce a CI failure, or to diagnose a risk no suite
    covers. Don't repeat unchanged passing work or run affected suites beside
    CI just in case. Add coverage for missing behavior; determine whether each
-   failure is in the code or the test. Delete flaky tests rather than patching
-   them. Investigate required-check timeouts instead of hiding them with a
-   later green run.
+   failure is in the code or the test. A test that fails in CI and passes on a
+   rerun is flaky: make it deterministic or delete it in this PR. Never rerun
+   CI to get past a failed test. Investigate required-check timeouts instead
+   of hiding them with a later green run.
 
    A local run is small and bounded. Select only what the fix reaches, keep
    inside the repository's test time limits, and never raise a limit or wait

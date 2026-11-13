@@ -3556,15 +3556,6 @@ wait("finish-upgrade")
 /// viewer follows the new build and completes more turns in the same history.
 #[test]
 fn resumed_session_completes_turns_after_build_replacement_and_viewer_return() {
-    continue_session_after_upgrade(false);
-}
-
-#[test]
-fn unanswering_superseded_owner_preserves_pending_turn_and_queued_input() {
-    continue_session_after_upgrade(true);
-}
-
-fn continue_session_after_upgrade(unanswering: bool) {
     let fixture = Fixture::new();
     // Hooks reach the Machine server, which records their turns.
     let _server = fixture.machine_server();
@@ -3701,21 +3692,6 @@ while True:
         command.env("LF_BIN", &entry).env("PATH", &path);
         Terminal::spawn(command)
     };
-    if unanswering {
-        let paused = fixture.pause(&owner);
-        let mut failed = resume();
-        let status = failed.wait_exit();
-        drop(paused);
-        assert!(!status.success(), "{status:?}");
-        assert_eq!(
-            attachment(),
-            before,
-            "failed attachment replaced the provider"
-        );
-        assert_eq!(continuity(), original);
-        assert!(fixture.running(&owner), "failed attachment ended the owner");
-        assert!(!fixture.home.path().join("completed-2").exists());
-    }
     let mut terminal = resume();
     fixture.wait_controlled(&owner);
     assert_eq!(

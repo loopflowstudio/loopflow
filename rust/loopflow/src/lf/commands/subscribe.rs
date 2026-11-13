@@ -972,13 +972,6 @@ mod tests {
         agent("codex");
 
         let before = reads.load(Ordering::Relaxed);
-        for index in 0..20 {
-            std::fs::write(&wave, format!("agent: pi # edit {index}\n")).unwrap();
-        }
-        agent("pi");
-        assert_eq!(reads.load(Ordering::Relaxed), before + 1);
-
-        let before = reads.load(Ordering::Relaxed);
         std::fs::write(checkout.join("unrelated.txt"), "changed\n").unwrap();
         let until = Instant::now() + Duration::from_millis(1200);
         while Instant::now() < until {

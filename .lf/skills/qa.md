@@ -470,6 +470,15 @@ feeder with a flag file, not `kill`: a surviving feeder interleaves writes and
 leaves lf blocked on an open with no writer. In this shell `which lf` names a
 wrapper function; use `whence -p lf` for the installed binary.
 
+Read changes on a large private repository: `lf task create` takes seconds
+each, so create hundreds in parallel batches with `--request-id` (twelve at a
+time held up), claiming and completing some. For a "before" binary, run
+`--version` on sibling worktrees' `target/debug/lf` and pick a build that
+descends from the branch's base with no `store/migrations/` diff; it reads the
+same private store. Compare `jq -S` output of both binaries, then time them in
+interleaved rounds, since other worktrees' builds make the Machine's load swing.
+`lf server status` prints JSON without `--json`.
+
 ## Waking idle conversations
 
 Real turns need real logins: keep the account's `HOME` (Claude's Keychain login

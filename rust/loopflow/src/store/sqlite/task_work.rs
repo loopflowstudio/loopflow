@@ -132,39 +132,10 @@ pub(super) fn task_of_process(
         .optional()?)
 }
 
-/// Each Task in `tasks` paired with each Graph among its work. Membership is
-/// driven from the Graphs, so asking for every Task costs one reading: a Graph
-/// joins the checkout that is its directory or one of its ancestors, the same
-/// containment `checkout` tests from the other side.
-fn task_graph_pairs(conn: &rusqlite::Connection, tasks: &str) -> StoreResult<String> {
-    let (unmoved, relocated) = if has_relocations(conn)? {
-        (
-            "WHERE NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=f.id)",
-            "UNION SELECT r.task_id, r.process_id FROM relocated_task_processes r JOIN tw ON tw.id=r.task_id
-                WHERE r.process_id IN (SELECT id FROM f)",
-        )
-    } else {
-        ("", "")
-    };
-    Ok(format!(
-        "WITH RECURSIVE tw AS MATERIALIZED ({tasks}),
-            f AS MATERIALIZED (SELECT e.id, e.cwd FROM graph_processes fp JOIN processes e ON e.id=fp.lf_process_id),
-            up(id, path) AS (SELECT id, cwd FROM f {unmoved}
-                UNION ALL SELECT id, rtrim(rtrim(path, replace(path,'/','')),'/') FROM up WHERE path!=''),
-            checkouts AS MATERIALIZED (SELECT id, rtrim(worktree,'/') AS root FROM tw
-                WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1) AND worktree!=''),
-            links(session_id, graph) AS (
-                SELECT se.session_id, se.lf_process_id FROM session_events se INDEXED BY session_events_process
-                    WHERE se.lf_process_id IN (SELECT id FROM f)
-                UNION SELECT p.agent_session_id, p.attached_lf_process_id FROM processes p
-                    WHERE p.kind='agent' AND p.attached_lf_process_id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL
-                UNION SELECT p.agent_session_id, p.id FROM processes p
-                    WHERE p.kind='agent' AND p.id IN (SELECT id FROM f) AND p.agent_session_id IS NOT NULL)
-         SELECT c.id AS task_id, up.id AS graph FROM up JOIN checkouts c ON c.root=up.path
-         {relocated}
-         UNION SELECT tw.id, l.graph FROM links l JOIN agent_sessions a ON a.id=l.session_id JOIN tw ON ({})",
-        session_membership("a"),
-    ))
+/// Each Task in `tasks` paired with each Graph started for it. The Graph
+/// recorded its Task at launch, so the pairs come from an index probe per Task.
+fn task_graph_pairs(tasks: &str) -> String {
+    format!("SELECT tw.id AS task_id, g.lf_process_id AS graph FROM ({tasks}) tw JOIN graph_processes g ON g.task_id=tw.id")
 }
 
 pub(super) fn graphs_of_task(
@@ -175,15 +146,14 @@ pub(super) fn graphs_of_task(
         conn,
         &format!(
             "e.id IN (SELECT graph FROM ({}))",
-            task_graph_pairs(conn, &tasks("?1"))?
+            task_graph_pairs(&tasks("?1"))
         ),
         &[&task.as_str()],
     )
 }
 
 /// Each of `tasks`' completed Graph steps, by step process, for all of them in
-/// one reading: pairing Tasks with Graphs walks every Graph process, so asking
-/// per Task repeats that walk for each one.
+/// one reading.
 fn completed_graph_steps(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
@@ -193,11 +163,7 @@ fn completed_graph_steps(
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
          JOIN processes s ON s.id=gs.lf_process_id
          WHERE s.completed_at IS NOT NULL",
-        task_graph_pairs(
-            conn,
-            "SELECT id,worktree,checkout_machine_id FROM tasks
-             WHERE id IN (SELECT value FROM json_each(?1))"
-        )?
+        task_graph_pairs("SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?1))")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     let mut completed = HashMap::<TaskId, HashSet<LfProcessId>>::new();
@@ -224,11 +190,7 @@ fn latest_task_graphs(
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
          ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
-        task_graph_pairs(
-            conn,
-            "SELECT id,worktree,checkout_machine_id FROM tasks
-             WHERE id IN (SELECT value FROM json_each(?1))"
-        )?
+        task_graph_pairs("SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?1))")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     for row in query.query_map([&ids], |row| {
@@ -1734,7 +1696,6 @@ mod tests {
                 [],
             )
             .unwrap();
-            // A sibling whose path extends the Task's is not inside it.
             for (id, n, worktree) in [
                 (&task, 1, "/repo/task/"),
                 (&sibling, 2, "/repo/task-other"),
@@ -1742,12 +1703,12 @@ mod tests {
             ] {
                 conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES('repo_proof',?1,?2,?3,?4,1,(SELECT id FROM machines WHERE is_local=1))", params![id.as_str(), project.as_str(), format!("PROOF-{n}"), worktree]).unwrap();
             }
-            for cwd in [
-                "/repo/task",
-                "/repo/task-other",
-                "/repo/task/deep/er",
-                "/repo/task-other/x",
-                "/elsewhere",
+            for (cwd, owner) in [
+                ("/repo/task", Some(&task)),
+                ("/repo/task-other", Some(&sibling)),
+                ("/repo/task/deep/er", Some(&task)),
+                ("/repo/task-other/x", Some(&sibling)),
+                ("/elsewhere", None),
             ] {
                 let id = LfProcessId::new();
                 conn.execute(
@@ -1755,12 +1716,12 @@ mod tests {
                     params![id, TraceId::new(), cwd],
                 )
                 .unwrap();
-                graphs.push(id);
+                graphs.push((id, owner));
             }
         }
         let graph = crate::graph::compiled::CompiledGraph::new("proof", &[]);
-        for id in &graphs {
-            store.record_graph_process(id, &graph).unwrap();
+        for (id, owner) in &graphs {
+            store.record_graph_process(id, &graph, *owner).unwrap();
         }
         let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
@@ -1890,14 +1851,14 @@ mod tests {
             after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
             "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
         );
-        // Graph reads start from the Graphs without losing historical association
-        // when the Graph ran outside the Task's checkout.
+        // A Graph started for the Task is its work wherever it ran, and other
+        // Tasks' Graphs cost one Task's reading nothing.
         conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
-            [&finished],
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
+            params![finished, task.as_str()],
         )
         .unwrap();
-        let pairs = super::task_graph_pairs(&conn, &super::tasks("?1")).unwrap();
+        let pairs = super::task_graph_pairs(&super::tasks("?1"));
         let read_graphs = || {
             let mut statement = conn.prepare(&pairs).unwrap();
             let selected = statement
@@ -1909,35 +1870,43 @@ mod tests {
             statement.get_status(rusqlite::StatementStatus::VmStep)
         };
         let before = read_graphs();
-        for _ in 0..2_000 {
+        let others: Vec<String> = conn
+            .prepare("SELECT id FROM tasks WHERE id!=?1")
+            .unwrap()
+            .query_map([task.as_str()], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        for other in &others {
+            let graph = LfProcessId::new();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
-                params![LfProcessId::new(), TraceId::new()],
+                params![graph, TraceId::new()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
+                params![graph, other],
             )
             .unwrap();
         }
         let after = read_graphs();
         assert!(
             after <= before * 2,
-            "Unrelated commands increased Graph membership work: {before} → {after}"
+            "Other Tasks' Graphs increased one Task's Graph reading: {before} → {after}"
         );
-        // Every Task's Graphs are one reading driven from the Graphs, so Sessions
-        // that reach no Graph cost nothing however many Tasks are read. On
-        // October 18, 2026 each Task rescanned all 4,246 of Jack Heart's
-        // Sessions: 2.3 s for 622 Tasks.
-        let every_task =
-            super::task_graph_pairs(&conn, "SELECT id,worktree,checkout_machine_id FROM tasks")
-                .unwrap();
+        // Every Task's Graphs come from the Graph records, so Sessions that
+        // reach no Graph cost nothing however many Tasks are read. On October
+        // 18, 2026 each Task rescanned all 4,246 of Jack Heart's Sessions:
+        // 2.3 s for 622 Tasks.
+        let every_task = super::task_graph_pairs("SELECT id FROM tasks");
         let read_every_task = || {
             let mut statement = conn.prepare(&every_task).unwrap();
             let pairs = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
+                .query_map([], |row| row.get::<_, String>(0))
                 .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(pairs, vec![(task.to_string(), finished.to_string())]);
+                .count();
+            assert_eq!(pairs, others.len() + 1);
             statement.get_status(rusqlite::StatementStatus::VmStep)
         };
         let before = read_every_task();

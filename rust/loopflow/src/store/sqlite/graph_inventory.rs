@@ -383,19 +383,22 @@ impl SqliteStore {
         graphs_in(&conn, "e.cwd=?1", &[&cwd.to_string_lossy()])
     }
 
-    /// A Graph process's one write about its Graph: the name and graph it launched with.
+    /// A Graph process's one write about its Graph: the name and graph it
+    /// launched with, and the Task it started for.
     pub(crate) fn record_graph_process(
         &self,
         graph_process: &LfProcessId,
         compiled: &CompiledGraph,
+        task: Option<&TaskId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,?4)",
             params![
                 graph_process,
                 compiled.name,
-                serde_json::to_string(compiled)?
+                serde_json::to_string(compiled)?,
+                task.map(TaskId::as_str)
             ],
         )?;
         Ok(())
@@ -580,8 +583,19 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_graph_process(&graph_process, &CompiledGraph::new(name, &compiled))
-            .unwrap();
+        // A Graph started in a checkout is that Task's, as the launch binds it.
+        let task = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            super::task_work::task_of_process(&conn, &graph_process)
+                .unwrap()
+                .map(|task| TaskId::parse(&task).unwrap())
+        };
+        self.record_graph_process(
+            &graph_process,
+            &CompiledGraph::new(name, &compiled),
+            task.as_ref(),
+        )
+        .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = LfProcessId::new();
             let mut argv = vec!["lf".to_string()];

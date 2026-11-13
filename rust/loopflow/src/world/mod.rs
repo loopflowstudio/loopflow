@@ -20,6 +20,7 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
+use crate::durable::TaskId;
 use crate::graph::compiled::CompiledGraph;
 use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
@@ -660,7 +661,8 @@ impl World {
         let name = captured.name.clone();
         let argv = vec!["lf", "--task", issue, "graph", "run"];
         self.graph(
-            &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
+            &store, &task.id, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes,
+            outcome,
         )?;
         if outcome == Outcome::Succeeded {
             store
@@ -709,6 +711,7 @@ impl World {
     fn graph(
         &self,
         store: &SharedStore,
+        task: &TaskId,
         trace: &TraceId,
         parent: &LfProcessId,
         cwd: &Path,
@@ -751,7 +754,9 @@ impl World {
         }
         // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
-        store.sqlite.record_graph_process(&graph.id, &compiled)?;
+        store
+            .sqlite
+            .record_graph_process(&graph.id, &compiled, Some(task))?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
             store

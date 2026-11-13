@@ -398,11 +398,12 @@ boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
 Desktop navigation uses the same membership as Task status.
 
-No Graph is privileged: every one naming the Task, or run in its checkout,
-is equally its work. `task status`'s `work` contains all Sessions, Graphs and
-Processes, including headless and closed history. Its `execution` and Task Graph
-record observe the most recently launched Graph only: `none`, `latest` or
-`finished`. The one control is `start`, available whenever the Task can run,
+No Graph is privileged: every one started for the Task, by naming it or in its
+checkout, is equally its work. The Graph records that Task when it starts, so
+reading a Task's Graphs costs the same however many other Graphs ran.
+`task status`'s `work` contains all Sessions, Graphs and Processes, including
+headless and closed history. Its `execution` and Task Graph record observe the
+most recently launched Graph only: `none`, `latest` or `finished`. The one control is `start`, available whenever the Task can run,
 even when an earlier Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
@@ -432,8 +433,8 @@ and releases its attachment without reporting a provider turn.
 
 A step is told nothing about its Graph and writes nothing about it. The Graph process
 writes GraphProcess, and only by appending: `graph_processes` holds one row per Graph process
-(Graph process, Graph name, graph as compiled at launch) and `graph_process_steps` one
-row per step it started (child Process, graph node key, per-edge iterations). The
+(Graph process, Graph name, graph as compiled at launch, the Task it started for
+or none) and `graph_process_steps` one row per step it started (child Process, graph node key, per-edge iterations). The
 Graph process finds a step's Process as its own newest child. Running, finished and each
 step's result are read from the Processes. Nothing reads the record back to resume,
 and no command changes a running Graph; the control is ending its Graph process.

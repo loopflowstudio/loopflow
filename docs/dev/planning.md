@@ -457,8 +457,8 @@ alternative, into a graph the Graph process holds in memory. One cursor and its 
 counters identify loop passes. Subgraphs and passes are display lenses over the
 step processes, with no separate record or process.
 
-Every Graph naming a Task, or run in its checkout, is equally that Task's
-work; none is selected or privileged. Taskless and Task execution share the
+Every Graph started for a Task, by naming it or in its checkout, is equally that
+Task's work; none is selected or privileged. Taskless and Task execution share the
 Graph runner. `lf graph` runs an `interactive:` step in place, with the person at a
 terminal, else headless. Each `task run` starts a fresh Graph as a child Graph process
 (hidden `lf --task ISSUE graph run`), and a fresh one again when that Graph process

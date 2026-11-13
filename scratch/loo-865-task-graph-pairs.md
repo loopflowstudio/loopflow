@@ -138,3 +138,18 @@ record and never changes; the table stays append-only. Tasks are never deleted
 - Gate, headless on a store copy: apply the branch migration to a `.backup` of
   the live store and compare `lf task status --json` `graph_processes` ids for a
   sample of Tasks before and after.
+
+## Status
+
+Built: migration `graph_process_task.sql` (fixture `graph_process_task_released.sql`,
+test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
+indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
+recording the deepest checkout's Task. Left: the gate's store-copy comparison.
+
+- `cargo test -p loopflow --lib` (task_work::, graph_inventory::, the migration test, server::events::): compiles; not run to completion here. Load average ~240 and the test processes sat stopped (state `T`) for 10+ minutes. Gate runs them.
+
+## Docs
+
+Updated for launch-recorded Graph Tasks: `docs/dev/data.md`, `docs/dev/planning.md`,
+`docs/dev/reference-models.md`, `docs/dev/index.md` (and regenerated
+`docs/dev/index.html`). No user-facing docs change: `lf task status` output is the same.

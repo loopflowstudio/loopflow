@@ -7,7 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::durable::{Machine, MachineId, RepositoryId, TaskId, TaskOwnership};
+use crate::durable::{Machine, MachineId, RepositoryId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
 use crate::store::SharedStore;
@@ -26,7 +26,11 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
             return Ok(None);
         };
         let target = super::ssh::resolve_target(target, forward_agent).await?;
-        relay(&store, &session, &target).await
+        if let Some(task) = moves::conversation_task(&store.sqlite, &session.id)? {
+            let route = store.task_execution_route(&task).await?;
+            return Ok((route.machine_id != target.id).then_some(task));
+        }
+        relay(&store, &session, &target).await.map(|()| None)
     })?;
     if let Some(task) = task {
         move_task(task.as_str(), target)?;
@@ -34,21 +38,12 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
     Ok(())
 }
 
-/// Move a Task-less `session` to `target` unless it is already there. For a
-/// Task's conversation, returns its Task when the Task still has to move there.
-async fn relay(
-    store: &SharedStore,
-    session: &LfSession,
-    target: &Machine,
-) -> Result<Option<TaskId>> {
-    if let Some(task) = moves::conversation_task(&store.sqlite, &session.id)? {
-        let route = store.task_execution_route(&task).await?;
-        return Ok((route.machine_id != target.id).then_some(task));
-    }
+/// Move a conversation outside any Task to `target` unless it is already there.
+async fn relay(store: &SharedStore, session: &LfSession, target: &Machine) -> Result<()> {
     let id = session.id.to_string();
     let moved_to = store.sqlite.session_moved_to(&id)?;
     if moved_to.as_ref() == Some(&target.id) {
-        return Ok(None);
+        return Ok(());
     }
     ready(store, target, None, &format!("Session {}", session.title)).await?;
     let moved = match moved_to {
@@ -74,7 +69,7 @@ async fn relay(
         .await
         .map_err(|error| retry_session(error, &id, target))?;
     eprintln!("Moved {} to {}", session.title, target.name());
-    Ok(None)
+    Ok(())
 }
 
 /// `lf task move X --machine M`. A Graph the move stopped continues where the

@@ -161,6 +161,9 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 - Checks: lib `ops::human_session` + `task_moves::` 51 pass; integration
   `machine_commands::` 49 + the two changed tests pass; clippy clean.
   Gate runs `documented_commands::` for the machines.md paragraph.
+- Compress: the Task-conversation check sits in `session_move::move_session`;
+  `relay` moves only Task-less Sessions and returns `()`. Clippy clean;
+  integration `machine_commands::` resume/move tests 4 passed.
 
 ## Remaining
 

@@ -50,10 +50,10 @@ an explicit destination; `/Applications` is the default for initial setup.
 Freshness checks the public link, bundled helper identity and store compatibility,
 as well as the app's release version. A matching version string alone is insufficient.
 
-Running Session owners and Graphs keep their process images. Promotion never kills
-bundled `lf` processes; renamed bundles remain while they are in use. A superseded
-owner ends itself once its Sessions hold no work or input, and `lf process rollover`
-moves every eligible owner at once. Installed files and already-running processes
+Running holders and Graphs keep their process images. Promotion never kills
+bundled `lf` processes; renamed bundles remain while they are in use. An earlier
+build's holder keeps its terminals until their agents quit, and the new server
+keeps speaking to it. Installed files and already-running processes
 can therefore report different builds during an update. Promotion retains the
 prior published artifacts, which are [not a rollback path](../docs/dev/machines.md#one-main-machine),
 and does not restart Tasks or Graphs.

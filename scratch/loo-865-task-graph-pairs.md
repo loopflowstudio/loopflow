@@ -192,13 +192,15 @@ Task state passed its focused test and real-CLI re-walk (QA §7).
   `idle` once Graph and step exit.
 
 Remaining:
-- Gate: affected suites (Task controls, `task_graph_launch_tests`,
-  `task_github_cache_tests`, `task_execution`, waves, shared Task-state readers,
-  `documented_commands`, `store::query_plans`) plus clippy, on the merge head
-  7ae63e616d. Main's #1916 (merged in) adds partial-index scan budgets to
-  `store/query_plans.rs`; `graph_processes_task` and `task_state_sql`'s
-  `processes_unfinished` probe have not been run against them. nextest processes on
-  this Machine enter `TN` until SIGCONT; continue only this run's descendants.
+- CI: finish the selected Rust tests not completed by the bounded gate below:
+  remaining `task_graph_launch_tests`, `world`, `documented_commands`,
+  `task_github_cache_tests`, `two_people` and `transport_tests`.
+- CI: compile the extracted crate (`cargo package --locked --allow-dirty -p loopflow`)
+  and run the populated-release/checkout-adoption installation proof
+  (`uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_graph_history`).
+  Only archive creation ran locally. The host remained heavily contended and
+  free disk ended at 35 GiB against the 32 GiB emergency reserve; no additional
+  build or proof container was started.
 - Not this change: QA §6 "Still wrong" 2 (a signal-killed provider leaves
   `condition.unresolved_execution` true while `action` is `run`).
 
@@ -218,7 +220,39 @@ test's index name, and `foreign_key_children.sql`, which drops
 `agent_process_session` (no branch query names it). QA §8 re-walked 8dec86f0ca
 on a fresh Machine seeded by installed 0.15.3+87f0e3c60: both migrations apply in
 order, Graph readings identical, adopted-mid-Graph `moving` → refusal → `idle`
-→ recorded run. Gate's Task-state suites remain.
+→ recorded run. Gate's Task-state suites passed on 7713aab257.
+
+### Gate on 7713aab257 (2026-11-13)
+
+Plan: Graph launch/writer changes reach Task controls and launch fixtures;
+store ownership, migration and Task-state changes reach migration, query-plan,
+inventory, Task-work, shared-state, subscription and shared-writer suites;
+documentation changes reach command examples and website rendering. No Swift,
+Python or provider-lifecycle implementation changed.
+
+Commands below ran with inherited `LF_*` unset and stdin closed.
+
+- `uv run python scripts/check_migrations.py` — passed; `graph_process_task.sql` is the one unmerged migration.
+- `uv run python scripts/test.py --list` — architecture, Rust and website selected.
+- `uv run python scripts/test.py --reuse-passing --rust-filter '<selected suites below>'` — resource preflight stopped before tests: uv-cache and capture inventory deadlines; a changing build file in another checkout also disappeared during inventory. The documented manual plan followed; this is not a passing runner result.
+- `uv run python scripts/check_architecture.py` — passed all seven maps, zero unexplained entries.
+- `uv run python scripts/check_rust_test_inventory.py` — passed.
+- `cargo fmt --all -- --check` — passed.
+- `cargo build -p loopflow --bin lf --jobs 4` — passed (2.23 s).
+- `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed, exit 0 (3.64 s cached confirmation). The first attempt printed a successful finish after 8m 25s but its outer process returned 143 without its receipt; the second invocation resolved that uncertainty on identical Rust inputs. No lint diagnostics.
+- `LOOPFLOW_TEST_LF=$PWD/target/debug/lf cargo --config 'target."cfg(all())".runner = ["uv", "run", "--no-sync", "python", "/Users/jack/src/loopflow.loo-865-read-task-graph/scripts/test_network.py"]' nextest run -p loopflow --no-fail-fast --build-jobs 4 --test-threads 4 -E '<selected suites below>'` — 266 passed, four interrupted, 183 not started; stopped at the 2,400-second phase limit, not green. Build took 16m 42s, tests 1,372.861 s. Host load was 271–341, with 8.7 GiB swap used at one observation; tests kept completing, with no assertion failure before interruption. CI owns the remaining 187 cases. All recorded descendants exited after SIGINT.
+- `cd website && uv run python dev.py test` — 73 passed (212.17 s), including portable architecture and accessibility. Reference generation used the installed CLI; its `help --all --json` SHA-256 matched the candidate byte for byte (`26a2262841e3babab5e61d66c8e794368c87a75c29f9a80d52431f3cdc614bcf`). Website server/browser processes exited.
+- `cargo package --locked --allow-dirty -p loopflow --no-verify` — archive creation passed: 940 files, 16.3 MiB (3.5 MiB compressed); checked that the migration and released fixture occur once each in the archive. Compilation remains with CI. Cargo warned that the existing locked `chacha20 0.10.0` is yanked; dependencies are unchanged by this branch.
+- `git diff --check` — passed.
+
+Selected suites: `test(store::sqlite::task_work::) | test(store::sqlite::graph_inventory::) | test(store::sqlite::durable::) | test(store::migrations::) | test(store::query_plans::) | test(ops::task::) | test(ops::task_execution::) | test(task_graph_launch_tests::) | test(task_github_cache_tests::) | test(lf::commands::waves::tests::) | test(lf::commands::graph::tests::) | test(server::events::) | test(documented_commands::) | test(world::) | binary(two_people) | binary(transport_tests)`.
+
+All selected migration, query-plan, Task-work, Graph inventory, Task controls,
+Task execution, Wave and subscription tests passed. This includes the new
+backfill, adoption-state/refusal regression and the 2,000-unrelated-Graphs
+read-cost assertion. The macOS linker warned about a large unwind table; no
+compile error. Gate corrected the QA report's stale “Nothing in the product”
+summary to name the adoption repairs; production code is unchanged by this pass.
 
 ## Docs
 

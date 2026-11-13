@@ -115,7 +115,9 @@ then opened with the branch build.</p>
 <p>The run registered a private launchd server (<code>com.loopflow.server.e306e8bcbf89e030</code>); booted out, its holder stopped. No <code>lf-qa-865*</code> process remains.
 The live Process rows list as <code>unknown</code> while running, as in §5; not from this change.</p>
 <h2>Fixed</h2>
-<p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
+<p>Sections 5–7 led to the adoption safeguards: execution and Task state report a running Graph in an adopted checkout,
+and <code>lf task run</code> refuses an overlapping run. The Graph's recorded Task stays unchanged.
+<code>.lf/skills/qa.md</code> also says how to give a private Task Graphs without a server
 (<code>lf -b graph</code> in an adopted checkout).</p>
 
 <h2>Not reached</h2>

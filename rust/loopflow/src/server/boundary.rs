@@ -932,9 +932,8 @@ mod tests {
         store
             .save_session_steer("session", "Fixture author", "TRACED")
             .unwrap();
-        let mut traced = Vec::new();
-        let empty = crate::store::query_plans::empty_writes(&store, || {
-            traced = crate::store::query_plans::statements(&store, || {
+        let traced = crate::store::query_plans::assert_no_empty_writes(&store, || {
+            crate::store::query_plans::statements(&store, || {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
@@ -982,9 +981,8 @@ mod tests {
             ),
         )
         .unwrap();
-            });
+            })
         });
-        crate::store::query_plans::assert_no_empty_writes(&empty);
         let found = crate::store::query_plans::growing_scans(&store, &traced);
         assert!(found.is_empty(), "{}", found.join("\n"));
     }

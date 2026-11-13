@@ -221,15 +221,14 @@ serves it when the column is mostly NULL.
 The same tests catch a path that takes the write lock and changes nothing.
 Every write connection begins `IMMEDIATE`, so a transaction that only reads,
 or an `UPDATE` that matches no row, still makes every other writer wait.
-`empty_writes` runs a closure and returns the call site of each one, whichever
-thread ended the transaction:
+`assert_no_empty_writes` runs a closure and fails naming the call site of each
+one, whichever thread ended the transaction:
 
 ```rust
-let found = query_plans::empty_writes(&store, || {
+query_plans::assert_no_empty_writes(&store, || {
     store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200))).unwrap();
     store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200))).unwrap();
 });
-query_plans::assert_no_empty_writes(&found);
 ```
 
 ```text

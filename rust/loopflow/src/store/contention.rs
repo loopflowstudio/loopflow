@@ -184,12 +184,15 @@ pub(crate) mod empty_writes {
 
     /// The call site of each write transaction on `conn` that ends during `run`
     /// without changing a row.
-    pub(crate) fn record(conn: &Mutex<Connection>, run: impl FnOnce()) -> Vec<String> {
+    pub(crate) fn record<R>(conn: &Mutex<Connection>, run: impl FnOnce() -> R) -> (R, Vec<String>) {
         // SAFETY: only the address is kept, as a key, while `conn` is open.
         let connection = unsafe { conn.lock().unwrap().handle() } as usize;
         RECORDED.lock().unwrap().insert(connection, Vec::new());
-        run();
-        RECORDED.lock().unwrap().remove(&connection).unwrap()
+        let result = run();
+        (
+            result,
+            RECORDED.lock().unwrap().remove(&connection).unwrap(),
+        )
     }
 }
 

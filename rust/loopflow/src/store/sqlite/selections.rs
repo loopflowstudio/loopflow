@@ -1837,7 +1837,7 @@ mod tests {
                 [&attachment.agent_process_id],
             )
             .unwrap();
-        let empty = crate::store::query_plans::empty_writes(&store, || {
+        crate::store::query_plans::assert_no_empty_writes(&store, || {
             let ended = store.read_dashboard(&repo, &id).unwrap().unwrap();
             assert!(ended.resolution.unavailable.is_empty());
             assert!(ended.arrangement.order.is_empty());
@@ -1851,7 +1851,6 @@ mod tests {
                 3
             );
         });
-        crate::store::query_plans::assert_no_empty_writes(&empty);
     }
 
     #[test]

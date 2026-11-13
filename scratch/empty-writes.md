@@ -28,9 +28,9 @@ took the write lock and changed nothing:
 The hooks `watch_write_holds` already installs see every write transaction
 end. In test builds they also note whether a row changed, and a transaction
 that ended holding the lock with no changed row is recorded with
-`contention::call_site()`. `query_plans::empty_writes(store, run)` returns
-those call sites for `store`'s connection, the way `statements(store, run)`
-returns its SQL. Production behavior is unchanged: no logging, no new state
+`contention::call_site()`. `query_plans::assert_no_empty_writes(store, run)` fails naming
+those call sites for `store`'s connection and returns `run`'s result, so it
+wraps `statements(store, run)` directly. Production behavior is unchanged: no logging, no new state
 outside `#[cfg(test)]`.
 
 What decides "took the lock" (checked against bundled SQLite 3 in
@@ -106,7 +106,7 @@ text true, or edits the doc.
 ## Status
 
 Built: `contention::empty_writes` (per-connection registry keyed by handle
-address, `PROGRESS_STEPS = 1` in test builds), `query_plans::empty_writes` and
+address, `PROGRESS_STEPS = 1` in test builds), `query_plans::empty_writes` (self-test only) and
 `assert_no_empty_writes`, the self-test, and assertions in both query_plans
 path tests, the boundary sequence, `task_detail_reads_capacity_once_for_all_sessions`
 (now `multi_thread`, `block_in_place` around `registered_task_status`) and
@@ -143,7 +143,7 @@ fails with that function's name.
 
 ## Checks
 
-- Focused (17 tests: query_plans, contention, boundary, human_session, selections): pass.
+- Focused (17 tests: query_plans, contention, boundary, human_session, selections): pass after compress (322 s, load ~600).
 - `cargo clippy -p loopflow --lib -- -D warnings`: clean.
 - Gate: `test(documented_commands::)` for `docs/dev/data.md`, plus
   `cargo clippy --all-targets -- -D warnings`.

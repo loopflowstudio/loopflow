@@ -1000,19 +1000,17 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
         })
         .unwrap();
     // `lf task status`, Desktop and screens read this on the write store.
-    let mut status = None;
-    let empty = crate::store::query_plans::empty_writes(&logins.store.sqlite, || {
-        status = Some(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(crate::ops::task::registered_task_status(
-                    &logins.store,
-                    task,
-                ))
-                .unwrap()
-        }));
-    });
-    crate::store::query_plans::assert_no_empty_writes(&empty);
-    let mut status = status.unwrap();
+    let mut status =
+        crate::store::query_plans::assert_no_empty_writes(&logins.store.sqlite, || {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(crate::ops::task::registered_task_status(
+                        &logins.store,
+                        task,
+                    ))
+                    .unwrap()
+            })
+        });
     let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
     let mut expected = Vec::new();
     for id in ["first", "second", "third"] {

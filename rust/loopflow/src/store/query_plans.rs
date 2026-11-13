@@ -162,21 +162,24 @@ pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String>
     TRACED.with(|traced| traced.borrow_mut().take().unwrap())
 }
 
-/// The call site of each write transaction `run` ends on `store`'s connection
-/// that took the write lock and changed no row: an `IMMEDIATE` transaction that
-/// only read, or an autocommit write that matched nothing. Each one made every
-/// other writer on the Machine wait for nothing.
-pub(crate) fn empty_writes(store: &SqliteStore, run: impl FnOnce()) -> Vec<String> {
+/// Run `run` and return the call site of each write transaction it ends on
+/// `store`'s connection that took the write lock and changed no row: an
+/// `IMMEDIATE` transaction that only read, or an autocommit write that matched
+/// nothing. Each one made every other writer on the Machine wait for nothing.
+fn empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> (R, Vec<String>) {
     super::contention::empty_writes::record(&store.conn, run)
 }
 
-/// Fail naming each of `empty_writes`' call sites.
-pub(crate) fn assert_no_empty_writes(found: &[String]) {
+/// Run `run` and return its result, failing with the call site of each write
+/// that took the lock and changed nothing (see `empty_writes`).
+pub(crate) fn assert_no_empty_writes<R>(store: &SqliteStore, run: impl FnOnce() -> R) -> R {
+    let (result, found) = empty_writes(store, run);
     assert!(
         found.is_empty(),
         "took the write lock and changed nothing:\n  {}",
         found.join("\n  ")
     );
+    result
 }
 
 /// A partial index over a live subset (open Sessions, unfinished Processes)
@@ -328,7 +331,7 @@ mod tests {
             .execute_batch("CREATE TABLE probe(x); INSERT INTO probe VALUES (1);")
             .unwrap();
 
-        let found = empty_writes(&store, || take_the_lock_for_nothing(&store));
+        let ((), found) = empty_writes(&store, || take_the_lock_for_nothing(&store));
         assert_eq!(found.len(), 3, "{found:?}");
         assert!(
             found
@@ -337,7 +340,7 @@ mod tests {
             "{found:?}"
         );
 
-        let found = empty_writes(&store, || {
+        assert_no_empty_writes(&store, || {
             let mut conn = store.conn.lock().unwrap();
             conn.execute_batch("BEGIN DEFERRED; SELECT count(*) FROM probe; ROLLBACK;")
                 .unwrap();
@@ -350,7 +353,6 @@ mod tests {
             tx.execute("UPDATE probe SET x=2 WHERE x=1", []).unwrap();
             tx.commit().unwrap();
         });
-        assert_no_empty_writes(&found);
     }
 
     /// A Machine's retirement sweep and its viewers' polls.
@@ -395,9 +397,8 @@ mod tests {
     #[test]
     fn retirement_sweeps_and_viewer_polls_plan_by_index() {
         let (_home, store, task, viewer) = fixture();
-        let mut traced = Vec::new();
-        let empty = empty_writes(&store, || {
-            traced = statements(&store, || {
+        let traced = assert_no_empty_writes(&store, || {
+            statements(&store, || {
                 assert!(store.pending_retirements().unwrap().contains(&task));
                 store
                     .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
@@ -410,7 +411,6 @@ mod tests {
                     .unwrap();
             })
         });
-        assert_no_empty_writes(&empty);
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
@@ -480,9 +480,8 @@ mod tests {
         let steer = store
             .save_session_steer("viewed", "person", "Look here")
             .unwrap();
-        let mut traced = Vec::new();
-        let empty = empty_writes(&store, || {
-            traced = statements(&store, || {
+        let traced = assert_no_empty_writes(&store, || {
+            statements(&store, || {
                 store
                     .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
                     .unwrap();
@@ -494,7 +493,6 @@ mod tests {
                 store.session_steer_source("viewed", &steer.id).unwrap();
             })
         });
-        assert_no_empty_writes(&empty);
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

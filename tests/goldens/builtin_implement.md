@@ -115,8 +115,9 @@ Graph calls for it.
    - One build at a time: never run two compilers, test runners or linters
      against the same build directory at once, in the background or in
      parallel tool calls.
-   - Gate runs affected suites and the design's acceptance checks, once. Don't
-     run them early because they appear in "Done when".
+   - Gate starts CI for the suites and selects a few high-risk tests, including
+     the design's acceptance checks. Don't run suites early because they appear
+     in "Done when".
    - If a check can't run headless here, use a headless equivalent or leave it
      to gate/CI. Ask for a judgment when someone is in the conversation;
      headless, leave it for demo or review. A real build or test failure still

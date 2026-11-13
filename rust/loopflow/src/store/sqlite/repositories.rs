@@ -258,7 +258,7 @@ impl SqliteStore {
 
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let me = super::task_ownership::RepoFacts::of_task_in(&conn, task)?;
+        let me = super::task_ownership::OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.savepoint()?;
         let (repo, checkout): (String, Option<String>) = tx.query_row(
             "SELECT w.repo,t.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id

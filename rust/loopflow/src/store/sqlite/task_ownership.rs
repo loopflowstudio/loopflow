@@ -728,7 +728,7 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
             person,
             person_key,
             &local,
-            planning_connected_in(conn, task)?,
+            planning_connected_in(conn, &task)?,
         )?;
         tasks.push(task);
     }

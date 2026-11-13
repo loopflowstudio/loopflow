@@ -830,12 +830,18 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             sources: Vec::new(),
         })],
     );
+    // A Graph launched in a Task's checkout records that Task, the deepest
+    // checkout holding `cwd`.
     db.execute(
-        "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,
+            (SELECT id FROM tasks WHERE checkout_machine_id=(SELECT id FROM machines WHERE is_local=1)
+                AND worktree!='' AND (?4=rtrim(worktree,'/') OR instr(?4,rtrim(worktree,'/')||'/')=1)
+             ORDER BY length(worktree) DESC LIMIT 1))",
         rusqlite::params![
             graph_process.as_str(),
             graph,
-            serde_json::to_string(&compiled).expect("compiled serializes")
+            serde_json::to_string(&compiled).expect("compiled serializes"),
+            cwd.to_string_lossy()
         ],
     )
     .expect("record GraphProcess");

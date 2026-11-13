@@ -62,7 +62,8 @@ agent needed by automatic restart callers.
   injects its stop record. Real-provider checks have not passed.
 - The affected suites, clippy, architecture, inventory, website and container-only
   cross-Task agent check passed in the publication pass below. The four product
-  choices remain open for demo.
+  choices remain open for demo. The gate follow-up below repaired two further
+  fallback transitions; its final agent/Task rerun passed 113 tests.
 
 ### Compatibility cleanup
 
@@ -88,7 +89,8 @@ was empty. The upstream Task-move change makes
 selected. After `dfd8d74ed4`, realign repeated the upstream and Task-comment
 reads: the same upstream tip and no newer product decision. The advice, focused
 regression and troubleshooting docs agree; no code repair or test rerun was
-needed. Gate verification and the demo checks above remain outstanding.
+needed at that point. The gate follow-up below completes automated verification;
+the real-provider demo checks above remain outstanding.
 
 ## Observed runs (2026-11-12)
 
@@ -202,6 +204,66 @@ comments end at 22:12Z with the quotes above. No design change; the four
 choices stay open for demo with their built defaults.
 
 ## Checks and handoff
+
+- Gate follow-up plan (2026-11-13): config/catalog/settings/file edits reach
+  `config::`, `settings_launch_tests::`, configuration subscription, Graph
+  defaults, `wave_setup_tests::` and `two_people`; agent/recovery/Graph/shipping
+  edits reach `agent::`, `ops::task_execution::` and `task_graph_launch_tests::`.
+  Docs and repository QA skill reach `documented_commands::` and website;
+  architecture, Rust inventory, fmt and clippy complete the plan. No embedded
+  builtin, protocol, schema or Desktop files changed.
+- Gate runner `scripts/test.py --reuse-passing --rust-filter <above suites>`:
+  resource preflight failed before tests; uv cache inventory exceeded 15 seconds
+  with 92.6 GiB free. The attempted cleanup exited 2. Running the printed plan
+  directly per `scripts/testing.md`; no product check is counted from that run.
+- `rustup update stable --no-self-update`: current stable is Rust 1.100.0;
+  the direct checks use rustup ahead of Homebrew's Rust 1.98.1.
+- Gate found two fallback transitions: a refused launch followed by an
+  unavailable fallback lost its saved limit and aborted before later entries;
+  a wait starting on a fallback reset the list index to zero while keeping
+  that fallback's launch, causing an extra attempt after its next refusal.
+  The loop now retains the failure across moves and stores the wait's starting
+  index with its launch. Both new regressions failed before their repairs:
+  `an_unavailable_fallback_keeps_walking_after_a_usage_refusal` returned
+  `no eligible managed claude account`, and
+  `a_fallback_wait_keeps_its_place_in_the_order` made a fourth launch after
+  the three scripted attempts.
+- Gate direct plan, after the first repair: `cargo nextest run -p loopflow
+  --no-tests fail --no-fail-fast --build-jobs 4 --test-threads 4 -E
+  'test(config::) | test(agent::) | test(ops::task_execution::) |
+  test(settings_launch_tests::) | test(documented_commands::) |
+  test(configuration_changes_reach_an_existing_subscription) |
+  test(graph_defaults_follow_task_wave_and_repository) | test(wave_setup_tests::) |
+  test(task_graph_launch_tests::) | binary(two_people)'` through
+  `scripts/test_network.py`, with a prepared CLI and LF variables unset:
+  237 passed in 155.757 s; one leaky output pipe in
+  `agent::session::tests::bare_harness_sends_no_model_and_a_pinned_one_sends_it`.
+  A surviving fixture holder exited by the follow-up process check without a
+  signal. After the second repair, only agent/task suites need another pass.
+- Gate: `cargo fmt --all -- --check`, `uv run python scripts/check_architecture.py`
+  and `uv run --no-sync python scripts/check_rust_test_inventory.py` passed.
+- Gate final repair: the same isolated nextest command narrowed to
+  `test(agent::) | test(ops::task_execution::) | test(task_graph_launch_tests::)`:
+  113 passed in 94.112 s, including both regressions, no leak warning. The
+  remaining config/docs suites retain the preceding pass. Fixture holders
+  exited without signals; no candidate `lf` processes remained afterward.
+- Gate: `cargo clippy --all-targets --jobs 4 -- -D warnings` passed on Rust
+  1.100.0. Cargo emitted manifest advisories for unchanged `chrono-tz`,
+  `rpassword` and `tokio-stream` dependencies; no Rust lint failures.
+- Gate: `cd website && uv run python dev.py test` with the candidate CLI first
+  on PATH and LF variables unset: 73 passed in 24.12 s, including rendered
+  config/subscription guides and accessibility. `git diff --check` passed.
+  Full-matrix CI and real-provider demo remain separate; no new check is
+  deferred from this gate's affected plan.
+
+- Headless demo decision pass 1: no hands-on demo happened and no human feedback
+  was collected. Advance on the recorded QA and publication results: the
+  intended terminal move/stop advice is visible, the later Task-path QA fixed
+  repeated capacity messages and observed recovery through Graph completion,
+  and the affected publication suites passed. Real Codex refusal and
+  login-to-login failover remain unobserved; that missing coverage does not
+  establish a repairable implementation defect. Keep the four documented
+  product defaults for this pass, without treating them as Jack's approval.
 
 - Publication (2026-11-13), after `lf sync` left base `78bb9f5564` unchanged: the gate runner stopped before tests because `~/.cache/uv` inventory exceeded 15 seconds (92.9 GiB free). Ran its planned commands directly per `scripts/testing.md`: affected nextest filter (`config::`, `agent::`, `ops::task_execution::`, settings launch, documented commands, configuration subscription, graph defaults, Wave setup, Task Graph launch, `two_people`) 236 passed; `cargo clippy --all-targets --jobs 4 -- -D warnings`, formatting, architecture and Rust test inventory passed. Website with candidate CLI: 73 passed. Existing linker `__eh_frame` advisory.
 - Publication: `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` failed before tests: Linux `rustc` compiling the library test received SIGKILL with two build jobs. The same script run in memory with `CARGO_BUILD_JOBS=1` passed the selected check and both prerequisite migration checks; repository source was unchanged and both disposable containers were removed.

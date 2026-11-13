@@ -1188,7 +1188,7 @@ fn _run_with_transient_retries(
     let mut rung = 0;
     // How the step stood when it began falling through; every rung starts
     // from here, and the wait at the top of the ladder returns to it.
-    let mut origin: Option<AgentConfig> = None;
+    let mut origin: Option<(usize, AgentConfig)> = None;
     let mut earliest_reset: Option<i64> = None;
     let mut attempt_config = launch.clone();
     let mut launched = false;
@@ -1250,10 +1250,11 @@ fn _run_with_transient_retries(
             }) if process.wait_for_capacity => {
                 failovers = 0;
                 let reset = earliest_reset.map_or(retry_at, |at| at.min(retry_at));
-                let origin = origin.get_or_insert_with(|| attempt_config.clone());
+                let (origin_rung, origin) =
+                    origin.get_or_insert_with(|| (rung, attempt_config.clone()));
                 rung += 1;
                 if rung == rungs.len() {
-                    rung = 0;
+                    rung = *origin_rung;
                     earliest_reset = None;
                     wait(capacity.pause(&provider, &error, reset));
                     attempt_config = origin.clone();
@@ -1306,7 +1307,9 @@ fn _run_with_transient_retries(
                     };
                     rung += 1;
                     failovers = 0;
-                    account_failure = None;
+                    // An unavailable fallback still follows this refusal;
+                    // keep walking the order rather than losing the limit.
+                    account_failure = Some(result);
                     _record_agent_move(&provider, &reason, next);
                     attempt_config = _climb(&attempt_config, next, process, launch);
                 } else {
@@ -2930,6 +2933,78 @@ trust_level = "trusted"
             assert_eq!(continued.resume_token, None);
             assert!(continued.task_prompt.ends_with("implement the plan"));
         }
+    }
+
+    #[test]
+    fn an_unavailable_fallback_keeps_walking_after_a_usage_refusal() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into(), "claude:sonnet".into()],
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.agent.as_deref().unwrap();
+                attempts.push(agent.to_owned());
+                Ok(match agent {
+                    "codex" => AgentAttempt::Finished {
+                        result: failed_result("You've hit your usage limit"),
+                        can_failover: false,
+                    },
+                    "claude:opus" => cooling(None),
+                    "claude:sonnet" => done(),
+                    _ => panic!("unexpected agent {agent}"),
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:sonnet"]);
+    }
+
+    #[test]
+    fn a_fallback_wait_keeps_its_place_in_the_order() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into()],
+            ..Default::default()
+        };
+        let refused = || AgentAttempt::Finished {
+            result: failed_result("You've hit your usage limit"),
+            can_failover: false,
+        };
+        let mut scripted = [
+            refused(),
+            cooling(Some(crate::store::rows::now_unix() + 3600)),
+            refused(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("the last refusal stops the step"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:opus"]);
     }
 
     #[test]

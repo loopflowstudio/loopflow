@@ -1130,9 +1130,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if let Some(error) = &status.planning_error {
                     println!("Planning: {error}");
                 }
-                // A Task another Machine runs is read from its ownership; this
-                // Machine's records are what it left behind.
-                // A move in flight reads as that, with its retry, before ownership.
+                // A move in flight reads as that, with its retry; a Task another
+                // Machine runs is read from its ownership. This Machine's records
+                // are what it left behind.
                 let elsewhere = match (&status.task, &status.ownership) {
                     (Some(task), Some(ownership)) => {
                         loopflow::ops::task_ownership::moving_here(&task.id, &task.identifier)?
@@ -1143,24 +1143,25 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     }
                     _ => None,
                 };
-                let checked_out = status
-                    .task
-                    .as_ref()
-                    .is_none_or(|task| task.worktree.is_some());
                 if let Some(line) = &elsewhere {
                     println!("{line}");
                 }
-                if !checked_out {
-                    let line = loopflow::ops::task_ownership::not_checked_out_here();
-                    match (&elsewhere, &status.task) {
-                        (None, Some(task)) => println!("{}  {line}", task.identifier),
-                        _ => println!("  {line}"),
-                    }
-                } else if elsewhere.is_none() {
-                    match &status.execution {
+                match status.task.as_ref().filter(|task| task.worktree.is_none()) {
+                    // Under the line naming where it runs, indented; alone, by name.
+                    Some(task) => println!(
+                        "{}  {}",
+                        if elsewhere.is_some() {
+                            ""
+                        } else {
+                            task.identifier.as_str()
+                        },
+                        loopflow::ops::task_ownership::not_checked_out_here()
+                    ),
+                    None if elsewhere.is_none() => match &status.execution {
                         Some(execution) => print_task_snapshot(execution, false)?,
                         None => println!("No execution allocated."),
-                    }
+                    },
+                    None => {}
                 }
             }
             Ok(())

@@ -147,7 +147,7 @@ pub(crate) async fn send(store: &SharedStore, id: &str, to: &MachineId) -> Resul
     })
 }
 
-/// Hand the Task off to `to`, then stop its Graph, commit and push its
+/// Claim the Task for `to`, then stop its Graph, commit and push its
 /// worktree and take its conversation. A failure in those steps hands it back
 /// here; repeating it after a failed receive reuses that claim.
 pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) -> Result<Move> {
@@ -316,7 +316,7 @@ fn claim_for(store: &SqliteStore, task: &TaskId, to: &MachineId) -> Result<TaskO
     if owner.is_none() {
         store.claim_task(task)?;
     }
-    Ok(store.move_claim_with_conversation(task, to)?)
+    Ok(store.move_claim_keeping_conversation(task, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still

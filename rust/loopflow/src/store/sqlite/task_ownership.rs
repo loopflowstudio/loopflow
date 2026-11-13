@@ -730,7 +730,7 @@ impl SqliteStore {
 
     /// A move's claim on `target`, written before the move stops anything: the
     /// Task's conversation travels with it, and the move completes it once taken.
-    pub(crate) fn move_claim_with_conversation(
+    pub(crate) fn move_claim_keeping_conversation(
         &self,
         task: &TaskId,
         target: &MachineId,

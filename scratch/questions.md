@@ -64,6 +64,11 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   context/settings launch, task_initialization pass; transport_tests and
   session_lifecycle_tests binaries pass. Gate reruns affected suites once.
 
+- Compress (2026-11-13): `lf task status` prints the move/elsewhere line and
+  `Not checked out` in one match; `move_claim_keeping_conversation`,
+  `retry_task`. `cargo test --test integration -- machine_commands::` 50 passed;
+  clippy clean.
+
 ## Remaining
 
 1. **`task_ship_events`**: replace the seven `ship_*` columns with an approval/stop

@@ -215,7 +215,7 @@ async fn relay_task(
     receive(store, &moved, target.as_ref())
         .await
         .map_err(|error| match &target {
-            Some(target) => retry(error, name, target),
+            Some(target) => retry_task(error, name, target),
             None => error,
         })?;
     // A Task received here recorded its arrival as it was taken in.
@@ -371,7 +371,7 @@ fn retry_session(error: anyhow::Error, id: &str, target: &Machine) -> anyhow::Er
 }
 
 /// A Task's move is recorded as sent, so the same move delivers it again.
-fn retry(error: anyhow::Error, name: &str, target: &Machine) -> anyhow::Error {
+fn retry_task(error: anyhow::Error, name: &str, target: &Machine) -> anyhow::Error {
     anyhow!(
         "{error:#}\n{name} was sent but did not arrive on {}; retry with\n  lf task move {name} --machine {}",
         target.name(),

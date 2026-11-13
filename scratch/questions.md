@@ -31,3 +31,13 @@
 - After `HeldTask` (6bd724d6ee): `cargo check -p loopflow --lib --tests` clean;
   `cargo test --lib -- store::sqlite::rentals store::sqlite::task_ownership`
   ran 3 of 16 (all ok) before the 30-minute limit stopped it. Gate runs the rest.
+
+## Concept review (2026-11-12)
+
+The change has a clear concept: `OwnershipFacts` is everything an ownership
+write needs from outside the store (Git identity, planning connection,
+declared Machines, the scope's owning Machine). It is read before `BEGIN` and
+passed in as values. Read-only paths (`ownership_in`, `held_in`) load
+nothing inside a write. No naming or model change is called for, and no
+product choice is open. The remaining in-write config load is the one already
+listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.

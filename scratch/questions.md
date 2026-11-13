@@ -4,8 +4,8 @@ Docs written for this Task: `docs/dev/machines.md` (Own Tasks, checkout paragrap
 move Failures, Auto-Ship, pools), `docs/dev/reference-processes.md`,
 `docs/dev/reference-models.md`, `docs/dev/reference.md`, `docs/dev/reference-code.md`.
 Migration: `rust/loopflow/src/store/migrations/task_machine_local.sql` (edit in place).
-Contract Task: 538340 ("Drop the Task, ownership and Machine columns LOO-874
-replaced"; Linear ID pending sync). It drops only what the merged migration replaced.
+Contract Task: LOO-877 (538340, "Drop the Task, ownership and Machine columns
+LOO-874 replaced"). It drops only what the merged migration replaced.
 
 ## Done (2026-11-12)
 
@@ -69,7 +69,7 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
   `retry_task`. `cargo test --test integration -- machine_commands::` 50 passed;
   clippy clean.
 
-## Sync onto main 87f0e3c (2026-11-13)
+## Sync onto main 87f0e3c, then 709e029 (2026-11-13; the second brought only a ruff bump)
 
 - Conflicts in `children.rs`, `task_ownership.rs`, `task_retirement.rs`:
   main's `RepoFacts` (`me`, `planning_connected`) kept, branch names

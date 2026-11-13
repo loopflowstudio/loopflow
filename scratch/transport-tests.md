@@ -290,6 +290,10 @@ no test that waits out a production timeout except a named fallback above.
    manager's 5 s retry), logout closing remote connections, refusing a foreign
    device and the `server.plist` check; its config branches are now redundant
    and go in slice 4.
+   Compressed: the retention test's string-matched cases became a
+   `retention_after(setup)` helper with one assertion each. `cargo nextest run
+   -p loopflow --lib -E 'test(owner_retention_names)'`: pass, 0.18 s; clippy
+   `--lib --tests --test transport_tests` clean (no orphaned helpers).
 4. Merge the kept real-process tests (63 → ≤ 35); remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
 

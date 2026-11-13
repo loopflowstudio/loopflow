@@ -58,8 +58,11 @@ reach backlog and finished Tasks. Preserve authored node IDs across edits: occur
 paths and canonical Work keys, so sibling insertion does not change identity.
 
 `resolve_selection` reads Work and query definitions in one SQLite savepoint.
-Missing references are explicit unavailable evidence; database failures return
-errors. Neither is confirmed emptiness. `read_dashboard` returns saved intent,
+It reads Task state, publication and ownership for the whole repository in a
+fixed number of statements, so its cost does not grow by a query per Task;
+plans and `read_dashboard` share that read. Missing references are explicit
+unavailable evidence; database failures return errors. Neither is confirmed
+emptiness. `read_dashboard` returns saved intent,
 current evidence, and a reconciled arrangement without writing it. Incomplete
 reads keep earlier members; complete departures can prune them.
 

@@ -238,6 +238,9 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 
 ## Done (2026-11-13, eighth pass): a move is a row from its claim
 
+Closes the concept review's one gap (a kill between the claim and `sent` left
+"Runs on mini" with no row, and a repeat refused).
+
 - `task_moves` gains `leaving` (`claim_id`, `stopped`), written with the move's
   claim in one transaction (`begin_task_move`, which replaced
   `move_claim_keeping_conversation`). `leave` stores the stopped Graph on the
@@ -311,4 +314,6 @@ that answers the parallel-stall question below.
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`. `leaving` is a third
-  `task_moves` state beside the brief's "sent or arrived".
+  `task_moves` state beside the brief's "sent or arrived"; the alternative the
+  concept review offered was a `sent` row with no payload meaning "not finished
+  leaving" (review page: `294de82873:scratch/concept-review.html`).

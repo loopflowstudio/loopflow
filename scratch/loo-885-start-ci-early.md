@@ -39,17 +39,18 @@ Gate becomes four moves, in both the builtin and Loopflow's copy:
    notes, far enough to publish one coherent candidate: commit open work, run
    the formatter's auto-fix, follow any step the repository's guide names for
    making a PR one CI tests, `lf sync`, `lf pr publish`. Nothing is armed.
+   Name the two to five tests that cover the riskiest or most-edited behavior
+   here, a line of why each; the design's acceptance check is one of them.
 2. **Confirm it started.** The PR's `headRefOid` equals local `HEAD`, and the
    real suites are queued or running for it. Suites reported `skipping`, or
    only a classifier job passing, mean CI did not start: fix the cause or
    report it. That is never a pass.
 3. **Review while it runs.** Security and data handling where the change
    touches them, correctness, failure handling and recovery, ownership,
-   interfaces, maintainability, docs. Fix concrete findings in scope. Name the
-   two to five tests that cover the riskiest or most-edited behavior and say
-   why in a line each; the design's acceptance check is one of them. CI runs
-   them along with everything else. Run one locally only for fast feedback on
-   a fix, to reproduce a CI failure, or to probe a risk no suite covers.
+   interfaces, maintainability, docs. Fix concrete findings in scope. CI runs
+   the named tests along with everything else. Run one locally only for fast
+   feedback on a fix, to reproduce a CI failure, or to probe a risk no suite
+   covers.
 4. **Publish fixes and report by head.** Batch fixes into one publish per
    review pass (each push cancels the previous CI run). Read checks for the
    final head. Report passing, failing, pending, skipped and unavailable
@@ -115,7 +116,32 @@ creates/refreshes a ready PR without arming. Cached PR copy is read and
 removed by `consume_gate_artifacts` before publication commits; its ref must
 name HEAD or its immediate ancestor, so prepare those files after cleanup.
 
-Remaining: packaging and live gate acceptance below.
+Remaining: the concept-review edits below, then packaging and live gate
+acceptance.
+
+### Next implement pass (concept-review, 2026-11-13)
+
+Two sentences in `.lf/skills/gate.md`; the builtin is unchanged, since a
+repository whose CI ignores `scratch/` can keep writing there.
+
+- **`scratch/questions.md` after the clear.** The headless preamble
+  (`builtins/surfaces/headless.md`) and AGENTS.md tell every headless run to
+  note an assumption in `scratch/questions.md`. Deliver runs gate headless, so
+  a gate that follows that default after `lf scratch clear` re-adds a scratch
+  file; the next publish commits it and the matrix skips. "Write no notes
+  under `scratch/`" covers it only by implication. Name the file: an
+  assumption made after the clear goes in the PR body and the report.
+- **The restoring revert is a local commit.** `git revert <clear-commit>`
+  changes local HEAD only; the PR stays the candidate until something
+  publishes. Say so: gate leaves the revert unpublished, reports the PR head
+  and its checks as the candidate's, and reports local HEAD as the checkpoint
+  the next run starts from.
+
+Checked and left as they are: in `code`, pursue's `pr-publish` has already
+made the PR before deliver's gate, so "no PR" is only `queue` and bare
+`lf gate`; `land` and `ci-fix` after gate ran without scratch before this
+change too; the test naming sits in step 1, as the Task brief asks ("At the
+start").
 Publication and the live matrix observation belong to delivery, not implement.
 Realign 2026-11-13: branch is level with origin/main; no PR exists yet, so
 the first `lf pr publish` in gate creates it.

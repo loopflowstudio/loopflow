@@ -1,0 +1,64 @@
+=== test(adoption::tests::)
+        PASS [   1.824s] (1/8) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+        PASS [   2.527s] (2/8) loopflow ops::task::adoption::tests::creation_adopts_only_the_selected_work
+        PASS [   2.755s] (3/8) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+        PASS [   2.922s] (4/8) loopflow ops::task::adoption::tests::creation_from_a_conversation_keeps_its_directory
+        PASS [   2.932s] (5/8) loopflow ops::task::adoption::tests::binding_selects_the_task_conversation
+        PASS [   3.399s] (6/8) loopflow ops::task::adoption::tests::a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one
+        PASS [   3.778s] (7/8) loopflow ops::task::adoption::tests::binding_a_done_task_keeps_it_done
+        PASS [   5.593s] (8/8) loopflow ops::task::adoption::tests::checkout_adoption_records_its_open_pull_request
+     Summary [   5.595s] 8 tests run: 8 passed, 2881 skipped
+real 88.49
+=== test(run::launch_policy_tests::)
+        PASS [   0.913s] (1/5) loopflow lf::commands::run::launch_policy_tests::resume_applies_current_policy_and_command_line_overrides
+        PASS [   1.056s] (2/5) loopflow lf::commands::run::launch_policy_tests::resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice
+        PASS [   1.124s] (3/5) loopflow lf::commands::run::launch_policy_tests::headless_launch_carries_the_schema_and_terminal_launch_refuses_it
+        PASS [   1.154s] (4/5) loopflow lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit
+        PASS [   1.244s] (5/5) loopflow lf::commands::run::launch_policy_tests::launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository
+     Summary [   1.247s] 5 tests run: 5 passed, 2884 skipped
+real 1.64
+=== test(ops::task::explain::tests::)
+        PASS [   0.021s] (1/7) loopflow ops::task::explain::tests::previews_without_a_readable_registry_are_unavailable_and_create_nothing
+        PASS [   0.940s] (2/7) loopflow ops::task::explain::tests::run_takes_up_the_named_else_waves_else_repositorys_else_code_graph
+        PASS [   1.023s] (3/7) loopflow ops::task::explain::tests::checkout_reuses_a_present_checkout_and_names_option_impediments
+        PASS [   1.187s] (4/7) loopflow ops::task::explain::tests::run_names_option_impediments_selection_and_missing_evidence
+        PASS [   1.216s] (5/7) loopflow ops::task::explain::tests::checkout_proposes_a_path_for_a_task_without_one
+        PASS [   1.328s] (6/7) loopflow ops::task::explain::tests::checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote
+        PASS [   1.337s] (7/7) loopflow ops::task::explain::tests::run_on_a_captured_graph_waits_runs_or_ends_from_its_position
+     Summary [   1.339s] 7 tests run: 7 passed, 2882 skipped
+real 1.67
+=== test(ssh::dispatch_tests::) | test(task_ownership::tests::)
+        PASS [   0.022s] ( 1/15) loopflow ops::task_ownership::tests::an_unassign_reads_as_unassign_and_is_stored_as_released
+        PASS [   0.029s] ( 2/15) loopflow lf::commands::ssh::dispatch_tests::ssh_failures_name_their_recovery
+        PASS [   0.038s] ( 3/15) loopflow store::sqlite::task_ownership::tests::a_recorded_entry_with_an_unknown_machine_is_owned_without_a_machine
+        PASS [   0.042s] ( 4/15) loopflow store::sqlite::task_ownership::tests::only_the_local_unclaim_or_handoff_ends_the_local_claim
+        PASS [   0.043s] ( 5/15) loopflow store::sqlite::task_ownership::tests::a_later_claim_wins_elsewhere_but_never_displaces_the_local_claim
+        PASS [   0.056s] ( 6/15) loopflow ops::task_ownership::tests::log_lines_read_as_a_time_and_a_person_on_a_named_machine
+        PASS [   0.063s] ( 7/15) loopflow store::sqlite::task_ownership::tests::unstamped_entries_in_one_second_keep_their_written_order
+        PASS [   0.083s] ( 8/15) loopflow lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags
+        PASS [   0.092s] ( 9/15) loopflow lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse
+        PASS [   0.387s] (10/15) loopflow store::sqlite::task_ownership::tests::unassigning_an_unowned_task_writes_nothing
+        PASS [   0.732s] (11/15) loopflow store::sqlite::task_ownership::tests::a_private_machine_publishes_its_id_but_not_its_hostname
+        PASS [   1.035s] (12/15) loopflow store::sqlite::task_ownership::tests::a_handoff_does_not_publish_the_targets_local_label
+        PASS [   1.606s] (13/15) loopflow store::sqlite::task_ownership::tests::the_owner_reclaims_after_a_stale_unclaim_elsewhere
+        PASS [   1.728s] (14/15) loopflow store::sqlite::task_ownership::tests::another_persons_claim_never_routes_work_to_their_machine
+        PASS [   2.680s] (15/15) loopflow store::sqlite::task_ownership::tests::a_double_claim_keeps_the_first_claimant_and_names_the_later_claim
+     Summary [   2.684s] 15 tests run: 15 passed, 2874 skipped
+real 3.04
+=== adoption rerun
+        PASS [   2.777s] (1/8) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+        PASS [   3.858s] (2/8) loopflow ops::task::adoption::tests::binding_selects_the_task_conversation
+        PASS [   3.945s] (3/8) loopflow ops::task::adoption::tests::creation_adopts_only_the_selected_work
+        PASS [   4.167s] (4/8) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+        PASS [   4.685s] (5/8) loopflow ops::task::adoption::tests::a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one
+        PASS [   4.856s] (6/8) loopflow ops::task::adoption::tests::creation_from_a_conversation_keeps_its_directory
+        PASS [   5.398s] (7/8) loopflow ops::task::adoption::tests::binding_a_done_task_keeps_it_done
+        PASS [   5.512s] (8/8) loopflow ops::task::adoption::tests::checkout_adoption_records_its_open_pull_request
+     Summary [   5.516s] 8 tests run: 8 passed, 2881 skipped
+=== promotion_
+        PASS [   7.005s] (1/4) loopflow::session_lifecycle_tests promotion_background_run_does_not_claim_primary
+        PASS [   9.153s] (2/4) loopflow::session_lifecycle_tests promotion_sets_directory_immediately_and_resumes_same_native_conversation
+        PASS [   9.764s] (3/4) loopflow::session_lifecycle_tests promotion_selects_session_in_owned_and_shared_checkouts
+        PASS [  11.839s] (4/4) loopflow::session_lifecycle_tests promotion_explicit_sources_with_run_keep_the_selected_work
+     Summary [  11.839s] 4 tests run: 4 passed, 29 skipped
+real 72.40

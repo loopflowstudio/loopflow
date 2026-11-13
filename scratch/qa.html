@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-889 QA</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#222}
+code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f5f5f4;padding:.75rem;overflow:auto}
+table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}</style></head>
+<body>
+<h1>LOO-889 QA: decision rows and full-Machine tests</h1>
+<p>Contributors are the people this change is for: someone who touches promotion, launch settings, Task previews or Machine dispatch
+opens <code>rust/loopflow/tests/README.md</code> § Decision rows and runs what it says. That's the walkthrough I ran. Branch HEAD <code>24d4fec7</code>
+(code identical to the PR head <code>a4e2d438</code>), 2026-11-13 15:30–15:55 local. The commands ran from a shell with <code>LF_*</code>/<code>REX_*</code> unset and stdin closed.
+Machine load average 225–315 on 16 cores throughout (other worktrees building), so the times below are inflated.</p>
+
+<h2>1. Run the decision table exactly as the README prints it</h2>
+<table>
+<tr><th>Filter</th><th>Rows</th><th>Result</th><th>nextest wall</th></tr>
+<tr><td><code>test(adoption::tests::)</code></td><td>8</td><td>8 passed</td><td>5.6 s, rerun 5.5 s</td></tr>
+<tr><td><code>test(run::launch_policy_tests::)</code></td><td>5</td><td>5 passed</td><td>1.2 s</td></tr>
+<tr><td><code>test(ops::task::explain::tests::)</code></td><td>7</td><td>7 passed</td><td>1.3 s</td></tr>
+<tr><td><code>test(ssh::dispatch_tests::) | test(task_ownership::tests::)</code></td><td>15</td><td>15 passed</td><td>2.7 s</td></tr>
+</table>
+<p>The first command took 88 s of real time because it compiled the library test binary. Later filters reused it (1.6–3.0 s real).
+The slowest row was <code>checkout_adoption_records_its_open_pull_request</code> at 5.5–5.6 s.
+Transcript: <code>scratch/qa-logs/rows.log</code>.</p>
+
+<h2>2. Run the full-Machine promotion tests</h2>
+<pre>cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
+PASS [ 7.005s] promotion_background_run_does_not_claim_primary
+PASS [ 9.153s] promotion_sets_directory_immediately_and_resumes_same_native_conversation
+PASS [ 9.764s] promotion_selects_session_in_owned_and_shared_checkouts
+PASS [11.839s] promotion_explicit_sources_with_run_keep_the_selected_work
+Summary [11.839s] 4 tests run: 4 passed, 29 skipped</pre>
+<p>The filter selects exactly the four tests the promotion table lists. <code>promotion_selects_…</code> took 25.1 s before this change; it now takes 9.8 s, under heavier load.</p>
+
+<h2>3. Check that what the README names exists</h2>
+<p>Each of the 19 full-Machine tests named in the tables resolves to exactly one <code>fn</code>. Each named seam exists:
+<code>engine::creation::create</code>, <code>ops::human_session::bind</code>, <code>preview_binding</code>, <code>primary::ensure</code>,
+<code>run::build_prompt</code>, <code>resolve_session_config</code>, <code>explain_task_run</code>, <code>explain_task_checkout</code>,
+<code>navigation::machine_invocation</code>, <code>ssh::parse_remote_command</code>, <code>machine::transport_failure</code>,
+<code>SessionRecorder::begin_at</code>, <code>open_ephemeral_store</code> and <code>test_ambient::EnvGuard</code> (<code>tests/support/ambient.rs</code>, which the library includes as <code>test_support</code>).
+The <code>scripts/testing.md</code> paragraph links to the README anchor, and the filters there match the README's.</p>
+
+<h2>Fixed</h2>
+<p>Nothing. No failures came up.</p>
+
+<h2>What works now</h2>
+<ul>
+<li>All four decision-table filters pass from a clean environment (35 rows).</li>
+<li>The kept promotion full-Machine tests pass.</li>
+<li>The README and <code>scripts/testing.md</code> reference only tests and functions that exist.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>The kept full-Machine tests for launch, Task Graph and Machine dispatch were not run locally. CI runs those suites: on <code>4ba42d46</code> it passed in full. On the PR head <code>a4e2d438</code>, every check except <code>macos-inputs</code> and <code>scratch-clear</code> was SKIPPED at 15:55. That is what a scratch-only head produces, since its code matches <code>4ba42d46</code>.</li>
+<li>Row timings at normal load. The earlier quiet-machine measurement was 35 rows in 5.8 s.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The README says each family "answers in one to three seconds". Under this load the adoption family took 5.5 s, and one of its rows took 5.5 s on its own. This may be fine on a quiet Machine. If it repeats there, either split <code>checkout_adoption_records_its_open_pull_request</code> or change the wording.</li>
+</ol>
+</body></html>

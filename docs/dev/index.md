@@ -234,7 +234,7 @@ The provider's AgentProcess resolves to its attached LfProcess at child admissio
 A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
-Every Graph naming a Task, or run in its checkout, is part of its work.
+Every Graph started for a Task, by naming it or in its checkout, is part of its work.
 Only `lf task run` and `lf ship` advance the Task's captured graph position;
 independent Graphs leave that position unchanged. Each launch starts a fresh
 Graph process.

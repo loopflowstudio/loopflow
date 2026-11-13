@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-865 QA: Task–Graph pairs</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f3;padding:.8em;overflow:auto;font-size:12.5px}
+td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}
+table{border-collapse:collapse} .ok{color:#1a7f37} .no{color:#b42318}
+</style>
+<h1>LOO-865 QA: Graphs recorded with their Task</h1>
+<p>2026-11-13. Branch <code>lf 0.15.3+bed5521d6</code> against installed <code>0.15.3+112c27a05</code>.
+Private Machine: <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-865</code>, disposable repo with a bare origin,
+<code>planning: {provider: git, personal: true}</code>, command-only Graphs (<code>- cmd: help</code>). No provider CLI on <code>PATH</code>.</p>
+
+<h2>1. Returning user: store written by 0.15.3, opened by the branch</h2>
+<p>With the installed binary: two worktrees, <code>lf task create --worktree</code> for Alpha and Beta, then
+<code>lf -b graph</code> twice in Alpha's checkout, once in <code>repo.alpha/sub/deep</code>, once in Beta, once in the main checkout.
+Saved <code>lf task status &lt;id&gt; --json</code>. Then ran the branch binary on the same home (migration applies on open).</p>
+<pre>task_6378931a… graphs identical      (fd55f976, 63851a45, ddd6ae61)
+task_7fbe243b… graphs identical      (4a65a357)
+
+graph_processes after migration:
+4a65a357 | task_7fbe243b…   (repo.beta)
+6079cc1d | NULL             (main checkout)
+63851a45 | task_6378931a…   (repo.alpha)
+ddd6ae61 | task_6378931a…   (repo.alpha/sub/deep)
+fd55f976 | task_6378931a…   (repo.alpha)
+index graph_processes_task ON graph_processes(task_id) WHERE task_id IS NOT NULL</pre>
+<p class="ok">Backfill reproduces 0.15.3's read-time pairing exactly, including the nested directory and the stopped Graphs.</p>
+
+<h2>2. New launches with the branch</h2>
+<table>
+<tr><th>Launched from</th><th>Recorded <code>task_id</code></th></tr>
+<tr><td><code>repo.alpha/sub/deep</code></td><td class="ok">Alpha</td></tr>
+<tr><td>symlink <code>/tmp/lf-qa-865/alpha-link</code> → Alpha's checkout</td><td class="ok">Alpha (cwd recorded canonical)</td></tr>
+<tr><td>main checkout</td><td class="ok">NULL</td></tr>
+<tr><td>main checkout with <code>--task &lt;Beta&gt;</code></td><td class="ok">Beta (ran in Beta's checkout)</td></tr>
+<tr><td><code>/tmp</code> (outside a repo)</td><td>Graph not found; nothing recorded (expected)</td></tr>
+</table>
+<p><code>lf task status</code> (human) lists Alpha's five Graphs in launch order, old ones first; Beta's JSON shows its two.
+A Task with no Graphs reads <code>[]</code>.</p>
+
+<h2>3. Server: <code>task.get</code> watch and <code>plan.list</code></h2>
+<p>Branch <code>lf server run</code> in the private home; a Python client spoke newline JSON (revision 5) over its socket.
+Subscribed <code>task.get</code> for Alpha, then ran a Graph in the main checkout, then one in Alpha.</p>
+<pre>reading  graph_processes=5
+reading  graph_processes=6
+event    graph.step_finished task=Alpha graph=63508a17   ← the Alpha run
+reading  graph_processes=6
+(no event for 5d26278c, the main-checkout run, task_id NULL)</pre>
+<p><code>plan.list</code> (<code>all: true</code>): each Task's <code>latest_graph_process.cwd</code> is its own checkout; Beta's stays
+<code>repo.beta</code> although the newer main-checkout Graph ran after it.</p>
+
+<h2>Fixed</h2>
+<p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
+(<code>lf -b graph</code> in an adopted checkout).</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>Desktop window and a Wave board in the UI: the private repo has no Wave; the board's data path (<code>plan.list</code>) was checked over the socket.</li>
+<li>Comparison on a copy of the real 817 MB store: the skill forbids opening a copy with <code>lf</code>; the plan's backfill numbers came from SQL on a copy.</li>
+<li>Focused tests (<code>graph_process_task_backfills</code>, <code>store::sqlite::task_work::</code>): the test binary printed
+<code>running 14 tests</code> and went to state <code>TN</code> again, run directly from an empty dir with closed stdin.
+Its parent shell (and a <code>sleep 60</code> in it) stopped too, so something on this Machine stops whole process groups;
+other worktrees' test binaries sit in <code>TN</code> as well. Killed only this run's PIDs. Gate or CI must run them.</li>
+</ul>
+
+<h2>Still wrong</h2>
+<p>Nothing found. Known semantic change, by design: a Task adopting a checkout later does not claim Graphs that ran there earlier (<code>scratch/questions.md</code>).</p>

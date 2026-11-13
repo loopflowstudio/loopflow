@@ -71,7 +71,10 @@ Set `default_agent: codex` in its `.lf/config.yaml`. Create real records with
 `lf task create --title ... --json` and `lf session resume --prepare --json`;
 `--prepare` creates connection data without starting a provider. For an upgrade
 scenario, prepare a Session with the installed binary before opening the same
-state with the branch binary.
+state with the branch binary. `lf -b graph <name>` runs a command-only Graph
+(`- cmd: help`) in place with no server; run it in a checkout adopted by
+`lf task create --worktree <path>` to give that Task Graphs. A `cmd:` step must
+name a real `lf` command (`version` is not one).
 
 Run `lf server run` as a child with closed stdin; get its socket from
 `lf server status`. Use the current revision's newline JSON protocol in

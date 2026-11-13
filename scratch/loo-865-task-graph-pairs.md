@@ -148,8 +148,21 @@ recording the deepest checkout's Task. Left: the gate's store-copy comparison.
 
 - `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13; rerun at realign after merging origin/main 87f0e3c60a: same, `running 14 tests` then stopped). Gate or CI runs them; nothing on the branch has executed these tests yet.
 
+- QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished` and `plan.list` latest Graph pair correctly. Focused tests stopped in `TN` again; gate or CI runs them.
+
 ## Docs
 
 Updated for launch-recorded Graph Tasks: `docs/dev/data.md`, `docs/dev/planning.md`,
 `docs/dev/reference-models.md`, `docs/dev/index.md` (and regenerated
 `docs/dev/index.html`). No user-facing docs change: `lf task status` output is the same.
+
+## Concept review (2026-11-13)
+
+The model matches the work model: a Graph runs *for* a Task (or a Wave, or
+nothing), the launch already decides which, and the store now records that
+decision instead of re-deriving it from directories on every read. A Graph run
+with an explicit `--wave` inside a Task's checkout no longer counts as the
+Task's; that follows from the same concept. Writers are the launch
+(`graph.rs` execute), `World::graph` and test fixtures; no other production
+INSERT exists. Nothing further to change; the adoption question in
+`scratch/questions.md` stays reversible and does not change the design.

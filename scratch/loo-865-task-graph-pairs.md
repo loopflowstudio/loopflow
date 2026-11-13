@@ -159,34 +159,47 @@ record and never changes; the table stays append-only. Tasks are never deleted
 
 ## Status
 
-Prior implementation gated, CI green on PR #1910 (2026-11-13). Adoption regression repaired: status and run selection inspect open Graph/step Processes in the Task's work, without changing Graph membership. A Graph whose owner exited still blocks overlap while its step runs. Earlier Graphs remain unattached.
+Built and behind PR #1910 (CI green on the pre-adoption-repair head,
+2026-11-13). Every "Done when" item is implemented; the adopted-mid-Graph
+Task state has a focused test but no real-CLI re-walk yet.
 
-Task-state iteration (2026-11-13): the shared derived state also checks open
-Graph/step Processes through the existing checkout/Session membership query.
-It reports `moving` (or approved `shipping`) until those Processes finish;
-done and abandoned still take precedence. The query filters to Graph owners
-and children before reading Session history, with indexed Session lookups.
-`EXPLAIN QUERY PLAN` on the live store (1,233 Tasks, 172,024 Processes, 2,396
-Graphs, 17,928 Sessions) uses `processes_unfinished` and point indexes for
-Graphs, Sessions and events; all Task states in one statement took 295 ms.
-Direct SQL probe: adoption → `moving`, owner exit with open step → `moving`,
-approval → `shipping`, both exited → `idle`; terminal marks take precedence
-and the Graph's `task_id` stays NULL. A 10,000-Task in-memory fixture returned
-the expected states in 1,344 ms, using the unfinished index and Graph/Session
-point lookups.
-- Implement Task-state check: the focused build was stopped at its 900-second budget with no result. Compress 2026-11-13 ran it: `cargo test -p loopflow --lib -- adopting_a_checkout_with_a_running_graph_prevents_another_run process_membership open_process task_state` — 6 pass (18 min build), including the adoption regression (snapshot and `task_detail_facts` both `moving`, then `idle`) and the open-process membership cost test.
-- Compress Task-state 2026-11-13: `task_state_sql` has one running branch (own run, ship process or open Graph/step in the Task's work); the Graph filter is one `graph_processes` probe, `lf_process_id IN (p.id,p.parent_lf_process_id)`. Live store, read-only: covering-index search per unfinished Process, 29 rows either form.
+- Store copy: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's
+  `task_graph_pairs` over every Task, then the branch migration: 2,141 pairs on
+  434 Tasks both ways, 0 differences, 0 Graphs with more than one Task.
+- QA §1–4 (`scratch/qa.html`): a 0.15.3-written store opened by the branch keeps
+  every Task's Graphs; new launches, `task.get` `graph.step_finished`,
+  `plan.list` latest Graph, `lf graph list --processes`/`--taskless`/`--for-task`
+  and `lf task status` agree with `graph_processes.task_id`.
+- Gate (last on 4e8851107): `scripts/test.py --reuse-passing` stopped at
+  resource preflight (uv cache inventory deadline), so its plan ran by hand:
+  fmt, clippy, architecture, test inventory, website `dev.py test` (73), and
+  173/173 focused tests. Gate fix: `entry_in` reads the recorded `task_id`.
+- Adoption repair (QA §5 → §6): `open_graph_execution` and `select_task_run`
+  see open Graph/step Processes in the Task's work. §6 confirmed execution
+  `running`, `no_action`, `lf task run` refused with the same sentence, Graph
+  row still NULL. `select_task_run` checks the Task's own run first, so its
+  "`lf task interrupt`" message is unchanged.
+- Task state (QA §6 "Still wrong" 1, header read `idle`): `task_state_sql`
+  (`store/sqlite/durable.rs`) has one running branch: own run, ship process,
+  or an open `lf` Process that is a Graph or a Graph's child in the Task's work
+  (`task_open_process_ids`, relocation-aware). It reports `moving`, or
+  `shipping` when approved; done/abandoned take precedence. Live store,
+  read-only `EXPLAIN QUERY PLAN` (1,233 Tasks, 172,024 Processes, 2,396 Graphs,
+  17,928 Sessions): `processes_unfinished` plus point indexes; all Task states
+  in one statement 295 ms. 10,000-Task in-memory fixture: 1,344 ms.
+  `cargo test -p loopflow --lib -- adopting_a_checkout_with_a_running_graph_prevents_another_run process_membership open_process task_state`
+  — 6 pass (18 min build): snapshot and `task_detail_facts` both `moving`, then
+  `idle` once Graph and step exit.
 
-Remaining: gate owns the affected Task controls, task_graph_launch_tests, task_github_cache_tests, task_execution, waves, shared Task-state readers and documented_commands suites plus clippy.
-
-- Implement iteration 2026-11-13: `cargo test -p loopflow --lib adopting_a_checkout_with_a_running_graph_prevents_another_run` — pass (1 test; real OS identity, unknown identity, owner exit with open step, both finished, unchanged Graph membership). `cargo fmt` and `git diff --check` pass. Linker emitted its large `__eh_frame` warning; no Rust warning.
-- Compress 2026-11-13: `select_task_run` checks the Task's own run first, so a Task already running keeps its "is running graph … `lf task interrupt`" message and only an unattached Graph gets the `lf history show` one. Same focused test — pass. Nothing else to cut.
-
-- Store copy 2026-11-13: `.backup` of the live store (2,319 Graphs, 1,224 Tasks); main's `task_graph_pairs` over every Task, then the branch migration. 2,141 pairs on 434 Tasks both ways, 0 differences, 0 Graphs with more than one Task.
-- QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished`, `plan.list` latest Graph, `lf graph list --processes`/`--taskless`/`--for-task` and `lf task status` agree with `graph_processes.task_id`.
-- Gate 2026-11-13 (last on 4e8851107): `scripts/test.py --reuse-passing` stopped at resource preflight (uv cache inventory deadline), so its plan ran by hand. nextest test processes on this Machine enter `TN` until SIGCONT, other worktrees' too; runs continued only their own descendants. fmt, clippy, architecture, test inventory, website `dev.py test` (73), and 173/173 focused tests (`task_work::`, `graph_inventory::`, `bind_attribution::`, migration test, `server::events::`, `graph_tests::`, `task_graph_launch_tests::`, `planning_foreground_tests::`, `graph_discovery_tests::`, `machine_commands::`, `record_graph` integration, `documented_commands::`): pass.
-- Gate fixes: `entry_in` derived a Graph's `task_id` from the cwd/Session rule while `graphs_of_task` read the column; it now reads the column.
-- Compress 2026-11-13: `graphs_of_task` probes `task_id IN (?1)` directly. A second pass on 4c54a93ec found nothing further to cut; `entry_in`'s per-Graph `task_id` lookup replaces an equal per-Graph `task_of_process` call.
+Remaining:
+- QA/demo: re-walk QA §6 with the current head and see the `lf task status`
+  header read `moving` while the unattached Graph runs, `idle` after.
+- Gate: affected suites (Task controls, `task_graph_launch_tests`,
+  `task_github_cache_tests`, `task_execution`, waves, shared Task-state readers,
+  `documented_commands`) plus clippy, on the current head. nextest processes on
+  this Machine enter `TN` until SIGCONT; continue only this run's descendants.
+- Not this change: QA §6 "Still wrong" 2 (a signal-killed provider leaves
+  `condition.unresolved_execution` true while `action` is `run`).
 
 ## Docs
 

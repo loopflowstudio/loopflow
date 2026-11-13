@@ -630,18 +630,24 @@ pub(crate) async fn arriving_task(
 /// A moved Task is taken in first: its claim, its checkout on the carried
 /// branch and its Graph. Returns the Session, when one moved.
 pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
+    let task = moved.task.as_ref().map(|task| task.task_id.clone());
+    let from = moved.from_machine_id.clone();
+    let received = receive_move(store, moved).await?;
+    // Arrival acknowledges the conversation as well as the checkout. A failed
+    // transcript import must leave the checked move available for retry.
+    if let Some(task) = task {
+        store
+            .sqlite
+            .record_move_arrived(&task, &from, &store.sqlite.local_machine()?.id)?;
+    }
+    Ok(received)
+}
+
+async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
     let repo = repository(store, &moved).await?;
     let main = crate::git::worktrees::main_repo_root(&repo)?;
     let task = match &moved.task {
-        Some(task) => {
-            let taken = take_in_task(store, &main, task, moved.checkout.as_ref()).await?;
-            store.sqlite.record_move_arrived(
-                &task.task_id,
-                &moved.from_machine_id,
-                &store.sqlite.local_machine()?.id,
-            )?;
-            Some(taken)
-        }
+        Some(task) => Some(take_in_task(store, &main, task, moved.checkout.as_ref()).await?),
         None => None,
     };
     let Some(moved_session) = &moved.session else {

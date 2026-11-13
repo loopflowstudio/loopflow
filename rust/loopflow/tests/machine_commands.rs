@@ -2484,6 +2484,43 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Runs on mini since"), "{status}");
 }
 
+#[test]
+fn a_failed_conversation_import_keeps_the_move_available_for_retry() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "retry-conversation");
+    let conversation = "0199a213-81c0-7800-8aa1-bbab2a035a60";
+    let session = claude_conversation(&fixture, &worktree, conversation);
+    let blocked = fixture.root.path().join("remote/.claude");
+    fs::write(&blocked, "blocks the transcript directory").unwrap();
+
+    let failed = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(plan.remote.task(&task).unwrap().unwrap().worktree.is_some());
+    assert!(!plan.remote.task_move_arrived_on(&task, &mini).unwrap());
+
+    fs::remove_file(&blocked).unwrap();
+    let retried = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&retried);
+    assert!(plan.remote.task_move_arrived_on(&task, &mini).unwrap());
+    let arrived = plan.remote.session(&session).unwrap().unwrap();
+    let project = fixture
+        .root
+        .path()
+        .join("remote/.claude/projects")
+        .join(claude_project(&arrived.cwd));
+    assert!(project.join(format!("{conversation}.jsonl")).is_file());
+}
+
 /// Mini never took the Task it was sent, and the laptop claims it back: the
 /// move is over, so status shows none and moving it again begins a new move
 /// instead of delivering the old one.

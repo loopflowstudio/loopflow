@@ -122,11 +122,6 @@ outage is discarded, never replayed; reconnect exhaustion reports unavailable,
 Retry reconnects without reaching the provider; pane closure cancels a pending
 move/reconnect/installer; Move here consumes before sending.
 
-Risk: `connection::Status` opens the server bridge itself. If a fake server
-socket cannot stand in without a production seam, keep the server-bridge
-heartbeat and exhaustion cases as **one** real-process test each (merged; one
-30 s window, one 12.7 s cycle) and say so here.
-
 ### 3. Real-process surface tests (`tests/transport_tests.rs`, 34 + 8 ignored)
 
 What exists after slice 4 (merged legs keep their own `Fixture`):
@@ -410,6 +405,9 @@ bound, and lf at a turn boundary is meant to keep passing. Slice 5 does not
 exercise that path. Unreproduced; worth its own Task if it recurs.
 
 ## Checks
+
+- After merging main (`39b3779427`): the slice 5 test passes (0.04 s); the
+  rest goes to gate/CI.
 
 Left for gate/CI: the `transport_tests` CI sum against 400 s, relay case times
 on CI, and the SSH cases (Linux only).

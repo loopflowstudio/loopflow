@@ -146,10 +146,7 @@ pub(super) fn graphs_of_task(
 ) -> StoreResult<Vec<crate::ops::graph_process::GraphProcess>> {
     super::graph_inventory::graphs_in(
         conn,
-        &format!(
-            "e.id IN (SELECT graph FROM ({}))",
-            task_graph_pairs(&format!("SELECT id FROM ({})", tasks("?1")))
-        ),
+        &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
         &[&task.as_str()],
     )
 }
@@ -1860,7 +1857,7 @@ mod tests {
             params![finished, task.as_str()],
         )
         .unwrap();
-        let pairs = super::task_graph_pairs(&format!("SELECT id FROM ({})", super::tasks("?1")));
+        let pairs = super::task_graph_pairs("?1");
         let read_graphs = || {
             let mut statement = conn.prepare(&pairs).unwrap();
             let selected = statement

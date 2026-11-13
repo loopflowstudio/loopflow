@@ -78,8 +78,9 @@ record and never changes; the table stays append-only. Tasks are never deleted
    under `cfg(test)`, so cwd-built fixtures keep their meaning.
 3. **Readers:** `task_graph_pairs(task_ids)` becomes
    `SELECT task_id, lf_process_id AS graph FROM graph_processes WHERE task_id IN (…)`
-   for its three callers (`graphs_of_task`, `completed_graph_steps`,
-   `latest_task_graphs`); no join on `tasks`, and the partial index serves `IN`. Rewrite the doc comments that justify "driven from the
+   for its three callers (`graphs_of_task` passes `?1`, a canonical `TaskId`;
+   `completed_graph_steps` and `latest_task_graphs` pass `json_each`); no join on
+   `tasks`, and the partial index serves `IN`. Rewrite the doc comments that justify "driven from the
    Graphs" and "asking per Task repeats that walk".
 4. **Tests:** replace the VmStep test at `task_work.rs` ~1880–1960 (unrelated
    Processes, unrelated Sessions) with: one Task's Graph reading does not grow
@@ -180,3 +181,4 @@ Task's; that follows from the same concept. Writers are the launch
 (`graph.rs` execute), `World::graph` and test fixtures; no other production
 INSERT exists. Nothing further to change; the adoption question in
 `scratch/questions.md` stays reversible and does not change the design.
+- Compress 2026-11-13: `graphs_of_task` probes `task_id IN (?1)` directly (a `TaskId` is canonical, so the identifier-matching `tasks()` subquery added nothing). `cargo test -p loopflow --lib store::sqlite::task_work::`: 13 passed (binary stopped in `TN` repeatedly; continued by PID).

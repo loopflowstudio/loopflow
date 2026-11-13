@@ -1,0 +1,44 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 42s
+────────────
+ Nextest run ID efe9b4ac-a96f-48bb-8b6a-9793d107df57 with nextest profile: default
+    Starting 8 tests across 1 binary (2879 tests skipped)
+        PASS [   1.913s] (1/8) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+        PASS [   2.661s] (2/8) loopflow ops::task::adoption::tests::binding_selects_the_task_conversation
+        PASS [   2.684s] (3/8) loopflow ops::task::adoption::tests::checkout_adoption_records_its_open_pull_request
+        PASS [   3.092s] (4/8) loopflow ops::task::adoption::tests::creation_adopts_only_the_selected_work
+        FAIL [   3.214s] (5/8) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+  stdout ───
+
+    running 1 test
+    test ops::task::adoption::tests::refusals_leave_ownership_unchanged ... FAILED
+
+    failures:
+
+    failures:
+        ops::task::adoption::tests::refusals_leave_ownership_unchanged
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2886 filtered out; finished in 3.19s
+
+  stderr ───
+    Saved locally; planning synchronization pending. See `lf planning status`.
+    Saved locally; planning synchronization pending. See `lf planning status`.
+    Saved locally; planning synchronization pending. See `lf planning status`.
+    Saved locally; planning synchronization pending. See `lf planning status`.
+
+    thread 'ops::task::adoption::tests::refusals_leave_ownership_unchanged' (1460844714) panicked at rust/loopflow/src/ops/task/adoption/tests.rs:167:28:
+    called `Result::unwrap_err()` on an `Ok` value: Task { id: TaskId("task_09a173e8566e4def860bbdf7f225780b"), revision: 2, identifier: "09a173", title: "Keep prototype", description: "Keep prototype", rank: 0, assignee: None, due_date: None, state: Some("unstarted"), completed_at: None, linear_id: None, pm_snapshot_synced_at: None, pm_writeback: Current, wave_id: None, repository_id: RepositoryId("repo_bda5ec83cb334e6799c04179bcca9476"), project_id: None, worktree: Some("/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp1M7PUm.prototype"), workspace_slug: ".tmp1M7PUm.prototype", branch: "prototype", base_commit: "6867fdd6fee9b3098dcc143bffca71ee2b448721", parent_pr_id: None, created_at: 2026-11-13 23:32:02.0 +00:00:00, updated_at: 2026-11-13 23:32:02.0 +00:00:00, observation: NotRequired }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   3.547s] (6/8) loopflow ops::task::adoption::tests::creation_from_a_conversation_keeps_its_directory
+        PASS [   4.031s] (7/8) loopflow ops::task::adoption::tests::a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one
+        PASS [   4.391s] (8/8) loopflow ops::task::adoption::tests::binding_a_done_task_keeps_it_done
+────────────
+     Summary [   4.393s] 8 tests run: 7 passed, 1 failed, 2879 skipped
+        FAIL [   3.214s] (5/8) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+error: test run failed

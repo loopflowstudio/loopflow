@@ -26,8 +26,9 @@ The auto-retry then restarted from kickoff. No Task comment or steer adds scope.
   matrix) and 6 (local planning, `work_open_tests`, `context_launch_tests`,
   `settings_launch_tests`) were scoped out of Done-when; they need their own
   Task if wanted.
-- gate / land: CI for `9dab90df` was running when this restart began. Wait on
-  it and fix real failures; a commit of this file re-triggers CI.
+- gate / land: PR head is `8c4b0103` (merge of base `5a0fa46b`; origin/main
+  has nothing newer). Its CI run 43526844171 was queued at 23:24Z. Wait on it
+  and fix real failures; a commit of this file re-triggers CI.
 
 ## Open outside this Task
 

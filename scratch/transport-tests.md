@@ -170,19 +170,10 @@ surface, merged where they share a fixture):
 ### Delete — do not maintain
 
 Duplicates or guards for removed mechanisms; each one's rule is covered above.
-Still in `transport_tests` after slice 2:
-`a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait` (guards a removed timeout),
-`native_program_status_detects_support_before_a_viewer_attaches` (`output.rs:405`),
-`viewer_stream_waits_for_destination_resolution_before_attachment` (asserts only that 60 s > 6 s),
-`completed_task_without_checkout_ends_a_conversation_with_typed_input` (screen-save assertion joins the shell cleanup test),
-`returning_task_viewer_resets_cleanup_without_another_sweep` (= `task_retirement.rs::returning_viewers_reset_retirement_and_retry_without_a_sweep`),
-`sessions_keep_serving_when_their_lf_executable_goes` (no executable watcher exists; resume tail joins the takeover test),
-`unanswering_superseded_owner_preserves_pending_turn_and_queued_input`,
-`resumed_session_completes_turns_after_build_replacement_and_viewer_return` (owner-hosted Task conversation predates #1887; restart leg = `registry_tests`),
-`desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged).
-Slices 1–2 deleted the rest of this list (the viewer-protocol and control-claim
-clusters, the `prepared_*_preserves_a_later_controlling_viewer` pair, the server
-heartbeat/reconnect/exhaustion/Move here cluster); names are in `git show 7acc5cea27 117378aadb -- rust/loopflow/tests/transport_tests.rs`.
+Still in `transport_tests` after slice 3:
+`desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged into the shell reconnect test in slice 4).
+Slices 1–3 deleted the rest of this list; names are in
+`git show 7acc5cea27 117378aadb da53314382 dc3d722f36 -- rust/loopflow/tests/transport_tests.rs`.
 Unused fixture helpers go with them. `lifetime.rs` tests (14 s on `POLL` sleeps) get the same `#[cfg(test)]` timing value if it is one line; otherwise leave them.
 
 ## Forbidden
@@ -244,7 +235,47 @@ no test that waits out a production timeout except a named fallback above.
      ports them to `relay_tests` with `TEST_PACE` or merges them into
      `local_terminal_reconnects_…`. 95 − 35 = 60 tests still have to go in
      slices 3–4.
-3. Non-transport moves (store retention, human_session, server, retirement).
+3. **Done (2026-11-13), server rows pending.** 24 real-process tests deleted,
+   290.5 s of CI medians; `transport_tests` holds 71 `#[test]`s. In-process homes:
+   - `store::sqlite::steers::tests::owner_retention_names_the_graph_run_or_absence_that_holds_an_idle_owner`
+     (graph, step, run, completed; request and turn were already the
+     `pending_requests_…` and `silent_native_turns_…` cases there).
+   - `server::boundary::tests::a_turn_end_settles_only_once_no_watch_or_wakeup_remains`
+     (Stop with background tasks, crons, or neither list).
+   - `lf::tests::a_retained_stop_hook_spelling_reaches_the_turn_end` (`__planning-check`).
+   - `harness::native_exit::tests::a_failed_provider_exit_carries_its_own_code_and_says_so`,
+     now a table over `ExitStatus::from_raw` (3, 7, 130, SIGINT, SIGKILL).
+     `native_exit_preserves_returning_launcher_results` keeps only the Graph
+     exit-1 case; slice 4 merges it into the launcher test.
+   - `ops::task::retirement::tests::conversation_cleanup_owns_grace_membership_and_work`
+     gained the retired-checkout case.
+   - `ops::human_session::tests::a_stale_viewer_record_reads_unviewed_unless_the_owner_says_it_is_held`
+     (fake owner socket: held, not held, never answers, absent). 1.0 s: the
+     never-answering case waits out `transport::attachment`'s 1 s read timeout.
+     `opening_takes_over_…` lost its prepare half and keeps the takeover.
+   - The typed-input screen assertion joined
+     `completed_task_cleanup_signals_shell_owner_and_settles_jobs` (shell
+     owners keep their screen under the owner id).
+   Dropped with the rule covered elsewhere:
+   - `resume_refuses_a_graph_step_…`: `human_session::tests::resume_refuses_a_run_…`
+     covers the refusal; the Graph name in the label is `session_summary().graph`.
+   - `conversation_open_continues_closed_history_…`: native `--resume` argv is
+     `agent::session` tests; no replay is `automatic_start_…` and `reveal_requires_…`.
+   - `provider_changing_resume_json_…`: same `new_thread` path as the kept JSON
+     test; Codex history import is `conversation_log::tests::codex_log_…`.
+   - `conversation_open_pending_retry_…`: readiness is the bench's
+     `Controlled{ready}` rule; `open.rs:1094` maps the reply straight to
+     Opening/Usable.
+   - `taskless_session_renames_…`: `output.rs` title tests plus
+     `session_cli_tests::terminal_titles_follow_session_rename_…`.
+   - `native_program_status_has_no_stale_launcher_working_record`: the native
+     launcher execs its provider and sends no Status; pass-through and replay
+     are `output.rs`'s `program_status_*` tests.
+   Gap: a subagent's Stop (`agent_id`) is ignored by `context.rs:251`, which
+   reads the callback from stdin; no in-process test covers that guard.
+   Server rows of the move table (subscriptions, mobile, tickets, held-terminal
+   starts) are being ported to `server/service.rs`, `server/mobile.rs` and
+   `registry_tests`; their real-process tests are still in the file.
 4. Merge the kept real-process tests; remove fixed sleeps; SSH trims. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
 

@@ -34,7 +34,7 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(transport::)'     # host and relay rules: seconds
-cargo nextest run -p loopflow --test transport_tests           # about 30 real-process surface tests
+cargo nextest run -p loopflow --test transport_tests           # 34 real-process surface tests
 ```
 
 Each transport rule is tested in exactly one of three layers. Put a new rule in
@@ -43,7 +43,7 @@ the cheapest layer that can observe it.
 | Layer | Where | What it proves | Budget |
 |---|---|---|---|
 | Host rules | `transport::hosted::host_tests` (`src/transport/host_tests.rs`) | the viewer protocol: attach, takeover, control and size arbitration, snapshots, resume and spool overflow, heartbeat and grace expiry, holds, input, events | under 100 ms each |
-| Relay rules | `transport::relay_tests`, `transport::viewer_tests` | what a viewer's terminal sees: reconnect, attach timeout, outage input discarded, exhaustion and Retry, failed setup, pane closure, Move here; snapshot previews and handoff | about 1 s each, mostly the child's startup |
+| Relay rules | `transport::relay_tests`, `transport::viewer_tests` | what a viewer's terminal sees: connecting, reconnect, attach timeout, outage input discarded, exhaustion and Retry, failed setup, pane closure, Move here; a local owner's control handoff, unacknowledged attachment and stalled input; snapshot previews | about 1 s each, mostly the child's startup |
 | Surfaces | `tests/transport_tests.rs` | that each real launch path is wired and cleans up: owner, bare launch, provider exec, headless, CLI open/JSON, build takeover, server relay, held terminals, Desktop and SSH shells | one test per surface |
 
 Host rules drive `Hosted::pass` in-process. `Hosted` serves both owners and held
@@ -56,10 +56,12 @@ period, backdate `Viewer.heartbeat_at`, `Connection::Dropped(at)` or
 
 Relay rules run `view` in a child of the lib test binary on a real PTY. In
 `relay_tests` the child relays a Desktop pane to a held terminal while its own
-threads play the server's entrance and the pane's status socket; the parent owns
-the PTY and types when the child writes `type` in its home. Relay time is
+threads play the server's entrance and the pane's status socket, or relays a
+terminal to an owner whose socket a thread plays; the parent owns the PTY and
+types when the child writes `type` in its home. Relay time is
 `transport::Pace`: the child sets the `#[cfg(test)]` thread-local `TEST_PACE`
-(heartbeat, silence, attach acknowledgement, reconnect backoff) before relaying,
+(heartbeat, silence, attach acknowledgement, reconnect backoff, stalled write)
+before relaying,
 the same pattern as `server::holder::TEST_IDLE`. Release builds use `PACE`.
 
 A surface test exists only for what needs real processes, PTYs, sockets or
@@ -143,7 +145,7 @@ Runs) is a store rule: the `owner_retention` table test in
 checks that resume attaches to the retained owner. A completed Session is
 unknown, not work: its unanswering owner ends and resume continues on one new
 provider, while an answering one is attached
-(`transport_tests::resume_ends_an_unanswering_superseded_owner_of_a_completed_session`).
+(`transport_tests::resume_takes_over_only_an_owner_that_does_not_answer`).
 
 Upgrade recovery runs `resume_takes_over_an_owner_from_another_build` and
 `a_held_view_meeting_another_build_reopens_as_the_installed_lf`: resume keeps live

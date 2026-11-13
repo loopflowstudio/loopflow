@@ -68,11 +68,6 @@ Done when:
   real-process test still shows ~10 s on CI.
 - Simple owner tests cost ~5–6 s: an owner lingers 2 s after its child exits
   (`hosted.rs:1171`) plus process startup. Accept it for the kept set.
-- Fixed sleeps left after slice 3: `transport_tests.rs` 6 s in
-  `acknowledged_viewer_remains_attached_past_handshake_deadline`, 5 s in
-  `a_held_conversation_outlives_its_view`, 4 s each in `headless_run` and
-  `shell_reconnects_and_settles`; the 32 s quiet loop in
-  `tests/transport/ssh_shells.rs:704`. All go in slice 4.
 - `ghostty_vt`'s 7 unit tests also run in `transport_tests` through its `#[path]`
   include. Negligible; left alone.
 - `scripts/testing.md` routes store-wide schema changes to `binary(transport_tests)`
@@ -167,10 +162,9 @@ surface, merged where they share a fixture):
 ### Delete — do not maintain
 
 Duplicates or guards for removed mechanisms; each one's rule is covered above.
-Still in `transport_tests` after slice 3:
-`desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` (merged into the shell reconnect test in slice 4).
-Slices 1–3 deleted the rest of this list; names are in
-`git show 7acc5cea27 117378aadb da53314382 dc3d722f36 79f92459fc -- rust/loopflow/tests/transport_tests.rs`.
+Slices 1–4 deleted the whole list; names are in
+`git show 7acc5cea27 117378aadb da53314382 dc3d722f36 79f92459fc -- rust/loopflow/tests/transport_tests.rs`
+and the slice 4 commit.
 Unused fixture helpers go with them. `lifetime.rs` tests (14 s on `POLL` sleeps) get the same `#[cfg(test)]` timing value if it is one line; otherwise leave them.
 
 ## Forbidden
@@ -224,14 +218,6 @@ no test that waits out a production timeout except a named fallback above.
    - Pane closure while a Move here is pending (relay SIGSTOPped) is not
      ported; the closure case covers a pending reconnect and `take_move`
      checks `closed()` before consuming.
-   - Local (non-server) relay rules from the design — control handoff notice
-     (`control_handoff_restores_the_terminal_and_prints_the_notice`), a host
-     that stops reading input, an acknowledged viewer past the attach deadline
-     (`acknowledged_viewer_remains_attached_past_handshake_deadline`, 6 s sleep)
-     — are not in `relay_tests` yet; they stay real-process until slice 4
-     ports them to `relay_tests` with `TEST_PACE` or merges them into
-     `local_terminal_reconnects_…`. 95 − 35 = 60 tests still have to go in
-     slices 3–4.
 3. **Done (2026-11-13).** 32 real-process tests deleted, 366.1 s of CI
    medians; `transport_tests` holds 63 `#[test]`s. In-process homes:
    - `store::sqlite::steers::tests::owner_retention_names_the_graph_run_or_absence_that_holds_an_idle_owner`
@@ -291,13 +277,54 @@ no test that waits out a production timeout except a named fallback above.
    `retention_after(setup)` helper with one assertion each. `cargo nextest run
    -p loopflow --lib -E 'test(owner_retention_names)'`: pass, 0.18 s; clippy
    `--lib --tests --test transport_tests` clean (no orphaned helpers).
-4. Merge the kept real-process tests (63 → ≤ 35, per the surface table);
-   remove the fixed sleeps above; SSH trims; port the local relay rules
-   (control handoff, a host that stops reading, acknowledged viewer past the
-   attach deadline) to `relay_tests`; drop `server_mobile_changes_…`'s config
-   branches; fold the Graph exit-1 case of `native_exit_preserves_…` into the
-   launcher test. (README
-   bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
+4. **Done (2026-11-13).** `transport_tests` holds 34 non-ignored `#[test]`s
+   (42 with the 8 ignored acceptance tests; see `scratch/questions.md`).
+   Local run, Mac, debug, load average ~650, `--test-threads 6`: 34/34 pass,
+   166.4 s summed, 34.4 s wall; slowest `resume_takes_over_only_…` 16.3 s.
+   - Ported to `relay_tests` (child relays a terminal to an owner socket a
+     thread plays; `LOCAL` cases set no `LF_SERVER_STATUS`): control handoff
+     0.11 s, stalled owner 0.40 s, unacknowledged owner 0.64 s, acknowledged
+     past the attach deadline 1.1 s. `Pace` gained `stall` (the 2 s
+     `Stream::write` deadline). The quiet case now also asserts the pane reads
+     connecting and takes no keys before acknowledgement, replacing
+     `server_initial_connection_…`. Deleted the five real-process tests plus
+     `SilentOwner`/`silent_attachment`/`accept_attachment`. Not ported: the
+     SIGINT case (exit 130 is `lf`'s `ctrlc` handler).
+   - Merged (legs keep their own fixture): launcher test ← failed provider,
+     Graph exit 1, no `lf` children (from `opening_a_prepared_…`, deleted; its
+     exec-keeps-Process check joined `resume_json_returns_after_relay_…`);
+     `json_launches_start_once_and_return_one_record` ← three JSON tests;
+     `resume_takes_over_only_an_owner_that_does_not_answer` ← three takeover
+     tests; headless graph + skill; held placement into
+     `a_held_conversation_outlives_its_view`; Move here into the restart test;
+     `session.attach` waiting into `a_held_view_waits_…` (ticket-after-end leg
+     dropped: the redemption uses `registry::refusal`, the same answer
+     `registry_tests::an_ended_terminal_…` checks); server threads into
+     `held_terminals_share_one_holder_and_add_no_server_threads`; directory
+     into the snapshot test; both pipe viewers; the `getsid` sweep and a
+     stale-checkout create into the Desktop shell test.
+   - Sleeps removed: 6 s (ported), 5 s (now a hosted check right after the
+     view stops; nothing in `lifetime.rs` ends an unviewed conversation), 4 s
+     headless and 4 s shell (`shell_should_close` reads only
+     `close_requested`), SSH 32 s quiet loop. SSH lifecycles 20 → 2; the
+     failures test keeps only the denied key.
+   - `server_mobile_changes_…` lost its config branches (now
+     `server_mobile_changes_preserve_local_connections`).
+   - `cargo nextest run -p loopflow --lib -E 'test(transport::)'`: 104/104,
+     72 s wall under that load. Clippy `--lib --tests --test transport_tests`
+     clean. SSH cases not run here (Linux CI).
+5. **Next.** Steer (comment 087e0ee8, 2026-11-13): coverage removed in
+   #1922 (not yet on main) "to rebuild in this suite with a controlled
+   timeout": `unanswering_superseded_owner_preserves_pending_turn_and_queued_input`
+   froze the owner (SIGSTOP), ran `lf session resume` against the replaced
+   build, and required that the failed attachment left the provider
+   attachment, capture, provider thread and Task binding unchanged, the owner
+   running, and no second turn completed. It failed in CI with "relay did not
+   exit" after its 20 s `wait_exit`; which production timeout governs the
+   give-up was not traced. The non-frozen
+   `resumed_session_completes_turns_after_build_replacement_and_viewer_return`
+   remains. Trace the give-up timeout, then put the rule in the cheapest
+   layer (relay or `human_session`) with `TEST_PACE` or a value seam.
 
 ## Checks
 

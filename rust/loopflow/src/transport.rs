@@ -61,6 +61,9 @@ struct Pace {
     attach: Duration,
     /// The first reconnect delay; later attempts double it, up to 32 times.
     backoff: Duration,
+    /// How long a write to the host may wait before the host counts as no
+    /// longer reading.
+    stall: Duration,
 }
 
 const PACE: Pace = Pace {
@@ -68,6 +71,7 @@ const PACE: Pace = Pace {
     silence: HEARTBEAT_TIMEOUT,
     attach: Duration::from_secs(5),
     backoff: Duration::from_millis(100),
+    stall: Duration::from_secs(2),
 };
 
 #[cfg(test)]

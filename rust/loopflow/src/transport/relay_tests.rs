@@ -1,7 +1,8 @@
-//! Relay rules: a Desktop pane's relay to a held terminal, run in a child of
-//! this test binary on a real PTY. The child plays the server's entrance and
-//! Desktop's status socket itself, with the relay's pace shortened; the parent
-//! owns the PTY and types when the child asks.
+//! Relay rules, run in a child of this test binary on a real PTY: a Desktop
+//! pane's relay to a held terminal, and a terminal's relay to its owner. The
+//! child plays the server's entrance and Desktop's status socket, or the
+//! owner's socket, itself, with the relay's pace shortened; the parent owns
+//! the PTY and types when the child asks.
 
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
@@ -14,8 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Tag};
-use super::{attach_with_terminal, registry, terminal_pair, Host, Pace, TEST_PACE};
-use crate::id::{LfSessionId, TerminalId};
+use super::{attach_with_terminal, endpoint, registry, terminal_pair, Host, Pace, TEST_PACE};
+use crate::id::{LfProcessId, LfSessionId, TerminalId};
 
 const SESSION: &str = "session_5e55105e000040008000000000000002";
 const CASE: &str = "LOOPFLOW_RELAY_FIXTURE";
@@ -26,7 +27,10 @@ const PACE: Pace = Pace {
     silence: Duration::from_millis(300),
     attach: Duration::from_millis(300),
     backoff: Duration::from_millis(1),
+    stall: Duration::from_millis(200),
 };
+/// Cases relaying to an owner's socket directly, with no server or pane.
+const LOCAL: [&str; 4] = ["handoff", "acknowledged", "unacknowledged-owner", "stalled"];
 
 // ---------------------------------------------------------------------------
 // Child: the relay, its server and its Desktop pane
@@ -38,15 +42,30 @@ fn relay_fixture() {
     };
     TEST_PACE.set(PACE);
     let home = crate::store::lf_home_dir();
-    let entrance = UnixListener::bind(registry::entrance().unwrap()).unwrap();
-    entrance.set_nonblocking(true).unwrap();
-    let desktop = Desktop::new(std::env::var_os("LF_SERVER_STATUS").unwrap().into());
-    let server = Server {
-        entrance,
-        home: home.clone(),
-    };
-    let scenario = std::thread::spawn(move || {
-        let played = std::panic::catch_unwind(|| match case.as_str() {
+    let (host, scenario): (Host, Box<dyn FnOnce() + Send>) = if LOCAL.contains(&case.as_str()) {
+        let owner = LfProcessId::new();
+        let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
+        let owner_socket = Owner {
+            listener,
+            home: home.clone(),
+        };
+        let scenario = move || match case.as_str() {
+            "handoff" => control_handoff(&owner_socket),
+            "acknowledged" => acknowledged_past_the_deadline(&owner_socket),
+            "unacknowledged-owner" => unacknowledged_owner(&owner_socket),
+            "stalled" => stalled_owner(&owner_socket),
+            other => panic!("unknown relay case {other}"),
+        };
+        (Host::Owner(owner), Box::new(scenario))
+    } else {
+        let entrance = UnixListener::bind(registry::entrance().unwrap()).unwrap();
+        entrance.set_nonblocking(true).unwrap();
+        let desktop = Desktop::new(std::env::var_os("LF_SERVER_STATUS").unwrap().into());
+        let server = Server {
+            entrance,
+            home: home.clone(),
+        };
+        let scenario = move || match case.as_str() {
             "quiet" => quiet_host_then_silent_bridge(&server, &desktop),
             "unacknowledged" => unacknowledged_attachment(&server, &desktop),
             "outage" => outage_and_retry(&server, &desktop),
@@ -54,29 +73,30 @@ fn relay_fixture() {
             "closure" => pane_closure(&server, &desktop),
             "move" => move_here(&server, &desktop),
             other => panic!("unknown relay case {other}"),
-        });
+        };
+        (Host::Terminal(TerminalId::new()), Box::new(scenario))
+    };
+    let scenario = std::thread::spawn(move || {
         // The relay may still be waiting; a failed case ends the child now.
-        if played.is_err() {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(scenario)).is_err() {
             std::process::exit(101);
         }
     });
-    let relayed = attach_with_terminal(
-        &Host::Terminal(TerminalId::new()),
-        Some(&LfSessionId::from(SESSION)),
-        None,
-        None,
-        false,
-    );
+    let relayed = attach_with_terminal(&host, Some(&LfSessionId::from(SESSION)), None, None, false);
     scenario.join().unwrap();
-    relayed.unwrap();
-    std::fs::write(home.join("relayed"), "").unwrap();
+    let error = relayed.err().map(|error| format!("{error:#}"));
+    std::fs::write(home.join("relayed"), error.unwrap_or_default()).unwrap();
 }
 
-/// Heartbeats a quiet host answers keep the relay on its first connection;
-/// a bridge that still accepts writes but stops answering is replaced.
+/// The pane reads connecting, and takes no keys, until its attachment is
+/// acknowledged. Heartbeats a quiet host answers keep the relay on its first
+/// connection; a bridge that still accepts writes but stops answering is
+/// replaced.
 fn quiet_host_then_silent_bridge(server: &Server, desktop: &Desktop) {
     let mut first = server.accept();
-    first.attached(true);
+    desktop.wait("connecting", false, 1);
+    server.type_keys(b"not yet\n");
+    first.attached(true, true);
     desktop.wait("connected", true, 1);
     let quiet = Instant::now() + PACE.silence * 4;
     while Instant::now() < quiet {
@@ -89,9 +109,10 @@ fn quiet_host_then_silent_bridge(server: &Server, desktop: &Desktop) {
         1,
         "no reconnect while answered"
     );
+    assert!(first.input.is_empty(), "{:?}", first.input);
     // `first` stays open and readable, so only silence can end it.
     let mut second = server.accept();
-    second.attached(true);
+    second.attached(true, true);
     desktop.wait("connected", true, 2);
     server.type_keys(b"after recovery\n");
     second.read_input(b"after recovery\n");
@@ -108,7 +129,7 @@ fn unacknowledged_attachment(server: &Server, desktop: &Desktop) {
         Some(Request::Attach { .. })
     ));
     let mut second = server.accept();
-    second.attached(true);
+    second.attached(true, true);
     desktop.wait("connected", true, 2);
     second.exit();
     drop(first);
@@ -118,7 +139,7 @@ fn unacknowledged_attachment(server: &Server, desktop: &Desktop) {
 /// reconnects without running setup again.
 fn outage_and_retry(server: &Server, desktop: &Desktop) {
     let mut first = server.accept();
-    first.attached(true);
+    first.attached(true, true);
     desktop.wait("connected", true, 1);
     // A lost status channel is presentation; the relay keeps relaying.
     desktop.disconnect();
@@ -132,7 +153,7 @@ fn outage_and_retry(server: &Server, desktop: &Desktop) {
     server.type_keys(b"uncertain outage input\n");
     desktop.send(json!({"kind": "retry"}));
     let mut second = server.accept();
-    second.attached(true);
+    second.attached(true, true);
     desktop.wait("connected", true, 2);
     server.type_keys(b"after retry\n");
     second.read_input(b"after retry\n");
@@ -161,7 +182,7 @@ fn failed_setup(server: &Server, desktop: &Desktop) {
         !replace && own != Some(Own::Take),
         "recovery takes no claim"
     );
-    first.attached_reply(false);
+    first.attached_reply(false, true);
     desktop.wait("connected", false, 1);
     first.exit();
     assert!(first.input.is_empty(), "{:?}", first.input);
@@ -171,7 +192,7 @@ fn failed_setup(server: &Server, desktop: &Desktop) {
 /// Closing the pane ends a relay waiting to reconnect, and nothing else.
 fn pane_closure(server: &Server, desktop: &Desktop) {
     let mut first = server.accept();
-    first.attached(true);
+    first.attached(true, true);
     desktop.wait("connected", true, 1);
     drop(first);
     desktop.wait("reconnecting", false, 2);
@@ -183,7 +204,7 @@ fn pane_closure(server: &Server, desktop: &Desktop) {
 /// keys typed meanwhile never reach the program.
 fn move_here(server: &Server, desktop: &Desktop) {
     let mut first = server.accept();
-    first.attached(false);
+    first.attached(false, true);
     desktop.wait("connected", false, 1);
     desktop.send(json!({"kind": "move", "generation": 1}));
     let Some(Request::Attach {
@@ -212,7 +233,7 @@ fn move_here(server: &Server, desktop: &Desktop) {
     let Some(Request::Attach { control: false, .. }) = second.next_request(STEP) else {
         panic!("a busy recovery attaches passively");
     };
-    second.attached_reply(false);
+    second.attached_reply(false, true);
     desktop.wait("connected", false, 3);
     std::thread::sleep(PACE.heartbeat * 4);
     assert_eq!(
@@ -222,6 +243,97 @@ fn move_here(server: &Server, desktop: &Desktop) {
     );
     second.exit();
     assert!(second.input.is_empty(), "{:?}", second.input);
+}
+
+/// Losing control restores the terminal, prints the owner's notice and
+/// leaves; nothing runs after it.
+fn control_handoff(owner: &Owner) {
+    let mut viewer = owner.accept();
+    viewer.attached(true, true);
+    viewer.send(Tag::Snapshot, b"\x1b[?1049h");
+    let notice = Event::Control {
+        held: false,
+        notice: Some("owner retired".into()),
+    };
+    viewer.send(Tag::Out, &wire::event("nonce", 1, notice));
+    assert!(matches!(viewer.next_request(STEP), Some(Request::Leave)));
+}
+
+/// Only the handshake is bounded: an acknowledged viewer stays attached past
+/// the attach deadline and its input still arrives.
+fn acknowledged_past_the_deadline(owner: &Owner) {
+    let mut viewer = owner.accept();
+    viewer.attached(true, false);
+    let past = Instant::now() + PACE.attach * 3;
+    while Instant::now() < past {
+        if let Some(Request::Controlled { .. }) = viewer.next_request(PACE.heartbeat * 2) {
+            viewer.reply(Reply::Accepted);
+        }
+    }
+    owner.type_keys(b"accepted\n");
+    viewer.read_input(b"accepted\n");
+    viewer.exit();
+}
+
+/// An owner that never acknowledges ends the viewer at the deadline, and
+/// nothing typed meanwhile reaches it.
+fn unacknowledged_owner(owner: &Owner) {
+    let mut viewer = owner.accept();
+    assert!(matches!(
+        viewer.next_request(STEP),
+        Some(Request::Attach { .. })
+    ));
+    owner.type_keys(b"must-not-submit\n");
+    viewer.socket.set_read_timeout(Some(STEP)).unwrap();
+    let mut rest = Vec::new();
+    viewer.socket.read_to_end(&mut rest).unwrap();
+    viewer.decoder.extend(&rest);
+    while viewer.next_request(Duration::ZERO).is_some() {}
+    assert!(viewer.input.is_empty(), "{:?}", viewer.input);
+}
+
+/// An owner that answers but stops reading ends the viewer once a write
+/// stalls, saying why.
+fn stalled_owner(owner: &Owner) {
+    let mut viewer = owner.accept();
+    viewer.attached(true, false);
+    let mut answers = viewer.socket.try_clone().unwrap();
+    // Answering without reading keeps the viewer from judging silence.
+    std::thread::spawn(move || {
+        let accepted = Outgoing {
+            answers: 0,
+            seq: 0,
+            reply: Reply::Accepted,
+        };
+        let accepted = wire::frame(Tag::Reply, &serde_json::to_vec(&accepted).unwrap());
+        while answers.write_all(&accepted).is_ok() {
+            std::thread::sleep(PACE.heartbeat);
+        }
+    });
+    std::fs::write(owner.home.join("flood"), "").unwrap();
+    // The socket stays open and unread until the child exits.
+    std::mem::forget(viewer);
+}
+
+/// An owner's socket, as its viewer reaches it.
+struct Owner {
+    listener: UnixListener,
+    home: PathBuf,
+}
+
+impl Owner {
+    fn accept(&self) -> Peer {
+        let (socket, _) = self.listener.accept().unwrap();
+        Peer {
+            socket,
+            decoder: Decoder::default(),
+            input: Vec::new(),
+        }
+    }
+
+    fn type_keys(&self, keys: &[u8]) {
+        type_keys(&self.home, keys);
+    }
 }
 
 struct Server {
@@ -282,14 +394,18 @@ impl Server {
         assert_eq!(attempts, "install server\n", "Retry only reconnects");
     }
 
-    /// Has the parent type `keys` at the pane's terminal.
     fn type_keys(&self, keys: &[u8]) {
-        let typed = self.home.join("typed");
-        std::fs::write(self.home.join("type.pending"), keys).unwrap();
-        std::fs::rename(self.home.join("type.pending"), self.home.join("type")).unwrap();
-        wait_until(|| typed.exists(), "the parent typed");
-        std::fs::remove_file(typed).unwrap();
+        type_keys(&self.home, keys);
     }
+}
+
+/// Has the parent type `keys` at the relay's terminal.
+fn type_keys(home: &std::path::Path, keys: &[u8]) {
+    let typed = home.join("typed");
+    std::fs::write(home.join("type.pending"), keys).unwrap();
+    std::fs::rename(home.join("type.pending"), home.join("type")).unwrap();
+    wait_until(|| typed.exists(), "the parent typed");
+    std::fs::remove_file(typed).unwrap();
 }
 
 /// One connection from the relay, as its host sees it.
@@ -336,36 +452,36 @@ impl Peer {
         }
     }
 
+    fn send(&mut self, tag: Tag, payload: &[u8]) {
+        self.socket.write_all(&wire::frame(tag, payload)).unwrap();
+    }
+
     fn reply(&mut self, reply: Reply) {
         let reply = Outgoing {
             answers: 0,
             seq: 0,
             reply,
         };
-        self.socket
-            .write_all(&wire::frame(
-                Tag::Reply,
-                &serde_json::to_vec(&reply).unwrap(),
-            ))
-            .unwrap();
+        self.send(Tag::Reply, &serde_json::to_vec(&reply).unwrap());
     }
 
-    /// Reads the attachment and acknowledges it, with input when `control`.
-    fn attached(&mut self, control: bool) {
+    /// Reads the attachment and acknowledges it, with input when `control`,
+    /// for a program with or without a terminal.
+    fn attached(&mut self, control: bool, terminal: bool) {
         assert!(matches!(
             self.next_request(STEP),
             Some(Request::Attach { .. })
         ));
-        self.attached_reply(control);
+        self.attached_reply(control, terminal);
     }
 
-    fn attached_reply(&mut self, control: bool) {
+    fn attached_reply(&mut self, control: bool, terminal: bool) {
         self.reply(Reply::Attached {
             viewer: "viewer".into(),
             reconnect: "reconnect".into(),
             nonce: "nonce".into(),
             token: control.then(|| "claim".into()),
-            terminal: true,
+            terminal,
             grace_ms: 60_000,
             owner: None,
         });
@@ -383,9 +499,7 @@ impl Peer {
     /// The program exits, which ends the relay.
     fn exit(&mut self) {
         let exited = wire::event("nonce", 1, Event::ChildExited { code: 0 });
-        self.socket
-            .write_all(&wire::frame(Tag::Out, &exited))
-            .unwrap();
+        self.send(Tag::Out, &exited);
     }
 }
 
@@ -471,7 +585,7 @@ fn wait_until(done: impl Fn() -> bool, what: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// Parent: the pane's terminal
+// Parent: the relay's terminal
 
 struct RelayProcess(std::process::Child);
 
@@ -482,8 +596,16 @@ impl Drop for RelayProcess {
     }
 }
 
+/// What a relay case left behind.
+struct Relayed {
+    /// The relay's error, empty when it returned normally.
+    error: String,
+    screen: String,
+    stderr: String,
+}
+
 /// Runs `case` in a relay child on a PTY, typing what it asks for.
-fn relay_case(case: &str) {
+fn relay_case(case: &str) -> Relayed {
     let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
     let pane = home.path().join("pane");
     std::fs::create_dir(&pane).unwrap();
@@ -504,26 +626,26 @@ fn relay_case(case: &str) {
     .unwrap();
     std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755)).unwrap();
     let (mut master, slave) = terminal_pair().unwrap();
-    let mut child = RelayProcess(
-        Command::new(std::env::current_exe().unwrap())
-            .env_clear()
-            .env("HOME", home.path())
-            .env("PATH", "/usr/bin:/bin")
-            .env("LF_HOME", home.path())
-            .env("LF_BIN", &installer)
-            .env("LF_SERVER_STATUS", pane.join("status.sock"))
-            .env(CASE, case)
-            .args([
-                "--exact",
-                "transport::relay_tests::relay_fixture",
-                "--nocapture",
-            ])
-            .stdin(slave.try_clone().unwrap())
-            .stdout(slave.try_clone().unwrap())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", &installer)
+        .env(CASE, case)
+        .args([
+            "--exact",
+            "transport::relay_tests::relay_fixture",
+            "--nocapture",
+        ])
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(Stdio::piped());
+    if !LOCAL.contains(&case) {
+        command.env("LF_SERVER_STATUS", pane.join("status.sock"));
+    }
+    let mut child = RelayProcess(command.spawn().unwrap());
     drop(slave);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut output = Vec::new();
@@ -540,34 +662,59 @@ fn relay_case(case: &str) {
             master.write_all(&keys).unwrap();
             std::fs::write(home.path().join("typed"), "").unwrap();
         }
+        if std::fs::remove_file(home.path().join("flood")).is_ok() {
+            // More input than any socket buffers, typed until the relay's
+            // terminal goes away.
+            let mut flood = master.try_clone().unwrap();
+            std::thread::spawn(move || {
+                let line = [&[b'x'; 99][..], b"\n"].concat();
+                while flood.write_all(&line).is_ok() {}
+            });
+        }
         if let Some(status) = child.0.try_wait().unwrap() {
             break status;
         }
     };
-    let mut error = String::new();
+    let mut stderr = String::new();
     child
         .0
         .stderr
         .take()
         .unwrap()
-        .read_to_string(&mut error)
+        .read_to_string(&mut stderr)
         .unwrap();
+    drain(&mut master, &mut output, 0);
+    let mut diagnostics = stderr.clone();
     // A terminal relay records its diagnostics, panics included, in logs/.
     for log in std::fs::read_dir(home.path().join("logs"))
         .into_iter()
         .flatten()
     {
-        error += &std::fs::read_to_string(log.unwrap().path()).unwrap_or_default();
+        diagnostics += &std::fs::read_to_string(log.unwrap().path()).unwrap_or_default();
     }
+    let screen = String::from_utf8_lossy(&output).into_owned();
     assert!(
         status.success(),
-        "relay case {case}: {error}\n{}",
-        String::from_utf8_lossy(&output)
+        "relay case {case}: {diagnostics}\n{screen}"
     );
+    let error = std::fs::read_to_string(home.path().join("relayed"))
+        .unwrap_or_else(|_| panic!("relay case {case} did not run: {diagnostics}"));
+    Relayed {
+        error,
+        screen,
+        stderr,
+    }
+}
+
+/// Runs `case`, which the relay ends normally.
+fn relays(case: &str) -> Relayed {
+    let relayed = relay_case(case);
     assert!(
-        home.path().join("relayed").exists(),
-        "relay case {case} did not run: {error}"
+        relayed.error.is_empty(),
+        "relay case {case}: {}",
+        relayed.error
     );
+    relayed
 }
 
 fn drain(master: &mut std::fs::File, output: &mut Vec<u8>, timeout_ms: i32) {
@@ -587,30 +734,65 @@ fn drain(master: &mut std::fs::File, output: &mut Vec<u8>, timeout_ms: i32) {
 
 #[test]
 fn a_quiet_host_stays_attached_and_a_silent_bridge_reconnects() {
-    relay_case("quiet");
+    relays("quiet");
 }
 
 #[test]
 fn an_unacknowledged_attachment_reconnects_to_the_same_terminal() {
-    relay_case("unacknowledged");
+    relays("unacknowledged");
 }
 
 #[test]
 fn outage_input_is_discarded_and_retry_reconnects_after_exhaustion() {
-    relay_case("outage");
+    relays("outage");
 }
 
 #[test]
 fn failed_setup_retry_only_reconnects_without_taking_claims() {
-    relay_case("setup");
+    relays("setup");
 }
 
 #[test]
 fn closing_the_pane_cancels_a_pending_reconnect() {
-    relay_case("closure");
+    relays("closure");
 }
 
 #[test]
 fn move_here_is_consumed_before_its_takeover_is_sent() {
-    relay_case("move");
+    relays("move");
+}
+
+#[test]
+fn control_handoff_restores_the_terminal_and_prints_the_notice() {
+    let relayed = relays("handoff");
+    assert!(
+        relayed.screen.contains("\x1b[?1049l"),
+        "{:?}",
+        relayed.screen
+    );
+    assert!(
+        relayed.stderr.contains("owner retired"),
+        "{}",
+        relayed.stderr
+    );
+}
+
+#[test]
+fn an_acknowledged_viewer_stays_attached_past_the_attach_deadline() {
+    relays("acknowledged");
+}
+
+#[test]
+fn an_owner_that_never_acknowledges_ends_the_viewer_without_its_input() {
+    let error = relay_case("unacknowledged-owner").error;
+    assert!(error.contains("did not acknowledge attachment"), "{error}");
+    assert!(error.contains("outcome is unknown"), "{error}");
+}
+
+#[test]
+fn an_owner_that_stops_reading_input_ends_the_viewer_with_a_cause() {
+    let error = relay_case("stalled").error;
+    assert!(error.contains("stopped reading requests"), "{error}");
+    assert!(error.contains("later input was not delivered"), "{error}");
+    assert!(!error.contains("os error"), "{error}");
 }

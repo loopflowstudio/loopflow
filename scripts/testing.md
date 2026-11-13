@@ -74,6 +74,9 @@ exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows.
+Store query changes also run `test(store::query_plans::tests::)`. Missing-key
+fixtures must use prefixes outside generated UUID keys, not short hex strings
+that can randomly match a captured input.
 Fixture database seeding changes include
 `test(concurrent_copies_share_one_initialized_machine)` and
 `test(two_task_research_runs_leave_distinct_uncommitted_artifacts_for_the_next_prompt)`:

@@ -444,7 +444,10 @@ mod tests {
             store
                 .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
                 .unwrap();
-            assert!(store.resolve_history_input("abc").is_err());
+            assert!(matches!(
+                store.resolve_history_input("missing-capture"),
+                Err(crate::store::StoreError::NotFound)
+            ));
             store.unrecorded_agent_ancestry().unwrap();
             store.session_steers("viewed", 0, 10).unwrap();
             store.session_steer_source("viewed", &steer.id).unwrap();

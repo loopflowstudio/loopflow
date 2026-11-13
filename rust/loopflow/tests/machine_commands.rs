@@ -2443,7 +2443,7 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     );
     let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
     assert_eq!(owner.machine.id, Some(mini));
-    assert!(plan.local.task_move_sent(&task).unwrap().is_none());
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     // The conversation that left with the first send arrived with the retry.
     let arrived = plan.remote.session(&session).unwrap().unwrap();
     assert!(arrived.completed_at.is_none());
@@ -2500,7 +2500,7 @@ fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
     let laptop = laptop.split('.').next().unwrap().to_string();
     let lost = move_to(&laptop);
     assert!(!lost.status.success());
-    let sent = plan.remote.task_move_sent(&task).unwrap().unwrap();
+    let sent = plan.remote.task_move_in_flight(&task).unwrap().unwrap();
     assert_eq!(sent.to_machine_id, laptop_id);
     // The conversation left mini with that send.
     assert!(plan
@@ -2529,7 +2529,7 @@ fn a_task_sent_without_its_reply_delivers_its_conversation_when_repeated() {
         laptop_id
     );
     // Mini heard it arrived: nothing is in flight there any more.
-    assert!(plan.remote.task_move_sent(&task).unwrap().is_none());
+    assert!(plan.remote.task_move_in_flight(&task).unwrap().is_none());
 }
 
 #[test]
@@ -3081,12 +3081,8 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
         exits_within_ten_seconds(&mut run),
         "the laptop's run outlived its stop"
     );
-    rusqlite::Connection::open(local_home.join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE task_moves SET stopped=?2 WHERE task_id=?1 AND state='leaving'",
-            rusqlite::params![task.as_str(), serde_json::json!({"step": step}).to_string()],
-        )
+    plan.local
+        .record_move_stopped(&task, &serde_json::json!({"step": step}).to_string())
         .unwrap();
     fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
 
@@ -3124,7 +3120,7 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
         ),
         "halfway"
     );
-    assert_eq!(plan.local.task_move_leaving(&task).unwrap(), None);
+    assert_eq!(plan.local.task_move_in_flight(&task).unwrap(), None);
     let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     let mini_status = fixture
@@ -3383,7 +3379,7 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
     let arrived = plan.remote.session(&session).unwrap().unwrap();
     assert_eq!(arrived.task_id.as_ref(), Some(&task));
     // The move was sent from the laptop and arrived on mini.
-    assert!(plan.local.task_move_sent(&task).unwrap().is_none());
+    assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
     for db in ["local/loopflow.db", "remote/store/loopflow.db"] {
         let moves: Vec<(String, String, String)> =
             rusqlite::Connection::open(fixture.root.path().join(db))

@@ -258,6 +258,12 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 - Checks: lib `task_ownership::` `task_moves::` `store::migrations::` 145 passed;
   integration `machine_commands::` move tests 11 passed; clippy clean. Gate runs
   `documented_commands::` (machines.md).
+- Compress: one read, `task_move_in_flight` → `MoveInFlight { stage: Leaving
+  { claim_id, stopped } | Sent { payload } }`, replaces `task_move_leaving` /
+  `task_move_sent` and their two structs; `describe_move` builds the status
+  line and the refusal for a move leaving elsewhere. Lib `task_moves::` +
+  the leaving test 2 passed; integration `machine_commands::` move tests 5
+  passed; clippy clean.
 
 ## Remaining
 

@@ -11,33 +11,32 @@ use crate::store::StoreResult;
 
 use super::SqliteStore;
 
-/// A move this Machine sent that has not arrived.
+/// A move of the Task this Machine began that has not arrived.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SentMove {
+pub struct MoveInFlight {
     pub to_machine_id: MachineId,
-    /// When it was sent.
+    /// When it entered its stage.
     pub at: i64,
-    /// The move as sent.
-    pub payload: String,
+    pub stage: MoveStage,
 }
 
-/// A move this Machine began that has not been sent: its claim is written,
-/// and stopping, committing, pushing or taking its conversation did not finish.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LeavingMove {
-    pub to_machine_id: MachineId,
-    /// When the claim was written.
-    pub at: i64,
-    /// The ownership entry claiming the Task for `to_machine_id`.
-    pub claim_id: OwnershipEntryId,
-    /// The Graph the move stopped, as JSON; absent until one stopped.
-    pub stopped: Option<String>,
+pub enum MoveStage {
+    /// Its claim naming the target is written; stopping, committing, pushing
+    /// or taking its conversation did not finish.
+    Leaving {
+        claim_id: OwnershipEntryId,
+        /// The Graph the move stopped, as JSON; absent until one stopped.
+        stopped: Option<String>,
+    },
+    /// Sent, with the move as sent.
+    Sent { payload: String },
 }
 
 impl SqliteStore {
     /// The move stopped the Task's Graph: keep it, so carrying on leaving
     /// continues the step it stopped.
-    pub(crate) fn record_move_stopped(&self, task: &TaskId, stopped: &str) -> StoreResult<()> {
+    pub fn record_move_stopped(&self, task: &TaskId, stopped: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE task_moves SET stopped=?2 WHERE task_id=?1 AND state='leaving'",
@@ -125,39 +124,29 @@ impl SqliteStore {
             .unwrap_or(false))
     }
 
-    /// The Task's move this Machine began and has not sent.
-    pub fn task_move_leaving(&self, task: &TaskId) -> StoreResult<Option<LeavingMove>> {
+    /// The Task's move this Machine began that has not arrived. At most one
+    /// is in flight: beginning or sending a move replaces the last.
+    pub fn task_move_in_flight(&self, task: &TaskId) -> StoreResult<Option<MoveInFlight>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT to_machine_id,at,claim_id,stopped FROM task_moves
-                 WHERE task_id=?1 AND state='leaving' ORDER BY id DESC LIMIT 1",
+                "SELECT to_machine_id,at,claim_id,stopped,payload FROM task_moves
+                 WHERE task_id=?1 AND state IN ('leaving','sent') ORDER BY id DESC LIMIT 1",
                 [task.as_str()],
                 |row| {
-                    Ok(LeavingMove {
+                    let stage = match row.get::<_, Option<String>>(2)? {
+                        Some(claim_id) => MoveStage::Leaving {
+                            claim_id: OwnershipEntryId::from_raw(claim_id),
+                            stopped: row.get(3)?,
+                        },
+                        None => MoveStage::Sent {
+                            payload: row.get(4)?,
+                        },
+                    };
+                    Ok(MoveInFlight {
                         to_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
                         at: row.get(1)?,
-                        claim_id: OwnershipEntryId::from_raw(row.get::<_, String>(2)?),
-                        stopped: row.get(3)?,
-                    })
-                },
-            )
-            .optional()?)
-    }
-
-    /// The Task's move this Machine sent that has not arrived.
-    pub fn task_move_sent(&self, task: &TaskId) -> StoreResult<Option<SentMove>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT to_machine_id,at,payload FROM task_moves
-                 WHERE task_id=?1 AND state='sent' ORDER BY id DESC LIMIT 1",
-                [task.as_str()],
-                |row| {
-                    Ok(SentMove {
-                        to_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
-                        at: row.get(1)?,
-                        payload: row.get(2)?,
+                        stage,
                     })
                 },
             )
@@ -167,6 +156,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use super::MoveStage;
     use crate::durable::{MachineId, TaskId};
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
@@ -188,7 +178,7 @@ mod tests {
             .unwrap()
             .id;
         let (laptop, mini) = (store.local_machine().unwrap().id, MachineId::new());
-        assert_eq!(store.task_move_sent(&task).unwrap(), None);
+        assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
 
         store
             .record_move_sent(&task, &laptop, &mini, "{\"first\":1}")
@@ -196,12 +186,17 @@ mod tests {
         store
             .record_move_sent(&task, &laptop, &mini, "{\"again\":2}")
             .unwrap();
-        let sent = store.task_move_sent(&task).unwrap().unwrap();
+        let sent = store.task_move_in_flight(&task).unwrap().unwrap();
         assert_eq!(sent.to_machine_id, mini);
-        assert_eq!(sent.payload, "{\"again\":2}");
+        assert_eq!(
+            sent.stage,
+            MoveStage::Sent {
+                payload: "{\"again\":2}".into()
+            }
+        );
 
         store.record_move_arrived(&task, &laptop, &mini).unwrap();
-        assert_eq!(store.task_move_sent(&task).unwrap(), None);
+        assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
         let conn = store.conn.lock().unwrap();
         let rows: Vec<(String, Option<String>)> = conn
             .prepare("SELECT state,payload FROM task_moves WHERE task_id=?1")
@@ -222,7 +217,7 @@ mod tests {
             .unwrap();
         assert!(!store.task_move_arrived_on(&task, &third).unwrap());
         store.record_move_arrived(&task, &third, &laptop).unwrap();
-        assert_eq!(store.task_move_sent(&task).unwrap(), None);
+        assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
         assert!(store.task_move_arrived_on(&task, &laptop).unwrap());
     }
 }

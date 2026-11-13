@@ -25,6 +25,7 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
+use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
 use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
@@ -183,18 +184,22 @@ pub(crate) async fn send_task(
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
     let name = &task.identifier;
-    if let Some(sent) = store
-        .sqlite
-        .task_move_sent(&task.id)?
-        .filter(|sent| &sent.to_machine_id == to)
+    let moving = store.sqlite.task_move_in_flight(&task.id)?;
+    if let Some(MoveInFlight {
+        to_machine_id,
+        stage: MoveStage::Sent { payload },
+        ..
+    }) = &moving
     {
-        let moved: Move = serde_json::from_str(&sent.payload).context("read the sent move")?;
-        if let Some(session) = &moved.session {
-            store
-                .sqlite
-                .complete_task_conversation(&session.id, &task.id)?;
+        if to_machine_id == to {
+            let moved: Move = serde_json::from_str(payload).context("read the sent move")?;
+            if let Some(session) = &moved.session {
+                store
+                    .sqlite
+                    .complete_task_conversation(&session.id, &task.id)?;
+            }
+            return Ok(moved);
         }
-        return Ok(moved);
     }
     let worktree = task.worktree.clone().filter(|path| path.exists());
     if let Some(root) = &worktree {
@@ -203,33 +208,35 @@ pub(crate) async fn send_task(
     // Owned by `to` from here, so nothing on this Machine (recovery restarting
     // a ship process, a run waiting out a limit) starts the Task again while
     // the move stops it. If it cannot leave, it is handed back.
-    let (claim, stopped) = match store.sqlite.task_move_leaving(&task.id)? {
-        Some(leaving) if &leaving.to_machine_id == to => {
+    let (claim, stopped) = match moving {
+        Some(MoveInFlight {
+            to_machine_id,
+            stage: MoveStage::Leaving { claim_id, stopped },
+            ..
+        }) if &to_machine_id == to => {
             let claim = store
                 .sqlite
                 .task_ownership(&task.id)?
                 .log
                 .into_iter()
-                .find(|entry| entry.id == leaving.claim_id)
-                .ok_or_else(|| anyhow!("{name}'s move claim {} is gone", leaving.claim_id))?;
-            let stopped = leaving
-                .stopped
+                .find(|entry| entry.id == claim_id)
+                .ok_or_else(|| anyhow!("{name}'s move claim {claim_id} is gone"))?;
+            let stopped = stopped
                 .map(|stopped| serde_json::from_str(&stopped))
                 .transpose()
                 .context("read the stopped Graph")?;
             (claim, stopped)
         }
-        Some(leaving) => {
-            let place = store
-                .sqlite
-                .machine_by_id(&leaving.to_machine_id)?
-                .map_or_else(
-                    || leaving.to_machine_id.to_string(),
-                    |machine| machine.name(),
-                );
-            bail!("{name} is leaving for {place}\n  retry: lf task move {name} --machine {place}")
-        }
-        None => (claim_for(&store.sqlite, &task, to)?, None),
+        Some(
+            leaving @ MoveInFlight {
+                stage: MoveStage::Leaving { .. },
+                ..
+            },
+        ) => bail!(
+            "{}",
+            crate::ops::task_ownership::describe_move(&store.sqlite, name, &leaving)?
+        ),
+        _ => (claim_for(&store.sqlite, &task, to)?, None),
     };
     let (stopped, checkout, conversation, taken) =
         match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {

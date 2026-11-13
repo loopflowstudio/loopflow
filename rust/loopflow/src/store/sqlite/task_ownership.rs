@@ -1090,6 +1090,7 @@ mod tests {
         MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskId, TaskOwner,
         TaskOwnershipEntry,
     };
+    use crate::store::sqlite::task_moves::MoveStage;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
 
@@ -1370,21 +1371,26 @@ mod tests {
         store
             .record_move_stopped(&task, "{\"step\":\"implement\"}")
             .unwrap();
-        let leaving = store.task_move_leaving(&task).unwrap().unwrap();
+        let leaving = store.task_move_in_flight(&task).unwrap().unwrap();
         assert_eq!(leaving.to_machine_id, mini);
-        assert_eq!(leaving.claim_id, claim.id);
-        assert_eq!(leaving.stopped.as_deref(), Some("{\"step\":\"implement\"}"));
+        assert_eq!(
+            leaving.stage,
+            MoveStage::Leaving {
+                claim_id: claim.id.clone(),
+                stopped: Some("{\"step\":\"implement\"}".into())
+            }
+        );
 
         // Handed back, nothing is leaving and the laptop owns it again.
         store.hand_back(&task, &claim).unwrap();
-        assert_eq!(store.task_move_leaving(&task).unwrap(), None);
+        assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
         let owner = store.task_ownership(&task).unwrap().owner.unwrap();
         assert_eq!(owner.machine.id, Some(laptop.clone()));
 
         // Sent, the move is no longer leaving.
         store.begin_task_move(&task, &mini).unwrap();
         store.record_move_sent(&task, &laptop, &mini, "{}").unwrap();
-        assert_eq!(store.task_move_leaving(&task).unwrap(), None);
-        assert!(store.task_move_sent(&task).unwrap().is_some());
+        let sent = store.task_move_in_flight(&task).unwrap().unwrap();
+        assert!(matches!(sent.stage, MoveStage::Sent { .. }));
     }
 }

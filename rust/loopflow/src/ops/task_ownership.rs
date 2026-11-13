@@ -4,7 +4,9 @@ use std::path::Path;
 
 use crate::durable::{MachineId, TaskId, TaskOwnership};
 use crate::ops::{OpsError, OpsResult};
+use crate::store::sqlite::task_moves::{MoveInFlight, MoveStage};
 use crate::store::sqlite::SqliteStore;
+use crate::store::StoreResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnershipChange {
@@ -150,28 +152,32 @@ pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>>
     let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
         return Ok(None);
     };
-    let leaving = store.sqlite.task_move_leaving(task).map_err(message)?;
-    let (to, at, state, progress) = match leaving {
-        Some(leaving) => (leaving.to_machine_id, leaving.at, "Leaving for", "not sent"),
-        None => match store.sqlite.task_move_sent(task).map_err(message)? {
-            Some(sent) => (
-                sent.to_machine_id,
-                sent.at,
-                "Moving to",
-                "sent, not arrived",
-            ),
-            None => return Ok(None),
-        },
+    let Some(moving) = store.sqlite.task_move_in_flight(task).map_err(message)? else {
+        return Ok(None);
     };
+    describe_move(&store.sqlite, identifier, &moving)
+        .map(Some)
+        .map_err(message)
+}
+
+/// [`moving_here`]'s lines for `moving`.
+pub(crate) fn describe_move(
+    store: &SqliteStore,
+    identifier: &str,
+    moving: &MoveInFlight,
+) -> StoreResult<String> {
+    let to = &moving.to_machine_id;
     let place = store
-        .sqlite
-        .machine_by_id(&to)
-        .map_err(message)?
+        .machine_by_id(to)?
         .map_or_else(|| to.to_string(), |machine| machine.name());
-    Ok(Some(format!(
+    let (state, progress) = match moving.stage {
+        MoveStage::Leaving { .. } => ("Leaving for", "not sent"),
+        MoveStage::Sent { .. } => ("Moving to", "sent, not arrived"),
+    };
+    Ok(format!(
         "{state} {place} since {}: {progress}\n  retry: lf task move {identifier} --machine {place}",
-        crate::lf::output::format_time(at)
-    )))
+        crate::lf::output::format_time(moving.at)
+    ))
 }
 
 pub fn render(ownership: &TaskOwnership) -> String {

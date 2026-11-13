@@ -18,6 +18,10 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
+Builtin Graph order or loop changes also include `test(world_recipes::)` in the
+gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
+recorded by real Task runs, including the pursuit that stops at demo.
+
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
 to regenerate and review snapshots for intended prompt changes before gate.

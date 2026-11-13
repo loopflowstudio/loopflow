@@ -152,7 +152,8 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   Graph; a Task already on M moves nothing.
 - Deleted `moved_task_conversation`, `task_conversation_moved_to` and the
   `leave` marker-retry branch; `resume --task` routes by ownership only.
-  `agent_sessions.moved_to_machine_id` stays a Session fact.
+  `agent_sessions.moved_to_machine_id` stays for Task-less Sessions only
+  (seventh pass).
 - Tests: `resume_task_follows_a_task_session_moved_alone` →
   `resuming_a_task_conversation_on_mini_moves_its_task`;
   `a_repeated_task_send_carries_the_conversation_that_already_left` (tested
@@ -211,15 +212,6 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   new test's two old `handoff_task` calls; linker warned about the size of
   `__eh_frame`. `cargo fmt` clean. Gate owns static analysis and broader suites.
 
-## Remaining
-
-Every Machine-local column the brief names (`worktree`, `branch`,
-`base_commit`, `parent_pr_id`, `checkout_machine_id`, `primary_session_id`,
-the `ship_*` set, `machines.pool/cost_usd/expires_at`) has no production
-reader left outside the pre-`task_checkouts` fallbacks in
-`read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
-remaining mentions are pre-migration fixtures.
-
 ## Done (2026-11-13, seventh pass): a Task's conversation resumes where its Task runs
 
 - `send_task` completes the leaving conversation with
@@ -243,6 +235,15 @@ remaining mentions are pre-migration fixtures.
   its Task binding; a pruned checkout otherwise loses the mapping). Only
   `moved_session` tidied. `machine_commands::a_handed_back` + `resuming_a_task`
   3 passed; clippy clean.
+
+## Remaining
+
+Every Machine-local column the brief names (`worktree`, `branch`,
+`base_commit`, `parent_pr_id`, `checkout_machine_id`, `primary_session_id`,
+the `ship_*` set, `machines.pool/cost_usd/expires_at`) has no production
+reader left outside the pre-`task_checkouts` fallbacks in
+`read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
+remaining mentions are pre-migration fixtures.
 
 `session_moves` (an agent switch at the Stop hook) and
 `relocated_task_processes` (a repository directory moved on disk) stay: the

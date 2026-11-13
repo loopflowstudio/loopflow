@@ -247,3 +247,4 @@ build), not product failures.
 - implement slice 3, 2026-11-13: `ops::task::explain::tests::` 7/7; kept explain + Graph run filter 10/10; clippy `--all-targets` clean
 - compress slice 3, 2026-11-13: restore rows read as sequential stanzas; `ops::task::explain::tests::` 7/7 (0.05–2.5 s each)
 - implement slice 4, 2026-11-13: `ssh::dispatch_tests:: | task_ownership::tests::` 15/15; `machine_commands` + destination-policy 44/44; clippy `--all-targets` clean
+- compress slice 4, 2026-11-13: ownership `Pair` holds one `Side` (store, checkout, path) per Machine; `ssh::dispatch_tests:: | task_ownership::tests::` 15/15 in 2.3 s; clippy `--all-targets` clean

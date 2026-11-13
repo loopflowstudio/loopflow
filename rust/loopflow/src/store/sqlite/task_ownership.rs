@@ -992,11 +992,14 @@ impl SqliteStore {
 mod tests {
     use super::{local_label, log_in, read_log, Reading, Row};
     use crate::durable::{
-        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskId, TaskOwner,
-        TaskOwnershipEntry,
+        MachineId, MachineRef, OwnershipEntryId, OwnershipKind, OwningMachineSource, RepositoryId,
+        TaskExecutionSource, TaskId, TaskOwner, TaskOwnershipEntry,
     };
+    use crate::planning_git::PlanningDestination;
     use crate::store::sqlite::SqliteStore;
+    use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
     use crate::work::task::NewTask;
+    use loopflow_test_support::TestRepo;
 
     fn published_bodies(store: &SqliteStore, task: &TaskId) -> Vec<String> {
         let conn = store.conn.lock().unwrap();
@@ -1165,14 +1168,19 @@ mod tests {
             .all(|body| !body.contains("kims-basement-mini")));
     }
 
-    /// A laptop and mini sharing one Task's planning, each with its own store
-    /// and checkout; `to_laptop`/`to_mini` exchange the planning journal.
+    /// One Machine's store and checkout of the shared repository.
+    struct Side {
+        store: SqliteStore,
+        repo: TestRepo,
+        path: String,
+    }
+
+    /// A laptop and mini sharing one Task's planning; `to_laptop`/`to_mini`
+    /// exchange the planning journal.
     struct Pair {
-        laptop: SqliteStore,
-        mini: SqliteStore,
-        laptop_repo: loopflow_test_support::TestRepo,
-        mini_repo: loopflow_test_support::TestRepo,
-        destination: crate::planning_git::PlanningDestination,
+        laptop: Side,
+        mini: Side,
+        destination: PlanningDestination,
         task: TaskId,
         _dir: tempfile::TempDir,
     }
@@ -1181,28 +1189,28 @@ mod tests {
         /// mini creates the Task; the laptop has not seen it yet.
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let laptop = SqliteStore::open_ephemeral(&dir.path().join("laptop.db")).unwrap();
-            let mini = SqliteStore::open_ephemeral(&dir.path().join("mini.db")).unwrap();
-            let (laptop_repo, mini_repo) = (
-                loopflow_test_support::TestRepo::new(),
-                loopflow_test_support::TestRepo::new(),
-            );
-            let repository = crate::durable::RepositoryId::new();
-            let destination = crate::planning_git::PlanningDestination::new(
-                "/unused/fixture",
-                "refs/loopflow/planning/shared/owners",
-            )
-            .unwrap();
-            for (store, repo) in [(&laptop, &laptop_repo), (&mini, &mini_repo)] {
-                let path = Self::path(repo);
+            let repository = RepositoryId::new();
+            let destination =
+                PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
+                    .unwrap();
+            let side = |name: &str| {
+                let store = SqliteStore::open_ephemeral(&dir.path().join(name)).unwrap();
+                let repo = TestRepo::new();
+                let path = repo.path().canonicalize().unwrap();
+                let path = path.to_str().unwrap().to_owned();
                 store.bind_repository(&path, &repository).unwrap();
                 store.bind_peer_planning(&path, &destination).unwrap();
-            }
-            let path = Self::path(&mini_repo);
-            let project = mini.ensure_wave_project(&path, "owners").unwrap();
+                Side { store, repo, path }
+            };
+            let (laptop, mini) = (side("laptop.db"), side("mini.db"));
+            let project = mini
+                .store
+                .ensure_wave_project(&mini.path, "owners")
+                .unwrap();
             let task = mini
+                .store
                 .create_task(&NewTask {
-                    repository_id: mini.ensure_repository(&path).unwrap(),
+                    repository_id: mini.store.ensure_repository(&mini.path).unwrap(),
                     id: TaskId::new(),
                     project_id: Some(project.id),
                     title: "Ownership demo".into(),
@@ -1214,53 +1222,34 @@ mod tests {
             Self {
                 laptop,
                 mini,
-                laptop_repo,
-                mini_repo,
                 destination,
                 task,
                 _dir: dir,
             }
         }
 
-        fn path(repo: &loopflow_test_support::TestRepo) -> String {
-            repo.path()
-                .canonicalize()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned()
-        }
-
-        fn exchange(
-            &self,
-            from: (&SqliteStore, &loopflow_test_support::TestRepo),
-            to: (&SqliteStore, &loopflow_test_support::TestRepo),
-        ) {
+        fn exchange(&self, from: &Side, to: &Side) {
+            let destination = self.destination.id();
             let journal = from
-                .0
-                .export_peer_planning(&Self::path(from.1), &self.destination.id())
+                .store
+                .export_peer_planning(&from.path, &destination)
                 .unwrap();
-            to.0.import_peer_planning(
-                &Self::path(to.1),
-                &self.destination.id(),
-                &uuid::Uuid::new_v4().to_string(),
-                &journal,
-            )
-            .unwrap();
+            to.store
+                .import_peer_planning(
+                    &to.path,
+                    &destination,
+                    &uuid::Uuid::new_v4().to_string(),
+                    &journal,
+                )
+                .unwrap();
         }
 
         fn to_laptop(&self) {
-            self.exchange(
-                (&self.mini, &self.mini_repo),
-                (&self.laptop, &self.laptop_repo),
-            );
+            self.exchange(&self.mini, &self.laptop);
         }
 
         fn to_mini(&self) {
-            self.exchange(
-                (&self.laptop, &self.laptop_repo),
-                (&self.mini, &self.mini_repo),
-            );
+            self.exchange(&self.laptop, &self.mini);
         }
     }
 
@@ -1269,47 +1258,51 @@ mod tests {
         let pair = Pair::new();
         let task = &pair.task;
         pair.to_laptop();
-        let mini = pair.mini.local_machine().unwrap().id;
-        let laptop = pair.laptop.local_machine().unwrap().id;
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        let laptop = pair.laptop.store.local_machine().unwrap().id;
         // No owning Machine is configured, so each Machine may claim for itself.
-        pair.mini.claim_task(task).unwrap().unwrap();
+        pair.mini.store.claim_task(task).unwrap().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        pair.laptop.claim_task(task).unwrap().unwrap();
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
         pair.to_mini();
         pair.to_laptop();
-        let first = pair.mini.task_ownership(task).unwrap();
+        let first = pair.mini.store.task_ownership(task).unwrap();
         assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
         assert_eq!(
             first.superseded_by.unwrap().machine.id,
             Some(laptop.clone())
         );
         assert_eq!(
-            pair.mini.task_execution_route(task).unwrap().machine_id,
+            pair.mini
+                .store
+                .task_execution_route(task)
+                .unwrap()
+                .machine_id,
             mini
         );
         assert!(pair
             .mini
+            .store
             .task_steers(task)
             .unwrap()
             .iter()
             .any(|steer| steer.text.starts_with("Also claimed later by")));
-        let second = pair.laptop.task_ownership(task).unwrap();
+        let second = pair.laptop.store.task_ownership(task).unwrap();
         assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
         assert!(second.superseded_by.is_none());
         // Exchange settles: neither Machine re-claims a log that shows a later claim.
         pair.to_mini();
         pair.to_laptop();
-        assert_eq!(pair.mini.task_ownership(task).unwrap().log.len(), 2);
+        assert_eq!(pair.mini.store.task_ownership(task).unwrap().log.len(), 2);
     }
 
     #[test]
     fn the_owner_reclaims_after_a_stale_unclaim_elsewhere() {
-        use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
         let pair = Pair::new();
         let task = &pair.task;
         pair.to_laptop();
-        let mini = pair.mini.local_machine().unwrap().id;
-        pair.laptop.claim_task(task).unwrap().unwrap();
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
         pair.to_mini();
         // A stale reading on mini treats the Task as its own and unclaims it there,
         // delivering the unclaim as mini would: a marked comment in the journal.
@@ -1321,6 +1314,7 @@ mod tests {
             "at": later.unix_timestamp(),
         });
         pair.mini
+            .store
             .append_task_comment(
                 task,
                 &TaskComment {
@@ -1337,33 +1331,33 @@ mod tests {
             .unwrap();
         pair.to_laptop();
         // The laptop's claim stays open locally and it claims again in the journal.
-        let ownership = pair.laptop.task_ownership(task).unwrap();
+        let ownership = pair.laptop.store.task_ownership(task).unwrap();
         assert_eq!(
             ownership.owner.unwrap().machine.id,
-            Some(pair.laptop.local_machine().unwrap().id)
+            Some(pair.laptop.store.local_machine().unwrap().id)
         );
         assert_eq!(ownership.log.last().unwrap().kind, OwnershipKind::Claim);
     }
 
     #[test]
     fn another_persons_claim_never_routes_work_to_their_machine() {
-        use crate::durable::{OwningMachineSource, TaskExecutionSource};
         let pair = Pair::new();
         let task = &pair.task;
-        let mini = pair.mini.local_machine().unwrap().id;
-        let laptop = pair.laptop.local_machine().unwrap().id;
+        let mini = pair.mini.store.local_machine().unwrap().id;
+        let laptop = pair.laptop.store.local_machine().unwrap().id;
         // Kim claims on mini, a Machine this laptop also has registered. Her
         // person key, not the Machine, says whose claim it is.
         assert!(std::process::Command::new("git")
             .args(["config", "user.email", "kim@example.com"])
-            .current_dir(pair.mini_repo.path())
+            .current_dir(pair.mini.repo.path())
             .status()
             .unwrap()
             .success());
-        pair.mini.claim_task(task).unwrap().unwrap();
+        pair.mini.store.claim_task(task).unwrap().unwrap();
         pair.to_laptop();
         assert_eq!(
             pair.laptop
+                .store
                 .task_ownership(task)
                 .unwrap()
                 .owner
@@ -1373,7 +1367,7 @@ mod tests {
             Some("kim@example.com")
         );
         // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
-        let route = pair.laptop.task_execution_route(task).unwrap();
+        let route = pair.laptop.store.task_execution_route(task).unwrap();
         assert_eq!(
             (route.machine_id, route.source),
             (
@@ -1381,14 +1375,15 @@ mod tests {
                 TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
             )
         );
-        assert!(pair.laptop.unassign_task(task).is_err());
-        assert!(pair.laptop.handoff_task(task, &mini).is_err());
+        assert!(pair.laptop.store.unassign_task(task).is_err());
+        assert!(pair.laptop.store.handoff_task(task, &mini).is_err());
         // Claiming writes here; the later claim wins.
-        pair.laptop.claim_task(task).unwrap().unwrap();
+        pair.laptop.store.claim_task(task).unwrap().unwrap();
         pair.to_mini();
         // Kim's claim stays Kim's on mini, which now sees the later claim.
         let later = pair
             .mini
+            .store
             .task_ownership(task)
             .unwrap()
             .superseded_by

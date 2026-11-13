@@ -32,6 +32,8 @@
   `cargo test --lib -- store::sqlite::rentals store::sqlite::task_ownership`
   ran 3 of 16 (all ok) before the 30-minute limit stopped it. Gate runs the rest.
 
+- QA (2026-11-12): focused lib tests above, 22 of 22 passed (627 s, load ~155).
+
 ## Concept review (2026-11-12)
 
 The change has a clear concept: `OwnershipFacts` is everything an ownership

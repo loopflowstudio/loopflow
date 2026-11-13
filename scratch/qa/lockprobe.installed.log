@@ -1,0 +1,10 @@
+opens:   19 free 
+lf task unassign -> exit 0
+  Nov 12 22:13  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 12 22:13  unassign  QA Person on Jacks-MacBook-Pro-2
+Saved locally; planning synchronization pending. See `lf planning status`.
+opens:   18 free    3 HELD 
+lf task claim -> exit 0
+  Nov 12 22:13  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 12 22:13  claim  QA Person on Jacks-MacBook-Pro-2
+Saved locally; planning synchronization pending. See `lf planning status`.

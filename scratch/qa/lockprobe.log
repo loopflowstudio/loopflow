@@ -1,0 +1,609 @@
+== /tmp/lf-qa-867-bin
+opens:  118 free 
+lf task unassign -> exit 0
+  Nov 12 22:01  claim  QA Person on Jacks-MacBook-Pro-2
+  Nov 12 22:01  unassign  QA Person on Jacks-MacBook-Pro-2
+Saved locally; planning synchronization pending. See `lf planning status`.
+opens:   76 free 
+lf task claim -> exit 0
+  Nov 12 22:01  unassign  QA Person on Jacks-MacBook-Pro-2
+  Nov 12 22:12  claim  QA Person on Jacks-MacBook-Pro-2
+Saved locally; planning synchronization pending. See `lf planning status`.
+== lf
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== ()
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== {
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== local
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== directive_file
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== exit_code=0
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== directive_file="$(mktemp)"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== LOOPFLOW_DIRECTIVE_FILE="$directive_file"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== command
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== lf
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== "$@"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== ||
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== exit_code=$?
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== [[
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== -s
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== "$directive_file"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== ]]
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== &&
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== source
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== "$directive_file"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== rm
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== -f
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== "$directive_file"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== return
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== "$exit_code"
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+== }
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task unassign -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory
+scratch/qa/lockprobe.sh:cd:7: no such file or directory: /tmp/lf-qa-867c-main/repo
+Error: unable to open database "file:/tmp/lf-qa-867c-main/lfhome/loopflow.db?mode=ro": unable to open database file
+mkfifo: /tmp/lf-qa-867c-main/lfhome/config.yaml: No such file or directory
+scratch/qa/lockprobe.sh:11: no such file or directory: /tmp/lf-qa-867c-main/probe.out
+scratch/qa/lockprobe.sh:14: no such file or directory: /tmp/lf-qa-867c-main/probe.opens
+touch: /tmp/lf-qa-867c-main/probe.stop: No such file or directory
+sort: No such file or directory
+opens: 
+scratch/qa/lockprobe.sh:27: no such file or directory: /tmp/lf-qa-867c-main/lfhome/config.yaml
+lf task claim -> exit 1
+tail: /tmp/lf-qa-867c-main/probe.out: No such file or directory

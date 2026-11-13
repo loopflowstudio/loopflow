@@ -462,6 +462,14 @@ from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
+Config loaded inside a write transaction: in a private home, replace
+`$LF_HOME/config.yaml` with a FIFO. At each open, before writing the file's
+contents, try `sqlite3 -cmd '.timeout 0' <db> 'BEGIN IMMEDIATE; ROLLBACK;'`;
+a failure means lf holds the write lock while it reads config. Stop the
+feeder with a flag file, not `kill`: a surviving feeder interleaves writes and
+leaves lf blocked on an open with no writer. In this shell `which lf` names a
+wrapper function; use `whence -p lf` for the installed binary.
+
 ## Waking idle conversations
 
 Real turns need real logins: keep the account's `HOME` (Claude's Keychain login

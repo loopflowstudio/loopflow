@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-867 QA: placement config reads out of ownership writes</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f3;padding:.8em;overflow:auto;font-size:13px}
+h2{margin-top:1.8em} td,th{padding:.3em .8em;border-bottom:1px solid #ddd;text-align:left}
+.ok{color:#1a7f37}.bad{color:#b42318}
+</style>
+<h1>LOO-867 QA</h1>
+<p>The branch's <code>lf</code> (built at 791367ca97) ran against private <code>HOME</code>/<code>LF_HOME</code> homes under <code>/tmp/lf-qa-867*</code>,
+each with a disposable Git repository using <code>planning: {provider: git, personal: true}</code>. Scripts and logs are in <code>scratch/qa/</code>.</p>
+
+<h2>1. The write lock is never held while config loads</h2>
+<p>The change's claim is that ownership writes load Git identity, placement YAML, Machine declarations and planning connections before <code>BEGIN</code>.
+<code>scratch/qa/lockprobe.sh</code> checks this from outside: it replaces <code>$LF_HOME/config.yaml</code> with a FIFO. Each time <code>lf</code> opens the file, the probe
+tries <code>BEGIN IMMEDIATE</code> on the store from another connection <em>before</em> writing the file's contents, which lf is blocked waiting for.
+If lf holds the write lock while it reads config, that attempt fails.</p>
+<table>
+<tr><th>binary</th><th>command</th><th>config opens</th><th>opens with write lock held</th></tr>
+<tr><td>installed 0.15.3</td><td><code>lf task unassign</code></td><td>19</td><td>0</td></tr>
+<tr><td>installed 0.15.3</td><td><code>lf task claim</code></td><td>21</td><td class="bad">3</td></tr>
+<tr><td>branch</td><td><code>lf task unassign</code></td><td>118</td><td class="ok">0</td></tr>
+<tr><td>branch</td><td><code>lf task claim</code></td><td>76</td><td class="ok">0</td></tr>
+</table>
+<p>An earlier branch run of the same pair (47 and 74 opens) also had 0 held. The probe catches the old behaviour (3 held during claim on 0.15.3), so the zero on the branch means something.
+The open counts vary from run to run (47 vs 118 for one unassign), so they don't measure how often lf loads config; the warning count below does.</p>
+
+<h2>2. Claim, re-claim, unassign on a fresh Machine</h2>
+<pre>$ lf task claim task_7116…
+Owner: QA Person on Jacks-MacBook-Pro-2
+  Nov 12 21:57  claim  QA Person on Jacks-MacBook-Pro-2
+$ lf task claim task_7116…      # second claim writes nothing new
+Owner: QA Person on Jacks-MacBook-Pro-2
+  Nov 12 21:57  claim  QA Person on Jacks-MacBook-Pro-2</pre>
+<p>The local Machine's label is its hostname. A newly created Task has an empty log, and unassigning an unowned Task prints <code>Unowned</code>.</p>
+
+<h2>3. A declared Machine owns the repository's Tasks</h2>
+<p>Declared <code>mini</code> in <code>$LF_HOME/config.yaml</code> (<code>lf machine list</code> shows it) and ran <code>lf set machine.tasks mini</code>.
+After that, <code>lf task claim</code> on both a new Task and the previously owned one went to mini instead of writing locally: the owning Machine read before <code>BEGIN</code> is used.</p>
+<pre>$ lf task claim task_4dfe…
+ssh: connect to host  port 22: Connection refused
+Error: machine "": unreachable: run `ssh -o ControlPath=none -- ''` to check the address, …</pre>
+<p>Running <code>lf unset machine.tasks</code> routed claims back here, and both Tasks claimed locally. The empty Machine name and SSH host in that error
+come from remote routing, which this branch doesn't touch (see "still wrong").</p>
+
+<h2>4. Malformed personal config, and two claims at once</h2>
+<p>With <code>machines: [not, a, map</code>, <code>lf task unassign</code> warns, skips the entry and succeeds. Afterwards the store accepts writes and nothing is left locked.
+Two concurrent <code>lf task claim</code> on an unowned Task both exit 0 and the log gains exactly one <code>claim</code> row.</p>
+
+<h2>What works now</h2>
+<ul>
+<li>Claim and unassign take the store's write lock only after every config load (FIFO probe, section 1).</li>
+<li>Owner resolution still follows <code>machine.tasks</code>, and labels still come from declared names. The old <code>map_machine_by_id</code> label was also the declaration name, so display is unchanged.</li>
+<li>Concurrent claims and malformed config behave as before.</li>
+</ul>
+
+<h2>Not reached, and why</h2>
+<ul>
+<li><b>Handoff, marker ingestion (<code>lf task move --machine</code>, session move), Linear comment ingestion and rental hand-back</b> each need a second reachable Machine or Linear.
+No SSH server runs on this host, and the only other Machine is a real one. <code>lf task move --machine mini</code> stops at <code>SSH destination cannot be empty</code>.
+The focused lib tests cover these paths (<code>store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}</code>, 22 tests).
+All 22 passed here (627 s at load average ~155; <code>scratch/qa/tests.log</code>).</li>
+<li>Desktop: no UI change.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>Claiming for a declared Machine that has no connection prints <code>machine "": unreachable</code> with an empty SSH host. That's the remote-routing layer, outside this change.</li>
+<li>One CLI command loads the personal config many times. With a malformed file, the warning prints 19 times per unassign on the branch, against 12 on 0.15.3
+(claim: 19 vs 15; show: 12 vs 11). 0.15.3 is older than origin/main, so this isn't a clean before/after. Part of the increase is that
+<code>OwnershipFacts</code> now loads Machine names and the owning Machine on every write, even when the holder is already yours. Each load happens outside the lock.</li>
+</ol>

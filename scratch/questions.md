@@ -424,6 +424,22 @@ Compress: one function builds both lines.
 `machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it`
 and clippy pass; `documented_commands::` passes.
 
+## Next (concept review, 2026-11-13): different person ids don't prove different people
+
+`is_mine_in` (store/sqlite/task_ownership.rs) returns `id == mine` whenever
+the holder and this Machine both carry a `people` id. One person has two ids
+once Linear connects: `record_local_person` moves the Machine from
+`journal:<key>` to `linear:<viewer>`, and their earlier claims keep
+`journal:<key>`. Those Tasks then read as another person's, although the Git
+email matches, which main's key check would have accepted. The open question
+"A person with both" covers merging the rows. It doesn't cover this regression.
+
+Direction: matching ids are enough to say "you". Different ids fall through to
+the person key, then to the Machine, as before. Never worse than main, which
+had only the key. Test: claim under `journal:k` with key `a@x`, record the
+local person `linear:v`, and the Task stays yours (`lf task status` shows no
+other owner; claim and unassign are allowed).
+
 ## Open questions (each reversible; the simpler option is built)
 
 - **Mini's ownership log.** After a move, mini's `lf task status` log does

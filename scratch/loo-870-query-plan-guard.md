@@ -120,11 +120,6 @@ linked Task, as LOO-839 did.
    partial index ... does not" with the measured-size rule; say FK child lookups
    are checked from the schema.
 
-## Docs
-
-- `docs/dev/data.md` § "Query cost and the write lock": written ahead of the
-  code (partial-walk rule, measured-row requirement, FK child lookups).
-
 ## Exclusions
 
 - Per-path FK tracing (adding child lookups for each traced parent DELETE/UPDATE).
@@ -149,6 +144,7 @@ was newly flagged.
 
 ## Checks
 
+- compress: `cargo test -p loopflow --lib store::query_plans::` — 8 pass; clippy clean
 - `cargo test -p loopflow --lib store::query_plans::` plus `task_work::tests::process_membership_upgrade_probes_cwd_and_session_indexes` — pass at implement (10 tests); clippy clean; gate reruns
 - `server::boundary::tests::boundary_statements_never_scan_tables_that_grow_with_use` — pass at implement; gate reruns
 - `documented_commands::` (docs/dev/data.md changed) — gate

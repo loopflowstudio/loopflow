@@ -211,12 +211,7 @@ pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<S
                     .strip_prefix("SCAN ")
                     .and_then(|rest| rest.split_whitespace().next());
                 if table.is_some_and(|table| growing.contains(&table)) {
-                    let index = detail
-                        .split_whitespace()
-                        .skip_while(|word| *word != "INDEX")
-                        .nth(1)
-                        .map(str::to_owned);
-                    steps.push((stats, detail, index, sql));
+                    steps.push((stats, detail, sql));
                 }
             }
         }
@@ -241,15 +236,19 @@ pub(crate) fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<S
     };
     steps
         .into_iter()
-        .filter_map(
-            |(stats, detail, index, sql)| match index.as_deref().and_then(partial_rows) {
+        .filter_map(|(stats, detail, sql)| {
+            let index = detail
+                .split_whitespace()
+                .skip_while(|word| *word != "INDEX")
+                .nth(1);
+            match index.and_then(partial_rows) {
                 Some(rows) if rows < LIVE_SUBSET_ROWS => None,
                 Some(rows) => Some(format!(
                     "{stats}: {detail} ({rows} rows measured)\n  in {sql}"
                 )),
                 None => Some(format!("{stats}: {detail}\n  in {sql}")),
-            },
-        )
+            }
+        })
         .collect()
 }
 

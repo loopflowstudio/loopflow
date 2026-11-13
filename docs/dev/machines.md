@@ -330,11 +330,12 @@ it was leaving, or one whose answer was lost on the way back, shows in status:
 
 ```console
 $ lf task status MTG-321
-MTG-321  Leaving for mini since Nov 12 10:42: not sent
+MTG-321  Moving to mini since Nov 12 10:42: not sent
   retry: lf task move MTG-321 --machine mini
 ```
 
-or, once sent, `Moving to mini since Nov 12 10:42: sent, not arrived`.
+Once sent, the stage after the colon reads `sent, not arrived`; `since` stays
+when the move began.
 
 Running the same move again, from any Machine, asks the Machine the Task left.
 A leaving move carries on: it commits, pushes and takes the conversation, which

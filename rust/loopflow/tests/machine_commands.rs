@@ -3095,7 +3095,7 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
         .unwrap();
     assert_success(&status);
     let status = String::from_utf8_lossy(&status.stdout);
-    assert!(status.contains("Leaving for mini since"), "{status}");
+    assert!(status.contains("Moving to mini since"), "{status}");
     assert!(status.contains(": not sent"), "{status}");
     assert!(status.contains(&format!("retry: {retry}")), "{status}");
 

@@ -145,9 +145,9 @@ pub fn not_checked_out_here() -> String {
 }
 
 /// A move of the Task this Machine began that has not arrived, with the
-/// command that carries it on: `Leaving for mini since Nov 12 10:42: not
-/// sent` or `Moving to mini since Nov 12 10:42: sent, not arrived`. `None`
-/// when no move is in flight.
+/// command that carries it on: `Moving to mini since Nov 12 10:42: not sent`
+/// or `…: sent, not arrived`, since when the move began. `None` when no move
+/// is in flight.
 pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
     let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
         return Ok(None);
@@ -170,12 +170,12 @@ pub(crate) fn describe_move(
     let place = store
         .machine_by_id(to)?
         .map_or_else(|| to.to_string(), |machine| machine.name());
-    let (state, progress) = match moving.stage {
-        MoveStage::Leaving { .. } => ("Leaving for", "not sent"),
-        MoveStage::Sent { .. } => ("Moving to", "sent, not arrived"),
+    let progress = match moving.stage {
+        MoveStage::Leaving { .. } => "not sent",
+        MoveStage::Sent { .. } => "sent, not arrived",
     };
     Ok(format!(
-        "{state} {place} since {}: {progress}\n  retry: lf task move {identifier} --machine {place}",
+        "Moving to {place} since {}: {progress}\n  retry: lf task move {identifier} --machine {place}",
         crate::lf::output::format_time(moving.at)
     ))
 }

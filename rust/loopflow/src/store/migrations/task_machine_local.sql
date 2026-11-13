@@ -29,7 +29,7 @@ CREATE TABLE task_moves (
     from_machine_id TEXT NOT NULL,
     to_machine_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('leaving', 'sent', 'arrived')),
-    -- When the move entered its state.
+    -- When the move began, while leaving or sent; when it arrived, once arrived.
     at INTEGER NOT NULL,
     -- The ownership entry claiming the Task for the target, while leaving.
     claim_id TEXT,

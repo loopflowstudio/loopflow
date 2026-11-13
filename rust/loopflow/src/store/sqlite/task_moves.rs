@@ -15,7 +15,7 @@ use super::SqliteStore;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoveInFlight {
     pub to_machine_id: MachineId,
-    /// When it entered its stage.
+    /// When the move began; sending it keeps this time.
     pub at: i64,
     pub stage: MoveStage,
 }
@@ -46,7 +46,8 @@ impl SqliteStore {
     }
 
     /// Record `payload` as sent to `to`. A Task has at most one move in
-    /// flight: the leaving or unarrived one is replaced.
+    /// flight: the leaving or unarrived one turns into this one, keeping when
+    /// it began unless it was to another Machine.
     pub(crate) fn record_move_sent(
         &self,
         task: &TaskId,
@@ -54,24 +55,22 @@ impl SqliteStore {
         to: &MachineId,
         payload: &str,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        tx.execute(
-            "DELETE FROM task_moves WHERE task_id=?1 AND state IN ('leaving','sent')",
-            [task.as_str()],
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let now = now_unix();
+        let updated = conn.execute(
+            "UPDATE task_moves SET state='sent',from_machine_id=?2,to_machine_id=?3,
+                 at=CASE WHEN to_machine_id=?3 THEN at ELSE ?4 END,
+                 claim_id=NULL,stopped=NULL,payload=?5
+             WHERE task_id=?1 AND state IN ('leaving','sent')",
+            params![task.as_str(), from.as_str(), to.as_str(), now, payload],
         )?;
-        tx.execute(
-            "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,payload)
-             VALUES(?1,?2,?3,'sent',?4,?5)",
-            params![
-                task.as_str(),
-                from.as_str(),
-                to.as_str(),
-                now_unix(),
-                payload
-            ],
-        )?;
-        tx.commit()?;
+        if updated == 0 {
+            conn.execute(
+                "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,payload)
+                 VALUES(?1,?2,?3,'sent',?4,?5)",
+                params![task.as_str(), from.as_str(), to.as_str(), now, payload],
+            )?;
+        }
         Ok(())
     }
 
@@ -180,6 +179,16 @@ mod tests {
         let (laptop, mini) = (store.local_machine().unwrap().id, MachineId::new());
         assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
 
+        // Leaving, then sent, then sent again: still one move, as old as
+        // when it began.
+        store.begin_task_move(&task, &mini).unwrap();
+        let began = 1_000;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE task_moves SET at=?1", [began])
+            .unwrap();
         store
             .record_move_sent(&task, &laptop, &mini, "{\"first\":1}")
             .unwrap();
@@ -188,6 +197,7 @@ mod tests {
             .unwrap();
         let sent = store.task_move_in_flight(&task).unwrap().unwrap();
         assert_eq!(sent.to_machine_id, mini);
+        assert_eq!(sent.at, began);
         assert_eq!(
             sent.stage,
             MoveStage::Sent {

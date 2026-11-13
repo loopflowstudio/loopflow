@@ -202,7 +202,8 @@ pub(crate) fn describe_move(
 
 /// What to run for a move to `place` that has not arrived: the same move
 /// again, or, while `place` stays out of reach, claiming the Task here, which
-/// asks the target first so it never runs on both Machines.
+/// asks the target first to resolve a lost arrival acknowledgement. An
+/// unreachable target may still be running it.
 pub(crate) fn ways_out(identifier: &str, place: &str) -> String {
     format!(
         "  retry: lf task move {identifier} --machine {place}\n  take back: lf task claim {identifier}"

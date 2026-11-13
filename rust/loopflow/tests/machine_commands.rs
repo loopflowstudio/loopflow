@@ -897,6 +897,7 @@ fn remote_command_exit_is_retained_in_local_process_history() {
 fn machine_add_on_the_remote_updates_only_its_registry() {
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
     executable(
         &remote.join(".local/bin/lf"),
         &format!(
@@ -941,6 +942,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
 fn preview_machines() -> Machines {
     let fixture = Machines::new();
     let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
     executable(
         &remote.join(".local/bin/lf"),
         &format!(

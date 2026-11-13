@@ -1,27 +1,18 @@
 # Make the Rust tests fast
 
-## Change of priority (2026-11-13, read before the next edit)
-
-Stop working on transport tests: `tests/transport_tests.rs`, `tests/transport/`,
-`src/transport/*tests*`. A separate Task (f3d86e, "Rebuild the transport tests
-around the current design") redesigns that suite stacked on this branch. Commit
-transport work that is finished and green; revert the rest. Continue with the
-other groups: `store::sqlite`, `store::migrations`,
-`ops::linear::task_planning_tests`, `task_graph_launch_tests`,
-`session_lifecycle_tests`, `machine_commands`, `session_launch_contract`,
-`local_planning`, `release_lock_tests`.
-
 Goal: as many tests as possible under 1 s, better under 100 ms. Cutting
 redundant or unimportant tests is fine. Said about this work: "lets go
 ballistic on these. Totally fine to cut redundant or unimportant tests. Find
 way to bring as many as possiblle at <1s, even better <100ms".
 
-## What three merge-queue runs showed (2026-11-13, Linux, 6 threads)
+## Original CI baseline
 
-`scratch/test-timings.tsv` has every test: median and max seconds, binary, name.
+`scratch/test-timings.tsv` contains every test's median/max duration across
+three merge-queue runs (2026-11-13, Linux, six threads). Keep it as the baseline;
+these changes have not been remeasured on CI.
 
 | Duration | Tests | Total seconds |
-|---|---|---|
+|---|---:|---:|
 | under 0.1 s | 1549 | 43 |
 | 0.1–1 s | 442 | 166 |
 | 1–5 s | 246 | 828 |
@@ -29,180 +20,159 @@ way to bring as many as possiblle at <1s, even better <100ms".
 | 10–30 s | 496 | 7758 |
 | over 30 s | 72 | 3592 |
 
-About 19,700 s in all. The 5–10 s band is one fixed cost: modules such as
-`store::sqlite::durable`, `session_events`, `task_work`, `harness::agent_process`
-have a per-test minimum near 5 s and a median near 6.3 s.
+About 19,700 s in all. Largest original groups included transport (1503 s,
+121 tests), Task graph launch (1092 s, 56), Session lifecycle (911 s, 42),
+Linear Task planning (811 s, 86), Machine commands (790 s, 48), launch contracts
+(567 s, 30), local planning (553 s, 33), release locks (537 s, 13), and migration
+unit tests (466 s, 112). Platform/ignored-test counts differ from the Mac runs.
 
-## Local profiling and first fix (2026-11-13, Mac, debug)
+## The fixed cost: migration SQL replay
 
-Temporary timing prints (removed) in `apply_sqlite_transaction` and
-`apply_set_with_purpose`, using
+Temporary timing prints in `apply_sqlite_transaction` and
+`apply_set_with_purpose` measured
 `store::sqlite::durable::durable_store_tests::bind_preserves_prior_work_and_usage_while_assigning_future_work`:
 
-| Part | Time |
+| Part | Local debug time |
 |---|---:|
 | SQL replay | 1.262277 s |
 | Conversion and ledger bookkeeping | 0.007580 s |
-| Migration loop total | 1.304106 s |
+| Entire migration loop | 1.304106 s |
 | Schema validation/checksums | 0.008098 s |
-| Foreign key check | 0.000061 s |
+| Foreign-key check | 0.000061 s |
 | Persisted JSON check | 0.000121 s |
-| Migration call total | 1.313613 s |
+| Entire migration call | 1.313613 s |
 
-The earlier claim that fresh opens avoid migration replay was wrong:
-`canonical_schema.json` avoids rebuilding the *validation reference* only.
-`--list` on the same test binary (including its pre-main constructor) takes
-0.01 s real, below the profiler's 0.01 s CPU resolution.
+The earlier assumption that fresh opens avoid replay was wrong:
+`canonical_schema.json` avoids rebuilding the validation reference only.
+The same test binary's `--list`, including its constructor, takes 0.01 s real
+and less than 0.01 s CPU. All timing prints were removed.
 
-Build now writes `test-store.db` from its already-migrated catalog connection,
-including migration versions/checksums. Only fresh stores in `cfg(test)` copy
-it; existing stores still upgrade/validate. Raw migration tests still replay
-SQL. The image's nullable historical provenance is unset; it claims no runtime
-migration application. Copying refreshes the local Machine identity/timestamps (the comparison caught
-these nondeterministic seed fields); all other seed values stay identical.
-A regression compares every product schema object and
-seed row with actual runtime migration, and checks independent copies and reopen.
+`build.rs` now writes `test-store.db` from the connection it already migrates,
+including migration versions/checksums. Fresh `cfg(test)` store opens copy it.
+`tests/support::seed_store(home)` uses the same helper before fixture CLI/server
+launches. Existing stores still upgrade/validate normally; raw migration tests
+still replay SQL. Production does not embed or use the test image.
 
-Baseline: `cargo nextest run -p loopflow --lib -E
-'test(store::sqlite::durable::durable_store_tests::)' --test-threads 6`:
-20 passed, 8.394 s wall; named bind test 1.521 s alone / 1.674 s in group.
-Initial copied-image run: named bind test 0.298 s, mixed with frontier tests.
-After: same 20 names total 19.359 s (summed per-test durations) versus
-45.573 s before; bind 0.285 s in the mixed six-thread validation run.
-The full selected store/frontier/viewer validation: 93/93 passed, 14.595 s.
-The equivalence test found the Machine identity/timestamp difference before
-commit; refreshing those fields fixed it. Raw migration replay remains covered.
-One initial validation failed only this new image check; rerun above is green.
-The initial viewer run spent 66 s per resume case preparing a CLI; passing
-`LOOPFLOW_TEST_LF=$PWD/target/debug/lf` reduced them to 6.3–6.6 s.
-`cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+Every copy refreshes the local Machine identity/timestamps. The equivalence
+check caught these nondeterministic seed fields before commit. It compares all
+product schema objects and seed rows against runtime migration, checks distinct
+Machine IDs, and proves reopening retains writes and copies stay independent.
+Historical nullable migration provenance stays unset in the image.
 
-## Spawned CLI baseline
+## Local before/after (Mac, debug, 2026-11-13)
 
-Against one fresh private `LF_HOME`, `target/debug/lf session list --json`:
-1.447 s first open, 0.094 s second, 0.098 s third. Each new home pays replay;
-subsequent processes on that home do not. Repeated paired runs during the
-integration baseline, including image copy and identity refresh in seeded times:
-empty homes 1.578 / 1.554 / 1.537 s, seeded homes 0.204 / 0.182 / 0.292 s
-(medians 1.554 → 0.204 s). The seed itself took 0.006 s. CLI validation remains
-real. These probes used Python sqlite3 only to reproduce the Rust fixture copy;
-the committed fixtures share `store/test_database.rs`.
+Group times are summed per-test seconds from six-thread nextest filters, not
+concurrent wall time. Process-heavy timings varied; Session lifecycle was flat.
 
-## Integration fixture image (second win)
-
-`tests/support::seed_store` compiles the same test-only copy helper. Account and
-Task fixture registration plus transport, Machine command, Session lifecycle,
-and launch-contract constructors seed before starting their first CLI.
-The server-status and initial unregistered-Machine dispatch proofs use
-uninitialized fixtures. They keep their absence/first-open behavior. Generic environment guards do
-not seed stores, so absence/upgrade proofs keep their original starting point.
-
-Filtered six-thread baseline: 247/247 passed, 313.090 s wall. Totals below are
-**summed test seconds**, not concurrent wall time; no CI speedup is claimed.
-
-| Group | Tests | Before local s | After local s |
+| Group | Tests before → after | Before s | After s |
 |---|---:|---:|---:|
-| Machine commands | 48 | 325.884 | 272.464 |
-| Session launch contract | 30 | 202.828 | 159.677 |
-| Session lifecycle | 41 | 330.047 | 329.797 |
-| Transport (non-SSH) | 128 | 893.027 | 756.319 |
+| Durable store | 20 → 20 | 45.573 | 19.359 |
+| Machine commands | 48 → 48 | 325.884 | 272.464 |
+| Session launch contract | 30 → 30 | 202.828 | 159.677 |
+| Session lifecycle | 41 → 41 | 330.047 | 329.797 |
+| Transport, non-SSH | 128 → 126 | 893.027 | 680.112 |
+| Quiet native runner variants | 4 → 4 | 86.043 | 15.291 |
 
-Command: `cargo nextest run -p loopflow --test transport_tests --test integration --test session_lifecycle_tests --test session_launch_contract -E '(binary(transport_tests) - test(ssh_shells::)) | test(machine_commands::) | binary(session_lifecycle_tests) | binary(session_launch_contract)' --test-threads 6`.
-The first after-run exposed the Machine dispatch proof's dependence on an
-uninitialized local store: the diagnostic for an initialized store differs.
-Its fixture now starts uninitialized; expectations stay unchanged. The full
-Machine-command rerun passed all 48 tests; the table uses that run's times.
-The after-run passed the other 203 tests, including all four documentation checks.
-Session lifecycle total was flat; individual process-heavy timings varied in both
-directions, so this is not evidence of a whole-group speedup there.
+In the 20-test durable group, tests under 1 s increased from 0 to 14.
 
-Use inherited `LF_*` unset, `< /dev/null`, and
-`LOOPFLOW_TEST_LF=$PWD/target/debug/lf`. The after-run also includes
-`test(documented_commands::)` for the fixture guidance in `tests/README.md`.
+Named checks:
 
-## Transport timing cuts (third win)
+- Bind test named above: 1.521 → 0.169 s, serial nextest measurements.
+- Replay-grace refusal: 62.398 s integration → 0.025 s host unit test.
+- Shell lifecycle repetition: 49.975 s (20 cycles) → 7.541 s (three cycles).
+- Codex quiet foreground runner: 65.720 → 3.823 s.
+- Task launch/admission matrix trial: 13.345 → 15.368 s. The trial was reverted;
+  no timing gain is claimed for this matrix.
 
-- Replace the standalone
-  `grace_expiry_refuses_bytes_before_repainting_the_terminal_screen` (62.398 s)
-  with the same behavior in `transport::hosted::tests`: advance only a dropped
-  viewer's fixture timestamp, drive real resume/attach requests through
-  `Hosted::pass`, and check refusal before snapshot, current screen contents,
-  and retention of the newer controller. No production timeout or seam changes. The host-level check passed in
-  0.025 s versus 62.398 s in the old integration test.
-- Delete
-  `quiet_unviewed_conversations_ignore_the_obsolete_detached_limit` (5.657 s).
-  `config::tests::obsolete_detached_limit_is_readable_but_not_written` covers
-  the obsolete setting; `a_held_conversation_outlives_its_view` and viewer-hold
-  lifecycle tests cover surviving a closed view.
-- Rename the twenty-shell-lifecycles test to
-  `desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` and run
-  three cycles. Each retains the same full process/session/socket and settlement
-  assertions; seventeen more copies assert the same behavior. Before: 49.975 s.
-- Own the Machine server in the five managed-conversation cases identified below.
-  Server startup stays real and the guard stops it before deleting its home.
-  Focused validation: 18/18 passed in 12.756 s, including the production host
-  tests, obsolete-setting config test, five guarded cases, retained-view checks,
-  and three shell cycles (12.073 s versus 49.975 s for twenty).
+Spawned CLI processes pay replay once per fresh home, not once per process.
+`target/debug/lf session list --json` took 1.447 s on a fresh home, then
+0.094 / 0.098 s on that home. Three paired fresh-home runs during the fixture
+baseline: empty 1.578 / 1.554 / 1.537 s, seeded 0.204 / 0.182 / 0.292 s,
+including copy/identity refresh (medians 1.554 → 0.204 s). Copy alone took 0.006 s.
+The CLI still runs its real validation against seeded homes.
 
-Full non-SSH transport filter: 126/126 passed in 134.609 s wall.
-Summed duration: 680.112 s, versus 756.319 s after seeding and 893.027 s
-before seeding (128 tests then; one deleted, one moved to the host unit suite).
-The full run's repeated-shell case took 7.541 s. After the focused and full
-transport runs, `ps` showed no remaining process from this checkout's test CLI.
-`cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+## Coverage changes
 
-## Cleanup finding
+- Deleted `quiet_unviewed_conversations_ignore_the_obsolete_detached_limit`.
+  The config unit test covers reading/omitting that obsolete field; retained
+  conversation and viewer-hold tests cover surviving closed views.
+- Replaced the standalone
+  `grace_expiry_refuses_bytes_before_repainting_the_terminal_screen` with the
+  same behavior under `transport::hosted::tests`. A dropped fixture timestamp
+  drives real resume/attach requests through `Hosted::pass`: refusal must
+  precede the fresh snapshot, the current screen must survive, and the newer
+  controller must retain its claim. No production timeout/test setting added.
+- Renamed the twenty-shell-lifecycles test to
+  `desktop_shell_repeated_lifecycles_leave_no_owned_jobs_or_sockets` and kept
+  three complete cycles, each checking process/session/socket cleanup and
+  settlement. Removed seventeen copies of the same assertions.
+- Codex uses the same 1 s idle observation as Claude, removing a 60 s sleep.
+  All four provider/mode variants still assert zero requests before the turn
+  ends, then exactly two requests and the changed title afterward. The testing
+  guide no longer excludes these now-short cases from affected Linear gates.
+- A trial removed twelve duplicate CLI invocations from the Task admission
+  matrix. It passed, but the named check took 15.368 s versus 13.345 s and the
+  full 55-case group took 423.444 s versus 317.026 s. Timing variation did not
+  establish a gain, so the original matrix coverage was restored.
 
-After the two filtered transport runs, ten `target/debug/lf server run` processes
-remained (five per run). `lsof` showed private `lf-7501-*` database homes, all
-already removed by their fixtures. Sending SIGTERM restarted all ten through launchd. Each job's program/home
-was checked against this checkout and its private fixture path, then the exact
-ten jobs were unloaded with `launchctl bootout`; no other jobs were changed.
-Homes recreated by their restarted servers were removed.
-Fixed missing owners: the resume-JSON new-owner test, the three
-`prepared_thread_json` variants, and the prepared-conversation owner/relay test.
-They had started managed conversations without a `MachineServer` guard.
-Both focused and full transport runs now finish without leaving fixture servers. This is a fixture
-cleanup defect; no product correctness failure has been established.
+Bootstrap proofs remain uninitialized: server status must create no store,
+and initial unregistered-Machine dispatch retains its original first-open
+error. The first seeded run exposed the latter assumption; its fixture was
+corrected and the full Machine group passed with unchanged expectations.
 
-## Quiet native runner (fourth win)
+## Fixture server leak
 
-Codex now uses the same 1 s idle observation as Claude, removing a 60 s fixed
-sleep. The provider remains held at readiness, no HTTP requests may occur while
-idle, and the real turn boundary must still acquire the changed title with two
-requests. All four provider/mode variants remain.
+Two full transport runs left five supervised private servers each, after their
+`lf-7501-*` homes had been deleted. SIGTERM restarted all ten through launchd.
+After checking each job's executable/home, the exact ten jobs were unloaded
+with `launchctl bootout` and the homes they recreated were removed.
 
-`cargo nextest run -p loopflow --lib --test integration -E
-'test(ops::linear::task_planning_tests::native_runner_is_quiet_until_its_turn_ends) | test(documented_commands::)' --test-threads 6`:
-8/8 passed, 7.702 s wall. Four runner cases: 86.043 → 15.291 s summed;
-Codex foreground: 65.720 → 3.823 s. The testing guide no longer excludes these
-short cases from affected Linear gates. `cargo fmt` passed; clippy pending.
+Missing `MachineServer` guards were added to the new-owner resume-JSON test,
+the three `prepared_thread_json` variants, and the prepared-conversation
+owner/relay test. Focused and full transport runs now leave no fixture CLI or
+server process alive. This was a fixture ownership defect; no product
+correctness bug was established.
 
-## Next work
+## Verification and limits
 
-1. Store and integration image wins implemented; fmt passed.
-   Clippy found a duplicated module include in the library test crate; the
-   shared helper now compiles only through `test_support`, without a second
-   `store` module. The image equivalence/isolation check and named bind test
-   passed again (1.327 s / 0.169 s, serial); `cargo clippy --all-targets -- -D warnings` passed.
-   Further focused validation: 107/107 passed in 117.684 s, including all 55
-   Task graph launch tests, all 48 Machine commands, and all four quiet native
-   runner variants. These are the baseline for any further runner changes.
-2. Work down slow groups: transport fixed sleeps, native Linear runner's
-   60 s idle wait, repeated TestRepo Git setup, redundant lifecycle checks.
-   Transport candidates measured after fixture seeding: obsolete detached-limit
-   integration test duplicates config parsing plus held-conversation lifetime;
-   20 identical shell lifecycle iterations; a 61 s grace-expiry wait that can be
-   exercised directly through the host request handler with a dropped timestamp.
-   Codex quiet-runner baseline: 65.720 s (60 s is idle waiting); Claude variants
-   use 1 s for the same quiet-before-turn assertion.
-   Do not shorten waits that are the behavior being exercised without replacing
-   their coverage. Deleted/replaced cases are listed above; no product correctness
-   bug has been established.
+Run from this checkout with inherited `LF_*` unset, `< /dev/null`, and
+`LOOPFLOW_TEST_LF=$PWD/target/debug/lf` after preparing the CLI. Use nextest
+filters and six threads. Never run the whole workspace locally; one Cargo
+command at a time. `.config/nextest.toml` kills a test at five minutes and a run
+at twenty; five failures stop a local run. No limit/CI configuration changed.
 
-## Limits already on this branch
+- Store/durable/frontier and store/viewer caller filters: 93/93 passed, 14.595 s;
+  image/bind recheck after module consolidation: 2/2 passed, 1.498 s.
+- Four integration group baseline: 247/247 passed, 313.090 s. Seeded run:
+  250/251 passed; the sole failure was the initial-Machine assumption above.
+  Corrected full Machine group, Task graph group and four native variants:
+  107/107 passed, 117.684 s. All four documentation checks passed.
+- Transport host/model/config and changed public cases: 18/18 passed, 12.756 s.
+  Full non-SSH transport: 126/126 passed, 134.609 s; no leftover fixture processes.
+- Quiet native variants and documentation: 8/8 passed, 7.702 s.
+- Task graph/image trial filter: 56/56 passed, 72.621 s. The original matrix
+  was restored afterward; its unchanged coverage passed in the earlier full
+  107-case run. Eight holder processes briefly outlived the trial suite and had
+  exited by the post-clippy process check.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed before each
+  completed local speedup commit. Final formatting/import cleanup lint passed.
+  Linux/SSH checks remain with CI; the SSH suite was not changed.
 
-`.config/nextest.toml`: a test is killed at 5 minutes, a run at 20, and five
-failures stop a local run. Never run the whole workspace locally; measure with
-filters (`cargo nextest run -p loopflow -E 'test(store::sqlite::durable)'`).
-One cargo command at a time.
+## What remains
+
+1. Remeasure affected filters on Linux before projecting a CI-wide saving.
+2. Profile repeated `TestRepo` setup and remaining fresh-home constructors
+   (local planning, global commands, served reads, release locks). Extend
+   `support::seed_store` only to ordinary fixtures, keeping bootstrap/upgrade
+   starting states intact.
+3. Transport's remaining 30–36 s checks exercise actual heartbeat, reconnect,
+   and pending-turn lifetimes. Move a check to direct host/model coverage only
+   when it still exercises the failure people would notice; keep one real
+   protocol proof per behavior.
+4. Raw migration/prefix tests still replay SQL intentionally. Prepared prefix
+   images might help their setup, but must retain real upgrade coverage.
+
+Concurrent repository activity: at 12:14:11 another process made/pushed
+`2fe6b81d27` (`lf pr open: prepare branch`) while these checks were active.
+Read-only `gh pr view` showed open PR #1920 at that commit. This run did not
+push or create a PR; it retained the external commit and continued locally.

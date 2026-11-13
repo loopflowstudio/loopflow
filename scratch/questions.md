@@ -84,8 +84,7 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 
 ## Done (2026-11-13, third pass): ship log, pools, people
 
-- `task_ship_events` (approved, carried, restarted, progressed, stopped,
-  withdrawn; at, Process, person) replaces the local `ship_*` columns: every
+- `task_ship_events` (approved, carried, restarted, stopped, withdrawn; at, Process, person) replaces the local `ship_*` columns: every
   reader and writer (`task_work.rs` ship fns, `task_state_sql` carrier,
   process pruning) reads the log; backfilled from the old columns. `tasks.shipped_at`
   stays: it is the planning field (`task_shipped_at`) peers share. A move
@@ -334,7 +333,7 @@ which names mini from the claim on.
 - Ship log bounded: `restarted` stops at `SHIP_RESTARTS_COUNTED` (6, where
   `repair_backoff` stops growing); a step completing deletes them (`progressed`
   is gone); a new `carried` row replaces the last. `ship_log_in` reads from the
-  latest `approved`/`stopped` (partial index `task_ship_events_start`). Backfill
+  latest `approved`/`stopped` (a subquery searching `task_ship_events_task`). Backfill
   caps at 6. Test `a_ship_process_failing_all_day_keeps_its_log_short`
   (48 restarts → 8 rows) and `query_plans::auto_ship_log_reads_and_writes_plan_by_index`;
   MEASURED gains `task_ship_events` rows from the Machine store's 396 backfilled rows.
@@ -342,6 +341,9 @@ which names mini from the claim on.
   `store::migrations::` + `task_moves::` + `task_work::` + `ops::task::ship::` +
   `lf::tests::` 194, `store::query_plans::` 9, `server::schema::tests::` 7;
   clippy `--all-targets -D warnings` clean.
+- Compress: lists share `task_ownership::move_line`; the partial index
+  `task_ship_events_start` went (a Task's log is a few rows). lib `query_plans::`
+  + `ship` 102 ok, integration `machine_commands::a_move_` 3 ok, clippy clean.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -363,7 +365,7 @@ which names mini from the claim on.
 - **First claim on a Machine.** The Linear viewer is learned after the first
   claim's assignee write, so that claim names no `person_id`.
 - **Seven ship columns.** `shipped_at` is shared planning, so it stays; the
-  carrier and restart count joined the log as `carried`/`restarted`/`progressed`.
+  carrier and restart count joined the log as `carried`/`restarted`.
 - **Primary Session not on `task_checkouts`.** Directed there, but
   `ensure_task` opens a Task conversation in the repository when the Task has
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT

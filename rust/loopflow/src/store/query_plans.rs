@@ -127,7 +127,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_parent_pr','11 2'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
          ('task_ship_events','task_ship_events_task','396 3 1'),
-         ('task_ship_events','task_ship_events_start','186 1 1'),
          ('task_ship_events','task_ship_events_process','216 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),

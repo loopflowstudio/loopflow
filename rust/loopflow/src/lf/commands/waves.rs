@@ -886,12 +886,8 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                 let ownership = store.sqlite.task_ownership(&id)?;
                 let mut owner = owner_text(task.runtime.as_ref()).to_string();
                 // A move that has not arrived reads as that, as in `lf task status`.
-                let place = match store.sqlite.task_move_in_flight(&id)? {
-                    Some(moving) => {
-                        Some(crate::ops::task_ownership::moving_to(&store.sqlite, &moving)?.1)
-                    }
-                    None => crate::ops::task_ownership::runs_elsewhere(&ownership, &local),
-                };
+                let place = crate::ops::task_ownership::move_line(&store.sqlite, &id)?
+                    .or_else(|| crate::ops::task_ownership::runs_elsewhere(&ownership, &local));
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
                 }

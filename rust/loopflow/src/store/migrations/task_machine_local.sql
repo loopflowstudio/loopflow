@@ -168,8 +168,6 @@ CREATE TABLE task_ship_events (
     person TEXT
 );
 CREATE INDEX task_ship_events_task ON task_ship_events(task_id, id);
-CREATE INDEX task_ship_events_start ON task_ship_events(task_id, id)
-WHERE kind IN ('approved','stopped');
 CREATE INDEX task_ship_events_process ON task_ship_events(lf_process_id)
 WHERE lf_process_id IS NOT NULL;
 CREATE TRIGGER task_ship_events_append_only BEFORE UPDATE ON task_ship_events

@@ -172,12 +172,18 @@ pub(crate) fn describe_move(
     ))
 }
 
+/// The line a list shows for a Task whose move from here has not arrived,
+/// without the retry. `None` when no move is in flight.
+pub(crate) fn move_line(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<String>> {
+    let Some(moving) = store.task_move_in_flight(task)? else {
+        return Ok(None);
+    };
+    Ok(Some(moving_to(store, &moving)?.1))
+}
+
 /// The Machine `moving` names and its one line, without the retry:
 /// `Moving to mini since Nov 12 10:42: sent, not arrived`.
-pub(crate) fn moving_to(
-    store: &SqliteStore,
-    moving: &MoveInFlight,
-) -> StoreResult<(String, String)> {
+fn moving_to(store: &SqliteStore, moving: &MoveInFlight) -> StoreResult<(String, String)> {
     let to = &moving.to_machine_id;
     let place = store
         .machine_by_id(to)?

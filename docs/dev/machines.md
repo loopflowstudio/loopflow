@@ -323,21 +323,24 @@ The move hands the Task to mini before it stops the Graph, so nothing on the
 laptop restarts it meanwhile. If the checkpoint can't be pushed, the Task is
 handed back: the log shows both claims, its conversation stays on the laptop,
 and the Graph stays stopped at the step `lf task status` names.
-The Machine the Task leaves records the move as `sent`, with what it sent,
-before it answers; it becomes `arrived` once mini has taken the Task in. One
-that stopped in between, even one whose answer was lost on the way back,
-shows in status:
+The Machine the Task leaves records the move as `leaving` with the claim,
+keeps the step it stopped, records it as `sent`, with what it sent, before it
+answers, and as `arrived` once mini has taken the Task in. A move killed while
+it was leaving, or one whose answer was lost on the way back, shows in status:
 
 ```console
 $ lf task status MTG-321
-MTG-321  Moving to mini since Nov 12 10:42: sent, not arrived
+MTG-321  Leaving for mini since Nov 12 10:42: not sent
   retry: lf task move MTG-321 --machine mini
 ```
 
-Running the same move again, from any Machine, asks the Machine the Task left,
-which delivers what it sent, conversation included; it does not stop, commit
-or push again, and the Graph continues on mini at the
-step it was on. If the Graph does not start on mini, the move still stands and the last line prints
+or, once sent, `Moving to mini since Nov 12 10:42: sent, not arrived`.
+
+Running the same move again, from any Machine, asks the Machine the Task left.
+A leaving move carries on: it commits, pushes and takes the conversation, which
+are safe to repeat. A sent move is delivered as it was sent, conversation
+included, without committing or pushing again. Either way the Graph continues
+on mini at the step it was on. If the Graph does not start on mini, the move still stands and the last line prints
 `lf task run MTG-321 --from 'implement'`, which starts it at that step on the
 Task's owner.
 

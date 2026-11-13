@@ -236,29 +236,28 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   `moved_session` tidied. `machine_commands::a_handed_back` + `resuming_a_task`
   3 passed; clippy clean.
 
-## Next implement (concept-review, 2026-11-13): a move is a row from its claim
+## Done (2026-11-13, eighth pass): a move is a row from its claim
 
-The brief: "a half-finished move is a row you can see and retry". Today
-`send_task` writes the claim naming `to`, then stops the Graph, commits,
-pushes and takes the conversation, and only then records `sent`. A kill in
-that span (seconds to minutes, not a race) leaves this Machine reading "Runs
-on mini" with no row; a repeat refuses ("already runs on mini"), and only
-`lf task claim` here recovers it, by hand.
-
-- `task_moves` gains `leaving`, written in the same transaction as the move's
-  claim (one store call in place of `claim_for` + a later insert).
-- Once `stop_graphs` returns, the row keeps the stopped Graph: a repeat finds
-  nothing live to stop, and without it the receiver would not continue the
-  step that was running. Commit, push and take repeat safely (clean tree,
-  pushed branch, stopped agent).
-- A repeat of `lf task move X --machine M` on a `leaving` row naming M resumes
-  `leave` from there; then `sent` with the payload, as now. `claim_for`'s
-  "already runs on" stays for a Task with no row.
-- A failed leave hands back and deletes the row in one transaction.
-- `lf task status`: `Leaving for mini since …: not sent` + the same retry line.
-- Test: write the claim and a `leaving` row with a stopped Graph (as a kill
-  would leave them), run the move again, assert it arrives on mini and the
-  Graph continues from the stopped step.
+- `task_moves` gains `leaving` (`claim_id`, `stopped`), written with the move's
+  claim in one transaction (`begin_task_move`, which replaced
+  `move_claim_keeping_conversation`). `leave` stores the stopped Graph on the
+  row once `stop_graphs` returns (`record_move_stopped`).
+- A repeat of `lf task move X --machine M` on a `leaving` row naming M reads
+  the claim back and carries on leaving (commit, push, take), keeping the
+  stored stopped step; a row naming another Machine refuses with its retry
+  line. `claim_for`'s "already runs on" stays for a Task with no row.
+- `hand_back` deletes the leaving row in its transaction. `record_move_sent`
+  replaces the leaving row; the conversation completes after `sent` is
+  recorded, and again (idempotently) on a sent repeat.
+- `lf task status`: `Leaving for mini since …: not sent` + retry line; relay
+  prints `Carrying on X's move to mini` for both repeats. machines.md updated.
+- A retry that fails after an earlier attempt stopped the Graph hands back and
+  drops the stored step, as a first attempt failing after its stop did.
+- Tests: lib `a_move_leaves_from_its_claim_until_it_is_sent_or_handed_back`;
+  integration `a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_on`.
+- Checks: lib `task_ownership::` `task_moves::` `store::migrations::` 145 passed;
+  integration `machine_commands::` move tests 11 passed; clippy clean. Gate runs
+  `documented_commands::` (machines.md).
 
 ## Remaining
 
@@ -306,4 +305,4 @@ that answers the parallel-stall question below.
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`. `leaving` is a third
-  `task_moves` state beside the brief's "sent or arrived" (next implement).
+  `task_moves` state beside the brief's "sent or arrived".

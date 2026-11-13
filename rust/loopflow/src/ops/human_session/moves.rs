@@ -167,9 +167,11 @@ pub(crate) fn conversation_task(store: &SqliteStore, session: &str) -> Result<Op
 
 /// Claim the Task for `to`, then stop its Graph, commit and push its
 /// worktree and take `conversation` (the Task's own conversation when `None`).
-/// A failure in those steps hands it back here. The move is recorded as sent
-/// before it returns, so a repeat naming the same Machine returns what was
-/// sent, even when the first reply never reached the caller.
+/// From its claim until it is sent the move is leaving: a repeat naming the
+/// same Machine carries on from there, with the Graph it stopped. A failure
+/// in those steps hands it back here. The move is recorded as sent before it
+/// returns, so a repeat returns what was sent, even when the first reply never
+/// reached the caller.
 pub(crate) async fn send_task(
     store: &SharedStore,
     issue: &str,
@@ -186,7 +188,13 @@ pub(crate) async fn send_task(
         .task_move_sent(&task.id)?
         .filter(|sent| &sent.to_machine_id == to)
     {
-        return serde_json::from_str(&sent.payload).context("read the sent move");
+        let moved: Move = serde_json::from_str(&sent.payload).context("read the sent move")?;
+        if let Some(session) = &moved.session {
+            store
+                .sqlite
+                .complete_task_conversation(&session.id, &task.id)?;
+        }
+        return Ok(moved);
     }
     let worktree = task.worktree.clone().filter(|path| path.exists());
     if let Some(root) = &worktree {
@@ -195,20 +203,42 @@ pub(crate) async fn send_task(
     // Owned by `to` from here, so nothing on this Machine (recovery restarting
     // a ship process, a run waiting out a limit) starts the Task again while
     // the move stops it. If it cannot leave, it is handed back.
-    let claim = claim_for(&store.sqlite, &task, to)?;
+    let (claim, stopped) = match store.sqlite.task_move_leaving(&task.id)? {
+        Some(leaving) if &leaving.to_machine_id == to => {
+            let claim = store
+                .sqlite
+                .task_ownership(&task.id)?
+                .log
+                .into_iter()
+                .find(|entry| entry.id == leaving.claim_id)
+                .ok_or_else(|| anyhow!("{name}'s move claim {} is gone", leaving.claim_id))?;
+            let stopped = leaving
+                .stopped
+                .map(|stopped| serde_json::from_str(&stopped))
+                .transpose()
+                .context("read the stopped Graph")?;
+            (claim, stopped)
+        }
+        Some(leaving) => {
+            let place = store
+                .sqlite
+                .machine_by_id(&leaving.to_machine_id)?
+                .map_or_else(
+                    || leaving.to_machine_id.to_string(),
+                    |machine| machine.name(),
+                );
+            bail!("{name} is leaving for {place}\n  retry: lf task move {name} --machine {place}")
+        }
+        None => (claim_for(&store.sqlite, &task, to)?, None),
+    };
     let (stopped, checkout, conversation, taken) =
-        match leave(store, &task, worktree.as_deref(), to, conversation).await {
+        match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
             Err(error) => {
                 store.sqlite.hand_back(&task.id, &claim)?;
                 return Err(error);
             }
         };
-    if let Some(session) = &conversation {
-        store
-            .sqlite
-            .complete_task_conversation(&session.id, &task.id)?;
-    }
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
     let from = store.sqlite.local_machine()?.id;
@@ -229,6 +259,11 @@ pub(crate) async fn send_task(
     store
         .sqlite
         .record_move_sent(&task.id, &from, to, &serde_json::to_string(&moved)?)?;
+    if let Some(session) = &conversation {
+        store
+            .sqlite
+            .complete_task_conversation(&session.id, &task.id)?;
+    }
     Ok(moved)
 }
 
@@ -254,16 +289,27 @@ type Left = (
 );
 
 /// What leaves with the Task: its stopped Graph, its pushed checkpoint and
-/// its stopped conversation, `conversation` or else the Task's own.
+/// its stopped conversation, `conversation` or else the Task's own. A Graph
+/// stopped by an earlier attempt of this move is `stopped`: nothing of it is
+/// left running to stop again.
 async fn leave(
     store: &SharedStore,
     task: &Task,
     worktree: Option<&Path>,
     to: &MachineId,
     conversation: Option<&str>,
+    stopped: Option<StoppedGraph>,
 ) -> Result<Left> {
     let name = &task.identifier;
-    let stopped = stop_graphs(store, task).await?;
+    let stopped = match stop_graphs(store, task).await? {
+        Some(now) => {
+            store
+                .sqlite
+                .record_move_stopped(&task.id, &serde_json::to_string(&now)?)?;
+            Some(now)
+        }
+        None => stopped,
+    };
     let checkout = worktree
         .map(|root| checkpoint(&store.sqlite, root, name, to))
         .transpose()?;
@@ -342,21 +388,18 @@ fn take(
     ))
 }
 
-/// The claim naming `to`, written here: this Machine's claim moves there. An
-/// unowned Task is claimed first; one `to` already owns has nothing to send.
+/// The claim naming `to`, written here with the move leaving: this Machine's
+/// claim moves there. An unowned Task is claimed first; one `to` already owns
+/// has nothing to send.
 fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwnershipEntry> {
     let owner = store
         .task_ownership(&task.id)?
         .owner
         .and_then(|owner| owner.machine.id);
-    match owner {
-        Some(owner) if &owner == to => bail!("{} already runs on {to}", task.identifier),
-        Some(_) => {}
-        None => {
-            store.claim_task(&task.id)?;
-        }
+    if owner.as_ref() == Some(to) {
+        bail!("{} already runs on {to}", task.identifier);
     }
-    Ok(store.move_claim_keeping_conversation(&task.id, to)?)
+    Ok(store.begin_task_move(&task.id, to)?)
 }
 
 /// Interrupt the Task so nothing starts again, then end each Graph still

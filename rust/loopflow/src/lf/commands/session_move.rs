@@ -153,8 +153,8 @@ impl StoppedRun {
 
 /// Send the Task from the Machine it leaves, receive it on `target`, and learn
 /// the move's claim here too so this Machine routes it there. The Machine it
-/// leaves records the move as sent until it arrives, so the same command
-/// delivers it again.
+/// leaves records the move as leaving, then sent, until it arrives, so the
+/// same command carries it on.
 async fn relay_task(
     store: &SharedStore,
     issue: &str,
@@ -178,13 +178,13 @@ async fn relay_task(
     let route = store.task_execution_route(&task.id).await?;
     let name = &task.identifier;
     let place = describe(target.as_ref());
-    // Already claimed for `to` here: sent before and not arrived, so the
-    // Machine that sent it delivers it again as it was sent.
+    // Already claimed for `to` here: a move that did not arrive. The Machine
+    // it leaves carries on leaving, or delivers it again as it was sent.
     let resending = route.machine_id == to;
     let source = if resending {
         let source = sender(&store.sqlite, &task.id, &to)?
             .ok_or_else(|| anyhow!("{name} already runs on {place}"))?;
-        eprintln!("Delivering {name} as it was sent to {place}");
+        eprintln!("Carrying on {name}'s move to {place}");
         source
     } else {
         if let Some(target) = &target {

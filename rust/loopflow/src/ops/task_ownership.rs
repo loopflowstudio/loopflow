@@ -142,24 +142,35 @@ pub fn not_checked_out_here() -> String {
     )
 }
 
-/// A move of the Task this Machine sent that has not arrived, with the
-/// command that delivers it: `Moving to mini since Nov 12 10:42: sent, not
-/// arrived`. `None` when no move is in flight.
+/// A move of the Task this Machine began that has not arrived, with the
+/// command that carries it on: `Leaving for mini since Nov 12 10:42: not
+/// sent` or `Moving to mini since Nov 12 10:42: sent, not arrived`. `None`
+/// when no move is in flight.
 pub fn moving_here(task: &TaskId, identifier: &str) -> OpsResult<Option<String>> {
     let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
         return Ok(None);
     };
-    let Some(sent) = store.sqlite.task_move_sent(task).map_err(message)? else {
-        return Ok(None);
+    let leaving = store.sqlite.task_move_leaving(task).map_err(message)?;
+    let (to, at, state, progress) = match leaving {
+        Some(leaving) => (leaving.to_machine_id, leaving.at, "Leaving for", "not sent"),
+        None => match store.sqlite.task_move_sent(task).map_err(message)? {
+            Some(sent) => (
+                sent.to_machine_id,
+                sent.at,
+                "Moving to",
+                "sent, not arrived",
+            ),
+            None => return Ok(None),
+        },
     };
     let place = store
         .sqlite
-        .machine_by_id(&sent.to_machine_id)
+        .machine_by_id(&to)
         .map_err(message)?
-        .map_or_else(|| sent.to_machine_id.to_string(), |machine| machine.name());
+        .map_or_else(|| to.to_string(), |machine| machine.name());
     Ok(Some(format!(
-        "Moving to {place} since {}: sent, not arrived\n  retry: lf task move {identifier} --machine {place}",
-        crate::lf::output::format_time(sent.at)
+        "{state} {place} since {}: {progress}\n  retry: lf task move {identifier} --machine {place}",
+        crate::lf::output::format_time(at)
     )))
 }
 

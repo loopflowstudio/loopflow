@@ -2432,7 +2432,7 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
         .unwrap();
     assert_success(&retried);
     let stderr = String::from_utf8_lossy(&retried.stderr);
-    assert!(stderr.contains("as it was sent to mini"), "{stderr}");
+    assert!(stderr.contains("move to mini"), "{stderr}");
     assert!(!stderr.contains("Committed and pushed"), "{stderr}");
     assert_eq!(
         git(
@@ -3055,6 +3055,97 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         )
         .unwrap();
     assert_eq!(first_steps, 0, "mini ran the route's first step again");
+}
+
+/// A move killed after it stopped the Graph, before it pushed: the laptop's
+/// claim names mini and the move is leaving, with the step it stopped. Status
+/// says so, and the same command carries the move on: the checkpoint is
+/// pushed and the Graph continues on mini at the stopped step.
+#[test]
+fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_on() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let local_home = fixture.root.path().join("local");
+    let remote_home = fixture.root.path().join("remote/store");
+    let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
+    let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
+    let mini = plan.remote.local_machine().unwrap().id;
+    let (task, worktree) = placed_task(&plan, "leaving-task");
+    let mut run = start_hold_run(&fixture, &task, &worktree);
+    let step = format!("task wait {task} --timeout 120s");
+    plan.local.begin_task_move(&task, &mini).unwrap();
+    loopflow_test_support::end_recorded_processes(&local_home, Path::new(lf));
+    assert!(
+        exits_within_ten_seconds(&mut run),
+        "the laptop's run outlived its stop"
+    );
+    rusqlite::Connection::open(local_home.join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE task_moves SET stopped=?2 WHERE task_id=?1 AND state='leaving'",
+            rusqlite::params![task.as_str(), serde_json::json!({"step": step}).to_string()],
+        )
+        .unwrap();
+    fs::write(worktree.join("step-edit.txt"), "halfway\n").unwrap();
+
+    let name = plan.local.task(&task).unwrap().unwrap().identifier;
+    let retry = format!("lf task move {name} --machine mini");
+    let status = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("Leaving for mini since"), "{status}");
+    assert!(status.contains(": not sent"), "{status}");
+    assert!(status.contains(&format!("retry: {retry}")), "{status}");
+
+    let moved = fixture
+        .command(&["task", "move", task.as_str(), "--machine", "mini"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&moved);
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    for stage in [
+        "Carrying on".to_string(),
+        format!("Arrived on mini (Graph at `{step}`)"),
+        "Running on mini as Graph process".into(),
+    ] {
+        assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
+    }
+    assert_eq!(
+        git(
+            plan._repos[0].bare_path(),
+            &["show", "leaving-task:step-edit.txt"]
+        ),
+        "halfway"
+    );
+    assert_eq!(plan.local.task_move_leaving(&task).unwrap(), None);
+    let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
+    assert_eq!(owner.machine.id, Some(mini));
+    let mini_status = fixture
+        .command(&[
+            "--machine",
+            "mini",
+            "task",
+            "status",
+            task.as_str(),
+            "--json",
+        ])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&mini_status);
+    let mini_status: Value = serde_json::from_slice(&mini_status.stdout).unwrap();
+    assert_eq!(
+        mini_status["graph_processes"][0]["step"],
+        step.as_str(),
+        "{mini_status}"
+    );
 }
 
 /// Back is the same act: the laptop runs `lf task move X --machine laptop`

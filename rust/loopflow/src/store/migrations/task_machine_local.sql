@@ -17,19 +17,28 @@ WHEN NOT (OLD.ordered_at IS NULL AND NEW.ordered_at IS NOT NULL
     AND NEW.writer_machine_id IS OLD.writer_machine_id AND NEW.person_id IS OLD.person_id)
 BEGIN SELECT RAISE(ABORT, 'Task ownership entries are append-only'); END;
 
--- Machine-local: each move of a Task this Machine sent or received. A sent
--- move keeps what it sent until it arrives, so running the same move again
--- delivers it without stopping, committing or pushing again.
+-- Machine-local: each move of a Task this Machine sent or received. A move
+-- is `leaving` from the claim naming its target until it is sent: it keeps
+-- that claim and, once its Graph stopped, the step it stopped, so running the
+-- same move again carries on leaving. A sent move keeps what it sent until it
+-- arrives, so running it again delivers it without stopping, committing or
+-- pushing again.
 CREATE TABLE task_moves (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     from_machine_id TEXT NOT NULL,
     to_machine_id TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('sent', 'arrived')),
+    state TEXT NOT NULL CHECK (state IN ('leaving', 'sent', 'arrived')),
     -- When the move entered its state.
     at INTEGER NOT NULL,
+    -- The ownership entry claiming the Task for the target, while leaving.
+    claim_id TEXT,
+    -- The Graph the move stopped, while leaving.
+    stopped TEXT CHECK (stopped IS NULL OR json_valid(stopped)),
     -- The move as sent, while it has not arrived.
     payload TEXT CHECK (payload IS NULL OR json_valid(payload)),
+    CHECK ((state = 'leaving') = (claim_id IS NOT NULL)),
+    CHECK (state = 'leaving' OR stopped IS NULL),
     CHECK ((state = 'sent') = (payload IS NOT NULL))
 );
 CREATE INDEX task_moves_task ON task_moves(task_id, id);

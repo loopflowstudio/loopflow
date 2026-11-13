@@ -947,9 +947,12 @@ impl SqliteStore {
         Ok(entry)
     }
 
-    /// A move's claim on `target`, written before the move stops anything: the
-    /// Task's conversation travels with it, and the move completes it once taken.
-    pub(crate) fn move_claim_keeping_conversation(
+    /// Begin moving the Task to `target`: claim it here when unowned, write
+    /// the move's claim naming `target` and record the move as leaving, in one
+    /// transaction. Written before the move stops anything, so nothing here
+    /// starts the Task again; its conversation travels with it, and the move
+    /// completes it once taken.
+    pub fn begin_task_move(
         &self,
         task: &TaskId,
         target: &MachineId,
@@ -957,14 +960,33 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = OwnershipFacts::of_task_in(&conn, task)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if reading_in(&tx, task)?.1.owner.is_none() {
+            claim_in(&tx, task, &me)?;
+        }
         let entry = move_in(&tx, task, target, &me)?;
+        tx.execute(
+            "DELETE FROM task_moves WHERE task_id=?1 AND state IN ('leaving','sent')",
+            [task.as_str()],
+        )?;
+        tx.execute(
+            "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,claim_id)
+             VALUES(?1,?2,?3,'leaving',?4,?5)",
+            params![
+                task.as_str(),
+                local_machine_in(&tx)?.as_str(),
+                target.as_str(),
+                crate::store::rows::now_unix(),
+                entry.id.as_str()
+            ],
+        )?;
         tx.commit()?;
         Ok(entry)
     }
 
-    /// Take back `sent`, the move claim this Machine just wrote, when the move it
-    /// began could not leave. Nothing may follow it in the log: until it is
-    /// received, its target has not taken the Task. The log keeps both entries.
+    /// Take back `sent`, the move claim this Machine wrote, when the move it
+    /// began could not leave; the move is no longer leaving. Nothing may follow
+    /// the claim in the log: until it is received, its target has not taken
+    /// the Task. The log keeps both entries.
     pub(crate) fn hand_back(
         &self,
         task: &TaskId,
@@ -987,6 +1009,10 @@ impl SqliteStore {
             sent.owner().into(),
             &local_machine_in(&tx)?,
             planning_connected,
+        )?;
+        tx.execute(
+            "DELETE FROM task_moves WHERE task_id=?1 AND state='leaving'",
+            [task.as_str()],
         )?;
         tx.commit()?;
         Ok(entry)
@@ -1326,5 +1352,39 @@ mod tests {
         assert!(bodies
             .iter()
             .all(|body| !body.contains("kims-basement-mini")));
+    }
+
+    #[test]
+    fn a_move_leaves_from_its_claim_until_it_is_sent_or_handed_back() {
+        let (_dir, store, task) = store_with_unowned_task();
+        let (laptop, mini) = (store.local_machine().unwrap().id, MachineId::new());
+        store
+            .add_machine(&mini, "ssh://mini.example", "mini")
+            .unwrap();
+
+        // An unowned Task is claimed here, then its claim moves to mini.
+        let claim = store.begin_task_move(&task, &mini).unwrap();
+        let ownership = store.task_ownership(&task).unwrap();
+        assert_eq!(ownership.log.len(), 2);
+        assert_eq!(ownership.owner.unwrap().machine.id, Some(mini.clone()));
+        store
+            .record_move_stopped(&task, "{\"step\":\"implement\"}")
+            .unwrap();
+        let leaving = store.task_move_leaving(&task).unwrap().unwrap();
+        assert_eq!(leaving.to_machine_id, mini);
+        assert_eq!(leaving.claim_id, claim.id);
+        assert_eq!(leaving.stopped.as_deref(), Some("{\"step\":\"implement\"}"));
+
+        // Handed back, nothing is leaving and the laptop owns it again.
+        store.hand_back(&task, &claim).unwrap();
+        assert_eq!(store.task_move_leaving(&task).unwrap(), None);
+        let owner = store.task_ownership(&task).unwrap().owner.unwrap();
+        assert_eq!(owner.machine.id, Some(laptop.clone()));
+
+        // Sent, the move is no longer leaving.
+        store.begin_task_move(&task, &mini).unwrap();
+        store.record_move_sent(&task, &laptop, &mini, "{}").unwrap();
+        assert_eq!(store.task_move_leaving(&task).unwrap(), None);
+        assert!(store.task_move_sent(&task).unwrap().is_some());
     }
 }

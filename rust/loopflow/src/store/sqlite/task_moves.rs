@@ -1,9 +1,11 @@
-//! Machine-local moves of a Task: `sent` when this Machine sent it, until it
-//! arrives. A sent move keeps what it sent, so running the same move again
+//! Machine-local moves of a Task: `leaving` from the claim naming its target,
+//! then `sent` when this Machine sent it, until it arrives. A leaving move
+//! keeps its claim and the Graph it stopped, so running the same move again
+//! carries on leaving; a sent move keeps what it sent, so running it again
 //! delivers it without stopping, committing or pushing again.
 use rusqlite::{params, OptionalExtension};
 
-use crate::durable::{MachineId, TaskId};
+use crate::durable::{MachineId, OwnershipEntryId, TaskId};
 use crate::store::rows::now_unix;
 use crate::store::StoreResult;
 
@@ -19,9 +21,33 @@ pub struct SentMove {
     pub payload: String,
 }
 
+/// A move this Machine began that has not been sent: its claim is written,
+/// and stopping, committing, pushing or taking its conversation did not finish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeavingMove {
+    pub to_machine_id: MachineId,
+    /// When the claim was written.
+    pub at: i64,
+    /// The ownership entry claiming the Task for `to_machine_id`.
+    pub claim_id: OwnershipEntryId,
+    /// The Graph the move stopped, as JSON; absent until one stopped.
+    pub stopped: Option<String>,
+}
+
 impl SqliteStore {
+    /// The move stopped the Task's Graph: keep it, so carrying on leaving
+    /// continues the step it stopped.
+    pub(crate) fn record_move_stopped(&self, task: &TaskId, stopped: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE task_moves SET stopped=?2 WHERE task_id=?1 AND state='leaving'",
+            params![task.as_str(), stopped],
+        )?;
+        Ok(())
+    }
+
     /// Record `payload` as sent to `to`. A Task has at most one move in
-    /// flight: an unarrived one is replaced.
+    /// flight: the leaving or unarrived one is replaced.
     pub(crate) fn record_move_sent(
         &self,
         task: &TaskId,
@@ -32,7 +58,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "DELETE FROM task_moves WHERE task_id=?1 AND state='sent'",
+            "DELETE FROM task_moves WHERE task_id=?1 AND state IN ('leaving','sent')",
             [task.as_str()],
         )?;
         tx.execute(
@@ -76,8 +102,8 @@ impl SqliteStore {
         }
         if here {
             tx.execute(
-                "UPDATE task_moves SET state='arrived',payload=NULL
-                 WHERE task_id=?1 AND state='sent'",
+                "UPDATE task_moves SET state='arrived',claim_id=NULL,stopped=NULL,payload=NULL
+                 WHERE task_id=?1 AND state IN ('leaving','sent')",
                 [task.as_str()],
             )?;
         }
@@ -97,6 +123,26 @@ impl SqliteStore {
             )
             .optional()?
             .unwrap_or(false))
+    }
+
+    /// The Task's move this Machine began and has not sent.
+    pub fn task_move_leaving(&self, task: &TaskId) -> StoreResult<Option<LeavingMove>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT to_machine_id,at,claim_id,stopped FROM task_moves
+                 WHERE task_id=?1 AND state='leaving' ORDER BY id DESC LIMIT 1",
+                [task.as_str()],
+                |row| {
+                    Ok(LeavingMove {
+                        to_machine_id: MachineId::from_raw(row.get::<_, String>(0)?),
+                        at: row.get(1)?,
+                        claim_id: OwnershipEntryId::from_raw(row.get::<_, String>(2)?),
+                        stopped: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// The Task's move this Machine sent that has not arrived.

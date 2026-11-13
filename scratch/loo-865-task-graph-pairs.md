@@ -146,7 +146,7 @@ test `graph_process_task_backfills_the_read_time_pairing`), writer with `task`,
 indexed `task_graph_pairs`, `test_graph` and integration `support::record_graph`
 recording the deepest checkout's Task. Left: the gate's store-copy comparison.
 
-- `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13). Gate runs them.
+- `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13; rerun at realign after merging origin/main 87f0e3c60a: same, `running 14 tests` then stopped). Gate or CI runs them; nothing on the branch has executed these tests yet.
 
 ## Docs
 

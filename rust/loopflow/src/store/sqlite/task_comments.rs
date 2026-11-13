@@ -15,6 +15,7 @@ pub(super) fn ingest_task_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &crate::linear::LinearComment,
+    machine_names: &std::collections::HashMap<crate::durable::MachineId, String>,
 ) -> StoreResult<bool> {
     // A historical filing keeps its original local UUID. Only its Linear
     // representation changes version bits; an existing delivery proves the link.
@@ -41,6 +42,7 @@ pub(super) fn ingest_task_comment(
         task,
         &comment.body,
         super::task_ownership::provider_order(comment.created_at.as_deref()),
+        machine_names,
     )?;
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
@@ -404,7 +406,7 @@ mod tests {
         {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();
-            super::ingest_task_comment(&tx, &task, &observed).unwrap();
+            super::ingest_task_comment(&tx, &task, &observed, &Default::default()).unwrap();
             tx.rollback().unwrap();
         }
         assert_eq!(
@@ -415,7 +417,13 @@ mod tests {
             store.pending_task_comments(&task).unwrap(),
             vec![original.clone()]
         );
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &observed).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &observed,
+            &Default::default(),
+        )
+        .unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         store.record_comment_delivery(&original.id, None).unwrap();
@@ -452,7 +460,13 @@ mod tests {
             revision: Some("2026-10-08T01:00:00Z".into()),
             ..observed.clone()
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &stale).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &stale,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments,
             thread.comments
@@ -462,7 +476,13 @@ mod tests {
             revision: Some("2026-10-08T01:04:00Z".into()),
             ..observed
         };
-        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended).unwrap();
+        super::ingest_task_comment(
+            &store.conn.lock().unwrap(),
+            &task,
+            &amended,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             store.task_comments(&task).unwrap().comments[0].body,
             amended.body

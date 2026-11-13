@@ -187,6 +187,9 @@ While a write transaction is open, every other writer on the Machine waits:
 
 - Read first; open no write transaction when nothing changes.
 - Keep process spawns, network calls, file IO and large reads outside it.
+  Config counts: Git identity, placement YAML, Machine declarations and
+  planning connections load before `BEGIN` and pass in as values, even when
+  the code that uses them runs per Task inside the transaction.
 - Never hold one across an `await`, a request or a provider call.
 
 `store::query_plans` traces what a hot path executes on a fixture store, then

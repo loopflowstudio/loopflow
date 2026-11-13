@@ -182,3 +182,4 @@ Task's; that follows from the same concept. Writers are the launch
 INSERT exists. Nothing further to change; the adoption question in
 `scratch/questions.md` stays reversible and does not change the design.
 - Compress 2026-11-13: `graphs_of_task` probes `task_id IN (?1)` directly (a `TaskId` is canonical, so the identifier-matching `tasks()` subquery added nothing). `cargo test -p loopflow --lib store::sqlite::task_work::`: 13 passed (binary stopped in `TN` repeatedly; continued by PID).
+- QA re-run 2026-11-13 on 6ae00e744 (`scratch/qa.html` §4): `lf graph list --processes` `task_id`, `--taskless`, `--for-task` (full and short id) and `lf task status` agree with `graph_processes.task_id`; a new launch pairs at once. Nothing fixed.

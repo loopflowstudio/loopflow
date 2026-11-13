@@ -51,6 +51,17 @@ reading  graph_processes=6
 <p><code>plan.list</code> (<code>all: true</code>): each Task's <code>latest_graph_process.cwd</code> is its own checkout; Beta's stays
 <code>repo.beta</code> although the newer main-checkout Graph ran after it.</p>
 
+<h2>4. Re-run after gate and compress (lf 0.15.3+6ae00e744)</h2>
+<p>Gate made the Graph summary's <code>task_id</code> read the recorded column; compress made
+<code>graphs_of_task</code> probe <code>task_id IN (?1)</code> directly. Same private Machine, new binary.</p>
+<table><tr><th>Reading</th><th>Result</th></tr>
+<tr><td><code>lf graph list --processes --all --json</code> <code>task_id</code> per Graph vs <code>graph_processes.task_id</code> (11 Graphs)</td><td class=ok>identical</td></tr>
+<tr><td><code>--taskless</code></td><td class=ok>exactly the 3 NULL rows (5d26278c, 6079cc1d, f9bcaa4e)</td></tr>
+<tr><td><code>--for-task task_6378…</code>, <code>--for-task 637893</code>, <code>lf task status 637893 --json</code></td><td class=ok>same 7 Graphs, including one launched on this build (6615f356)</td></tr>
+<tr><td><code>--for-task nope</code></td><td class=ok><code>Error: Task was not found</code></td></tr>
+<tr><td>Beta's Graphs</td><td class=ok>4a65a357, 99a35144 (the <code>--task</code> launch from the main checkout)</td></tr>
+</table>
+<p>Short ids resolve through <code>resolve_task_id</code> before reaching the store, so dropping the identifier subquery loses nothing. No private processes left running.</p>
 <h2>Fixed</h2>
 <p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
 (<code>lf -b graph</code> in an adopted checkout).</p>

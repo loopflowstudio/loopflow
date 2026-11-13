@@ -457,7 +457,10 @@ delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
 A private home that applied an earlier draft of the branch's migration refuses
-to open (checksum mismatch); move it aside and start a fresh one.
+to open (checksum mismatch), as does one that applied the branch's migration
+before a merge put main's newer migration ahead of it ("migration history or
+schema differs"). Start a fresh one, seeded by the installed `lf` when the
+upgrade path matters.
 
 Boundary query plans: copy the Machine's store with
 `sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare

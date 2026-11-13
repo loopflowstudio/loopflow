@@ -215,8 +215,10 @@ second open-Process reader that still has to ask which of the two is the Graph.
 Since QA §7 the header path has not changed: compress touched only
 `open_graph_execution`; merging main (0afb302f52) changed `query_plans.rs`, one
 test's index name, and `foreign_key_children.sql`, which drops
-`agent_process_session` (no branch query names it). The CLI walk is not
-repeated on 7ae63e616d; gate's Task-state suites cover the merge head.
+`agent_process_session` (no branch query names it). QA §8 re-walked 8dec86f0ca
+on a fresh Machine seeded by installed 0.15.3+87f0e3c60: both migrations apply in
+order, Graph readings identical, adopted-mid-Graph `moving` → refusal → `idle`
+→ recorded run. Gate's Task-state suites remain.
 
 ## Docs
 

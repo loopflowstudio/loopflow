@@ -96,6 +96,24 @@ Same private Machine, fresh checkout <code>repo.live12</code>; launched
 </table>
 <p>No private server or conversation started; the Graph and stand-in exited, and no CLI process from this checkout remains.
 This resolves section 6's header discrepancy. Gate and CI retain the deferred checks.</p>
+
+<h2>8. Merge head re-walked from a fresh install (HEAD 8dec86f0ca)</h2>
+<p>2026-11-13. Since §7: compress rewrote <code>open_graph_execution</code>'s Graph pick, and main's
+<code>foreign_key_children</code> migration merged in ahead of <code>graph_process_task</code>.
+The §5–7 Machine now refuses to open (&ldquo;migration history or schema differs … last migrated by lf 0.15.3 (e2c1bcfce)&rdquo;):
+it applied the branch migration before main's existed. Dev-home artifact; no released store has either migration.
+New private Machine <code>/tmp/lf-qa-865d</code>, seeded by the installed <code>lf 0.15.3+87f0e3c60</code> (has neither migration),
+then opened with the branch build.</p>
+<table><tr><th>Did</th><th>Saw</th></tr>
+<tr><td>Installed lf: Tasks Alpha/Beta adopt <code>repo.alpha</code>/<code>repo.beta</code>; <code>lf -b graph</code> in alpha, alpha/sub/deep, beta, main checkout. Saved <code>lf task status --json</code> Graph ids.</td><td class="ok">Branch lf opens the store, applies <code>foreign_key_children</code> then <code>graph_process_task</code>; both Tasks' Graph ids identical. Backfill: alpha ×2 (incl. nested dir), beta ×1, main checkout NULL; partial index present.</td></tr>
+<tr><td>Branch: <code>lf -b graph</code> in alpha; in main checkout with <code>--task &lt;Beta&gt;</code></td><td class="ok">Recorded Alpha and Beta. <code>lf graph list --processes --all --json</code> <code>task_id</code> matches <code>graph_processes</code> on all 6 rows; <code>--taskless</code> is exactly the NULL one.</td></tr>
+<tr><td>Fresh <code>repo.live</code>: <code>lf -b -a claude graph qa-slow</code> (stand-in holds its turn), then <code>lf task create --worktree</code></td><td class="ok">Header <code>moving</code>; latest Graph and action <code>no_action</code> name Graph <code>62a6f045</code> and its <code>lf history show</code>; <code>--json</code> <code>graph_processes: []</code>.</td></tr>
+<tr><td><code>lf -b task run</code> while it runs; <code>lf plan list --all --json</code></td><td class="ok">Exit 1, same sentence; no second Graph. Board item: section <code>working</code>, <code>execution.state: running</code>, <code>actions.recommended: no_action</code>, <code>runtime.status: moving</code>, <code>latest_graph_process: null</code>.</td></tr>
+<tr><td>Released the stand-in; Graph exited</td><td class="ok">Header <code>idle</code>, action <code>run</code>, &ldquo;No Task Graph has run&rdquo;; Graph row stays NULL.</td></tr>
+<tr><td><code>lf -b task run</code></td><td class="ok">New Graph <code>bd3ef4e3</code> recorded with the Task; Auto-Ship marked it <code>done</code>.</td></tr>
+</table>
+<p>The run registered a private launchd server (<code>com.loopflow.server.e306e8bcbf89e030</code>); booted out, its holder stopped. No <code>lf-qa-865*</code> process remains.
+The live Process rows list as <code>unknown</code> while running, as in §5; not from this change.</p>
 <h2>Fixed</h2>
 <p>Nothing in the product. <code>.lf/skills/qa.md</code> now says how to give a private Task Graphs without a server
 (<code>lf -b graph</code> in an adopted checkout).</p>
@@ -115,4 +133,6 @@ other worktrees' test binaries sit in <code>TN</code> as well. Killed only this 
 <li value="2">After the stand-in was killed, its <code>claude -p</code> Process stays <code>unknown</code> and the board's <code>condition.unresolved_execution</code> stays true for T10, while <code>action</code> is <code>run</code>. Same reading on any Task whose provider dies by signal; not from this change.</li>
 </ol>
 <p>Fixed since section 5: adoption mid-Graph no longer recommends <code>run</code> or allows a second Graph.</p>
+<p>Works now (§8, merge head): upgrade from the installed release, new launches' recorded Task, inventory/<code>--taskless</code>,
+and the adopted-mid-Graph state, refusal and recovery.</p>
 </body></html>

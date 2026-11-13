@@ -387,7 +387,7 @@ managed conversation is woken with it now
 next runs. For a Task, `lf task steer` does the same for every Session on it
 ([Work](work.md#steer-it-while-it-runs)).
 Delivery proves the agent saw the steer, not that it followed it;
-`lf session steers <session> --retry <steer>` retries an uncertain delivery.
+`lf session steers <session> --retry <steer>` delivers one again.
 
 ## Keep several conversations open
 

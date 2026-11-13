@@ -508,19 +508,18 @@ step), and reopening a recorded conversation also reads the Session row
 (`SqliteStore::is_bare`). The launch carries the answer as
 `AgentConfig::holder`: `Server` for managed work, `Owner` for a bare
 conversation a per-Session owner holds, `Caller` for every other bare launch,
-which gets only the start and compaction hooks and no steer capability.
+which reports no boundary. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
 
 For a launch the server or an owner holds, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
-compaction, each prompt, each tool and each turn end. That process opens no
-store. It makes one `session.boundary` request on `machine.sock` and prints
-the provider's hook output. The OpenCode plugin and the Pi extension send the
-same request from inside the provider
-([below](#opencode-and-pi-ask-from-inside-the-provider)):
+compaction, each prompt and each turn end. That process first makes one
+`session.boundary` request on `machine.sock`, for the server to record. The
+OpenCode plugin and the Pi extension send the same request from inside the
+provider ([below](#opencode-and-pi-report-from-inside-the-provider)):
 
 ```text
 → {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":["54dc…"],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
@@ -531,8 +530,7 @@ JSON the provider sent the hook, unchanged. A conversation lf did not start,
 such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
-gap, `{first, last}`, or null. `printed` lists the steer batches this
-conversation's hooks printed since its last answered request. `inbox` is the key
+gap, `{first, last}`, or null. `inbox` is the key
 file a Claude conversation publishes for peers of its cross-session inbox,
 `sessions/<pid>.<sha256 of socket>.key` in its configuration directory, found
 from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude gives its children; null for
@@ -541,33 +539,58 @@ other providers.
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
 scheduled wakeups Claude reports), the acknowledgement of the native input, and
-a `store-gap` observation for a non-null `gap`. `steers` is the Session's
-pending steers as `{batch, text}`, the text already rendered for the provider,
-or null when none are ready. `update` is what changed on the Session's Tasks
-since its last update (Graph runs and steps, its Graph position, comments from
-anyone else), rendered for the provider and recorded as delivered when
-answered; the Session's first boundary records the baseline and gets none. At
+a `store-gap` observation for a non-null `gap`. At
 `stop` it answers first, then records a Codex Session's turns from its
 app-server, refreshes the Session's planning, wakes the Session with an update
 its turn missed, and starts any pending Session move, so none of it waits inside
-the turn.
+the turn. The answer carries nothing: `printed` in the request and `steers`,
+`update` and `waiting` in the answer are what conversations started before
+hooks read their own steers still send and parse (LOO-838 deletes them).
 
-A steer counts as delivered once the hook says it printed it. The hook prints
-`steers.text`, appends `steers.batch` to a `.printed` file beside the delivery
-file, and its next request sends those batches as `printed`; the server marks
-them `emitted`. A batch no request has named two seconds after its answer, the
-hook's deadline, goes back to pending and is answered again, so a hook that
-gave up waiting loses nothing. A hook that printed and died before noting its
-batch has it answered again too: a steer can arrive twice, and cannot be lost.
-`waiting` is true while an earlier answer's batch is unconfirmed and younger
-than the deadline, as when two tools finish together; the hook then asks again
-at its next tool boundary.
-`lf session steers <session>` shows a batch `uncertain` between its answer and
-its confirmation.
+The hook renders the context block from the delivery file itself, so a hook
+that gets no answer still prints the block.
 
-The hook renders the context block from the delivery file itself, prefixes
-`steers.text` and `update` and prints the result. Context comes from files in the checkout, so
-a hook that gets no answer still prints the block.
+### Every launch reads its own steers
+
+```bash
+lf -b research 'how does src/sync.rs retry?' &
+lf session steer SESSION 'skip the vendored code'   # read after the child's next tool call
+```
+
+After a tool call, at a prompt, at session start and after a compaction, a
+launch's hook opens the store and claims the Session's unread steers and its
+Task update (`steer::claim`, `task_updates::claim`). One row in
+`steer_delivered` per Session and steer says whether that Session read it:
+
+1. The hook inserts the row with `claimed_at`, for up to eight steers, oldest
+   first. A hook running beside it finds them claimed.
+2. It prints them ahead of the block, with what changed on the Session's
+   Tasks since its last update (Graph runs and steps, its Graph position,
+   comments from anyone else). The Session's first read records the baseline
+   and prints no update.
+3. It stamps `delivered_at`.
+
+A hook that dies between 2 and 3 leaves a claim that lapses after fifteen
+seconds, and the steer is printed again: a steer can arrive twice, and cannot
+be lost. `lf session steers <session>` shows each steer `delivered` or
+`pending`; `--retry <steer>` deletes the row. A store the hook cannot read is a
+line in `logs/lf.log`; the tool goes on and the next boundary asks again.
+
+The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
+records its boundaries and as `LF_BARE_STEER` when no one does; a bare
+launch's tool and prompt hooks run only `--moment steer`, which reports
+nothing. Nothing wakes a bare launch: a conversation idle at its prompt reads a
+steer when its person next types.
+
+Every tool hook first compares files and starts `lf` only when a steer may be
+waiting. Saving a steer touches one marker under `steers/` inside the write:
+`session/<id>` for a Session's, `task/<id>` for a Task's, `latest` for a
+Wave's or repository's. A launch names its Session's marker and its Task's
+(`LF_STEER_SESSION`, `LF_STEER_TASK`); its hook exits while `LF_STEER_SEEN`,
+touched at each check, is newer than all three. So a comment on one Task
+starts `lf` only in that Task's conversations. A held launch's prompt hook
+always runs, which reaches a Session bound to a Task after launch; a bare
+launch's prompt hook is gated like its tool hook.
 
 ### Waking an idle conversation
 
@@ -579,12 +602,12 @@ managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
 key names the socket and must still name the conversation. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer at start and whenever either
-moves; every idle conversation with news gets its pending steer batch and its
+moves; every idle conversation with news gets its unread steers and its
 Task update in one message, and is recorded as in a turn until its next Stop.
 One with no news is not connected to. A turn end checks
 its own conversation the same way. The update is recorded as delivered first;
-the steer batch is confirmed once the message is sent, so a failed send answers
-it again at the next boundary:
+the steers are claimed as a hook claims them and stamped once the message is
+sent, so a failed send leaves a claim that lapses for the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -596,7 +619,7 @@ it again at the next boundary:
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox leaves its news unclaimed. A failed send after claiming can lose
-the Task update; the steer remains retryable. LOO-841 replaces the progress
+the Task update; the steers arrive again. LOO-841 replaces the progress
 receipt with inbox confirmation. Bare Sessions are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
@@ -610,12 +633,12 @@ Still nothing, and the launch fails before the agent starts:
 Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
 ```
 
-A bare launch, here or through `lf --machine`, runs without a server. A
-headless one (`-b`, a Graph step, a run an agent starts) gets two callbacks,
-session start and compaction, which print the context block from checkout
-files. They carry no steer capability, make no request and log no gap. That
-run receives no steers and reports no turn boundary; whoever started it reads
-its output. On Pi the extension still guards bash tools, which ends a tool's
+A bare launch, here or through `lf --machine`, runs without a server. One
+with no owner (`-b`, a Graph step, a run an agent starts, `lf` at a terminal)
+prints the context block from checkout files at session start and
+compaction. Those two callbacks make no request and log no gap, and the run
+reports no turn boundary; whoever started it reads its output. On Pi the
+extension still guards bash tools, which ends a tool's
 process group with its provider. A bare conversation in a terminal keeps
 every callback while an owner process holds it: they say when it can take a
 reply and acknowledge input sent to it. With no server its hooks log one gap.
@@ -623,54 +646,55 @@ reply and acknowledge input sent to it. With no server its hooks log one gap.
 The hook resolves the server at its fixed path on every call; no address is
 put in the agent's environment. Connecting, `hello` and the answer share a
 two-second deadline. A refused connection, a missing socket, a timeout,
-`incompatible`, `busy` or any `error` ends the hook the same way: it prints
-the block without steers, notes the gap once in `logs/lf.log` and exits 0.
+`incompatible`, `busy` or any `error` ends the report the same way: the hook
+notes the gap once in `logs/lf.log`, reads its steers and exits 0.
 A server that has not yet reached this build answers `invalid {kind}` for
 `session.boundary`, which is the same gap.
 
-### OpenCode and Pi ask from inside the provider
+### OpenCode and Pi report from inside the provider
 
 A managed OpenCode or Pi turn with a dozen tool calls starts no `lf` process
-between model steps. Context rendering still starts `lf __context-block`:
-at OpenCode's first model request, at each Pi turn's first model request, and
-after compaction in either provider. The plugin runs inside the provider's
-own long-lived process, so
-at each boundary it does what a hook does without the process: it opens
-`machine.sock`, sends the `hello` a hook sends, makes one request and closes
-the connection when the answer arrives:
+between model steps unless a steer was saved for it. Context rendering still
+starts `lf __context-block`: at OpenCode's first model request, at each Pi
+turn's first model request, and after compaction in either provider. The
+plugin runs inside the provider's own long-lived process, so at each boundary
+it reports as a hook does without the process: it opens `machine.sock`, sends
+the `hello` a hook sends, makes one request and closes the connection when the
+answer arrives:
 
 ```text
-→ {"type":"hello","revision":4,"min_revision":4,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
+→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"boundary","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[]},"select":null}
-← {"type":"response","id":"boundary","trace_id":"…","result":{"steers":{"batch":"54dc…","text":"…"},"waiting":false}}
+→ {"type":"request","id":"boundary","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[],"inbox":null},"select":null}
+← {"type":"response","id":"boundary","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
-The request has the same fields, answer, deadline and steer confirmation as a
-hook's. Boundaries go to the server one at a time, in the order the provider
-reported them. The plugin keeps its open gap and the batches it printed in
-memory instead of the files beside the delivery file, and names them in the
-next request. When context needs rendering, the plugin sends `start` or
-`compact`, then runs `lf __context-block` without
-`LF_PROVIDER_CONTEXT`, which renders the block from checkout files and asks no
-server; it reuses that block for every model request until the next one.
+The request has the same fields and deadline as a hook's. Boundaries go to
+the server one at a time, in the order the provider reported them. The plugin
+keeps its open gap in memory instead of the file beside the delivery file.
+When context needs rendering, the plugin sends `start` or `compact`, then runs
+`lf __context-block` without the launch's capability, which renders the block
+from checkout files and asks no one; it reuses that block for every model
+request until the next one.
+
+For steers, held or bare, the plugin makes the hook's file comparison in
+process and starts `lf __context-block --moment steer` only when a marker is
+newer than its last check.
 
 - **Pi** sends each event it reports (session start, each message end, tool
   start and end, UI prompt start and end, and a `working` report at most
   every five seconds while the model streams) as `moment: "event"`, with the
-  event as `callback`. The server records the turn from it and, while a turn
-  runs (`turn` set, not `agent_settled`), answers waiting steers like a `tool`
-  boundary; the extension hands them to Pi as a steer. Outside a turn Pi would
-  store a steer without starting a run, so the event answers none. There is no
-  once-a-second poll: a steer saved during a long tool arrives when the tool
-  ends. Turn end is `stop`. Under lf's RPC driver, which records Pi's events
-  itself, the extension sends `tool` at the same events during a turn, for
-  steers only. While a gap is open, only session start, tool start and the
-  turn end still wait up to two seconds; the other events are left out of
-  the record and fall into the gap, and later events repeat the turn, open
-  tools, pending input and assistant messages.
-- **OpenCode** sends `tool` before each model request and
-  puts any steer text ahead of the block. Turn end is `stop`.
+  event as `callback`; the server records the turn from it. At each event
+  while a turn runs it checks for steers and hands them to Pi as a steer.
+  Outside a turn Pi would store a steer without starting a run, so it checks
+  none. Turn end is `stop`. Under lf's RPC driver, which records Pi's events
+  itself, the extension reports only `start`, `compact` and `stop`. While a
+  gap is open, only session start, tool start and the turn end still wait up
+  to two seconds; the other events are left out of the record and fall into
+  the gap, and later events repeat the turn, open tools, pending input and
+  assistant messages.
+- **OpenCode** sends `tool` before each model request and puts any steer
+  text ahead of the block. Turn end is `stop`.
 
 Pi's bash guard is a `/bin/sh` script in the extension, not an `lf` process
 (see `harness/context.rs`); it asks no server.
@@ -680,10 +704,10 @@ is a gap like a hook's: the boundary goes on without lf, the plugin writes
 one `recording gap` line to its log (`logs/pi-extension.log` for Pi,
 `opencode.stderr.log` beside the capture for OpenCode) and nothing to the
 conversation. The next boundary connects as every boundary does, sends the
-open gap and the printed batches, and logs one line when it is answered. A
+open gap, and logs one line when it is answered. A
 server restart, an upgrade and a stopped server all look like this; the
 conversation needs no relaunch. A bare headless run opens no connection: Pi
-keeps its context block and bash guard, OpenCode its context block. A bare
+keeps its context block, steers and bash guard, OpenCode its context block and steers. A bare
 conversation in a terminal connects while an owner process holds it, as its
 hooks do on Claude and Codex. A launch with no context delivery file has no
 `delivery` to send and opens none either.

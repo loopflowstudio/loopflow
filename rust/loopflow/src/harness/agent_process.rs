@@ -138,12 +138,12 @@ pub(crate) fn require_server() -> Result<()> {
     )
 }
 
-/// Capture identity in the launch's delivery file. A launch the Machine
-/// server holds starts beside it and carries a steer
-/// capability, which its hooks present to that server. So does a conversation
-/// an owner holds, without the server check: its hooks say when it can take a
-/// reply and acknowledge typed input. A bare launch carries none: its two
-/// context hooks reach no server.
+/// Capture identity in the launch's delivery file and give the launch its
+/// steer capability. A launch the Machine server holds starts beside it and
+/// presents the capability to that server. So does a conversation an owner
+/// holds, without the server check: its hooks say when it can take a reply
+/// and acknowledge typed input. A bare launch reaches no server: its hook
+/// presents the capability to the store.
 fn context_environment(
     command: &mut std::process::Command,
     owner: &AttachmentOwner,
@@ -160,20 +160,32 @@ fn context_environment(
         delivery.identify(store, session)?;
         delivery.save(path)?;
     }
-    match holder {
-        Holder::Caller => return Ok(()),
-        Holder::Owner => {}
-        Holder::Server => require_server()?,
-    }
+    let capability_env = match holder {
+        Holder::Caller => crate::steer::BARE_STEER_ENV,
+        Holder::Owner => crate::steer::PROVIDER_CONTEXT_ENV,
+        Holder::Server => {
+            require_server()?;
+            crate::steer::PROVIDER_CONTEXT_ENV
+        }
+    };
     let capability = store.reserve_steer_adapter(session, attachment)?;
-    command.env(
-        crate::steer::PROVIDER_CONTEXT_ENV,
-        serde_json::to_string(&capability)?,
-    );
+    let home = crate::store::lf_home_dir();
+    command.env(capability_env, serde_json::to_string(&capability)?);
     command.env(
         crate::steer::STEER_SEEN_ENV,
-        crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
+        crate::steer::seen_marker(&home, &capability.agent_process_id),
     );
+    command.env(
+        crate::steer::STEER_SESSION_ENV,
+        crate::steer::session_marker(&home, session),
+    );
+    // A Session belongs to at most one Task: Task checkouts do not nest.
+    if let [task] = store.session_task_ids(session)?.as_slice() {
+        command.env(
+            crate::steer::STEER_TASK_ENV,
+            crate::steer::task_marker(&home, task.as_str()),
+        );
+    }
     Ok(())
 }
 

@@ -191,9 +191,10 @@ pub struct SessionBoundary {
     /// Session's history as one `store-gap` observation.
     #[serde(deserialize_with = "Option::deserialize")]
     pub gap: Option<BoundaryGap>,
-    /// Steer batches from earlier answers that this conversation's hooks
-    /// printed and have not yet told the server about.
-    pub printed: Vec<crate::id::SteerBatchId>,
+    /// Unused: hooks claim their own steers from the store. Conversations
+    /// started before then still send it. TODO(LOO-838): delete it with
+    /// `ContextMoment::TaskUpdates`, once none of them is live.
+    pub printed: Vec<String>,
     /// The key file Claude publishes for the conversation's cross-session
     /// inbox, `sessions/<pid>.<sha256 of socket>.key` in its configuration
     /// directory, where an idle conversation takes steers and Task updates.
@@ -224,30 +225,20 @@ pub struct BoundaryGap {
     pub last: i64,
 }
 
-/// What `session.boundary` answers.
+/// What `session.boundary` answers: nothing. Hooks claim their own steers and
+/// Task update from the store. The three fields are what conversations
+/// started before then still parse. TODO(LOO-838): delete them with
+/// `ContextMoment::TaskUpdates`, once none of those conversations is live.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionBoundaryAnswer {
-    /// The next pending steers; null when none are ready.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub steers: Option<SteerBatch>,
-    /// What changed on the Session's Tasks since its last update, rendered
-    /// for the provider; null when nothing did. Recorded as delivered when
-    /// answered.
+    #[schemars(with = "Untyped")]
+    pub steers: Option<()>,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub update: Option<String>,
-    /// An earlier answer's batch is unconfirmed and its hook may still print
-    /// it: the hook asks again at its next tool boundary.
+    #[schemars(with = "Untyped")]
+    pub update: Option<()>,
     pub waiting: bool,
-}
-
-/// Steers rendered for the provider. They count as delivered once a later
-/// request lists `batch` in `printed`; unconfirmed, they are answered again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SteerBatch {
-    pub batch: crate::id::SteerBatchId,
-    pub text: String,
 }
 
 /// What `session.start` answers.

@@ -1252,7 +1252,7 @@ impl SessionCommand {
             | Self::Usage(_)
             | Self::Retention { .. } => false,
             Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
-            Self::Steers { retry, .. } => retry.is_some(),
+            Self::Steers { .. } => false,
             Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
             | Self::Resume { .. }
@@ -1796,13 +1796,11 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect steer delivery or retry delivery
+    /// See which steers a Session has read and which wait
     Steers {
         id: String,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        retry: Option<String>,
         #[arg(long, default_value_t = 0)]
         after: i64,
         #[arg(long, default_value_t = 32)]

@@ -13,15 +13,13 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 12] = [
+const GROWING: [&str; 10] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
     "processes",
     "session_events",
-    "session_steers",
-    "steer_batches",
-    "steer_deliveries",
+    "steer_delivered",
     "steers",
     "task_events",
     "task_retirements",
@@ -31,10 +29,11 @@ const GROWING: [&str; 12] = [
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
 /// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
 /// changes and 3,362 steers (November 13). Indexes newer than that store's
-/// schema were built and analyzed on a copy of it.
+/// schema were built and analyzed on a copy of it; `steer_delivered` is counted
+/// from the rows its migration copies there.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
-         'agent_sessions','processes','session_events','tasks','steer_batches',
-         'steer_deliveries','session_steers','steer_adapters','projects','waves',
+         'agent_sessions','processes','session_events','tasks','steer_delivered',
+         'steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
          'task_retirements');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
@@ -91,17 +90,10 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('session_events','session_process_membership','64427 10 3'),
          ('session_events','session_provider_transitions','3805 1 1'),
          ('session_events','session_turn_events','84228 45 45 3 1 1'),
-         ('session_steers','session_steers_steer','43400 34'),
-         ('session_steers','sqlite_autoindex_session_steers_1','43400 6 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_1','13914 1'),
          ('steer_adapters','sqlite_autoindex_steer_adapters_2','13914 1'),
-         ('steer_batches','sqlite_autoindex_steer_batches_1','11143 1'),
-         ('steer_batches','steer_batches_agent_process','11163 2'),
-         ('steer_batches','steer_batches_boundary','11078 2 1'),
-         ('steer_batches','steer_batches_session','11143 5 5 1'),
-         ('steer_deliveries','sqlite_autoindex_steer_deliveries_1','42654 6 1 1'),
-         ('steer_deliveries','steer_deliveries_batch','42654 4'),
-         ('steer_deliveries','steer_deliveries_steer','42654 34'),
+         ('steer_delivered','sqlite_autoindex_steer_delivered_1','42770 6 1'),
+         ('steer_delivered','steer_delivered_steer','42770 23'),
          ('steers','sqlite_autoindex_steers_1','3349 1'),
          ('steers','sqlite_autoindex_steers_2','3349 1 1'),
          ('steers','steers_project','1 1'),
@@ -424,13 +416,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unchanged_steer_read_does_not_wait_for_another_write() {
+    fn a_steer_read_does_not_wait_for_another_write() {
         let (home, store, _task, _viewer) = fixture();
         let steer = store
             .save_session_steer("viewed", "person", "Look here")
             .unwrap();
-        // The first read files the steer's receipt.
-        store.session_steers("viewed", 0, 10).unwrap();
         store
             .conn
             .lock()
@@ -441,21 +431,10 @@ mod tests {
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
         let page = store.session_steers("viewed", 0, 10).unwrap();
         assert_eq!(page.items.len(), 1);
+        assert_eq!(page.pending, 1);
         assert_eq!(
             store.session_steer_source("viewed", &steer.id).unwrap().id,
             steer.id
-        );
-        // A new steer needs a receipt, which needs the write lock.
-        writer.execute_batch("ROLLBACK").unwrap();
-        store
-            .save_session_steer("viewed", "person", "And here")
-            .unwrap();
-        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-        assert!(store.session_steers("viewed", 0, 10).is_err());
-        writer.execute_batch("ROLLBACK").unwrap();
-        assert_eq!(
-            store.session_steers("viewed", 0, 10).unwrap().items.len(),
-            2
         );
     }
 

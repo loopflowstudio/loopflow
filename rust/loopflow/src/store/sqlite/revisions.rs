@@ -134,9 +134,12 @@ mod tests {
         "session_steers",
         "steer_adapters",
         "steer_batches",
+        "steer_delivered",
         "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
+        // A Task's last reading is compared by the next reader; its news is the steers.
+        "task_update_readings",
         "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",

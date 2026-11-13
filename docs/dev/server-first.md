@@ -119,13 +119,15 @@ Sessions:
 - The agent's own status reports in its output show whether the Session is
   working or available for a reply, including a permission or a question.
   The server's emulator reads them; no per-pane status process is needed.
-- A hook at a turn or tool boundary sends the server the provider's callback.
-  The server records the turn from it and answers with any steers waiting.
+- A hook at a turn boundary sends the server the provider's callback, and
+  the server records the turn from it. The hook then reads the Session's
+  steers from the store itself.
 
 Hooks reach the server at its fixed socket path with a short deadline. A hook
 that cannot reach it logs a gap and lets the turn continue. A managed launch
 starts the server before its agent and fails when none comes up. A bare
-headless run already has only its two context hooks. A bare conversation
+launch no owner holds has its two context hooks and the steer check every
+launch has. A bare conversation
 keeps its turn hooks while an owner process holds it, because they say when
 it can take a reply and acknowledge input; they go with the owner.
 
@@ -258,8 +260,8 @@ deleted when the server's emulator reads status itself.
 | Piece | Removes | Needs |
 | --- | --- | --- |
 | Bare launches go direct: no owner, agent in the terminal's foreground | Owners and relays for bare runs; the turn hooks of bare conversations | |
-| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); bare headless runs keep only their two context hooks | Store opens inside turn boundaries; turn, tool and Task-update hooks for bare headless runs | |
-| OpenCode and Pi ask the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-ask-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
+| Hooks call the server, not the store ([`session.boundary`](../../rust/loopflow/src/server/README.md#turn-and-tool-boundaries)); every launch [reads its own steers](../../rust/loopflow/src/server/README.md#every-launch-reads-its-own-steers) from the store; bare runs no owner holds report nothing | Turn recording inside hooks; turn hooks for bare headless runs | |
+| OpenCode and Pi report to the server from inside the provider ([`session.boundary`](../../rust/loopflow/src/server/README.md#opencode-and-pi-report-from-inside-the-provider)) | An `lf` process per model request (OpenCode) and per second, per event and per bash tool (Pi) | Hooks call the server |
 | Transcript telemetry, on demand and watched by the server | The telemetry gap bare launches open | |
 | Retire leaked processes and find the tests that leak them | Stale owners, test and demo leftovers | |
 | Holder: PTYs move from per-Session owners to a holder beside the server; the server keeps a registry of held terminals ([Held terminals](../../rust/loopflow/src/transport/README.md#held-terminals)) | Per-Session owners | The managed rule below |

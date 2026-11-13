@@ -78,7 +78,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
         SessionCommand::Steers {
             id,
             json,
-            retry,
             after,
             limit,
             source,
@@ -87,11 +86,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
-            if let Some(steer) = retry {
-                store
-                    .sqlite
-                    .retry_session_steer(&session.id, &crate::id::SteerId::parse(steer)?)?;
-            }
             if let Some(source) = source {
                 let steer = store
                     .sqlite
@@ -103,17 +97,16 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             if *json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                println!("{}; {} pending", status.capability, status.pending);
-                // Hooks deliver steers through the Machine server and nothing else.
-                let server = crate::server::client::status()?;
-                if let Some(error) = server.error.filter(|_| !server.listening) {
-                    println!("{error}. Steers wait and turns go unrecorded until it runs.");
-                }
+                println!("{} pending", status.pending);
                 if let Some(after) = status.next_after {
                     println!("Next page: --after {after}");
                 }
                 for row in status.items {
-                    println!("{} {}", row.steer.id, row.evidence);
+                    let state = match row.delivered_at {
+                        Some(_) => "delivered",
+                        None => "pending",
+                    };
+                    println!("{} {state}", row.steer.id);
                 }
             }
             Ok(())

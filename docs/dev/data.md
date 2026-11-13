@@ -158,13 +158,13 @@ branch binary at the installed Machine.
 ```bash
 sqlite3 ~/.lf/loopflow.db ".backup /tmp/lf-plan.db"
 sqlite3 /tmp/lf-plan.db "ANALYZE; EXPLAIN QUERY PLAN
-  SELECT steer_id FROM session_steers WHERE session_id = 'x' AND applicable = 1;"
+  SELECT steer_id FROM steer_delivered WHERE session_id = 'x' AND delivered_at IS NULL;"
 cargo test -p loopflow --lib store::query_plans::
 ```
 
 ```text
 QUERY PLAN
-`--SEARCH session_steers USING INDEX sqlite_autoindex_session_steers_1 (session_id=?)
+`--SEARCH steer_delivered USING INDEX sqlite_autoindex_steer_delivered_1 (session_id=?)
 ```
 
 One Machine runs hundreds of agents over about 10,000 Tasks, and every one of
@@ -174,8 +174,8 @@ store, never the live file.
 
 Every statement on a path that runs per hook, per server request, per Desktop
 read, per Work projection or per Graph step plans as `SEARCH` or reads a fixed
-small table. `SCAN` of a table that grows with use (`steers`, `session_steers`,
-`steer_deliveries`, `agent_sessions`, `session_events`, `processes`, `tasks`
+small table. `SCAN` of a table that grows with use (`steers`,
+`steer_delivered`, `agent_sessions`, `session_events`, `processes`, `tasks`
 and their peers) is a bug. Filters an index cannot serve are the usual cause: an `OR`
 across columns, a function wrapped around an indexed column, a correlated `IN`
 subquery, or a per-row query inside a loop where one query would do. Fix it

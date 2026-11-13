@@ -101,12 +101,11 @@ fn wake_idle(store: &SqliteStore, session: Option<&str>) {
     }
 }
 
-/// Deliver `conversation`'s pending steers and Task update, if any; with
-/// neither, the conversation is not touched. The update is recorded as
-/// dispatched before it is sent; the steer batch is confirmed once sent, so a
-/// failed send returns it to pending for the next boundary. Once sent, the
-/// conversation is recorded as in a turn, so the next revision starts no
-/// second one.
+/// Deliver `conversation`'s pending steers, Task updates among them; with
+/// none, the conversation is not touched. The steers are stamped once sent,
+/// so a failed send leaves a claim that lapses for the next boundary. Once
+/// sent, the conversation is recorded as in a turn, so the next revision
+/// starts no second one.
 fn wake(store: &SqliteStore, conversation: &IdleConversation) {
     let IdleConversation {
         adapter,
@@ -116,9 +115,8 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
     } = conversation;
     let delivered = (|| -> Result<()> {
         let session = &adapter.session;
-        if !store.has_undelivered_steers(session)?
-            && crate::harness::task_updates::read(store, session)?.is_none()
-        {
+        crate::harness::task_updates::write(store, session)?;
+        if !store.has_undelivered_steers(session)? {
             return Ok(());
         }
         // Connect before claiming, so an unreachable conversation keeps its
@@ -130,32 +128,28 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
         };
-        let steers = super::boundary::wake_steers(store, cwd, adapter, thread)?;
-        let update = crate::harness::task_updates::claim(store, adapter, thread)?;
-        let text: String = steers
-            .iter()
-            .map(|steers| steers.text.as_str())
-            .chain(update.as_deref())
-            .collect();
-        if text.is_empty() {
+        let steers = crate::steer::claim(
+            store,
+            cwd,
+            adapter,
+            thread,
+            crate::steer::NativeBoundary::Turn,
+        )?;
+        let Some(steers) = steers else {
             return Ok(());
-        }
+        };
         match reach {
-            Reach::Inbox(mut socket, token) => send_inbox(&mut socket, &token, thread, &text)?,
-            Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &text)?,
+            Reach::Inbox(mut socket, token) => {
+                send_inbox(&mut socket, &token, thread, &steers.text)?
+            }
+            Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
         }
         store.record_woken(adapter)?;
-        if let Some(steers) = steers {
-            store.confirm_session_steers(
-                adapter,
-                &[steers.batch],
-                super::boundary::HOOK_DEADLINE.as_secs(),
-            )?;
-        }
+        crate::steer::delivered(store, session, &steers);
         Ok(())
     })();
     if let Err(error) = delivered {
-        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; steers remain retryable, claimed Task progress may be lost");
+        tracing::warn!(session = adapter.session, error = %format!("{error:#}"), "idle conversation not woken; its steers wait for its next boundary");
     }
 }
 
@@ -307,9 +301,7 @@ mod tests {
         let captured = store.session(session).unwrap().unwrap().captured;
         store.bind_session(session, captured, &task).unwrap();
         // The conversation's first boundary records what it already knows.
-        assert!(crate::harness::task_updates::read(&store, session)
-            .unwrap()
-            .is_none());
+        crate::harness::task_updates::write(&store, session).unwrap();
         let repo = home.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
         store
@@ -432,7 +424,11 @@ mod tests {
         let content = frames[1]["message"]["content"].as_str().unwrap();
         assert!(content.starts_with("<cross-session-message from=\"loopflow\""));
         assert!(content.contains("use the staging bucket"), "a steer wakes");
-        assert!(content.contains("New comment from jack: PR: https://example.test/pr/1"));
+        assert!(content.contains("Task update "), "{content}");
+        assert!(
+            content.contains("new comment from jack: PR: https://example.test/pr/1"),
+            "{content}"
+        );
         assert_eq!(
             fixture
                 .store
@@ -526,22 +522,17 @@ mod tests {
             std::io::ErrorKind::WouldBlock,
             "never woken"
         );
-        let prompt = SessionBoundary {
-            moment: BoundaryMoment::Tool,
-            delivery: fixture.delivery.clone(),
-            adapter: Some(fixture.adapter.clone()),
-            callback: serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
-                "prompt_id":"p-1","prompt":"go"}),
-            gap: None,
-            printed: Vec::new(),
-            inbox: None,
-        };
-        let update = super::super::boundary::answer(&fixture.store, &prompt)
-            .unwrap()
-            .0
-            .update
-            .expect("the next prompt hears the Task");
-        assert!(update.contains("pr/1"));
+        crate::harness::task_updates::write(&fixture.store, "wake-bare").unwrap();
+        let update = crate::steer::claim(
+            &fixture.store,
+            fixture.home.path(),
+            &fixture.adapter,
+            "native",
+            crate::steer::NativeBoundary::Turn,
+        )
+        .unwrap()
+        .expect("the next prompt's hook hears the Task");
+        assert!(update.text.contains("pr/1"));
     }
 
     #[test]
@@ -561,17 +552,8 @@ mod tests {
             1,
             "still idle"
         );
-        assert_eq!(
-            fixture
-                .store
-                .session_steers("wake-gone", 0, 8)
-                .unwrap()
-                .pending,
-            1
-        );
-        let update = crate::harness::task_updates::read(&fixture.store, "wake-gone")
-            .unwrap()
-            .expect("still news at the next boundary");
-        assert!(update.text.contains("pr/1"));
+        let page = fixture.store.session_steers("wake-gone", 0, 8).unwrap();
+        assert_eq!(page.pending, 2, "the direction and the Task update");
+        assert!(page.items.iter().any(|row| row.steer.text.contains("pr/1")));
     }
 }

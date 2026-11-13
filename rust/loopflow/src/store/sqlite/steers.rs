@@ -2,13 +2,12 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use sha2::{Digest, Sha256};
 
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
     IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
-    SteerAdapter, SteerContext,
+    SteerAdapter,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -371,13 +370,18 @@ pub(super) fn save_in(
         ],
     )?;
     // This transaction holds the write lock, so a hook that checks after this
-    // touch waits for the commit before reading pending steers.
+    // touch waits for the commit before claiming pending steers.
     if let Some(home) = conn
         .path()
         .filter(|path| !path.is_empty())
         .and_then(|path| Path::new(path).parent())
     {
-        crate::steer::touch(&crate::steer::latest_marker(home))
+        let marker = match owner.0 {
+            "task" => crate::steer::task_marker(home, owner.1),
+            "session" => crate::steer::session_marker(home, owner.1),
+            _ => crate::steer::latest_marker(home),
+        };
+        crate::steer::touch(&marker)
             .map_err(|error| invalid(format!("Mark saved steer for hooks: {error}")))?;
     }
     let result = conn.query_row(
@@ -414,173 +418,51 @@ fn scopes() -> String {
         (p.session_id=?1 OR p.task_id IN member_tasks OR p.wave_id IN member_waves
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steers newer WHERE newer.source=p.source AND newer.seq>p.seq)
-        -- A shared steer saved before this Session started and already emitted
-        -- to another Session was read there; a later Session starts past it.
+        -- A Task update (`update:<writer Session or ->:<key>`) is for the
+        -- Task's interactive conversations, never the Session that caused it.
+        AND (p.source NOT LIKE 'update:%'
+         OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
+             AND p.source NOT LIKE 'update:'||?1||':%'))
+        -- A shared steer saved before this Session started and already read
+        -- by another Session was read there; a later Session starts past it.
         AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
-         OR NOT EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
-            WHERE d.steer_id=p.id AND d.session_id!=?1 AND b.evidence='emitted'))
+         OR NOT EXISTS(SELECT 1 FROM steer_delivered d
+            WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL))
         )", super::task_work::session_tasks("s"))
 }
 
-/// Whether some applicable steer has no delivery at its current attempt: the
-/// only case in which [`reconcile`] leaves the Session anything to emit.
+/// A claim whose hook never stamped it lapses after this long, and the steer
+/// is printed again: a hook has ten seconds to run.
+const CLAIM_SECS: i64 = 15;
+
+/// The applicable steers Session `?1` has not read: no row, or a claim that
+/// lapsed unstamped.
+fn unread() -> String {
+    format!(
+        "{} SELECT {COLUMNS} FROM applicable a JOIN steers p ON p.id=a.id
+        WHERE NOT EXISTS(SELECT 1 FROM steer_delivered d WHERE d.session_id=?1 AND d.steer_id=a.id
+            AND (d.delivered_at IS NOT NULL OR d.claimed_at>unixepoch()-{CLAIM_SECS}))",
+        scopes()
+    )
+}
+
 fn undelivered(conn: &Connection, session: &str) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        &format!(
-            "{} SELECT EXISTS(SELECT 1 FROM applicable a
-            LEFT JOIN session_steers s ON s.session_id=?1 AND s.steer_id=a.id
-            WHERE NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=?1
-            AND d.steer_id=a.id AND d.attempt=COALESCE(s.attempt,0)))",
-            scopes()
-        ),
-        [session],
-        |row| row.get(0),
-    )?)
-}
-
-fn reconcile(conn: &Connection, session: &str) -> StoreResult<()> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-        [session],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(StoreError::NotFound);
-    }
-    let scopes = scopes();
-    conn.execute(
-        &format!(
-            "{scopes} UPDATE session_steers SET applicable=(steer_id IN applicable)
-        WHERE session_id=?1"
-        ),
-        [session],
-    )?;
-    conn.execute(
-        &format!(
-            "{scopes} INSERT INTO session_steers(session_id,steer_id)
-        SELECT ?1,id FROM applicable WHERE true ON CONFLICT DO NOTHING"
-        ),
-        [session],
-    )?;
-    // A revision or association change cancels the whole not-yet-written batch.
-    // Its emitter checks the reservation again before exposing any bytes.
-    conn.execute(
-        "UPDATE steer_batches SET evidence='cancelled'
-        WHERE session_id=?1 AND evidence='prepared' AND EXISTS(
-            SELECT 1 FROM steer_deliveries d JOIN session_steers s
-            ON s.session_id=d.session_id AND s.steer_id=d.steer_id
-            WHERE d.batch_id=steer_batches.id AND s.applicable=0)",
-        [session],
-    )?;
-    conn.execute(
-        "DELETE FROM steer_deliveries WHERE session_id=?1 AND batch_id IN (
-        SELECT id FROM steer_batches WHERE session_id=?1 AND evidence='cancelled')",
-        [session],
-    )?;
-    // Emitted and uncertain receipts survive scope changes and corrections.
-    conn.execute(
-        "DELETE FROM session_steers WHERE session_id=?1 AND applicable=0
-        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
-            WHERE d.session_id=?1 AND d.steer_id=session_steers.steer_id)",
-        [session],
-    )?;
-    Ok(())
-}
-
-/// Whether [`reconcile`] would write nothing: every receipt's applicability is
-/// current, every applicable steer has a receipt, and nothing is left to cancel
-/// or delete.
-fn reconciled(conn: &Connection, session: &str) -> StoreResult<bool> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-        [session],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return Err(StoreError::NotFound);
-    }
-    Ok(conn.query_row(
-        &format!(
-            "{} SELECT NOT (
-            EXISTS(SELECT 1 FROM session_steers s WHERE s.session_id=?1
-                AND s.applicable!=(s.steer_id IN applicable))
-            OR EXISTS(SELECT 1 FROM applicable a WHERE NOT EXISTS(
-                SELECT 1 FROM session_steers s WHERE s.session_id=?1 AND s.steer_id=a.id))
-            OR EXISTS(SELECT 1 FROM steer_batches b WHERE b.session_id=?1 AND b.evidence='prepared'
-                AND EXISTS(SELECT 1 FROM steer_deliveries d JOIN session_steers s
-                    ON s.session_id=d.session_id AND s.steer_id=d.steer_id
-                    WHERE d.batch_id=b.id AND s.applicable=0))
-            OR EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
-                WHERE d.session_id=?1 AND b.evidence='cancelled')
-            OR EXISTS(SELECT 1 FROM session_steers s WHERE s.session_id=?1 AND s.applicable=0
-                AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
-                    WHERE d.session_id=?1 AND d.steer_id=s.steer_id)))",
-            scopes()
-        ),
-        [session],
-        |row| row.get(0),
-    )?)
-}
-
-/// Read a Session's receipts after reconciling them. The write lock is taken
-/// only when reconciliation has something to change.
-fn read_reconciled<T>(
-    conn: &mut Connection,
-    session: &str,
-    read: impl Fn(&Connection) -> StoreResult<T>,
-) -> StoreResult<T> {
-    {
-        let snapshot = conn.savepoint()?;
-        if reconciled(&snapshot, session)? {
-            return read(&snapshot);
-        }
-    }
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    reconcile(&tx, session)?;
-    let result = read(&tx)?;
-    tx.commit()?;
-    Ok(result)
+    Ok(
+        conn.query_row(&format!("SELECT EXISTS({})", unread()), [session], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 fn pending_count(conn: &Connection, session: &str) -> StoreResult<i64> {
     Ok(conn.query_row(
-        "SELECT count(*) FROM session_steers s WHERE s.session_id=?1 AND s.applicable=1
-        AND NOT EXISTS(SELECT 1 FROM steer_deliveries d WHERE d.session_id=s.session_id
-        AND d.steer_id=s.steer_id AND d.attempt=s.attempt)",
+        &format!("SELECT count(*) FROM ({})", unread()),
         [session],
         |row| row.get(0),
     )?)
 }
 
 impl SqliteStore {
-    /// Every emitter holds a shared Session fence from reservation through write.
-    /// Acquiring it exclusively proves no prepared emitter survives; elapsed time
-    /// and provider liveness cannot establish that fact.
-    pub(crate) fn recover_prepared_steers(&self, session: &str) -> StoreResult<()> {
-        let Some(_fence) = self.try_lock_session_attachment(session)? else {
-            return Ok(());
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // Nearly every boundary has nothing to recover; it takes no write lock.
-        let prepared: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='prepared')",
-            [session],
-            |row| row.get(0),
-        )?;
-        if !prepared {
-            return Ok(());
-        }
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            "DELETE FROM steer_deliveries WHERE batch_id IN (
-            SELECT id FROM steer_batches WHERE session_id=?1 AND evidence='prepared')",
-            [session],
-        )?;
-        tx.execute("UPDATE steer_batches SET evidence='cancelled' WHERE session_id=?1 AND evidence='prepared'", [session])?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn save_wave_steer(
         &self,
         wave: &crate::id::WaveId,
@@ -642,15 +524,15 @@ impl SqliteStore {
         Ok(steer)
     }
 
-    /// Whether `session` has a steer to emit. The server asks for every idle
-    /// conversation whenever a revision moves; nearly always the answer is no,
-    /// and it takes no write lock.
+    /// Whether `session` has a steer to read. Hooks and the server ask often;
+    /// nearly always the answer is no, and it takes no write lock.
     pub(crate) fn has_undelivered_steers(&self, session: &str) -> StoreResult<bool> {
-        self.recover_prepared_steers(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         undelivered(&conn, session)
     }
 
+    /// Every steer that applies to the Session or that it read, oldest first,
+    /// with when it read each.
     pub fn session_steers(
         &self,
         session: &str,
@@ -658,45 +540,43 @@ impl SqliteStore {
         limit: usize,
     ) -> StoreResult<SessionSteerPage> {
         let limit = limit.clamp(1, 100);
-        self.recover_prepared_steers(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        read_reconciled(&mut conn, session, |tx| {
-            let mut items = tx.prepare(&format!("SELECT {COLUMNS},s.attempt,COALESCE(b.evidence,CASE WHEN s.applicable=1 THEN 'pending' ELSE 'cancelled' END),b.id,b.payload_hash,d.excerpted
-            FROM session_steers s JOIN steers p ON p.id=s.steer_id
-            LEFT JOIN steer_deliveries d ON d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt
-            LEFT JOIN steer_batches b ON b.id=d.batch_id WHERE s.session_id=?1 AND p.seq>?2 ORDER BY p.seq LIMIT ?3"))?
+        let tx = conn.savepoint()?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+            [session],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(StoreError::NotFound);
+        }
+        let mut items = tx
+            .prepare(&format!(
+                "{} SELECT {COLUMNS},d.delivered_at FROM (
+                    SELECT id FROM applicable
+                    UNION SELECT steer_id FROM steer_delivered WHERE session_id=?1) known
+                JOIN steers p ON p.id=known.id
+                LEFT JOIN steer_delivered d ON d.session_id=?1 AND d.steer_id=p.id
+                WHERE p.seq>?2 ORDER BY p.seq LIMIT ?3",
+                scopes()
+            ))?
             .query_map(params![session, after, (limit + 1) as i64], |row| {
                 Ok(SessionSteerStatus {
                     steer: read_steer(row)?,
-                    attempt: row.get(6)?,
-                    evidence: row.get(7)?,
-                    batch_id: row.get(8)?,
-                    payload_hash: row.get(9)?,
-                    excerpted: row.get(10)?,
+                    delivered_at: row.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-            let next_after = if items.len() > limit {
-                items.truncate(limit);
-                items.last().map(|item| item.steer.sequence)
-            } else {
-                None
-            };
-            let pending = pending_count(tx, session)?;
-            let capability: String = tx.query_row("SELECT CASE
-            WHEN p.id IS NULL OR p.completed_at IS NOT NULL THEN 'idle; pending until next supported provider start'
-            WHEN a.agent_process_id IS NULL THEN 'unavailable; provider start required to install adapter'
-            WHEN a.activated_at IS NULL THEN 'capability reserved; the Machine server has recorded no callback from this conversation'
-            ELSE 'authenticated provider callback observed; output acceptance unconfirmed' END
-            FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id
-            LEFT JOIN steer_adapters a ON a.agent_process_id=p.id WHERE s.id=?1",
-            [session], |row| row.get(0))?;
-            Ok(SessionSteerPage {
-                items,
-                next_after,
-                pending,
-                capability,
-            })
+        let next_after = if items.len() > limit {
+            items.truncate(limit);
+            items.last().map(|item| item.steer.sequence)
+        } else {
+            None
+        };
+        Ok(SessionSteerPage {
+            items,
+            next_after,
+            pending: pending_count(&tx, session)?,
         })
     }
 
@@ -705,203 +585,178 @@ impl SqliteStore {
         session: &str,
         id: &crate::id::SteerId,
     ) -> StoreResult<Steer> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        read_reconciled(&mut conn, session, |tx| {
-            tx.query_row(
-                &format!(
-                    "SELECT {COLUMNS} FROM steers p
-            JOIN session_steers s ON s.steer_id=p.id WHERE s.session_id=?1 AND p.id=?2"
-                ),
-                params![session, id],
-                read_steer,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)
-        })
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!(
+                "{} SELECT {COLUMNS} FROM steers p WHERE p.id=?2 AND (p.id IN applicable
+                OR EXISTS(SELECT 1 FROM steer_delivered d WHERE d.session_id=?1 AND d.steer_id=p.id))",
+                scopes()
+            ),
+            params![session, id],
+            read_steer,
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)
     }
 
-    pub fn retry_session_steer(
+    /// What the Task looked like when its updates were last written.
+    pub(crate) fn task_update_reading(
         &self,
-        session: &str,
-        steer_id: &crate::id::SteerId,
-    ) -> StoreResult<()> {
-        let _lock = self.lock_session_attachment(session)?;
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT observation FROM task_update_readings WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Save the Task's new reading and the steers that report what moved
+    /// since `expected`, each as `(source, text)`. False when another reader
+    /// wrote first: its steers already say it.
+    pub(crate) fn save_task_update(
+        &self,
+        task: &crate::durable::TaskId,
+        expected: Option<&str>,
+        observation: &str,
+        updates: &[(String, String)],
+    ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        reconcile(&tx, session)?;
-        if tx.execute(
-            "UPDATE session_steers SET attempt=attempt+1 WHERE session_id=?1 AND steer_id=?2 AND applicable=1
-            AND EXISTS(SELECT 1 FROM steer_deliveries d JOIN steer_batches b ON b.id=d.batch_id
-             WHERE d.session_id=?1 AND d.steer_id=?2 AND d.attempt=session_steers.attempt
-             AND b.evidence IN ('uncertain','emitted','confirmed'))",
-            params![session, steer_id],
-        )? == 0
-        {
-            return Err(invalid("No applicable emitted or uncertain steer to retry"));
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT observation FROM task_update_readings WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != expected {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO task_update_readings(task_id,observation) VALUES(?1,?2)
+            ON CONFLICT(task_id) DO UPDATE SET observation=excluded.observation",
+            params![task.as_str(), observation],
+        )?;
+        for (source, text) in updates {
+            save_in(
+                &tx,
+                ("task", task.as_str()),
+                source,
+                "1",
+                &crate::durable::Author::Named("Loopflow".into()),
+                text,
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// A conversation that just started has its Tasks' history in its prompt:
+    /// the updates written so far are not news to it.
+    pub(crate) fn baseline_task_updates(&self, session: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let pending = format!("{} AND p.source LIKE 'update:%'", unread());
+        let any: bool = conn.query_row(&format!("SELECT EXISTS({pending})"), [session], |row| {
+            row.get(0)
+        })?;
+        if any {
+            conn.execute(
+                &format!(
+                    "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+                    SELECT ?1,id,unixepoch(),unixepoch() FROM ({pending}) WHERE true
+                    ON CONFLICT(session_id,steer_id) DO UPDATE SET delivered_at=unixepoch()"
+                ),
+                [session],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Claim up to eight of the Session's unread steers for the caller to
+    /// print, oldest first, with how many more wait behind them. A second hook
+    /// at the same moment finds them claimed. The caller stamps them with
+    /// [`Self::deliver_session_steers`] once printed, or hands them back with
+    /// [`Self::release_session_steers`].
+    pub(crate) fn claim_session_steers(
+        &self,
+        adapter: &SteerAdapter,
+        provider_thread: &str,
+    ) -> StoreResult<(Vec<Steer>, usize)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        // Nothing to claim at most boundaries: answer without the write lock.
+        if !undelivered(&conn, &adapter.session)? {
+            return Ok((Vec::new(), 0));
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let owns: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s
+                JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
+                WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND s.provider_thread=?4
+                AND p.completed_at IS NULL)",
+            params![adapter.session, adapter.agent_process_id, adapter.capability, provider_thread],
+            |row| row.get(0),
+        )?;
+        if !owns {
+            return Err(StoreError::InvalidAuthority(
+                "Context adapter no longer owns this provider conversation".into(),
+            ));
+        }
+        let steers = tx
+            .prepare(&format!("{} ORDER BY p.seq LIMIT 8", unread()))?
+            .query_map([&adapter.session], read_steer)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for steer in &steers {
+            tx.execute(
+                "INSERT INTO steer_delivered(session_id,steer_id,claimed_at) VALUES(?1,?2,unixepoch())
+                ON CONFLICT(session_id,steer_id) DO UPDATE SET claimed_at=unixepoch()",
+                params![adapter.session, steer.id],
+            )?;
+        }
+        let remaining = pending_count(&tx, &adapter.session)?;
+        tx.commit()?;
+        Ok((steers, remaining as usize))
+    }
+
+    /// The caller printed these claimed steers: the Session has read them.
+    pub(crate) fn deliver_session_steers(
+        &self,
+        session: &str,
+        steers: &[crate::id::SteerId],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for steer in steers {
+            tx.execute(
+                "UPDATE steer_delivered SET delivered_at=unixepoch()
+                WHERE session_id=?1 AND steer_id=?2 AND delivered_at IS NULL",
+                params![session, steer],
+            )?;
         }
         tx.commit()?;
         Ok(())
     }
 
-    /// What a hook's request settles: batches it `printed` become `emitted`,
-    /// and any other batch an answer carried more than `deadline_secs` ago goes
-    /// back to pending, since the hook that asked for it had given up. Returns
-    /// whether a newer unconfirmed batch is still waiting for its hook.
-    pub(crate) fn confirm_session_steers(
+    /// The caller could not print these claimed steers: they are unread again.
+    pub(crate) fn release_session_steers(
         &self,
-        adapter: &SteerAdapter,
-        printed: &[crate::id::SteerBatchId],
-        deadline_secs: u64,
-    ) -> StoreResult<bool> {
-        // Whole seconds: a batch counts as older only once it is past the
-        // deadline whatever the fraction it was created at.
-        let older = "session_id=?1 AND evidence='uncertain' AND created_at < unixepoch() - ?4";
-        let owns = "EXISTS(SELECT 1 FROM steer_adapters a
-            JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
-            WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3)";
-        let waiting =
-            "EXISTS(SELECT 1 FROM steer_batches WHERE session_id=?1 AND evidence='uncertain')";
-        let identity = params![
-            adapter.session,
-            adapter.agent_process_id,
-            adapter.capability,
-            deadline_secs as i64
-        ];
-        // (whether a batch is past the deadline, whether one is unconfirmed)
-        let read = |conn: &Connection| -> StoreResult<(bool, bool)> {
-            let (owns, stale, waiting): (bool, bool, bool) = conn.query_row(
-                &format!(
-                    "SELECT {owns}, EXISTS(SELECT 1 FROM steer_batches WHERE {older}), {waiting}"
-                ),
-                identity,
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )?;
-            if !owns {
-                return Err(StoreError::InvalidAuthority(
-                    "Context adapter no longer owns this provider".into(),
-                ));
-            }
-            Ok((stale, waiting))
-        };
+        session: &str,
+        steers: &[crate::id::SteerId],
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // Most boundaries confirm and cancel nothing: answer them without the
-        // write lock every Session's writes share.
-        let (stale, waiting) = read(&conn)?;
-        if printed.is_empty() && !stale {
-            return Ok(waiting);
-        }
-        // The closing read checks authority again; failing it rolls back.
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for batch in printed {
+        for steer in steers {
             tx.execute(
-                "UPDATE steer_batches SET evidence='emitted'
-                WHERE id=?1 AND session_id=?2 AND agent_process_id=?3 AND evidence='uncertain'",
-                params![batch, adapter.session, adapter.agent_process_id],
+                "DELETE FROM steer_delivered
+                WHERE session_id=?1 AND steer_id=?2 AND delivered_at IS NULL",
+                params![session, steer],
             )?;
         }
-        tx.execute(
-            &format!(
-                "DELETE FROM steer_deliveries WHERE batch_id IN (
-                SELECT id FROM steer_batches WHERE {older})"
-            ),
-            identity,
-        )?;
-        tx.execute(
-            &format!("UPDATE steer_batches SET evidence='cancelled' WHERE {older}"),
-            identity,
-        )?;
-        let (_, waiting) = read(&tx)?;
         tx.commit()?;
-        Ok(waiting)
-    }
-
-    /// The Session's next batch of pending steers and its rendered text, for a
-    /// hook to print. The batch stays `uncertain` until a later request
-    /// confirms it through [`Self::confirm_session_steers`].
-    pub(crate) fn emit_session_steers(
-        &self,
-        adapter: &SteerAdapter,
-        provider_thread: &str,
-        boundary: &str,
-        render: impl FnOnce(&str, &[Steer], usize) -> StoreResult<SteerContext>,
-    ) -> StoreResult<Option<(crate::id::SteerBatchId, String)>> {
-        let _lock = self.lock_session_dispatch(&adapter.session)?;
-        let batch = crate::id::SteerBatchId::new();
-        let (steers, remaining) = {
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            // Nothing to emit at most boundaries: answer without the write
-            // lock. The caller already checked this adapter's authority.
-            if !undelivered(&conn, &adapter.session)? {
-                return Ok(None);
-            }
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let claim: Option<String> = tx.query_row("SELECT p.attachment_token FROM agent_sessions s
-                JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
-                WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND s.provider_thread=?4
-                AND p.completed_at IS NULL",params![adapter.session,adapter.agent_process_id,adapter.capability,provider_thread],|r|r.get(0)).optional()?;
-            let claim = claim.ok_or_else(|| {
-                StoreError::InvalidAuthority(
-                    "Context adapter no longer owns this provider conversation".into(),
-                )
-            })?;
-            reconcile(&tx, &adapter.session)?;
-            let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM steer_batches WHERE agent_process_id=?1 AND boundary=?2 AND evidence!='cancelled')",params![adapter.agent_process_id,boundary],|r|r.get(0))?;
-            if duplicate {
-                return Ok(None);
-            }
-            let rows = tx.prepare(&format!("SELECT {COLUMNS} FROM session_steers s JOIN steers p ON p.id=s.steer_id
-                WHERE s.session_id=?1 AND s.applicable=1 AND NOT EXISTS(SELECT 1 FROM steer_deliveries d
-                WHERE d.session_id=s.session_id AND d.steer_id=s.steer_id AND d.attempt=s.attempt)
-                ORDER BY p.seq LIMIT 8"))?.query_map([&adapter.session],read_steer)?.collect::<rusqlite::Result<Vec<_>>>()?;
-            if rows.is_empty() {
-                return Ok(None);
-            }
-            tx.execute("INSERT INTO steer_batches(id,session_id,agent_process_id,provider_thread,attachment_token,boundary,evidence,created_at)
-                VALUES(?1,?2,?3,?4,?5,?6,'prepared',unixepoch())",params![batch,adapter.session,adapter.agent_process_id,provider_thread,claim,boundary])?;
-            for row in &rows {
-                tx.execute("INSERT INTO steer_deliveries(session_id,steer_id,attempt,batch_id)
-                    SELECT session_id,steer_id,attempt,?3 FROM session_steers WHERE session_id=?1 AND steer_id=?2",
-                    params![adapter.session,row.id,batch])?;
-            }
-            let remaining = pending_count(&tx, &adapter.session)?;
-            tx.commit()?;
-            (rows, remaining as usize)
-        };
-        let payload = match render(batch.as_str(), &steers, remaining) {
-            Ok(payload) => payload,
-            Err(error) => {
-                let mut conn = self.conn.lock().expect("store mutex poisoned");
-                let tx = conn.transaction()?;
-                tx.execute("DELETE FROM steer_deliveries WHERE batch_id=?1", [&batch])?;
-                tx.execute("DELETE FROM steer_batches WHERE id=?1", [&batch])?;
-                tx.commit()?;
-                return Err(error);
-            }
-        };
-        let hash = hex::encode(Sha256::digest(payload.text.as_bytes()));
-        {
-            let mut conn = self.conn.lock().expect("store mutex poisoned");
-            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            reconcile(&tx, &adapter.session)?;
-            tx.execute(
-                "UPDATE steer_deliveries SET excerpted=0 WHERE batch_id=?1",
-                [&batch],
-            )?;
-            for steer in &payload.excerpts {
-                tx.execute(
-                    "UPDATE steer_deliveries SET excerpted=1 WHERE batch_id=?1 AND steer_id=?2",
-                    params![batch, steer],
-                )?;
-            }
-            let retained = tx.execute(
-                "UPDATE steer_batches SET evidence='uncertain',payload_hash=?2 WHERE id=?1 AND evidence='prepared'",
-                params![batch,hash])? == 1;
-            tx.commit()?;
-            if !retained {
-                return Ok(None);
-            }
-        }
-        Ok(Some((batch, payload.text)))
+        Ok(())
     }
 }
 

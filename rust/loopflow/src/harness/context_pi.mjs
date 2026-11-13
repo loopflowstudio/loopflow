@@ -43,10 +43,10 @@ async function guardBashTools(pi, ctx) {
 }
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
-// Every launch gets the bash guard and the context block. A launch that reports
-// turns (`spec.turns`) asks the Machine server at each event, one connection
-// per boundary; the answer may carry steers. One that doesn't opens none, asks
-// for no steers and reports no turn end.
+// Every launch gets the bash guard and the context block, and during a turn
+// reads its own steers. A launch that reports turns (`spec.turns`) also
+// reports each event to the Machine server, one connection per boundary; one
+// that doesn't opens none and reports no turn end.
 export default function (pi) {
   let turn;
   let started = false;
@@ -80,47 +80,42 @@ export default function (pi) {
   };
   const server = spec.turns && process.env.LF_CONTEXT_DELIVERY
     ? machineServer(process.env.LF_CONTEXT_DELIVERY, log) : undefined;
-  // The block comes from checkout files; the boundary itself went to the server.
-  const { LF_PROVIDER_CONTEXT: _, ...renderEnv } = process.env;
+  // The block comes from checkout files, rendered without the launch's
+  // capability; the Session's news is read apart from it.
+  const { LF_PROVIDER_CONTEXT: _, LF_BARE_STEER: __, ...renderEnv } = process.env;
   const readContext = async (ctx, moment) => {
     const callback = { session_id: ctx.sessionManager.getSessionFile(), hook_event_name: "PiContext",
       adapter_invocation_id: randomUUID() };
-    const answer = await server?.boundary(moment, callback);
-    const block = JSON.parse(execFileSync(spec.executable, ["__context-block", "--moment", moment], {
+    await server?.boundary(moment, callback);
+    return JSON.parse(execFileSync(spec.executable, ["__context-block", "--moment", moment], {
       input: JSON.stringify(callback), encoding: "utf8", env: renderEnv,
       timeout: 30000, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"] }))
       .hookSpecificOutput.additionalContext;
-    if (answer?.steers) server.printed(answer.steers.batch);
-    return `${news(answer)}${block}`;
   };
   const shutdown = (ctx) => {
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
-  // Every event a native launch reports is recorded, and during a turn
-  // answers steers; a launch Pi's RPC driver records asks only for steers.
-  // With the server not answering, only these still wait for it: Pi's identity,
-  // a tool start (where a steer lands) and the turn end. Later reports repeat
-  // the turn, open tools, pending input and assistant messages.
+  // Every event a native launch reports is recorded; a launch Pi's RPC driver
+  // records reports nothing here. With the server not answering, only these
+  // still wait for it: Pi's identity, a tool start and the turn end. Later
+  // reports repeat the turn, open tools, pending input and assistant messages.
   const kept = new Set(["session_start", "tool_execution_start", "agent_settled"]);
   const report = async (event, ctx, extra = {}) => {
-    if (!server || (!started && event.type !== "session_start")) return;
+    if (!started && event.type !== "session_start") return;
     const sessionFile = ctx.sessionManager.getSessionFile();
-    const skippable = !kept.has(event.type);
-    let answer;
-    if (spec.native) {
-      answer = await server.boundary("event", { ...event, ...extra, sessionFile,
-        turn, openTools: tools.size, pendingInput }, { skippable });
-    } else if (turn) {
-      answer = await server.boundary("tool", { session_id: sessionFile, hook_event_name: "PiSteer",
-        adapter_invocation_id: randomUUID() }, { skippable });
+    if (server && spec.native) {
+      await server.boundary("event", { ...event, ...extra, sessionFile,
+        turn, openTools: tools.size, pendingInput }, { skippable: !kept.has(event.type) });
     }
-    const content = news(answer);
+    // Pi takes a steer only while a turn runs; outside one it would be stored
+    // without starting a run.
+    if (!turn || event.type === "agent_settled") return;
+    const content = ownNews({ session_id: sessionFile, hook_event_name: "PiSteer" }, log);
     if (!content) return;
     // With triggerTurn omitted, Pi queues during streaming and only stores if
     // idle. A settlement race must never start another run.
     pi.sendMessage({ customType: "loopflow-steer", content, display: true },
       { deliverAs: "steer" });
-    if (answer.steers) server.printed(answer.steers.batch);
   };
   pi.on("session_start", async (event, ctx) => {
     try { await guardBashTools(pi, ctx); } catch (error) {

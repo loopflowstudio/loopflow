@@ -25,6 +25,10 @@ pub enum ContextMoment {
     Start,
     Compact,
     Tool,
+    /// A tool boundary, or a bare launch's prompt: the hook reads the
+    /// Session's unread steers and Task update from the store and reports
+    /// nothing to the server.
+    Steer,
     /// A turn ended: the Machine server records it, then refreshes planning
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
@@ -291,10 +295,11 @@ impl ContextDelivery {
     }
 
     /// The provider hooks of one launch. Every launch prints its context
-    /// block at session start and after a compaction. A launch an owner or
-    /// the Machine server holds (`Holder::reports_turns`) also reports its
-    /// turn and tool boundaries, whose answers carry its steers and Task
-    /// updates.
+    /// block at session start and after a compaction, and reads its own
+    /// steers and Task update from the store after a tool call and at a
+    /// prompt. A launch an owner or the Machine server holds
+    /// (`Holder::reports_turns`) also reports its starts, prompts and turn
+    /// ends to the server, which records them.
     pub fn hook_settings(
         &self,
         holder: crate::session::Holder,
@@ -307,29 +312,37 @@ impl ContextDelivery {
             quote(&executable),
         );
         let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
-        if !holder.reports_turns() {
-            return Ok(serde_json::json!({"SessionStart": [
-                {"matcher": "startup|resume|clear", "hooks": [context("start")]},
-                {"matcher": "compact", "hooks": [context("compact")]},
-            ]}));
-        }
-        // Tool boundaries start lf only for new steering. Prompt boundaries
-        // always run: they also record native turn activity.
-        let steer = format!(
-            // dash's -nt is false when the second file is missing, so test existence first.
-            "[ -n \"${seen}\" ] || exit 0; [ -e \"${seen}\" ] && {{ [ ! -e {latest} ] || [ \"${seen}\" -nt {latest} ]; }} && exit 0; {command} tool",
+        let hook = |command: String| serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]);
+        // Start lf only for new steering: skip while the seen marker is newer
+        // than every marker a steer for this conversation touches. dash's -nt
+        // is false when the second file is missing, so test existence first.
+        let gate = format!(
+            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
             seen = crate::steer::STEER_SEEN_ENV,
             latest = quote(&crate::steer::latest_marker(&self.home)),
+            session = crate::steer::STEER_SESSION_ENV,
+            task = crate::steer::STEER_TASK_ENV,
         );
-        Ok(serde_json::json!({
-            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
-            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
-            "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":10}]}],
-            "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":10}]}],
-            "SessionStart": [
+        let start = serde_json::json!([
             {"matcher": "startup|resume|clear", "hooks": [context("start")]},
-            {"matcher": "compact", "hooks": [context("compact")]}
-        ]}))
+            {"matcher": "compact", "hooks": [context("compact")]},
+        ]);
+        let steer = hook(format!("{gate} {command} steer"));
+        if !holder.reports_turns() {
+            return Ok(serde_json::json!({
+                "PostToolUse": steer,
+                "UserPromptSubmit": steer,
+                "SessionStart": start,
+            }));
+        }
+        // A held prompt always runs: the server records the turn it starts.
+        Ok(serde_json::json!({
+            "Stop": hook(format!("{command} stop")),
+            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
+            "PostToolUse": steer,
+            "UserPromptSubmit": hook(format!("{command} tool")),
+            "SessionStart": start,
+        }))
     }
 }
 
@@ -921,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_launch_installs_only_the_two_context_hooks() {
+    fn a_bare_launch_reports_no_turns_and_gates_every_steer_check() {
         let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempdir().unwrap();
@@ -933,23 +946,29 @@ mod tests {
             .unwrap();
         assert_eq!(
             bare.as_object().unwrap().keys().collect::<Vec<_>>(),
-            ["SessionStart"]
+            ["PostToolUse", "SessionStart", "UserPromptSubmit"]
         );
+        let moment = |hook: &serde_json::Value| {
+            let command = hook["command"].as_str().unwrap();
+            command.rsplit(' ').next().unwrap().to_owned()
+        };
         let moments: Vec<_> = bare["SessionStart"]
             .as_array()
             .unwrap()
             .iter()
             .flat_map(|group| group["hooks"].as_array().unwrap())
-            .map(|hook| {
-                hook["command"]
-                    .as_str()
-                    .unwrap()
-                    .rsplit(' ')
-                    .next()
-                    .unwrap()
-            })
+            .map(moment)
             .collect();
         assert_eq!(moments, ["start", "compact"]);
+        // No server records a bare prompt, so it too waits for a marker.
+        for event in ["PostToolUse", "UserPromptSubmit"] {
+            let hook = &bare[event][0]["hooks"][0];
+            assert_eq!(moment(hook), "steer");
+            assert!(hook["command"]
+                .as_str()
+                .unwrap()
+                .starts_with("s=\"$LF_STEER_SEEN\""));
+        }
     }
 
     #[test]
@@ -972,11 +991,15 @@ mod tests {
             .as_str()
             .unwrap();
         let seen = delivery.home.join("steers/seen/agent");
+        let session = crate::steer::session_marker(&delivery.home, "session");
+        let task = crate::steer::task_marker(&delivery.home, "task");
         let starts_lf = |seen: Option<&Path>| {
             let _ = fs::remove_file(&ran);
             let mut hook = std::process::Command::new("/bin/sh");
             hook.args(["-c", command])
-                .env_remove(crate::steer::STEER_SEEN_ENV);
+                .env_remove(crate::steer::STEER_SEEN_ENV)
+                .env(crate::steer::STEER_SESSION_ENV, &session)
+                .env(crate::steer::STEER_TASK_ENV, &task);
             if let Some(seen) = seen {
                 hook.env(crate::steer::STEER_SEEN_ENV, seen);
             }
@@ -991,7 +1014,26 @@ mod tests {
             !starts_lf(Some(&seen)),
             "nothing saved since the last check"
         );
-        crate::steer::touch(&crate::steer::latest_marker(&delivery.home)).unwrap();
-        assert!(starts_lf(Some(&seen)), "a steer saved after the check");
+        // macOS `sh` compares whole seconds, so the fixture spaces its stamps.
+        let mut clock = std::time::SystemTime::now();
+        let mut stamp = |path: &Path| {
+            clock += std::time::Duration::from_secs(5);
+            crate::steer::touch(path).unwrap();
+            let file = fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(clock).unwrap();
+        };
+        stamp(&crate::steer::task_marker(&delivery.home, "another-task"));
+        stamp(&seen);
+        assert!(!starts_lf(Some(&seen)), "another Task's steer");
+        for marker in [
+            &crate::steer::latest_marker(&delivery.home),
+            &session,
+            &task,
+        ] {
+            stamp(marker);
+            assert!(starts_lf(Some(&seen)), "a steer saved after the check");
+            stamp(&seen);
+            assert!(!starts_lf(Some(&seen)), "checked since");
+        }
     }
 }

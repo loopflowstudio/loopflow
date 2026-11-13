@@ -146,7 +146,7 @@ pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
-pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
+pub(crate) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
     read_wave_config(repo, wave)?
         .linear?
         .initiative

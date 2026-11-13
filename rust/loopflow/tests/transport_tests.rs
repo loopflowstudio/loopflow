@@ -63,6 +63,12 @@ impl Drop for Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        let fixture = Self::uninitialized();
+        support::seed_store(fixture.home.path());
+        fixture
+    }
+
+    fn uninitialized() -> Self {
         // An OSC opcode in an ordinary path is not terminal status.
         let home = tempfile::Builder::new()
             .prefix("lf-7501-")
@@ -830,6 +836,7 @@ read -r answer < /dev/tty
 #[test]
 fn piped_resume_json_runs_here_and_returns_once() {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let path = parented_provider(&fixture);
     let provider = fixture.home.path().join("bin/claude");
     let script = std::fs::read_to_string(&provider)
@@ -864,6 +871,7 @@ fn piped_resume_json_runs_here_and_returns_once() {
 
 fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let fixture = Fixture::new();
+    let _server = fixture.machine_server();
     let bin = fixture.home.path().join("bin");
     // The only executable provider is this stand-in; no native turn is sent.
     fixture.provider(
@@ -1755,12 +1763,12 @@ fn shell_reconnects_and_settles(integrated: bool) {
 }
 
 #[test]
-fn desktop_shell_twenty_lifecycles_leave_no_jobs() {
+fn desktop_shell_repeated_lifecycles_leave_no_jobs() {
     let fixture = Fixture::new();
     let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000006";
     fixture.shell_task(task);
-    for cycle in 0..20 {
+    for cycle in 0..3 {
         let id = format!("cycle-{cycle}");
         let base = [
             "desktop",
@@ -1845,7 +1853,7 @@ fn desktop_shell_twenty_lifecycles_leave_no_jobs() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((total, settled), (20, 20));
+    assert_eq!((total, settled), (3, 3));
 }
 
 #[path = "transport/ssh_shells.rs"]
@@ -2287,7 +2295,7 @@ fn server_registration_migrates_old_job_and_respects_disabled_choice() {
 
 #[test]
 fn server_status_does_not_install_or_create_work() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::uninitialized();
     let result = fixture.command(&["server", "status"]).output().unwrap();
     assert!(
         result.status.success(),

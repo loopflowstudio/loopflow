@@ -230,7 +230,7 @@ async fn relay_task(
             .ok()
             .flatten()
             .map_or_else(|| source.to_string(), |machine| machine.name());
-        anyhow!("{error:#}\n{name} is moving here from {from}, which did not send it; the same move run there carries it on")
+        anyhow!("{error:#}\n{name} is moving here from {from}, which could not send it now; the same move run on {from} carries it on")
     })?;
     let moved_task = moved
         .task

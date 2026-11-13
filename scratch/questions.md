@@ -518,3 +518,14 @@ asks the laptop, which has no move in flight and begins a new one. It then
 prints `Carrying on X's move`, and the check line stays until a later check or
 arrival even when mini's log shows the Task elsewhere. Qa runs it if that
 path matters; `a_move_checked_on_its_target…claim_back` stops at status.
+
+## QA, third round (2026-11-13)
+
+Report: `scratch/qa.html`. Ran the target check end to end: mini's status shows
+the check and its hostname retry; the retry arrives; the line goes on arrival;
+after a source claim-back the retry starts a new move from the laptop (prints
+"Carrying on", reverses the take-back; matches machines.md). Fixed: a retry on
+mini with the laptop unreachable said the laptop "did not send it"; it now says
+it "could not send it now" and names the Machine to run it on.
+- `cargo test -p loopflow --test integration -- machine_commands::a_move_retried_on_its_target machine_commands::a_move_checked_on_its_target` — 2 passed (qa)
+

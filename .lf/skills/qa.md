@@ -634,4 +634,6 @@ labels the laptop's claim by its own host name. For mini to reach the laptop
 `laptop`, run under the laptop's `HOME` and `LF_HOME`; then `lf machine add
 laptop` on mini, from outside any clone. Run inside a clone before the first
 move, `lf machine add` and `lf config repo --bind` minted mini's own planning
-key, and the move's check then refused; start mini's home over.
+key, and the move's check then refused; start mini's home over. A marker file the
+stand-in checks per host (exit 255, "Connection refused") makes either side
+unreachable without touching the other's store.

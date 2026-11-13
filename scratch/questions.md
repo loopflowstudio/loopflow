@@ -198,6 +198,9 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   WorkCache, WorkNavigation(Proof), WorkDestination) 248; clippy clean. Gate
   runs `server::schema::tests::` (Clap help for `session send` changed) and
   `transport_tests`.
+- Compress: one `send_from` builds the SSH `session send --task` call for
+  both the send and `--arrived`; the resend message sits in its branch.
+  Clippy clean; integration `machine_commands::` move/resume/sent 11 passed.
 
 ## Remaining
 

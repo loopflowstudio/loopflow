@@ -182,8 +182,10 @@ async fn relay_task(
     // Machine that sent it delivers it again as it was sent.
     let resending = route.machine_id == to;
     let source = if resending {
-        sender(&store.sqlite, &task.id, &to)?
-            .ok_or_else(|| anyhow!("{name} already runs on {place}"))?
+        let source = sender(&store.sqlite, &task.id, &to)?
+            .ok_or_else(|| anyhow!("{name} already runs on {place}"))?;
+        eprintln!("Delivering {name} as it was sent to {place}");
+        source
     } else {
         if let Some(target) = &target {
             ready(store, target, Some((&task, &route.repository_id)), name).await?;
@@ -191,9 +193,6 @@ async fn relay_task(
         }
         route.machine_id.clone()
     };
-    if resending {
-        eprintln!("Delivering {name} as it was sent to {place}");
-    }
     let moved = send_task(
         store,
         &task,
@@ -292,22 +291,7 @@ fn sender(
 /// arrived. The move already happened, so a Machine out of reach only leaves
 /// that record stale, which its next arrival there clears.
 async fn tell_arrived(source: &MachineId, repository: &RepositoryId, task: &Task, to: &MachineId) {
-    let told = async {
-        let source = super::ssh::resolve_target(source.as_str(), false).await?;
-        let args = [
-            "--repo-id".to_string(),
-            repository.to_string(),
-            "session".into(),
-            "send".into(),
-            "--task".into(),
-            task.id.to_string(),
-            "--to".into(),
-            to.to_string(),
-            "--arrived".into(),
-        ];
-        super::ssh::request(&source, &args, None).await.map(drop)
-    };
-    if let Err(error) = told.await {
+    if let Err(error) = send_from(source, repository, task, to, Some("--arrived")).await {
         tracing::warn!(
             "{} arrived, but {source} still records it as sent: {error:#}",
             task.identifier
@@ -327,22 +311,31 @@ async fn send_task(
     if *source == store.sqlite.local_machine()?.id {
         return moves::send_task(store, task.id.as_str(), to, conversation).await;
     }
+    let bytes = send_from(source, repository, task, to, conversation).await?;
+    serde_json::from_slice(&bytes).context("read the moved Task")
+}
+
+/// `lf session send --task <task> --to <to> [last]` on `source`, over SSH.
+async fn send_from(
+    source: &MachineId,
+    repository: &RepositoryId,
+    task: &Task,
+    to: &MachineId,
+    last: Option<&str>,
+) -> Result<Vec<u8>> {
     let source = super::ssh::resolve_target(source.as_str(), false).await?;
     let mut args = vec![
         "--repo-id".to_string(),
         repository.to_string(),
         "session".into(),
         "send".into(),
-    ];
-    args.extend(conversation.map(str::to_string));
-    args.extend([
         "--task".into(),
         task.id.to_string(),
         "--to".into(),
         to.to_string(),
-    ]);
-    let bytes = super::ssh::request(&source, &args, None).await?;
-    serde_json::from_slice(&bytes).context("read the moved Task")
+    ];
+    args.extend(last.map(str::to_string));
+    super::ssh::request(&source, &args, None).await
 }
 
 /// Before anything is committed, pushed, stopped or handed off, `target`

@@ -1957,7 +1957,7 @@ sys.exit(code)
     assert!(!ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains(
-            "stopped on a usage limit at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
         ),
         "{}",
         ran.text
@@ -1969,7 +1969,10 @@ sys.exit(code)
         .unwrap();
     assert_eq!(graphs, 1);
     let status = task.text_status();
-    assert!(status.contains("stopped on a usage limit"), "{status}");
+    assert!(
+        status.contains("stopped after a provider refusal"),
+        "{status}"
+    );
     assert!(status.contains("there is no `agents` list"), "{status}");
     assert!(
         status.contains("`lf task run INF-123` starts the run again at it"),

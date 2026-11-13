@@ -154,7 +154,7 @@ pub(super) enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
     Repeated { run: String, cause: String },
     #[error(
-        "the run of {run} stopped on a usage limit at {step}: {cause}; `lf task run {issue}` starts the run again at it"
+        "the run of {run} stopped after a provider refusal at {step}: {cause}; `lf task run {issue}` starts the run again at it"
     )]
     Limit {
         issue: String,

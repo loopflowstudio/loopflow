@@ -128,7 +128,7 @@ pub(crate) async fn execution_of_latest_graph(
 /// than another account; the agent follows.
 pub(crate) const MOVED_TO: &str = "; continuing on ";
 
-/// Ends a recorded limit reason when a usage limit refused the step and no
+/// Ends a recorded limit reason when a provider refused the step and no
 /// agent it may use was left; what would let it move follows.
 pub(crate) const STOPPED: &str = "; stopped: ";
 
@@ -179,7 +179,7 @@ fn apply_limit_recovery(
         (TaskExecutionState::Blocked, None) => {
             if let Some(stop) = limit_stop(recovery) {
                 snapshot.reason =
-                    format!("{label} stopped on a usage limit: {stop}; `lf task run {issue}` starts the run again at it");
+                    format!("{label} stopped after a provider refusal: {stop}; `lf task run {issue}` starts the run again at it");
             }
         }
         _ => {}
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(stopped.state, TaskExecutionState::Blocked);
         assert_eq!(
             stopped.reason,
-            "implement stopped on a usage limit: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
+            "implement stopped after a provider refusal: codex_error: You've hit your usage limit. no `agents` list is set; `lf task run LOO-1` starts the run again at it"
         );
 
         let mut ended = snapshot(TaskExecutionState::Blocked);

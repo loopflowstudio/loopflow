@@ -15,8 +15,6 @@ mod relay_tests;
 mod snapshot;
 mod stream;
 mod terminal;
-#[cfg(test)]
-mod viewer_tests;
 mod wire;
 
 use std::collections::VecDeque;

@@ -43,7 +43,7 @@ the cheapest layer that can observe it.
 | Layer | Where | What it proves | Budget |
 |---|---|---|---|
 | Host rules | `transport::hosted::host_tests` (`src/transport/host_tests.rs`) | the viewer protocol: attach, takeover, control and size arbitration, snapshots, resume and spool overflow, heartbeat and grace expiry, holds, input, events | under 100 ms each |
-| Relay rules | `transport::relay_tests`, `transport::viewer_tests` | what a viewer's terminal sees: connecting, reconnect, attach timeout, outage input discarded, exhaustion and Retry, failed setup, pane closure, Move here; a local owner's control handoff, unacknowledged attachment and stalled input; snapshot previews | about 1 s each, mostly the child's startup |
+| Relay rules | `transport::relay_tests` | what a viewer's terminal sees: connecting, reconnect, attach timeout, outage input discarded, exhaustion and Retry, failed setup, pane closure, Move here; a local owner's control handoff, unacknowledged attachment and stalled input; a saved screen's preview, its handoff to live output and its restoration after failure or interrupt | about 1 s each, mostly the child's startup |
 | Surfaces | `tests/transport_tests.rs` | that each real launch path is wired and cleans up: owner, bare launch, provider exec, headless, CLI open/JSON, build takeover, server relay, held terminals, Desktop and SSH shells | one test per surface |
 
 Host rules drive `Hosted::pass` in-process. `Hosted` serves both owners and held
@@ -57,8 +57,11 @@ period, backdate `Viewer.heartbeat_at`, `Connection::Dropped(at)` or
 Relay rules run `view` in a child of the lib test binary on a real PTY. In
 `relay_tests` the child relays a Desktop pane to a held terminal while its own
 threads play the server's entrance and the pane's status socket, or relays a
-terminal to an owner whose socket a thread plays; the parent owns the PTY and
-types when the child writes `type` in its home. Relay time is
+terminal to an owner whose socket a thread plays (`owner-…` cases, and
+`preview-…` cases that show a saved screen first). The parent owns the PTY,
+keeps a `ghostty_vt` display of it, and acts on files the child writes in its
+home: `type` keys, `inspect` the screen once a marker arrives, `interrupt` with
+SIGTERM, `flood` input. Relay time is
 `transport::Pace`: the child sets the `#[cfg(test)]` thread-local `TEST_PACE`
 (heartbeat, silence, attach acknowledgement, reconnect backoff, stalled write)
 before relaying,

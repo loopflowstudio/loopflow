@@ -55,8 +55,8 @@ Done when:
 - Relay-side time is not data: `view()` (`transport.rs:2070`, ~540 lines) keeps
   `heartbeat`/`last_response` locals; `connection::Status` backoff is
   `100ms << min(n,5)` × 8 attempts ≈ 12.7 s (`connection.rs:14,275`).
-  `viewer_tests.rs` already runs the relay by re-executing the lib test binary on
-  a PTY against an in-test fake owner socket.
+  `relay_tests.rs` runs the relay by re-executing the lib test binary on a PTY
+  against an in-test fake host socket.
 - `server::holder::TEST_IDLE` (`server/holder.rs:41-46`) is the precedent for a
   `#[cfg(test)]` thread-local timing value read where the constant is used.
 
@@ -104,7 +104,7 @@ nonce/seq and resize events, slow observer cut at `LIMIT`, input hints only to
 controllers, directory events, `Controlled{ready}` readiness, wire overhead of a
 1 MiB burst (pure `wire.rs` test).
 
-### 2. Relay rules: re-exec'd lib test binary on a PTY (`viewer_tests.rs` pattern)
+### 2. Relay rules: re-exec'd lib test binary on a PTY (`relay_tests.rs`)
 
 The relay (`view`, `relay_over`, `connection::Status`) runs in a child of the
 lib test binary on a real PTY, against a fake host socket in the parent test
@@ -364,32 +364,42 @@ no test that waits out a production timeout except the one named above.
    gate. `lifetime.rs` `POLL` is now a `#[cfg(test)]` 100 ms const (2 s in
    builds). It paces only the recorder's retries and shell/client rechecks.
    `viewer_state_retries_…` went from ~6 s to 0.33 s; its deadlines are 5 s
-   bounds, not `POLL` multiples. `viewer_tests::snapshot_preview_*` (3 cases,
-   > 60 s each under this load) are untouched. CI sum under 400 s is
-   unmeasured until gate.
-7. **Next (concept review, 2026-11-13): one relay bench.** Layer 2 has two
-   child benches doing one job: `viewer_tests.rs` (`LOOPFLOW_VIEWER_FIXTURE`,
-   the pattern `relay_tests` copied) and `relay_tests.rs`
-   (`LOOPFLOW_RELAY_FIXTURE`, `TEST_PACE`). Both re-exec the lib binary on a
-   PTY and relay to an owner socket a thread plays. `viewer_tests` never sets
-   `TEST_PACE`, so its cases run at production pace, and three of them are not
-   relay rules at all: `resume`, `reveal` and `provider_failure` run
-   `resume_fixture`, which starts the real `lf` binary (`lf session serve`).
-   That is why `test(transport::)` still holds > 60 s cases while the demo
-   calls it "host + relay rules, seconds".
-   - The owner-socket preview cases (`startup_failure`, `cancel`, `blank`,
-     `modes`, `completed`, `startup_input`, `directory`) become `preview-…`
-     cases in `relay_tests`' child: one entry point, one `Pace`, one PTY
-     driver. The fixture's `ctrlc` handler comes along; `cancel` is the
-     SIGINT-before-acknowledgement case slice 4 did not port.
-   - The three `resume_fixture` cases are surface tests. For each, name the
-     kept `transport_tests` test that asserts its rule (candidates:
-     `resume_json_returns_after_relay_and_viewer_takeover`,
-     `conversation_open_here_confirms_attachment_…`,
-     `a_terminal_launcher_becomes_its_provider_…` failed-provider leg) and
-     delete it; a rule nothing covers becomes a leg of the nearest kept test.
-   - `viewer_tests.rs` is deleted. Done when `test(transport::)` has no case
-     that starts `lf` and none over the relay windows slice 6 lists.
+   bounds, not `POLL` multiples. CI sum under 400 s is unmeasured until gate.
+7. **Done (2026-11-13): one relay bench.** `viewer_tests.rs` is deleted;
+   its owner-socket preview cases are `preview-…` cases in `relay_tests`
+   under `LOOPFLOW_RELAY_FIXTURE`, `TEST_PACE` and one PTY driver. The parent
+   keeps a `ghostty_vt` display and acts on `type`, `inspect` (screen reading
+   once a marker arrives), `interrupt` (SIGTERM) and `flood`. Preview cases
+   set `attach` and `silence` to `STEP`: no preview rule spans a window, so
+   those only bound a failure. Cases: startup failure, cancel, blank, modes,
+   completed, startup input, directory; 0.08–0.43 s each.
+   - `cancel` is the SIGINT-before-acknowledgement case slice 4 left out
+     (SIGTERM through the `ctrlc` handler, exit 130). Its owner now keeps
+     its socket open: the old case returned and closed it, so the relay
+     restored the terminal on EOF before the signal landed. A mutation
+     running no interrupt hooks fails it; before the fix it passed.
+   - `Peer::next_request` reads a refused `set_read_timeout` (macOS EINVAL
+     after the viewer shuts its end) as the connection ending.
+   - `resume_fixture` cases, deleted:
+     - `reveal`: `--reveal-existing` argv is
+       `human_session::tests::reveal_requires_history_…`; the open path is the
+       same as resume.
+     - `provider_failure`: a failed provider under an owner is the launcher
+       test's `failed_native_provider_settles_once_…` leg; the terminal
+       restored after an owner ends before readiness is `preview-completed`.
+     - `resume`: `--resume` on the same thread is
+       `resume_takes_over_an_owner_from_another_build`; no replay is
+       `human_session::tests::automatic_start_…`. The saved screen carried
+       across the relay's exec (`relay_with_preview`, `LF_RELAY_PREVIEW`) and
+       replaced by live output had no kept test: it is now the last leg of
+       `a_held_conversation_outlives_its_view` (6.8 s for the whole test
+       locally). Claude's `--name` title on resume is not asserted anywhere
+       (`terminal_title.rs` adds it on every Claude launch).
+   - `scripts/testing.md` and the tests README name `relay_tests` where they
+     named `viewer_tests`.
+   - `cargo nextest run -p loopflow --lib -E 'test(transport::)'`: 100/100,
+     2.78 s wall (Mac, debug). Clippy `--all-targets` clean. CI sum and SSH
+     cases: gate/CI.
 
 ## Outside this Task
 

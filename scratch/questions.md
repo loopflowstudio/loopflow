@@ -11,9 +11,7 @@
   continuity, pipes, directory). The count drops, and CI time drops only by
   the libtest overhead. Sharing one fixture would need one provider script per
   case; not attempted.
-- Relay case `cancelled` (SIGINT while waiting for an acknowledgement) was not
-  ported. Exit 130 comes from `lf`'s `ctrlc` handler (`agent::exit_on_interrupt`),
-  not the relay, and "no input before acknowledgement" is the
-  `owner-unacknowledged` case. `viewer_tests`' `cancel` preview case already
-  installs that handler and cancels before acknowledgement; slice 7 moves it
-  into `relay_tests`.
+- Relay case `cancelled` (SIGINT while waiting for an acknowledgement) is
+  `preview-cancel` in `relay_tests` (slice 7): SIGTERM through `lf`'s `ctrlc`
+  handler, exit 130. It runs with a saved-screen preview; the bare-terminal
+  variant (no preview) has no case of its own.

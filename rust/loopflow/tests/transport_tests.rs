@@ -1393,6 +1393,8 @@ read -r answer < /dev/tty
 /// Unviewed and quiet, a held terminal runs until its agent exits or Task
 /// cleanup ends it. The lf process that takes up its handoff names it, since
 /// a terminal is no process, and records the Desktop pane it launched from.
+/// A later view shows the conversation's saved screen, carried across the
+/// relay's exec, until the resumed provider's own output replaces it.
 #[test]
 fn a_held_conversation_outlives_its_view() {
     let fixture = Fixture::new();
@@ -1400,7 +1402,7 @@ fn a_held_conversation_outlives_its_view() {
     let path = fixture.waiting_provider();
     // The repository's conversation is managed, so a terminal viewing it holds it.
     let mut command = fixture.command(&["-a", "claude", "resume"]);
-    command.env("PATH", path);
+    command.env("PATH", &path);
     let view = Terminal::spawn_with_placement(command, Some(true));
     let launch = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
@@ -1426,6 +1428,44 @@ fn a_held_conversation_outlives_its_view() {
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };
     fixture.held_ends(&held);
+
+    let mut saved = ghostty_vt::Terminal::new(80, 24).unwrap();
+    saved.write(b"\x1b[?1049hsaved preview");
+    let mut bytes =
+        format!("lf-terminal-snapshot/1 ghostty={}\n", ghostty_vt::REVISION).into_bytes();
+    bytes.extend(saved.encode().unwrap());
+    let screens = fixture.home.path().join("screens");
+    std::fs::create_dir_all(&screens).unwrap();
+    std::fs::write(screens.join(format!("{session}.ghostsnp")), bytes).unwrap();
+    let mut command = fixture.command(&["-a", "claude", "resume", &session]);
+    command.env("PATH", &path);
+    let mut view = Terminal::spawn_with_placement(command, Some(true));
+    let resumed = fixture.launches(2).pop().unwrap();
+    let provider: libc::pid_t = resumed.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    assert!(
+        resumed.contains(" --resume ") && session_of(&fixture.sql(), &resumed) == session,
+        "{resumed}"
+    );
+    view.wait_text("ready for");
+    let screen = view.screen.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&screen);
+    let preview = text
+        .find("saved preview")
+        .unwrap_or_else(|| panic!("no saved screen: {text}"));
+    assert!(
+        preview < text.rfind("ready for").unwrap(),
+        "the saved screen came after live output: {text}"
+    );
+    let mut display = ghostty_vt::Terminal::new(80, 24).unwrap();
+    display.write(&screen);
+    let shown = display.text().unwrap();
+    assert!(!display.alternate_screen(), "{shown}");
+    assert!(!shown.contains("saved preview"), "{shown}");
+    view.stop();
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&fixture.terminal_of(&session));
 }
 
 #[test]

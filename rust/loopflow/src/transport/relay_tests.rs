@@ -1,21 +1,27 @@
 //! Relay rules, run in a child of this test binary on a real PTY: a Desktop
-//! pane's relay to a held terminal, and a terminal's relay to its owner. The
-//! child plays the server's entrance and Desktop's status socket, or the
-//! owner's socket, itself, with the relay's pace shortened; the parent owns
-//! the PTY and types when the child asks.
+//! pane's relay to a held terminal, and a terminal's relay to its owner, with
+//! or without a saved screen shown while it attaches. The child plays the
+//! server's entrance and Desktop's status socket, or the owner's socket,
+//! itself, with the relay's pace shortened; the parent owns the PTY and types,
+//! reads the screen or interrupts when the child asks.
 
 use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use super::wire::{self, Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Tag};
-use super::{attach_with_terminal, endpoint, registry, terminal_pair, Host, Pace, TEST_PACE};
+use super::{
+    attach_with_terminal, endpoint, registry, start, terminal_pair, Host, Pace, ViewerTerminal,
+    TEST_PACE,
+};
+use crate::ghostty_vt::{Terminal, REVISION};
 use crate::id::{LfProcessId, LfSessionId, TerminalId};
 
 const SESSION: &str = "session_5e55105e000040008000000000000002";
@@ -32,6 +38,16 @@ const PACE: Pace = Pace {
 /// Cases named `owner-…` relay to an owner's socket directly, with no server
 /// or pane.
 const OWNER: &str = "owner-";
+/// Cases named `preview-…` relay to an owner's socket too, showing the
+/// Session's saved screen until the owner's own replaces it. No rule of
+/// theirs spans a window, so their deadlines only bound a failure.
+const PREVIEW: &str = "preview-";
+const MODES: &[u8] = b"\x1b[?2004h\x1b[?1h\x1b[>5u";
+/// What the parent's terminal answers for its default colors.
+const THEME: [u8; 3] = [0x87, 0x65, 0x43];
+/// A marker outside the screen: the owner's live output has arrived.
+const LIVE: &[u8] = b"\x1b]777;live-ready\x07";
+const CLEAR_DIRECTORY: &[u8] = b"\x1b]7;\x1b\\";
 
 // ---------------------------------------------------------------------------
 // Child: the relay, its server and its Desktop pane
@@ -41,9 +57,30 @@ fn relay_fixture() {
     let Ok(case) = std::env::var(CASE) else {
         return;
     };
-    TEST_PACE.set(PACE);
+    let previews = case.starts_with(PREVIEW);
+    TEST_PACE.set(if previews {
+        Pace {
+            silence: STEP,
+            attach: STEP,
+            ..PACE
+        }
+    } else {
+        PACE
+    });
+    // An interrupt ends the relay as it ends `lf`.
+    ctrlc::set_handler(|| crate::agent::exit_on_interrupt()).unwrap();
     let home = crate::store::lf_home_dir();
-    let (host, scenario): (Host, Box<dyn FnOnce() + Send>) = if case.starts_with(OWNER) {
+    let preview = previews.then(|| saved_preview(&home));
+    if case == "preview-startup-failure" {
+        // This test executable cannot serve an owner: startup exits before
+        // acknowledgement, the real startup failure path.
+        let error = start(&["/missing-provider".into()], true, &home, &|_| {}).unwrap_err();
+        drop(preview);
+        std::fs::write(home.join("relayed"), format!("{error:#}")).unwrap();
+        return;
+    }
+    let (host, scenario): (Host, Box<dyn FnOnce() + Send>) = if case.starts_with(OWNER) || previews
+    {
         let owner = LfProcessId::new();
         let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
         let owner_socket = Owner {
@@ -55,6 +92,16 @@ fn relay_fixture() {
             "owner-acknowledged" => acknowledged_past_the_deadline(&owner_socket),
             "owner-unacknowledged" => unacknowledged_owner(&owner_socket),
             "owner-stalled" => stalled_owner(&owner_socket),
+            "preview-cancel" => interrupted_preview(&owner_socket),
+            "preview-blank" => preview_handoff(&owner_socket, b"", None),
+            "preview-modes" => preview_handoff(&owner_socket, MODES, None),
+            "preview-directory" => {
+                let execution = owner_socket.home.join("execution");
+                std::fs::create_dir(&execution).unwrap();
+                preview_handoff(&owner_socket, b"", Some(execution));
+            }
+            "preview-completed" => exit_before_readiness(&owner_socket),
+            "preview-startup-input" => typing_before_acknowledgement(&owner_socket),
             other => panic!("unknown relay case {other}"),
         };
         (Host::Owner(owner), Box::new(scenario))
@@ -83,10 +130,43 @@ fn relay_fixture() {
             std::process::exit(101);
         }
     });
-    let relayed = attach_with_terminal(&host, Some(&LfSessionId::from(SESSION)), None, None, false);
+    let relayed = attach_with_terminal(
+        &host,
+        Some(&LfSessionId::from(SESSION)),
+        None,
+        preview,
+        false,
+    );
     scenario.join().unwrap();
+    // A viewer enters the directory its execution reports.
+    let cwd = std::env::current_dir().unwrap();
+    std::fs::write(home.join("viewer-cwd"), cwd.as_os_str().as_encoded_bytes()).unwrap();
     let error = relayed.err().map(|error| format!("{error:#}"));
     std::fs::write(home.join("relayed"), error.unwrap_or_default()).unwrap();
+}
+
+/// Saves a screen for `SESSION`, alternate and recolored, and shows it as
+/// the Session's preview.
+fn saved_preview(home: &Path) -> ViewerTerminal {
+    let mut saved = Terminal::new(80, 24).unwrap();
+    saved.write(b"\x1b[?1049h");
+    saved.write(MODES);
+    saved.write(b"\x1b]4;1;rgb:12/34/56\x1b\\\x1b]10;rgb:ab/cd/ef\x1b\\\x1b[31msaved preview");
+    let screens = home.join("screens");
+    std::fs::create_dir_all(&screens).unwrap();
+    let mut bytes = format!("lf-terminal-snapshot/1 ghostty={REVISION}\n").into_bytes();
+    bytes.extend(saved.encode().unwrap());
+    std::fs::write(screens.join(format!("{SESSION}.ghostsnp")), bytes).unwrap();
+    ViewerTerminal::preview(Some(SESSION))
+        .unwrap()
+        .expect("the saved screen previews")
+}
+
+/// The owner's screen as its first snapshot paints it.
+fn live_screen(modes: &[u8]) -> Vec<u8> {
+    let mut live = Terminal::new(80, 24).unwrap();
+    live.write(modes);
+    super::terminal::repaint(&live).unwrap()
 }
 
 /// The pane reads connecting, and takes no keys, until its attachment is
@@ -316,6 +396,77 @@ fn stalled_owner(owner: &Owner) {
     std::mem::forget(viewer);
 }
 
+/// Interrupted while its attachment waits, a preview leaves the terminal as
+/// `lf`'s own interrupt does.
+fn interrupted_preview(owner: &Owner) {
+    let mut viewer = owner.accept();
+    assert!(matches!(
+        viewer.next_request(STEP),
+        Some(Request::Attach { .. })
+    ));
+    owner.inspect(b"saved preview");
+    std::fs::write(owner.home.join("interrupt"), "").unwrap();
+    // A closed socket would end the relay on its own; only the interrupt may.
+    std::mem::forget(viewer);
+}
+
+/// The owner's first snapshot replaces the preview; Ctrl+] then leaves, and
+/// nothing typed at the preview reaches the program.
+fn preview_handoff(owner: &Owner, modes: &[u8], directory: Option<PathBuf>) {
+    let mut viewer = owner.accept();
+    viewer.attached(true, true);
+    viewer.send(Tag::Snapshot, &live_screen(modes));
+    if let Some(cwd) = directory {
+        viewer.send(Tag::Out, &wire::event("nonce", 1, Event::Directory { cwd }));
+    }
+    viewer.send(Tag::Out, LIVE);
+    owner.inspect(LIVE);
+    owner.type_keys(&[0x1d]);
+    while let Some(request) = viewer.next_request(STEP) {
+        assert!(
+            matches!(request, Request::Leave | Request::Controlled { .. }),
+            "{request:?}"
+        );
+    }
+    assert!(viewer.input.is_empty(), "{:?}", viewer.input);
+}
+
+/// An owner that finished before the viewer acknowledged readiness still has
+/// its final output and exit status read.
+fn exit_before_readiness(owner: &Owner) {
+    let mut viewer = owner.accept();
+    viewer.attached(true, true);
+    viewer.send(Tag::Snapshot, &live_screen(b""));
+    viewer.socket.shutdown(Shutdown::Read).unwrap();
+    let mut output = wire::event(
+        "nonce",
+        1,
+        Event::Return {
+            detach: "native-client".into(),
+        },
+    );
+    output.extend_from_slice(b"provider finished\r\n");
+    output.extend(wire::event("nonce", 2, Event::ChildExited { code: 0 }));
+    viewer.send(Tag::Out, &output);
+}
+
+/// A line typed at the preview waits for the attachment, then reaches the
+/// program.
+fn typing_before_acknowledgement(owner: &Owner) {
+    let mut viewer = owner.accept();
+    assert!(matches!(
+        viewer.next_request(STEP),
+        Some(Request::Attach { .. })
+    ));
+    owner.type_keys(b"typed while opening\n");
+    // Give the relay a readable cooked line before acknowledging attach.
+    std::thread::sleep(Duration::from_millis(250));
+    viewer.attached_reply(true, true);
+    viewer.send(Tag::Snapshot, &live_screen(b""));
+    viewer.read_input(b"typed while opening\n");
+    viewer.exit();
+}
+
 /// An owner's socket, as its viewer reaches it.
 struct Owner {
     listener: UnixListener,
@@ -333,7 +484,12 @@ impl Owner {
     }
 
     fn type_keys(&self, keys: &[u8]) {
-        type_keys(&self.home, keys);
+        ask(&self.home, "type", keys);
+    }
+
+    /// Has the parent read its screen once `marker` has reached it.
+    fn inspect(&self, marker: &[u8]) {
+        ask(&self.home, "inspect", marker);
     }
 }
 
@@ -396,17 +552,19 @@ impl Server {
     }
 
     fn type_keys(&self, keys: &[u8]) {
-        type_keys(&self.home, keys);
+        ask(&self.home, "type", keys);
     }
 }
 
-/// Has the parent type `keys` at the relay's terminal.
-fn type_keys(home: &std::path::Path, keys: &[u8]) {
-    let typed = home.join("typed");
-    std::fs::write(home.join("type.pending"), keys).unwrap();
-    std::fs::rename(home.join("type.pending"), home.join("type")).unwrap();
-    wait_until(|| typed.exists(), "the parent typed");
-    std::fs::remove_file(typed).unwrap();
+/// Asks the parent, which holds the relay's terminal, for `request` (`type`
+/// keys, `inspect` the screen) and waits until it is done.
+fn ask(home: &Path, request: &str, body: &[u8]) {
+    let pending = home.join(format!("{request}.pending"));
+    std::fs::write(&pending, body).unwrap();
+    std::fs::rename(&pending, home.join(request)).unwrap();
+    let done = home.join(format!("{request}.done"));
+    wait_until(|| done.exists(), request);
+    std::fs::remove_file(done).unwrap();
 }
 
 /// One connection from the relay, as its host sees it.
@@ -435,7 +593,10 @@ impl Peer {
             if left.is_zero() {
                 return None;
             }
-            self.socket.set_read_timeout(Some(left)).unwrap();
+            // macOS refuses socket options once the viewer has shut its end.
+            if self.socket.set_read_timeout(Some(left)).is_err() {
+                return None;
+            }
             let mut bytes = [0; 4096];
             match self.socket.read(&mut bytes) {
                 Ok(0) => return None,
@@ -599,13 +760,64 @@ impl Drop for RelayProcess {
 
 /// What a relay case left behind.
 struct Relayed {
+    home: tempfile::TempDir,
     /// The relay's error, empty when it returned normally.
     error: String,
     screen: String,
     stderr: String,
+    /// The screen each time the child asked, then once the relay exited.
+    readings: Vec<Reading>,
+    last: Reading,
+    /// Whether the parent interrupted the relay, as Ctrl+C or a closing host
+    /// terminal would.
+    interrupted: bool,
+    /// Whether the terminal reads lines and echoes them again.
+    cooked: bool,
 }
 
-/// Runs `case` in a relay child on a PTY, typing what it asks for.
+/// The parent's terminal, as a person would see it.
+#[derive(Debug)]
+struct Reading {
+    alternate: bool,
+    text: String,
+    cursor: (u16, u16),
+    /// The color of the first cell.
+    foreground: [u8; 3],
+    /// What the terminal answers when asked for paste, cursor-key and
+    /// keyboard modes.
+    modes: Vec<u8>,
+    /// Whether newly written text, colored or not, takes the terminal's own
+    /// theme rather than one an earlier program set.
+    themed: bool,
+}
+
+impl Reading {
+    fn read(display: &mut Terminal) -> Self {
+        let alternate = display.alternate_screen();
+        let text = display.text().unwrap();
+        let cursor = display.cursor();
+        let foreground = display.foreground(0, 0);
+        let modes = mode_replies(display);
+        display.write(b"\x1b[H\x1b[31mX\x1b[0mY");
+        let themed = display.foreground(0, 0) == THEME && display.foreground(1, 0) == THEME;
+        Self {
+            alternate,
+            text,
+            cursor,
+            foreground,
+            modes,
+            themed,
+        }
+    }
+}
+
+fn mode_replies(terminal: &mut Terminal) -> Vec<u8> {
+    terminal.take_replies();
+    terminal.write(b"\x1b[?2004$p\x1b[?1$p\x1b[?u");
+    terminal.take_replies()
+}
+
+/// Runs `case` in a relay child on a PTY, acting on what it asks for.
 fn relay_case(case: &str) -> Relayed {
     let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
     let pane = home.path().join("pane");
@@ -643,27 +855,53 @@ fn relay_case(case: &str) -> Relayed {
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(Stdio::piped());
-    if !case.starts_with(OWNER) {
+    if !case.starts_with(OWNER) && !case.starts_with(PREVIEW) {
         command.env("LF_SERVER_STATUS", pane.join("status.sock"));
     }
     let mut child = RelayProcess(command.spawn().unwrap());
     drop(slave);
+    let mut display = Terminal::new(80, 24).unwrap();
+    display.set_theme(THEME);
+    display.write(b"shell prompt> ");
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut output = Vec::new();
+    let mut readings = Vec::new();
+    let mut inspecting: Option<Vec<u8>> = None;
+    let mut interrupted = false;
+    let request = |name: &str| {
+        let path = home.path().join(name);
+        let body = std::fs::read(&path).ok()?;
+        std::fs::remove_file(&path).unwrap();
+        Some(body)
+    };
+    let done = |name: &str| std::fs::write(home.path().join(format!("{name}.done")), "").unwrap();
     let status = loop {
         assert!(
             Instant::now() < deadline,
             "relay case {case} timed out: {}",
             String::from_utf8_lossy(&output)
         );
-        drain(&mut master, &mut output, 20);
-        let request = home.path().join("type");
-        if let Ok(keys) = std::fs::read(&request) {
-            std::fs::remove_file(&request).unwrap();
+        drain(&mut master, &mut output, &mut display, 20);
+        if let Some(keys) = request("type") {
             master.write_all(&keys).unwrap();
-            std::fs::write(home.path().join("typed"), "").unwrap();
+            done("type");
         }
-        if std::fs::remove_file(home.path().join("flood")).is_ok() {
+        if inspecting.is_none() {
+            inspecting = request("inspect");
+        }
+        if let Some(marker) = &inspecting {
+            if output.windows(marker.len()).any(|w| w == marker.as_slice()) {
+                readings.push(Reading::read(&mut display));
+                inspecting = None;
+                done("inspect");
+            }
+        }
+        if request("interrupt").is_some() {
+            // SAFETY: the live child this case started.
+            unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) };
+            interrupted = true;
+        }
+        if request("flood").is_some() {
             // More input than any socket buffers, typed until the relay's
             // terminal goes away.
             let mut flood = master.try_clone().unwrap();
@@ -684,7 +922,8 @@ fn relay_case(case: &str) -> Relayed {
         .unwrap()
         .read_to_string(&mut stderr)
         .unwrap();
-    drain(&mut master, &mut output, 0);
+    // Drain what the relay wrote immediately before it exited.
+    while drain(&mut master, &mut output, &mut display, 0) {}
     let mut diagnostics = stderr.clone();
     // A terminal relay records its diagnostics, panics included, in logs/.
     for log in std::fs::read_dir(home.path().join("logs"))
@@ -694,16 +933,32 @@ fn relay_case(case: &str) -> Relayed {
         diagnostics += &std::fs::read_to_string(log.unwrap().path()).unwrap_or_default();
     }
     let screen = String::from_utf8_lossy(&output).into_owned();
-    assert!(
-        status.success(),
+    assert_eq!(
+        status.code(),
+        Some(if interrupted { 130 } else { 0 }),
         "relay case {case}: {diagnostics}\n{screen}"
     );
-    let error = std::fs::read_to_string(home.path().join("relayed"))
-        .unwrap_or_else(|_| panic!("relay case {case} did not run: {diagnostics}"));
+    let error = if interrupted {
+        String::new()
+    } else {
+        std::fs::read_to_string(home.path().join("relayed"))
+            .unwrap_or_else(|_| panic!("relay case {case} did not run: {diagnostics}"))
+    };
+    // SAFETY: tcgetattr writes a termios for this live PTY; both ends share it.
+    let attrs = unsafe {
+        let mut attrs = std::mem::zeroed::<libc::termios>();
+        assert_eq!(libc::tcgetattr(master.as_raw_fd(), &mut attrs), 0);
+        attrs
+    };
     Relayed {
+        home,
         error,
         screen,
         stderr,
+        readings,
+        last: Reading::read(&mut display),
+        interrupted,
+        cooked: attrs.c_lflag & libc::ICANON != 0 && attrs.c_lflag & libc::ECHO != 0,
     }
 }
 
@@ -718,19 +973,64 @@ fn relays(case: &str) -> Relayed {
     relayed
 }
 
-fn drain(master: &mut std::fs::File, output: &mut Vec<u8>, timeout_ms: i32) {
+/// Reads what the relay wrote within `timeout_ms`; false when nothing came.
+fn drain(
+    master: &mut std::fs::File,
+    output: &mut Vec<u8>,
+    display: &mut Terminal,
+    timeout_ms: i32,
+) -> bool {
     let mut fd = libc::pollfd {
         fd: master.as_raw_fd(),
         events: libc::POLLIN,
         revents: 0,
     };
     // SAFETY: poll receives one live descriptor.
-    if unsafe { libc::poll(&mut fd, 1, timeout_ms) } > 0 {
-        let mut bytes = [0; 16384];
-        if let Ok(n) = master.read(&mut bytes) {
-            output.extend_from_slice(&bytes[..n]);
-        }
+    if unsafe { libc::poll(&mut fd, 1, timeout_ms) } <= 0 {
+        return false;
     }
+    let mut bytes = [0; 16384];
+    match master.read(&mut bytes) {
+        Ok(n @ 1..) => {
+            output.extend_from_slice(&bytes[..n]);
+            display.write(&bytes[..n]);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A preview leaves the terminal as it found it: primary screen, its own
+/// modes and colors, cooked input.
+fn assert_restored(relayed: &Relayed) {
+    let last = &relayed.last;
+    assert!(!last.alternate, "{last:?}");
+    assert_eq!(
+        last.modes,
+        mode_replies(&mut Terminal::new(80, 24).unwrap())
+    );
+    assert!(last.themed, "{last:?}");
+    assert!(relayed.cooked, "the terminal stayed raw");
+    assert!(
+        relayed.screen.contains("saved preview"),
+        "{}",
+        relayed.screen
+    );
+}
+
+/// The owner's screen replaced the preview: primary, blank and with the live
+/// screen's modes, in the terminal's own colors.
+fn assert_handed_off(relayed: &Relayed, modes: &[u8]) {
+    let [live] = relayed.readings.as_slice() else {
+        panic!("{:?}", relayed.readings);
+    };
+    assert!(!live.alternate, "{live:?}");
+    assert!(live.text.trim().is_empty(), "{live:?}");
+    assert_eq!(live.cursor, (0, 0));
+    let mut expected = Terminal::new(80, 24).unwrap();
+    expected.write(modes);
+    assert_eq!(live.modes, mode_replies(&mut expected));
+    assert!(live.themed, "{live:?}");
 }
 
 #[test]
@@ -796,4 +1096,78 @@ fn an_owner_that_stops_reading_input_ends_the_viewer_with_a_cause() {
     assert!(error.contains("stopped reading requests"), "{error}");
     assert!(error.contains("later input was not delivered"), "{error}");
     assert!(!error.contains("os error"), "{error}");
+}
+
+#[test]
+fn a_preview_restores_the_terminal_when_startup_fails() {
+    let relayed = relay_case("preview-startup-failure");
+    assert!(!relayed.error.is_empty());
+    assert_restored(&relayed);
+}
+
+#[test]
+fn interrupting_a_preview_before_acknowledgement_restores_the_terminal() {
+    let relayed = relay_case("preview-cancel");
+    assert!(relayed.interrupted);
+    let [shown] = relayed.readings.as_slice() else {
+        panic!("{:?}", relayed.readings);
+    };
+    assert!(
+        shown.alternate && shown.text.contains("saved preview"),
+        "{shown:?}"
+    );
+    assert_eq!(shown.foreground, [0x12, 0x34, 0x56]);
+    assert_restored(&relayed);
+}
+
+#[test]
+fn a_preview_hands_off_to_a_fresh_primary_screen() {
+    let relayed = relays("preview-blank");
+    assert_handed_off(&relayed, b"");
+    assert_restored(&relayed);
+}
+
+#[test]
+fn a_preview_hands_off_to_mode_only_live_state() {
+    let relayed = relays("preview-modes");
+    assert_handed_off(&relayed, MODES);
+    assert_restored(&relayed);
+}
+
+#[test]
+fn readiness_after_owner_exit_keeps_final_output_and_status() {
+    let relayed = relays("preview-completed");
+    assert!(
+        relayed.screen.contains("provider finished"),
+        "{}",
+        relayed.screen
+    );
+    assert_restored(&relayed);
+}
+
+/// Hosts read both the viewer's directory and its report; they must agree.
+#[test]
+fn viewer_taking_a_terminal_enters_the_execution_and_retires_its_report() {
+    let relayed = relays("preview-directory");
+    assert_handed_off(&relayed, b"");
+    let entered = std::fs::read_to_string(relayed.home.path().join("viewer-cwd")).unwrap();
+    assert_eq!(
+        Path::new(&entered),
+        relayed
+            .home
+            .path()
+            .join("execution")
+            .canonicalize()
+            .unwrap()
+    );
+    let output = relayed.screen.as_bytes();
+    assert!(output
+        .windows(CLEAR_DIRECTORY.len())
+        .any(|w| w == CLEAR_DIRECTORY));
+    assert_restored(&relayed);
+}
+
+#[test]
+fn a_preview_keeps_typing_until_initial_attachment_is_acknowledged() {
+    assert_restored(&relays("preview-startup-input"));
 }

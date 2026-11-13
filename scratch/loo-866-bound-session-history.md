@@ -149,8 +149,9 @@ a test that fails when it is removed:
 
 Not settled here: recording an input's end as one appended event would collapse
 the three `ended` sources, the per-input subqueries (Exclusions) and the
-finished-arm half of `windowed`. That is a store-model change beyond this Task;
-it belongs in its own Task if the gate run leaves 1d below 4×.
+finished-arm half of `windowed`. That is a store-model change beyond this Task.
+Open: whether to file it. The two runs disagree on 1d finished-included:
+gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 
 ## Exclusions
 
@@ -175,6 +176,8 @@ it belongs in its own Task if the gate run leaves 1d below 4×.
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
 - Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.
 - Compress after sync: no code cut; `session_turn_events` still serves the grouped turn lookup (EXPLAIN on the store copy), `session_capture_caller` still serves selector resolution.
+- Hosted CI on `cf1c165096`: green, with the Rust, Python and macOS suites
+  deferred while `scratch/` holds files; they run once submit clears it.
 - `check_migrations.py` — `history_window_indexes.sql` unmerged, additive.
 - `bench.sh` on a fresh `VACUUM INTO` copy (load avg 285–290): `same` all six windows (7053/7033/1912/1902/16370/19956 rows); best-of-5 too noisy at this load, so 7d and 1d finished-included were rerun interleaved (Done when).
 

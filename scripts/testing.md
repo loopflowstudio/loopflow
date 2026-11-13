@@ -18,14 +18,18 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
+Builtin Graph order or loop changes also include `test(world_recipes::)` in the
+gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
+recorded by real Task runs, including the pursuit that stops at demo.
+
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
 to regenerate and review snapshots for intended prompt changes before gate.
 
-After the final sync, rerun affected tests and `cargo clippy --all-targets -- -D warnings`
-when the Rust tree changed, even if Git merged cleanly. Main can add callers or
-fixtures for APIs this branch changes. A passing check from before the sync
-does not cover that combination; new fixtures can omit fields this branch adds.
+After the final sync, publish again when the Rust tree changed, even if Git
+merged cleanly. Main can add callers or fixtures for APIs this branch changes.
+A passing check from before the sync, local or hosted, does not cover that
+combination; new fixtures can omit fields this branch adds.
 
 CLI command or flag changes also run `cargo test -p loopflow --lib lf::tests::`.
 These parser and routing checks exercise canonical commands directly; navigation
@@ -103,7 +107,12 @@ uv run pytest python/tests/test_gate_bounded.py          # one Python file
 
 Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 
-## Gate: affected suites once per tree
+## Gate: a few named tests; CI runs the suites
+
+Gate publishes the candidate first ([CI.md](../.github/CI.md)) and CI's
+partitions run the suites. "Plan first" above is the map for naming the two to
+five tests that matter most. Run them here only for fast feedback on a review
+fix, to reproduce a CI failure, or for a risk no suite covers:
 
 ```bash
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'

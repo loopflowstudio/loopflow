@@ -48,7 +48,8 @@ see [setting precedence](config.md). Use `default_agent:` in either definition
 for a fallback: every applicable `agent:` choice wins before any fallback,
 then source, scope and target decide within each class. A step on a fallback
 moves through [`agents`](config.md#keep-going-when-a-provider-runs-out) when a
-usage limit refuses it; a step with `agent:` stays on its provider. Builtin skills recommend
+usage limit or unavailable model refuses it; a step with `agent:` stays on its
+provider and keeps its model when one is named. Builtin skills recommend
 no harness; the application's fallback applies when nothing else selects one.
 
 ```markdown
@@ -79,9 +80,11 @@ Mechanical steps ride along as commands:
 
 ```yaml
 # .lf/graphs/deliver.yaml (the builtin)
-- gate
+- gate                        # publish so CI starts, then review while it runs
 - cmd: land --wait-and-fix    # merge, repairing CI until it lands
 ```
+
+[What gate does and reports](ops.md#review-while-ci-runs).
 
 ## Loops and branches
 
@@ -91,11 +94,10 @@ Mechanical steps ride along as commands:
 - kickoff              # plan the change, risks answered
 - write-docs           # edit the actual user docs before implementation
 - implement
-- compress
+- concept-review
 - graph: refresh      # sync with main, then realign the plan
 - loop: implement     # loop-or-next decides: advance, iterate, or blocked
-- concept-review
-- loop: implement
+- compress
 - qa                  # use the change through its real path before anyone demos it
 - loop: implement
 - pr-publish

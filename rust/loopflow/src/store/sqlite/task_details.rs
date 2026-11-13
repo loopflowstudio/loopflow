@@ -141,7 +141,8 @@ fn task_set(conn: &Connection, sql: &str, ids: &str) -> StoreResult<HashSet<Task
         .map_err(StoreError::from)
 }
 
-fn states_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, TaskState>> {
+/// Each listed Task's state, in one statement; `ids` is a JSON array.
+pub(super) fn states_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, TaskState>> {
     let sql = format!(
         "SELECT t.id,{} FROM tasks t WHERE t.id IN (SELECT value FROM json_each(?1))",
         super::durable::task_state_sql("t")

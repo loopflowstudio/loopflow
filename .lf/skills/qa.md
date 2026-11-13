@@ -462,6 +462,23 @@ from `boundary_statements_never_scan_tables_that_grow_with_use` to JSON (a
 temporary line, reverted), then `EXPLAIN QUERY PLAN` and time each statement
 on the copy inside a rolled-back savepoint, before and after `ANALYZE`.
 
+Config loaded inside a write transaction: in a private home, replace
+`$LF_HOME/config.yaml` with a FIFO. At each open, before writing the file's
+contents, try `sqlite3 -cmd '.timeout 0' <db> 'BEGIN IMMEDIATE; ROLLBACK;'`;
+a failure means lf holds the write lock while it reads config. Stop the
+feeder with a flag file, not `kill`: a surviving feeder interleaves writes and
+leaves lf blocked on an open with no writer. In this shell `which lf` names a
+wrapper function; use `whence -p lf` for the installed binary.
+
+Read changes on a large private repository: `lf task create` takes seconds
+each, so create hundreds in parallel batches with `--request-id` (twelve at a
+time held up), claiming and completing some. For a "before" binary, run
+`--version` on sibling worktrees' `target/debug/lf` and pick a build that
+descends from the branch's base with no `store/migrations/` diff; it reads the
+same private store. Compare `jq -S` output of both binaries, then time them in
+interleaved rounds, since other worktrees' builds make the Machine's load swing.
+`lf server status` prints JSON without `--json`.
+
 ## Waking idle conversations
 
 Real turns need real logins: keep the account's `HOME` (Claude's Keychain login
@@ -607,3 +624,20 @@ earlier-build Desktop shell; its Task needs a checkout (`lf wt create` then
 `lf task create --worktree`). Running `open_argv` from
 `lf session resume --prepare --json` with `LF_SERVER_STATUS` set to any path
 takes the Desktop pane's relayed route.
+
+## Rented Machines without a provider
+
+Renting runs the provider bridge as `uv run … python -c <bridge> <provider> <op>`
+and reaches the sandbox with `ssh`, both from `PATH`. Stand-ins on a private
+`PATH` drive `lf machine ondemand rent`, `lf task move --machine` and
+`lf machine end` with no account or cloud: `uv` answers `create` with a unique
+`id` and an SSH `route` (`qa@sandbox<n>.invalid`), `get` with the sandbox or
+`null`, and `delete` with `null`; `ssh` takes its last argument as the remote
+command and runs it under a separate `HOME`/`LF_HOME` per sandbox, with the
+branch `lf` on that `PATH`. Exit 0 for the `install.sh` command and print
+`0\n0\n` for the `pgrep` holdings script. Each sandbox needs its own home: one
+Machine identity behind two rentals fails `rentals.machine_id`. Set any
+placeholder `DAYTONA_API_KEY` and an SSH key in the private `HOME`; stub
+`ssh-keygen -R`, which would edit the real `known_hosts`. To land a write between
+a preflight read and its transaction, serve a repository's `.lf/config.yaml`
+through a FIFO and act from another repository at the first open.

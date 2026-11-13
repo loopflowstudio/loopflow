@@ -61,7 +61,7 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 - interactive: design   # you take part; leaves scratch/<task>.md
 - implement             # leaves commits on the branch
 - audit
-- gate                  # leaves passing checks
+- gate                  # publishes the PR, reviews it while CI runs
 ```
 
 ```bash

@@ -417,15 +417,14 @@ fn one_task_waits_at_demo_after_writing_docs_and_pursuing() {
             (0, "kickoff"),
             (1, "write-docs"),
             (2, "implement"),
-            (3, "compress"),
+            (3, "concept-review"),
             (4, "sync"),
             (5, "realign"),
             (6, "loop-or-next"),
-            (7, "concept-review"),
-            (8, "loop-or-next"),
-            (9, "qa"),
-            (10, "loop-or-next"),
-            (11, "pr-publish"),
+            (7, "compress"),
+            (8, "qa"),
+            (9, "loop-or-next"),
+            (10, "pr-publish"),
         ]
     );
 }

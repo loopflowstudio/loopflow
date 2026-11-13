@@ -317,9 +317,9 @@ pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
     withdraw(issue, Withdrawal::Stop { process, note })
 }
 
-/// Withdraw the approval from inside the ship process when every attempt of its
-/// run failed with one error: restarting it would only repeat the failure. This
-/// is no person's stop, so a relaunch that reaches `end` may approve it again.
+/// Withdraw approval when a Task run stops on a provider refusal or repeated
+/// failure. This is no person's stop, so a relaunch that reaches `end` may
+/// approve it again. Returns false when it was not shipping.
 pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
     withdraw(issue, Withdrawal::Halt { cause })
 }

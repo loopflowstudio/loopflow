@@ -1127,7 +1127,7 @@ mod tests {
         for index in [
             "processes_cwd (cwd=?)",
             "processes_cwd (cwd>? AND cwd<?)",
-            "agent_process_session",
+            "processes_agent_session",
         ] {
             assert!(
                 plans.iter().any(|line| line.contains(index)),

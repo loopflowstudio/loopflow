@@ -29,7 +29,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 }
 
 /// The three ways to name a Task for a Graph: the Task entry, `--task`, and its
-/// worktree. All block in the foreground and reach the same checks.
+/// worktree. All block in the foreground; only the Task entry requires
+/// admission to start Task work.
 const LAUNCHES: [&[&str]; 3] = [
     &["-b", "task", "run", "INF-123", "proof"],
     &["-b", "--task", "INF-123", "graph", "proof"],
@@ -37,7 +38,7 @@ const LAUNCHES: [&[&str]; 3] = [
 ];
 
 #[test]
-fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
+fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
     for condition in [
         "valid",
         "invalid",
@@ -127,16 +128,32 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "removed" => "deleted",
                 _ => "planning",
             };
-            for launch in LAUNCHES {
+            for (launched, launch) in LAUNCHES.iter().enumerate() {
                 let output = run(launch);
-                assert!(!output.status.success(), "{condition} admitted {launch:?}");
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                let graphs = support::recorded_graphs(home.path());
+                if launched == 0 {
+                    assert!(!output.status.success(), "{condition} admitted {launch:?}");
+                    assert!(error.contains(expected), "{condition} {launch:?}: {error}");
+                    assert!(graphs.is_empty(), "{condition} started Task work");
+                } else {
+                    // The Graph starts even when its `task sync --plan` command
+                    // cannot use the retained planning input.
+                    assert_eq!(graphs.len(), launched, "{condition} {launch:?}: {error}");
+                    let (outcome, steps) = graphs.last().unwrap();
+                    assert_eq!(steps.len(), 1, "{condition} {launch:?}: {error}");
+                    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+                    assert_eq!(
+                        outcome.as_deref(),
+                        Some(if output.status.success() {
+                            "succeeded"
+                        } else {
+                            "failed"
+                        }),
+                        "{condition} {launch:?}: {error}"
+                    );
+                }
             }
-            assert!(
-                support::recorded_graphs(home.path()).is_empty(),
-                "{condition} launched a Graph"
-            );
             continue;
         }
         // Each launch has finished when its command returns, and is its own
@@ -1869,6 +1886,11 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
         rusqlite::params![waiting, recorded],
     )
     .unwrap();
+    // Convert the ordinary failure into a capacity wait. A real wait retains
+    // the end-to-end Graph's approval; the repeated failure above withdrew it.
+    if graph == "held" {
+        db.execute("UPDATE tasks SET shipped_at=1", []).unwrap();
+    }
     // A failed ship waits before restarting; that wait has passed too.
     db.execute(
         "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
@@ -1973,7 +1995,7 @@ sys.exit(code)
     let output = command(
         task.repo.path(),
         task.home.path(),
-        &["task", "run", "INF-123", "held-review"],
+        &["-b", "task", "run", "INF-123", "held-review"],
     )
     .env("LF_BIN", &lf)
     .output()
@@ -1982,24 +2004,40 @@ sys.exit(code)
     assert!(!ran.success(), "{}", ran.text);
     assert!(
         ran.text.contains(
-            "stopped on a usage limit at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
+            "stopped after a provider refusal at graph show late: codex_error: You've hit your usage limit. there is no `agents` list; `lf task run INF-123` starts the run again at it"
         ),
         "{}",
         ran.text
     );
     assert!(!ran.text.contains("starting it again"), "{}", ran.text);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let graphs: i64 = db
-        .query_row("SELECT COUNT(*) FROM graph_processes", [], |row| row.get(0))
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    // `-b` approved Auto-Ship; a ship restart would only meet the same refusal.
+    let shipped_at: Option<i64> = db
+        .query_row("SELECT shipped_at FROM tasks", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(graphs, 1);
-    let status = task.text_status();
-    assert!(status.contains("stopped on a usage limit"), "{status}");
-    assert!(status.contains("there is no `agents` list"), "{status}");
-    assert!(
-        status.contains("`lf task run INF-123` starts the run again at it"),
-        "{status}"
-    );
+    assert!(shipped_at.is_none());
+    // Cross ship's retry deadline so reads would restart an approval left behind.
+    db.execute(
+        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        [],
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let status = task.text_status();
+        assert!(!status.contains("Ship failed"), "{status}");
+        assert!(!status.contains("Auto-Ship approved"), "{status}");
+        assert!(
+            status.contains("stopped after a provider refusal"),
+            "{status}"
+        );
+        assert!(status.contains("there is no `agents` list"), "{status}");
+        assert!(
+            status.contains("`lf task run INF-123` starts the run again at it"),
+            "{status}"
+        );
+    }
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 
     // Once capacity is available, a manual run picks up the refused step.
     fs::write(

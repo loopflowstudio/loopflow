@@ -4,7 +4,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::durable::{MachineId, TaskId, TaskOwnership};
+use crate::durable::{MachineId, TaskId};
 use crate::rental::{
     self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Rental, RentalId,
     RentalState, Usd,
@@ -142,41 +142,6 @@ fn rental_in(conn: &Connection, id: &RentalId) -> StoreResult<Rental> {
     .ok_or(StoreError::NotFound)?
 }
 
-/// Unfinished Tasks whose current owner is this Machine, each with the
-/// ownership that says so.
-pub(super) fn tasks_held_in(
-    conn: &Connection,
-    machine: &MachineId,
-) -> StoreResult<Vec<(TaskId, TaskOwnership)>> {
-    let candidates = {
-        let mut statement = conn.prepare(
-            "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
-             WHERE o.machine_id=?1 AND t.planning_completed=0 AND t.abandoned_at IS NULL
-             ORDER BY o.task_id",
-        )?;
-        let rows = statement.query_map([machine.as_str()], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    let mut held = Vec::new();
-    for task in candidates {
-        let task = TaskId::from_raw(task);
-        let ownership = super::task_ownership::ownership_in(conn, &task)?;
-        if ownership
-            .owner
-            .as_ref()
-            .and_then(|owner| owner.machine.id.as_ref())
-            == Some(machine)
-        {
-            held.push((task, ownership));
-        }
-    }
-    Ok(held)
-}
-
-fn task_ids(held: Vec<(TaskId, TaskOwnership)>) -> Vec<TaskId> {
-    held.into_iter().map(|(task, _)| task).collect()
-}
-
 impl SqliteStore {
     // -- Pools -------------------------------------------------------------
 
@@ -258,7 +223,10 @@ impl SqliteStore {
                     .ok_or(StoreError::NotFound)?;
                 Ok(PoolMachine {
                     ownership: ownership_in(&snapshot, &id)?,
-                    tasks: task_ids(tasks_held_in(&snapshot, &id)?),
+                    tasks: super::task_ownership::held_in(&snapshot, &id)?
+                        .into_iter()
+                        .map(|held| held.task)
+                        .collect(),
                     machine,
                 })
             })
@@ -354,15 +322,16 @@ impl SqliteStore {
     pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<(TaskId, i64)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        tasks_held_in(&snapshot, machine)?
+        super::task_ownership::held_in(&snapshot, machine)?
             .into_iter()
-            .map(|(task, ownership)| {
-                let since = ownership.since(machine).ok_or_else(|| {
+            .map(|held| {
+                let since = held.since.ok_or_else(|| {
                     StoreError::InvalidData(format!(
-                        "Task {task} is owned on {machine} with no log entry naming it"
+                        "Task {} is owned on {machine} with no log entry naming it",
+                        held.task
                     ))
                 })?;
-                Ok((task, since))
+                Ok((held.task, since))
             })
             .collect()
     }
@@ -542,19 +511,32 @@ impl SqliteStore {
         state: RentalState,
     ) -> StoreResult<(Rental, Vec<TaskId>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let ended = (!state.is_live()).then(now_unix);
-        tx.execute(
-            "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
-            params![id.as_str(), state.as_str(), ended],
-        )?;
-        let rental = rental_in(&tx, id)?;
-        let returned = match (&rental.machine_id, state.is_live()) {
-            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine)?,
-            _ => Vec::new(),
-        };
-        tx.commit()?;
-        Ok((rental, returned))
+        loop {
+            let planning = match (&rental_in(&conn, id)?.machine_id, state.is_live()) {
+                (Some(machine), false) => super::task_ownership::held_planning_in(&conn, machine)?,
+                _ => Default::default(),
+            };
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let ended = (!state.is_live()).then(now_unix);
+            tx.execute(
+                "UPDATE rentals SET state=?2,ended_at=COALESCE(ended_at,?3) WHERE id=?1",
+                params![id.as_str(), state.as_str(), ended],
+            )?;
+            let rental = rental_in(&tx, id)?;
+            let returned = match (&rental.machine_id, state.is_live()) {
+                (Some(machine), false) => {
+                    match super::task_ownership::hand_back_in(&tx, machine, &planning)? {
+                        Some(tasks) => tasks,
+                        // A claim arrived after preflight: roll back, read its
+                        // planning configuration outside the write lock, retry.
+                        None => continue,
+                    }
+                }
+                _ => Vec::new(),
+            };
+            tx.commit()?;
+            return Ok((rental, returned));
+        }
     }
 
     /// Reachable and added: the rental is running as this Machine.

@@ -1,81 +1,89 @@
 ---
 requires: code on branch
-produces: corrected code and docs, check results, and context for the PR
+produces: published candidate, review fixes, and readiness report by head
 action_style: procedural
 ---
-Make the branch ready to ship and easy to review.
+Start useful CI, then make the branch ready to ship and easy to review.
 
 Read `scratch/` (`scratch/<branch>.md` is this PR's design, `scratch/questions.md`
-holds open questions) and the repo's agent guide. Read Wave or Linear context
-only when the seed names the exact wave, Task or Project; never infer it.
+holds open questions) and the repo's agent guide. Read Wave or PM context only
+when the seed names the exact wave, Task or Project; never infer it.
 
-## Phase 1: Polish code
+## Workflow
 
-1. **Review the diff**, including uncommitted work, against the intended outcome
-   and the repo's style guides.
+1. **Prepare and start CI.** Read the diff summary, including uncommitted work,
+   and the working notes far enough to publish one coherent candidate. Resolve
+   the comparison from the working context; don't assume a base branch.
+   - Identify two to five tests for the riskiest or most-edited behavior,
+     including the design's automated acceptance check. Give one line of why
+     each matters. Prefer existing CI coverage; this is a review focus, not
+     another local matrix or a ledger of every test.
+   - Use the formatter's auto-fix where needed, commit open work with
+     `lf commit`, then `lf sync`. Follow any preparation the repository's agent
+     guide names to make a PR one CI actually tests. Retain needed plans,
+     findings, open decisions and check results before any cleanup.
+   - Run `lf pr publish`, creating a ready PR if none exists. Start CI before
+     detailed review or a local build/lint/test cycle. Don't use `lf pr submit`,
+     `lf pr arm` or `lf land` to start CI; gate grants no merge approval.
 
-2. **Fix developer experience**: sensible defaults, obvious signatures, the same
-   word for the same concept, structure that matches the mental model. If three
-   functions take `(path, config, options)` and one takes `(config, path, opts)`,
-   fix it.
+2. **Confirm CI started for this head.** Compare the PR's `headRefOid` with
+   local `HEAD`, then read `lf pr checks` and the workflow/check details for
+   that SHA. Relevant suites must be queued, running or already completed.
+   A passing classifier or suites marked skipped don't show that tests ran;
+   don't trust the command's exit code alone. Fix the candidate/trigger cause
+   when possible, otherwise name the suites that never started.
+   - Without a remote, publishing access, `gh` or configured CI, say what is
+     unavailable, run the selected tests locally and report "no CI ran" when
+     that is known. If CI status can't be read, report it as unavailable.
+     Keep local results separate from hosted results; don't claim publication
+     when it failed.
 
-3. **Fix user experience**: fast paths stay fast, errors are clear, nothing
-   fails silently. Slow is a bug. Exercise changed interactions through
-   automated UI tests or rendered snapshots; leave manual walkthroughs to demo.
+3. **Review while CI runs.** Follow the change through its callers, data and
+   failure paths. Fix concrete findings within the design:
+   - Security: authorization, secret exposure and data handling where touched.
+   - Correctness, failure handling and recovery, including partial completion.
+   - Ownership and interfaces: clear responsibility, sensible defaults, obvious
+     signatures, the same word for the same concept.
+   - User experience: fast paths stay fast; errors explain what failed rather
+     than silently losing work. Exercise changed interactions through headless
+     UI tests or rendered snapshots; leave subjective walkthroughs to demo.
+   - Maintainability: remove dead code, debug prints, resolved TODOs, unused
+     compatibility shims and comments that only restate code. Add the why where
+     it isn't obvious.
+   - Docs: reread affected README/module docs and public API docs, including
+     edits made during review. Examples and commands match the final behavior.
 
-4. **Tests and lints.** Run the affected suites, formatting and static analysis
-   once for the current tree, including the design's automated acceptance and
-   any before/after measurements.
-   - Plan from the diff first: changed paths, the suites they reach, and why.
-     Run that list, not the whole repository.
-   - Prefer the repo's changed-aware runner (test script, task runner, CI path
-     filter) over hand-picked commands, with result reuse for identical content
-     and plan when it offers it.
-   - A later pass reruns only suites whose inputs changed.
-   - Never run a whole package or workspace suite in place of focused ones. The
-     full matrix belongs to CI, except to reproduce a CI failure or when release
-     guidance requires it.
-   - One build at a time: never run two compilers, test runners or linters
-     against the same build directory at once. Tests first, then static analysis
-     on the same build.
-   - Leave slow integration binaries the change cannot reach to CI.
-   - Match formatting and lint commands to what CI enforces. Use auto-fix modes;
-     fix the rest by hand.
-   - Every check runs headless. For Desktop, build the app and run view and
-     interaction tests or offscreen snapshots; no manual clicks or permission
-     dialogs. If a check can't run here, use a headless equivalent or leave it
-     to CI and keep going. Never mark a deferred check passed.
-   - Record each command and result in one line, with any CI deferral.
+   CI is the primary test driver. Run a focused test locally only for fast
+   feedback on a fix, to reproduce a CI failure, or to diagnose a risk no suite
+   covers. Don't repeat unchanged passing work or run affected suites beside
+   CI just in case. Add coverage for missing behavior; determine whether each
+   failure is in the code or the test. Delete flaky tests rather than patching
+   them. Investigate required-check timeouts instead of hiding them with a
+   later green run.
 
-   Fix failures: decide whether the test or the code is broken. Add focused
-   tests for key behavior changes. Delete flaky tests rather than patching them.
-   A timeout on a required check gets investigated, not overridden by a later
-   green run: name what ran long and why before the branch ships.
+   One build at a time: never run compilers, test runners or linters against
+   the same build directory concurrently, including in background tool calls.
+   Match CI's formatting/static analysis. Checks run headless; use a headless
+   equivalent or defer unavailable checks to capable CI and say so. Never mark
+   a deferred check passed.
 
-5. **Clean up**: dead code, debug prints, resolved TODOs, backwards-compatibility
-   shims nothing needs, comments like `// TODO: remove this`.
-
-## Phase 2: Polish docs
-
-1. **Assess the results** against the accepted outcome. Note meaningful
-   before/after numbers and any CI deferral. Don't start a second verification
-   pass. For substantial UI work, name its production performance signal, and
-   propose one for the Wave when there is one.
-
-2. **PR context.** Keep the improvement people will notice, the checks that ran
-   and real limits in the plan or lasting docs. Delivery commands write PR copy
-   from their pr-message template, so gate doesn't. If copy was requested or
-   already exists, bring it up to date: `scratch/pr-title.txt`,
-   `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA), which
-   publishing reads before its first commit or push. Move anything worth
-   keeping out of added scratch files before they are cleared.
-
-3. **README and docs.** If user-facing behavior changed, the docs say so.
-   Examples work and commands are current: `README.md`, module READMEs,
-   docstrings on public APIs.
-
-4. **Inline comments** where the why isn't obvious. `# increment counter` above
-   `counter += 1` is noise.
+4. **Publish fixes and report by head.** Batch review fixes into one publish
+   per pass; each push can cancel the previous CI run. Commit, sync and repeat
+   the repository's candidate preparation, then `lf pr publish`. Confirm the
+   published SHA and relevant checks again. Don't push merely to rerun CI.
+   - Keep PR context current: what improves, substantive findings, meaningful
+     before/after measurements, check results and real limits. Delivery uses
+     its pr-message template; reconcile existing or requested copy rather than
+     writing a second report. Optional cached copy is `scratch/pr-title.txt`,
+     `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA), consumed
+     by publishing before its first commit or push.
+   - Report the selected tests with their reasons, fixes and unresolved work,
+     PR URL and published SHA. Tie every hosted and local result to its head;
+     distinguish passing, failing, pending, skipped and unavailable. An earlier
+     green head doesn't validate later edits or uncommitted changes.
+   - Don't wait for pending CI to finish. Hand off its state honestly;
+     `lf land --wait-and-fix` owns waiting and landing when the caller runs it.
+     Gate itself requests neither merge nor auto-merge.
 
 ## Scope
 

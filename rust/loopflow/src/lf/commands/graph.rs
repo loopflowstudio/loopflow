@@ -43,13 +43,8 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_graph(graph, repo)?;
-    if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async {
-            let store = open_graph_store().await?;
-            store.sqlite.require_task_launch(task)?;
-            Ok(())
-        })?;
-    }
+    // A named Graph runs here with the checkout's context; only `task run`
+    // advances the Task's Graph and requires admission to start Task work.
     print_pipeline_header(&graph.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
@@ -150,11 +145,11 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 
 /// A Task run that must stop rather than retry, including when shipping.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum TaskRunStopped {
+enum TaskRunStopped {
     #[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
     Repeated { run: String, cause: String },
     #[error(
-        "the run of {run} stopped on a usage limit at {step}: {cause}; `lf task run {issue}` starts the run again at it"
+        "the run of {run} stopped after a provider refusal at {step}: {cause}; `lf task run {issue}` starts the run again at it"
     )]
     Limit {
         issue: String,
@@ -165,15 +160,21 @@ pub(super) enum TaskRunStopped {
 }
 
 impl TaskRunStopped {
-    pub(super) fn cause(&self) -> &str {
-        match self {
+    fn stop(self, task: &Task, status: std::process::ExitStatus) -> Result<()> {
+        // Render before the detached run's log closes when its process exits.
+        eprintln!("{self}");
+        let cause = match &self {
             Self::Repeated { cause, .. } | Self::Limit { cause, .. } => cause,
-        }
+        };
+        // Both `task run` and `ship` end the approval at a terminal stop.
+        // With no approval, ship_halt does nothing and records no person's stop.
+        crate::ops::task::ship::ship_halt(&task.identifier, cause)?;
+        Err(anyhow::Error::new(exit_of(status)).context(self))
     }
 }
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
-/// retry failed Graphs unless a usage limit stopped them. Each attempt records
+/// retry failed Graphs unless a provider refusal stopped them. Each attempt records
 /// its own GraphProcess beneath this process. A Graph held for a person or a
 /// watcher, an interrupted one, and a launch refused before any Graph started
 /// are returned as they ended. Once someone interrupts the Task, nothing is
@@ -273,22 +274,18 @@ pub fn run_task_graph_for(
                         step,
                         cause,
                     };
-                    eprintln!("{stop}");
-                    return Err(anyhow::Error::new(exit_of(status)).context(stop));
+                    return stop.stop(task, status);
                 }
             }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 if let Some(cause) = repeated {
-                    // Render it here: a detached run's log closes when this
-                    // process records its exit, before `main` prints errors.
                     let repeated = TaskRunStopped::Repeated {
                         run: run.to_string(),
                         cause,
                     };
-                    eprintln!("{repeated}");
-                    return Err(anyhow::Error::new(exit_of(status)).context(repeated));
+                    return repeated.stop(task, status);
                 }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }

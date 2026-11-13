@@ -186,15 +186,37 @@ While a write transaction is open, every other writer on the Machine waits:
 
 - Read first; open no write transaction when nothing changes.
 - Keep process spawns, network calls, file IO and large reads outside it.
+  Config counts: Git identity, placement YAML, Machine declarations and
+  planning connections load before `BEGIN` and pass in as values, even when
+  the code that uses them runs per Task inside the transaction.
 - Never hold one across an `await`, a request or a provider call.
 
 `store::query_plans` traces what a hot path executes on a fixture store, then
 plans each statement twice: unanalyzed, and with `sqlite_stat1` measured on a
-Machine at that size. A `SCAN` of a growing table fails the test; walking a
-partial index, which holds only its live subset, does not. A new hot path gets
-a test there (`server::boundary` uses the same helpers). Foreign keys count:
-deleting a parent row looks up its children, so a child column on a growing
-table needs an index.
+Machine at that size. A `SCAN` of a growing table fails the test, and so does
+a walk of a partial index on one that holds 1,000 or more rows in the measured
+statistics:
+
+```text
+analyzed: SCAN session_events USING INDEX session_observation_receipt (176447 rows measured)
+  in SELECT ... WHERE kind='observed' AND json_extract(payload,'$.evidence.provider_session_id')=?1
+```
+
+A partial index over a live subset (`processes_unfinished`, `open_sessions`)
+stays small because concurrency bounds it, so walking it passes. One over
+history grows with the table and gets an index on the filtered column like any
+other scan. Every partial index on a growing table needs a row in the measured
+statistics, or the test fails: fixture `ANALYZE` sees a handful of rows and
+would wave any walk through. When you add one, copy its `sqlite_stat1` row from
+a Machine store into `MEASURED` in `store/query_plans.rs`.
+
+A new hot path gets a test there (`server::boundary` uses the same helpers).
+Foreign-key checks never appear in `EXPLAIN QUERY PLAN`: deleting a parent row
+or changing its key looks up every child. The guard reads each foreign key from
+the schema and plans that lookup (`SELECT 1 FROM <child> WHERE <column> = ?`)
+under the same rules, so a child column on a growing table needs an index
+whatever its `ON DELETE` action. A partial `WHERE <column> IS NOT NULL` index
+serves it when the column is mostly NULL.
 
 The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
 PRAGMA optimize=0x10002` once when it starts and about once a day after, never

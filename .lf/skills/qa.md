@@ -71,7 +71,13 @@ Set `default_agent: codex` in its `.lf/config.yaml`. Create real records with
 `lf task create --title ... --json` and `lf session resume --prepare --json`;
 `--prepare` creates connection data without starting a provider. For an upgrade
 scenario, prepare a Session with the installed binary before opening the same
-state with the branch binary.
+state with the branch binary. `lf -b graph <name>` runs a command-only Graph
+(`- cmd: help`) in place with no server; run it in a checkout adopted by
+`lf task create --worktree <path>` to give that Task Graphs. A `cmd:` step must
+name a real `lf` command (`version` is not one). To keep a Graph live, give it
+a skill step run by a stand-in `claude` that `cat > /dev/null`: `-p` stream-json
+keeps stdin open, so the step runs until you kill the stand-in. macOS has no
+`setsid` command; detach with Python (`os.fork()`, `os.setsid()`, `os.execvp`).
 
 Run `lf server run` as a child with closed stdin; get its socket from
 `lf server status`. Use the current revision's newline JSON protocol in
@@ -451,7 +457,10 @@ delivery evidence is `lf session steers <id> --json`; a recovered gap shows as a
 `store-gap` row in `lf session history <id>`. Read the store with
 `sqlite3 "file:…/loopflow.db?immutable=1"` when it has no `-shm`.
 A private home that applied an earlier draft of the branch's migration refuses
-to open (checksum mismatch); move it aside and start a fresh one.
+to open (checksum mismatch), as does one that applied the branch's migration
+before a merge put main's newer migration ahead of it ("migration history or
+schema differs"). Start a fresh one, seeded by the installed `lf` when the
+upgrade path matters.
 
 Boundary query plans: copy the Machine's store with
 `sqlite3 -readonly ~/.lf/loopflow.db ".backup <copy>"`, compare

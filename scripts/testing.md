@@ -68,6 +68,10 @@ Session completion or attachment changes also run
 `test(session_record::capture_tests::)`: a headless continuation reopens its
 Session while retaining the saved provider thread and completes again on exit.
 
+Changes to Task/Graph membership or execution reads also include
+`test(performance_tests::)` in the gate's Rust filter. Its planning and status
+checks catch per-Task and per-Graph SQL growth beyond focused store tests.
+
 Store-wide schema or trigger changes also run `binary(two_people)` and
 `binary(transport_tests)`: shared planning exchanges and held-terminal lifetimes
 exercise writers beyond the changed store module.

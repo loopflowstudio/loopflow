@@ -74,7 +74,9 @@ replaced"; Linear ID pending sync). It drops only what the merged migration repl
 - Conflicts in `children.rs`, `task_ownership.rs`, `task_retirement.rs`:
   main's `RepoFacts` (`me`, `planning_connected`) kept, branch names
   (`move_claim`, `move_in`) kept; the retirement sweep's abandoned-checkout
-  arm joins `task_checkouts` inside main's `hosted` CTE.
+  arm reads `tasks INDEXED BY tasks_abandoned` (a partial index the migration
+  adds) cross-joined to `task_checkouts`, beside main's `hosted` CTE.
+- Compress after the sync: nothing left to cut in the merged files.
 - Main's `store/query_plans.rs` fixture now writes `task_checkouts`;
   `task_checkouts` joins `GROWING`, with stats from the measured 838 checkouts.
 - Main's `tasks_abandoned_checkout` index (`workload_indexes.sql`) indexes

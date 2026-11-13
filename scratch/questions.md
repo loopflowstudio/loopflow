@@ -143,6 +143,40 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   flag and inventory filter search its `session_id` index. Lib query_plans 6,
   server::boundary 13 passed.
 
+## Next implement direction (concept review, 2026-11-13)
+
+A Task's conversation moves only with its Task. Today `lf --machine mini
+resume <session>` on a Task's primary Session runs `moves::send` with
+`task: None`: the conversation and a pushed checkout go to mini while the
+ownership log, `task_checkouts`, Graph and Auto-Ship stay here, and
+`lf resume --task X` follows the Session marker (`work_route.rs`
+`moved_task_conversation`, `task_conversation_moved_to`). That is a second
+answer to "where does this Task run", and the brief's first line wants one.
+Counterexample it allows: Auto-Ship restarts the ship process here while the
+conversation commits to the same branch on mini. Behavior from #1720
+(`resume_task_follows_a_task_session_moved_alone`), built before LOO-863's
+Task move existed.
+
+- `moves::send` on a Session that is a Task's conversation (primary or
+  bound to the Task) runs the Task move (`send_task`) instead; the result
+  and notice are the Task move's (`lf resume --task X`).
+- `resume --task X` routes by the ownership log and `task_moves` only;
+  delete `moved_task_conversation`, `task_conversation_moved_to`, and the
+  `leave` retry branch that reads it (the retry reads the sent `task_moves`
+  payload, which already holds the conversation).
+- `agent_sessions.moved_to_machine_id` stays as a Session fact: the sender's
+  record of where a Task-less conversation went, and the ended mark on a
+  Task conversation that left with its Task.
+- Replace `resume_task_follows_a_task_session_moved_alone` with a test that
+  resuming a Task's Session on mini moves the Task (status on both Machines
+  names mini; `task_moves` shows `sent`/`arrived`).
+
+Not moves, so they stay outside `task_moves` (the brief listed them):
+`session_moves` is the agent-switch queue `lf session move -a` leaves for a
+busy Session's Stop hook; `relocated_task_processes` freezes Process
+membership when a repository's path changes on one Machine
+(`relocate_repository`). Neither crosses Machines.
+
 ## Remaining
 
 Every Machine-local column the brief names (`worktree`, `branch`,
@@ -152,20 +186,11 @@ reader left outside the pre-`task_checkouts` fallbacks in
 `read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
 remaining mentions are pre-migration fixtures.
 
-1. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
-   history, so the receipt is what keeps their membership. Folding needs a
-   path-history column on `task_checkouts`; open whether that is worth it.
-2. Swift does not decode `person_id` (Codable ignores it); add it where the
+1. Swift does not decode `person_id` (Codable ignores it); add it where the
    app shows owners.
 
 ## Open questions (each reversible; the simpler option is built)
 
-- **What the move record replaces.** `session_moves` is the queue
-  `lf session move -a` leaves for a busy Session's Stop hook (another agent, not
-  another Machine) and stays. `agent_sessions.moved_to_machine_id` also marks
-  Session-only moves (`lf --machine M resume <session>`), which `task_moves`
-  (keyed by Task) can't hold, so it stays for now. Does a Session-only move get
-  its own record, or does the marker stay?
 - **Parallel stalls.** Whether the stalls of those three groups under the
   default thread count predate this branch is unchecked; gate's nextest run
   answers it.

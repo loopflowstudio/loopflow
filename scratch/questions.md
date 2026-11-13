@@ -354,13 +354,21 @@ which names mini from the claim on.
 - Compress: `runs_here` replaced `selects_current_machine` +
   `delivers_sent_move`, opening the store once.
 
+## Next implement direction (concept review, 2026-11-13)
+
+machines.md states the rule: running the same move again, from any Machine,
+asks the Machine the Task left. The Machine holding the in-flight move is the
+one that can carry it on, whatever its stage. `runs_here` matching only
+`MoveStage::Sent` breaks that rule for a `leaving` move: `lf --machine mini task
+move X --machine mini` from the laptop while X is still leaving reaches mini and
+refuses with "did not send it". Drop the stage match: any `task_move_in_flight`
+to the target runs here (leaving carries on; sent redelivers). machines.md's
+sentence becomes "a move the laptop began runs on the laptop". Test: the
+leaving case beside
+`machine_commands::a_sent_move_forwarded_to_its_target_delivers_what_was_sent`.
+
 ## Open questions (each reversible; the simpler option is built)
 
-- **Forwarded retry of a leaving move.** Only a `sent` move runs locally when
-  forwarded; a forwarded retry of a move still `leaving` on the laptop still
-  reaches mini and refuses with "did not send it". Running any in-flight move
-  locally (drop the stage match in `runs_here`) would also cover it;
-  kept to `sent` as directed.
 - **Mini's ownership log.** After a move, mini's `lf task status` log does
   not show the laptop's earlier claim (QA, cosmetic); the log only holds
   entries that reached mini.

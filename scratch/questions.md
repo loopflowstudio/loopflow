@@ -37,8 +37,11 @@ remaining in-write config load is `hand_back_in`'s fallback, listed above.
 `owners_in` now calls `machine_names_in` (7cde745b90), so the
 declarations-to-names mapping lives once. `cargo test -p loopflow --lib
 store::sqlite::task_ownership:: store::sqlite::selections::`: 29 of 29 pass.
-The gate below ran at e282904291, before that commit; clippy has not run over
-it yet (CI `rust-lint` does at submit).
+The gate below ran at e282904291, before that commit.
+
+## Gate rerun (2026-11-13, HEAD 9518f3911a)
+
+- Only `task_ownership.rs` changed since e282904291 (−4 lines). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`: pass. Focused tests above cover the change; earlier suites keep their result.
 
 ## Gate (2026-11-13, HEAD e282904291, base 87f0e3c60a = origin/main)
 

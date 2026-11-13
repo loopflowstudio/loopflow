@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::durable::{MachineId, OwnershipEntryId, TaskId};
 use crate::store::rows::now_unix;
-use crate::store::StoreResult;
+use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
@@ -45,31 +45,19 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record `payload` as sent to `to`. A Task has at most one move in
-    /// flight: the leaving or unarrived one turns into this one, keeping when
-    /// it began unless it was to another Machine.
-    pub(crate) fn record_move_sent(
-        &self,
-        task: &TaskId,
-        from: &MachineId,
-        to: &MachineId,
-        payload: &str,
-    ) -> StoreResult<()> {
+    /// The leaving move was sent as `payload`. It stays one move, as old as
+    /// when it began; a repeat of a sent move returns its payload instead.
+    pub(crate) fn record_move_sent(&self, task: &TaskId, payload: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let now = now_unix();
         let updated = conn.execute(
-            "UPDATE task_moves SET state='sent',from_machine_id=?2,to_machine_id=?3,
-                 at=CASE WHEN to_machine_id=?3 THEN at ELSE ?4 END,
-                 claim_id=NULL,stopped=NULL,payload=?5
-             WHERE task_id=?1 AND state IN ('leaving','sent')",
-            params![task.as_str(), from.as_str(), to.as_str(), now, payload],
+            "UPDATE task_moves SET state='sent',claim_id=NULL,stopped=NULL,payload=?2
+             WHERE task_id=?1 AND state='leaving'",
+            params![task.as_str(), payload],
         )?;
         if updated == 0 {
-            conn.execute(
-                "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,payload)
-                 VALUES(?1,?2,?3,'sent',?4,?5)",
-                params![task.as_str(), from.as_str(), to.as_str(), now, payload],
-            )?;
+            return Err(StoreError::InvalidData(format!(
+                "Task {task} has no move leaving"
+            )));
         }
         Ok(())
     }
@@ -179,8 +167,7 @@ mod tests {
         let (laptop, mini) = (store.local_machine().unwrap().id, MachineId::new());
         assert_eq!(store.task_move_in_flight(&task).unwrap(), None);
 
-        // Leaving, then sent, then sent again: still one move, as old as
-        // when it began.
+        // Leaving, then sent: still one move, as old as when it began.
         store.begin_task_move(&task, &mini).unwrap();
         let began = 1_000;
         store
@@ -189,19 +176,14 @@ mod tests {
             .unwrap()
             .execute("UPDATE task_moves SET at=?1", [began])
             .unwrap();
-        store
-            .record_move_sent(&task, &laptop, &mini, "{\"first\":1}")
-            .unwrap();
-        store
-            .record_move_sent(&task, &laptop, &mini, "{\"again\":2}")
-            .unwrap();
+        store.record_move_sent(&task, "{\"first\":1}").unwrap();
         let sent = store.task_move_in_flight(&task).unwrap().unwrap();
         assert_eq!(sent.to_machine_id, mini);
         assert_eq!(sent.at, began);
         assert_eq!(
             sent.stage,
             MoveStage::Sent {
-                payload: "{\"again\":2}".into()
+                payload: "{\"first\":1}".into()
             }
         );
 
@@ -223,7 +205,14 @@ mod tests {
         // then back here: nothing is in flight any more.
         let third = MachineId::new();
         store
-            .record_move_sent(&task, &laptop, &third, "{\"third\":3}")
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at,payload)
+                 VALUES(?1,?2,?3,'sent',1,'{}')",
+                [task.as_str(), laptop.as_str(), third.as_str()],
+            )
             .unwrap();
         assert!(!store.task_move_arrived_on(&task, &third).unwrap());
         store.record_move_arrived(&task, &third, &laptop).unwrap();

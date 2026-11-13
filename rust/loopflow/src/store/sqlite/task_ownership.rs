@@ -1389,7 +1389,7 @@ mod tests {
 
         // Sent, the move is no longer leaving.
         store.begin_task_move(&task, &mini).unwrap();
-        store.record_move_sent(&task, &laptop, &mini, "{}").unwrap();
+        store.record_move_sent(&task, "{}").unwrap();
         let sent = store.task_move_in_flight(&task).unwrap().unwrap();
         assert!(matches!(sent.stage, MoveStage::Sent { .. }));
     }

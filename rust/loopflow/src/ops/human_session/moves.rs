@@ -248,9 +248,8 @@ pub(crate) async fn send_task(
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
-    let from = store.sqlite.local_machine()?.id;
     let moved = Move {
-        from_machine_id: from.clone(),
+        from_machine_id: store.sqlite.local_machine()?.id,
         session,
         checkout,
         history,
@@ -265,7 +264,7 @@ pub(crate) async fn send_task(
     };
     store
         .sqlite
-        .record_move_sent(&task.id, &from, to, &serde_json::to_string(&moved)?)?;
+        .record_move_sent(&task.id, &serde_json::to_string(&moved)?)?;
     if let Some(session) = &conversation {
         store
             .sqlite

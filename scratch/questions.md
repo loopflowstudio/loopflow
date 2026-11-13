@@ -271,12 +271,13 @@ Closes the concept review's one gap (a kill between the claim and `sent` left
 ## One move, one status verb (concept review → implement, 2026-11-13)
 
 Built: status and the refusal print `Moving to mini since <move began>: not
-sent` or `…: sent, not arrived`, plus the retry line. `record_move_sent` turns
-the in-flight row into `sent` in place and keeps `at` (reset only when the
-target changes); with none it inserts. The stored state keeps `leaving`.
-Checks: lib `task_moves::` 1 passed (asserts `at` kept leaving→sent→sent),
-`task_ownership::` 13 passed; integration `machine_commands::` move tests 10
-passed; clippy clean.
+sent` or `…: sent, not arrived`, plus the retry line. The stored state keeps `leaving`.
+Compress: `record_move_sent(task, payload)` only turns the leaving row into
+`sent`, keeping `at`, and errors with none. The brief's insert fallback and
+target-change reset were unreachable: `send_task` always begins the move
+(`begin_task_move`) before sending, and a sent repeat returns early. Lib
+`task_moves::` + `task_ownership::` 14 passed; integration `machine_commands::`
+move tests 11 passed; clippy clean.
 
 ## Remaining
 

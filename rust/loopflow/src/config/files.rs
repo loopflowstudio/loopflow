@@ -1060,6 +1060,7 @@ mod tests {
 
     #[test]
     fn relocating_wave_preferences_preserves_conflicts_and_concurrent_edits() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let source = loopflow_test_support::TestRepo::new();
         let target = loopflow_test_support::TestRepo::new();
         let id = crate::id::WaveId::new();

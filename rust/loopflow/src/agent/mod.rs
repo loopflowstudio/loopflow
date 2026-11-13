@@ -204,9 +204,9 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
-    /// Agents a Graph step falls through to, in order, when every account
-    /// for `agent` is held back: the rest of a `default_agent` list. Empty
-    /// when the agent was an explicit choice.
+    /// Agents a Graph step moves to, in order, when a usage limit refuses
+    /// `agent`: the rest of the configured order (`default_agent`, then
+    /// `agents`). Empty when the agent was an explicit choice.
     pub fallback_agents: Vec<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
@@ -391,6 +391,15 @@ impl CapacityWait {
         let left = retry_at - crate::store::rows::now_unix();
         Duration::from_secs(left.clamp(1, CAPACITY_POLL_SECS) as u64)
     }
+
+    /// Every account for this rung is held back, so the step tries `next`.
+    /// Once waiting, each poll walks the order again without saying so: the
+    /// wait already did, and a move would replace it where status reads.
+    fn fall_through(&self, provider: &str, reason: &str, next: &str) {
+        if self.announced.is_none() {
+            _record_agent_move(provider, reason, next);
+        }
+    }
 }
 
 /// Status only: a store that cannot say so never stops the recovery.
@@ -425,6 +434,45 @@ fn _record_limit_recovery(provider: &str, reason: &str, retry_at: Option<i64>) {
             crate::config::agent_override().as_deref(),
         )
     });
+}
+
+/// The step left `provider` for the next agent in its order.
+fn _record_agent_move(provider: &str, reason: &str, next: &str) {
+    eprintln!("Continuing on {next}: {reason}");
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
+        None,
+    );
+}
+
+/// A usage limit refused the step and no agent it may use is left: the stop
+/// and what would let it move, where Task status and `lf task run` read it.
+fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried: &[String]) {
+    let advice = _limit_stop_advice(provider, launch, tried);
+    eprintln!("Stopped: {advice}");
+    _record_limit_recovery(
+        provider,
+        &format!("{reason}{}{advice}", crate::ops::task_execution::STOPPED),
+        None,
+    );
+}
+
+fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) -> String {
+    if !launch.fallback_agents.is_empty() {
+        return format!(
+            "Nothing is left in its order after {}; add another agent to `agents`",
+            tried.join(", ")
+        );
+    }
+    let another = if provider == "claude" {
+        "codex"
+    } else {
+        "claude"
+    };
+    format!(
+        "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
+    )
 }
 
 fn resolve_account_route_blocking(
@@ -1140,7 +1188,7 @@ fn _run_with_transient_retries(
     let mut rung = 0;
     // How the step stood when it began falling through; every rung starts
     // from here, and the wait at the top of the ladder returns to it.
-    let mut origin: Option<AgentConfig> = None;
+    let mut origin: Option<(usize, AgentConfig)> = None;
     let mut earliest_reset: Option<i64> = None;
     let mut attempt_config = launch.clone();
     let mut launched = false;
@@ -1152,21 +1200,61 @@ fn _run_with_transient_retries(
     loop {
         let provider = parse_agent(attempt_config.agent()?).0;
         let retry = launched || attempt_config.agent != launch.agent;
-        let (mut result, can_failover) = match run(&attempt_config, retry)? {
+        let (result, failure, can_failover) = match run(&attempt_config, retry)? {
             AgentAttempt::Finished {
-                result,
+                mut result,
                 can_failover,
-            } => (result, can_failover),
+            } => {
+                launched = true;
+                origin = None;
+                capacity = CapacityWait::default();
+                result.failure = if process.auto {
+                    result.failure.or_else(|| _classify_agent_failure(&result))
+                } else {
+                    None
+                };
+                // Pi and OpenCode own retries; resuming adds model-visible input.
+                if matches!(provider.as_str(), "opencode" | "pi") {
+                    return Ok(result);
+                }
+                let Some(failure) = result.failure else {
+                    return Ok(result);
+                };
+                attempt_config = launch.clone();
+                attempt_config.agent = Some(rungs[rung].clone());
+                // A route chooses again; an exact pin would hold the spent account.
+                if can_failover {
+                    attempt_config.provider_account_id = None;
+                }
+                let prompt = match failure {
+                    AgentFailure::AccountSubscriptionLimit => LIMIT_FAILOVER_PROMPT,
+                    AgentFailure::AccountCredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
+                    _ => RETRY_PROMPT,
+                };
+                if let Some(thread) = result.agent_session.clone().or(launch.resume_token.clone()) {
+                    attempt_config.resume_token = Some(thread);
+                    attempt_config.task_prompt = prompt.to_string();
+                    attempt_config.skill_invocation = None;
+                } else if matches!(
+                    failure,
+                    AgentFailure::AccountSubscriptionLimit
+                        | AgentFailure::AccountCredentialInvalidated
+                ) {
+                    attempt_config.task_prompt = _with_original_task(prompt, launch);
+                }
+                (result, failure, can_failover)
+            }
             AgentAttempt::AccountUnavailable(AccountUnavailable {
                 error,
                 retry_at: Some(retry_at),
             }) if process.wait_for_capacity => {
                 failovers = 0;
                 let reset = earliest_reset.map_or(retry_at, |at| at.min(retry_at));
-                let origin = origin.get_or_insert_with(|| attempt_config.clone());
+                let (origin_rung, origin) =
+                    origin.get_or_insert_with(|| (rung, attempt_config.clone()));
                 rung += 1;
                 if rung == rungs.len() {
-                    rung = 0;
+                    rung = *origin_rung;
                     earliest_reset = None;
                     wait(capacity.pause(&provider, &error, reset));
                     attempt_config = origin.clone();
@@ -1174,11 +1262,7 @@ fn _run_with_transient_retries(
                     earliest_reset = Some(reset);
                     let next = &rungs[rung];
                     tracing::warn!(error, agent = %next, "every account held back; falling through");
-                    _record_limit_recovery(
-                        &provider,
-                        &format!("{error}; continuing on {next}"),
-                        None,
-                    );
+                    capacity.fall_through(&provider, &error, next);
                     attempt_config = _climb(origin, next, process, launch);
                 }
                 continue;
@@ -1200,57 +1284,36 @@ fn _run_with_transient_retries(
                     error = unavailable.error,
                     "alternate provider account unavailable"
                 );
-                return Ok(result.clone());
+                // Keep the continuation without restoring a thread we gave up.
+                // Account exhaustion and a provider refusal take the same path.
+                (
+                    result.clone(),
+                    result.failure.expect("saved account failure is classified"),
+                    false,
+                )
             }
         };
-        launched = true;
-        origin = None;
-        let failure = if process.auto {
-            result.failure.or_else(|| _classify_agent_failure(&result))
-        } else {
-            None
-        };
-        result.failure = failure;
-        // Pi and OpenCode cannot be resumed without adding a new
-        // model-visible input. Preserve failure; only explicit input starts more work.
-        if matches!(provider.as_str(), "opencode" | "pi") {
-            return Ok(result);
-        }
-        let Some(failure) = failure else {
-            return Ok(result);
-        };
-        let thread = result.agent_session.clone().or(launch.resume_token.clone());
-        attempt_config = launch.clone();
-        attempt_config.agent = Some(rungs[rung].clone());
-        // A route chooses again: an exact pin would hold the step on an
-        // account that has since run out. The thread keeps its account when it can.
-        if can_failover {
-            attempt_config.provider_account_id = None;
-        }
         let delay = match failure {
             AgentFailure::AccountSubscriptionLimit | AgentFailure::AccountCredentialInvalidated => {
-                if !can_failover || failovers == MAX_ACCOUNT_FAILOVERS {
-                    return Ok(result);
-                }
-                failovers += 1;
-                account_failure = Some(result.clone());
-                let prompt = if failure == AgentFailure::AccountSubscriptionLimit {
-                    LIMIT_FAILOVER_PROMPT
+                let reason = _failure_reason(&result, failure);
+                if can_failover && failovers < MAX_ACCOUNT_FAILOVERS {
+                    failovers += 1;
+                    account_failure = Some(result);
+                    _record_limit_recovery(&provider, &reason, None);
+                } else if failure == AgentFailure::AccountSubscriptionLimit {
+                    let Some(next) = rungs.get(rung + 1) else {
+                        _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
+                        return Ok(result);
+                    };
+                    rung += 1;
+                    failovers = 0;
+                    // An unavailable fallback still follows this refusal;
+                    // keep walking the order rather than losing the limit.
+                    account_failure = Some(result);
+                    _record_agent_move(&provider, &reason, next);
+                    attempt_config = _climb(&attempt_config, next, process, launch);
                 } else {
-                    CREDENTIAL_FAILOVER_PROMPT
-                };
-                _record_limit_recovery(&provider, &_failure_reason(&result, failure), None);
-                // The conversation moves with the step; a turn that never
-                // reached a thread still has its whole task to do.
-                match thread {
-                    Some(thread) => {
-                        attempt_config.resume_token = Some(thread);
-                        attempt_config.task_prompt = prompt.to_string();
-                        attempt_config.skill_invocation = None;
-                    }
-                    None => {
-                        attempt_config.task_prompt = _with_original_task(prompt, launch);
-                    }
+                    return Ok(result);
                 }
                 Duration::ZERO
             }
@@ -1260,11 +1323,6 @@ fn _run_with_transient_retries(
                 };
                 transient_failures += 1;
                 account_failure = None;
-                if let Some(thread) = thread {
-                    attempt_config.resume_token = Some(thread);
-                    attempt_config.task_prompt = RETRY_PROMPT.to_string();
-                    attempt_config.skill_invocation = None;
-                }
                 delay
             }
         };
@@ -1285,11 +1343,11 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
-/// The agents a Graph step tries in turn when every account for one is held
-/// back: its own, that harness's other models when it was named bare, then
-/// each `default_agent` fallback the same way. An explicit `harness:model`
-/// stays on its model; a replay of a recorded account and anything outside a
-/// Graph step never moves.
+/// The agents a Graph step tries in turn when a usage limit refuses one. With
+/// an order to move through (`default_agent`, then `agents`) it is that order
+/// as written, a bare harness on its configured model. With none, a bare
+/// harness tries its other models and an explicit `harness:model` stays put.
+/// A replay of a recorded account and anything outside a Graph step never moves.
 fn _fallthrough_rungs(
     launch: &AgentConfig,
     process: &ProcessConfig,
@@ -1298,27 +1356,22 @@ fn _fallthrough_rungs(
     if !process.wait_for_capacity || launch.provider_account_authority_home.is_some() {
         return Ok(vec![first]);
     }
+    let configured = |agent: &str| match (agent, &launch.claude_model) {
+        ("claude", Some(model)) => format!("claude:{model}"),
+        _ => agent.to_owned(),
+    };
+    let mut order: Vec<String> = std::iter::once(first.as_str())
+        .chain(launch.fallback_agents.iter().map(String::as_str))
+        .map(configured)
+        .collect();
+    // With no order to move through, a bare Claude tries its other models.
+    if launch.fallback_agents.is_empty() && first == "claude" {
+        order.extend(crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("claude:{model}")));
+    }
     let mut rungs: Vec<String> = Vec::new();
-    for agent in
-        std::iter::once(first.as_str()).chain(launch.fallback_agents.iter().map(String::as_str))
-    {
-        let (harness, model) = parse_agent(agent);
-        let models = (model.is_none() && harness == "claude")
-            .then(|| crate::config::CLAUDE_MODEL_RUNGS.map(|model| format!("{harness}:{model}")))
-            .into_iter()
-            .flatten();
-        let preferred = if harness == "claude" && model.is_none() {
-            launch
-                .claude_model
-                .as_ref()
-                .map(|model| format!("claude:{model}"))
-        } else {
-            None
-        };
-        for rung in std::iter::once(preferred.unwrap_or_else(|| agent.to_owned())).chain(models) {
-            if !rungs.contains(&rung) {
-                rungs.push(rung);
-            }
+    for rung in order {
+        if !rungs.contains(&rung) {
+            rungs.push(rung);
         }
     }
     Ok(rungs)
@@ -2831,9 +2884,133 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn exhausted_accounts_without_a_reset_move_to_the_next_agent() {
+        for (first, next, thread) in [
+            ("codex", "claude", None),
+            ("codex", "claude", Some("thread")),
+            ("claude:opus", "claude:sonnet", Some("thread")),
+        ] {
+            let launch = AgentConfig {
+                agent: Some(first.to_string()),
+                fallback_agents: vec![next.to_string()],
+                provider_account_id: Some(ProviderAccountId::parse("primary").unwrap()),
+                task_prompt: "implement the plan".to_string(),
+                ..Default::default()
+            };
+            let process = ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            };
+            let mut attempts = Vec::new();
+            let result = _run_with_transient_retries(
+                &launch,
+                &process,
+                &[],
+                |config, _| {
+                    attempts.push(config.clone());
+                    Ok(if attempts.len() == 1 {
+                        managed_attempt(AgentProcessResult {
+                            agent_session: thread.map(Into::into),
+                            ..failed_result("You've hit your usage limit")
+                        })
+                    } else if config.agent.as_deref() == Some(first) {
+                        AgentAttempt::AccountUnavailable(AccountUnavailable::terminal(
+                            "no eligible managed account",
+                        ))
+                    } else {
+                        done()
+                    })
+                },
+                |delay| assert_eq!(delay, Duration::ZERO),
+            )
+            .unwrap();
+
+            assert_eq!(result.exit_code, 0);
+            assert_eq!(attempts.len(), if thread.is_some() { 4 } else { 3 });
+            let continued = attempts.last().unwrap();
+            assert_eq!(continued.agent.as_deref(), Some(next));
+            assert_eq!(continued.provider_account_id, None);
+            assert_eq!(continued.resume_token, None);
+            assert!(continued.task_prompt.ends_with("implement the plan"));
+        }
+    }
+
+    #[test]
+    fn an_unavailable_fallback_keeps_walking_after_a_usage_refusal() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into(), "claude:sonnet".into()],
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.agent.as_deref().unwrap();
+                attempts.push(agent.to_owned());
+                Ok(match agent {
+                    "codex" => AgentAttempt::Finished {
+                        result: failed_result("You've hit your usage limit"),
+                        can_failover: false,
+                    },
+                    "claude:opus" => cooling(None),
+                    "claude:sonnet" => done(),
+                    _ => panic!("unexpected agent {agent}"),
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:sonnet"]);
+    }
+
+    #[test]
+    fn a_fallback_wait_keeps_its_place_in_the_order() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:opus".into()],
+            ..Default::default()
+        };
+        let refused = || AgentAttempt::Finished {
+            result: failed_result("You've hit your usage limit"),
+            can_failover: false,
+        };
+        let mut scripted = [
+            refused(),
+            cooling(Some(crate::store::rows::now_unix() + 3600)),
+            refused(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.agent.clone().unwrap());
+                Ok(scripted.next().expect("the last refusal stops the step"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        assert_eq!(attempts, ["codex", "claude:opus", "claude:opus"]);
+    }
+
+    #[test]
     fn nothing_that_will_free_up_ends_the_step_with_its_limit_failure() {
         let launch = AgentConfig {
-            agent: Some("claude".to_string()),
+            agent: Some("claude:opus".to_string()),
             ..Default::default()
         };
         // The thread is given up first in case only it stood in the way.
@@ -2845,7 +3022,10 @@ trust_level = "trusted"
         .into_iter();
         let result = _run_with_transient_retries(
             &launch,
-            &auto_process(),
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
             &[],
             |_, _| Ok(scripted.next().expect("scripted attempt")),
             |_| {},
@@ -3202,7 +3382,7 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn saved_claude_model_keeps_capacity_fallthrough_without_retrying_it_twice() {
+    fn an_order_is_tried_as_written_with_a_bare_entry_on_its_saved_model() {
         let launch = AgentConfig {
             agent: Some("claude".into()),
             claude_model: Some("opus".into()),
@@ -3230,15 +3410,138 @@ trust_level = "trusted"
         )
         .unwrap();
         assert_eq!(result.exit_code, 0);
-        assert_eq!(attempted.first().map(String::as_str), Some("claude:opus"));
+        // The list carries the model order; nothing is tried that it lacks.
+        assert_eq!(attempted, ["claude:opus", "codex"]);
+    }
+
+    #[test]
+    fn a_lone_bare_claude_tries_its_other_models() {
+        // `agents: [claude]` leaves nothing behind the first entry.
+        let launch = AgentConfig {
+            agent: Some("claude".into()),
+            claude_model: Some("fable".into()),
+            ..default_launch()
+        };
+        let mut attempted = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                let agent = config.resolved_agent().unwrap();
+                attempted.push(agent.clone());
+                Ok(if agent == "claude:haiku" {
+                    done()
+                } else {
+                    cooling(Some(crate::store::rows::now_unix() + 3600))
+                })
+            },
+            |_| panic!("Haiku still has capacity"),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
         assert_eq!(
-            attempted
-                .iter()
-                .filter(|agent| *agent == "claude:opus")
-                .count(),
-            1
+            attempted,
+            [
+                "claude:fable",
+                "claude:opus",
+                "claude:sonnet",
+                "claude:haiku"
+            ]
         );
-        assert!(attempted.contains(&"claude:sonnet".to_owned()));
-        assert_eq!(attempted.last().map(String::as_str), Some("codex"));
+    }
+
+    /// November 12: compress on Codex was refused at launch with no routed
+    /// account, and three Graph retries each relaunched the same agent.
+    #[test]
+    fn a_launch_refused_by_a_usage_limit_moves_to_the_next_agent() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            fallback_agents: vec!["claude:fable".into(), "claude:opus".into()],
+            task_prompt: "compress the diff".into(),
+            ..Default::default()
+        };
+        let refused = || AgentAttempt::Finished {
+            result: failed_result("codex_error: You've hit your usage limit"),
+            can_failover: false,
+        };
+        let mut scripted = vec![
+            refused(),
+            AgentAttempt::Finished {
+                result: limited_result(),
+                can_failover: false,
+            },
+            done(),
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(scripted.next().expect("scripted attempt"))
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        let agents: Vec<_> = attempts.iter().map(|c| c.agent.clone().unwrap()).collect();
+        assert_eq!(agents, ["codex", "claude:fable", "claude:opus"]);
+        // Another provider starts on the whole task; another model of the
+        // same provider keeps the thread.
+        assert!(attempts[1].task_prompt.ends_with("compress the diff"));
+        assert_eq!(attempts[1].resume_token, None);
+        assert_eq!(attempts[2].resume_token, Some("thread".into()));
+        assert_eq!(attempts[2].task_prompt, LIMIT_FAILOVER_PROMPT);
+    }
+
+    #[test]
+    fn a_pinned_agent_refused_at_launch_fails_with_its_limit() {
+        let launch = AgentConfig {
+            agent: Some("codex".into()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |_, _| {
+                attempts += 1;
+                Ok(AgentAttempt::Finished {
+                    result: failed_result("codex_error: You've hit your usage limit"),
+                    can_failover: false,
+                })
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_eq!(result.failure, Some(AgentFailure::AccountSubscriptionLimit));
+        // What it records names the way out; with an order, what was tried.
+        let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
+        assert_eq!(
+            advice,
+            "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents codex,claude`"
+        );
+        let ordered = AgentConfig {
+            fallback_agents: vec!["claude".into()],
+            ..launch
+        };
+        assert_eq!(
+            _limit_stop_advice("claude", &ordered, &["codex".into(), "claude".into()]),
+            "Nothing is left in its order after codex, claude; add another agent to `agents`"
+        );
     }
 }

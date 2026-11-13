@@ -239,7 +239,7 @@ that carry DTO values are not DTOs.
 docstring or none.
 
 **`*_test.py` / `test_*.py`:** short tests, one behavior each; assert on
-results, not mock calls; delete flaky tests rather than adding retries.
+results, not mock calls; no flaky tests (see Testing).
 
 **Typer CLI code:** lowercase short flags only; pass args through to the
 underlying tool; default to sensible behavior (whole repo as context).
@@ -372,6 +372,13 @@ lf debug -c    # paste an error, watch it fix
 Test what people would notice, not implementation details. A test that wouldn't
 fail when the feature breaks isn't worth keeping. Use a mix of smoke tests,
 edge cases at real boundaries, and tests of what users expect.
+
+No flaky tests. A test that fails and then passes with nothing changed is
+broken, whichever branch it shows up on: make it deterministic or delete it, in
+the change where it failed. Rerunning is never the fix, and neither is a retry,
+a longer timeout or a wider tolerance. Usual causes: reading state before the
+thing that writes it has finished, asserting an exact duration or timestamp,
+depending on test order, a shared port or path.
 
 Mock network, databases, file systems (when testing logic), subprocesses and
 slow operations. Don't mock to check internal wiring: assert on results, not on

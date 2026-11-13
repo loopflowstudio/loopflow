@@ -293,7 +293,9 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         for source in sources
         if source.bytes > source.budget_bytes
     )
-    issues.extend(measurement_issues)
+    # An unmeasured cache is unknown, not full: free disk above is the limit that
+    # stops verification.
+    warnings.extend(f"{issue.owner}: {issue.detail}" for issue in measurement_issues)
     issues.sort(key=lambda issue: issue.code)
     return ResourceSnapshot(
         filesystem=str(repo),

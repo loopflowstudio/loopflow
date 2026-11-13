@@ -24,15 +24,10 @@
 
 ## Checks
 
-- `cargo check -p loopflow --lib --tests`: clean, no warnings. `cargo fmt`: clean.
-- Focused lib tests (`store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}`):
-  binary built (15 min at load ~110), 22 tests selected, none finished in 5 min;
-  process sat in state `T`. Stopped by hand; gate runs them, plus clippy.
-- After `HeldTask` (6bd724d6ee): `cargo check -p loopflow --lib --tests` clean;
-  `cargo test --lib -- store::sqlite::rentals store::sqlite::task_ownership`
-  ran 3 of 16 (all ok) before the 30-minute limit stopped it. Gate runs the rest.
-
-- QA (2026-11-12): focused lib tests above, 22 of 22 passed (627 s, load ~155).
+- `cargo check -p loopflow --lib --tests` and `cargo fmt`: clean.
+- QA (2026-11-12, before the merge of 4b84a0dc9e): focused lib tests
+  (`store::sqlite::{task_ownership,rentals,linear_observation,planning_peers,task_comments}`),
+  22 of 22 passed (627 s, load ~155).
 
 ## Concept review (2026-11-12)
 
@@ -54,6 +49,5 @@ listed: `hand_back_in`'s fallback for a Task claimed after the pre-read.
   not run. Compiling the test binaries outlasted the 2 h limit (load 140–190,
   other checkouts compiling). No test started; CI's `rust-test` owns the result.
 - `cargo clippy --all-targets -- -D warnings`: not run (queued behind nextest); CI `rust-lint` owns it.
-- Before the merge of 4b84a0dc9e, QA ran the same lib modules: 22 of 22 passed.
 - PR #1909 CI (head 9054cb90f1): every proof job skipped. `ci.yml` runs them only once `scratch/` is clear, which happens at `lf pr submit`. Until then, nothing has checked the test binaries or clippy after the merge of 4b84a0dc9e.
-- Implement pass (2026-11-13): no code change; load 330, no local rerun.
+- Implement and compress passes (2026-11-13): no code change, no local rerun.

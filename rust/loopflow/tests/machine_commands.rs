@@ -2410,6 +2410,8 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     let name = plan.local.task(&task).unwrap().unwrap().identifier;
     let retry = format!("lf task move {name} --machine mini");
     assert!(stderr.contains(&retry), "{stderr}");
+    let take_back = format!("take back: lf task claim {name}");
+    assert!(stderr.contains(&take_back), "{stderr}");
 
     let status = fixture
         .command(&["task", "status", task.as_str()])
@@ -2421,6 +2423,7 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     assert!(status.contains("Moving to mini since"), "{status}");
     assert!(status.contains("sent, not arrived"), "{status}");
     assert!(status.contains(&format!("retry: {retry}")), "{status}");
+    assert!(status.contains(&take_back), "{status}");
     // The lists read the move the same way, not as a Task that runs on mini.
     for args in [&["task", "list"][..], &["machine", "list"][..]] {
         let listed = fixture

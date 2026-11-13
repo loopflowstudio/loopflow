@@ -332,6 +332,7 @@ it was leaving, or one whose answer was lost on the way back, shows in status:
 $ lf task status MTG-321
 MTG-321  Moving to mini since Nov 12 10:42: not sent
   retry: lf task move MTG-321 --machine mini
+  take back: lf task claim MTG-321
 ```
 
 Once sent, the stage after the colon reads `sent, not arrived`; `since` stays

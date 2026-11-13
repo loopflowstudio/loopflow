@@ -416,23 +416,12 @@ left both Machines running it.
 - Compress: `remote_ownership_writer` reads the registry once
   (`remote_task_in`). `machine_commands::claim` 2 passed; clippy clean.
 
-## Next: a stuck move names its way back (concept review, 2026-11-13)
+## A stuck move names its way back (fourteenth pass, 2026-11-13)
 
-The way out of a move whose target is gone is `lf task claim X` on the source
-(machines.md, twelfth/thirteenth passes), but no command output says so:
-`describe_move` (status, list refusal) and `session_move::retry_task` print only
-`retry: lf task move X --machine mini`, which fails again while mini is down.
-Implement: both print a second line under the retry,
-
-```console
-MTG-321  Moving to mini since Nov 12 10:42: sent, not arrived
-  retry: lf task move MTG-321 --machine mini
-  take back: lf task claim MTG-321
-```
-
-one string shared by `describe_move` and `retry_task`; machines.md's console
-block gains the line. Extend an existing `machine_commands::` move test's
-status assertion; no new test. Lists (`move_line`) stay one line.
+Status and a failed retry print `take back: lf task claim X` under the retry
+(`task_ownership::take_back`); lists stay one line.
+`machine_commands::a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it`
+and clippy pass; `documented_commands::` passes.
 
 ## Open questions (each reversible; the simpler option is built)
 

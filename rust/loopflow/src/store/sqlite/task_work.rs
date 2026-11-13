@@ -33,12 +33,16 @@ fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
 }
 
 fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
-    let current = checkout(&format!("{process}.cwd"));
     Ok(if has_relocations(conn)? {
-        format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
+        relocated_process_membership(process)
     } else {
-        current
+        checkout(&format!("{process}.cwd"))
     })
+}
+
+fn relocated_process_membership(process: &str) -> String {
+    let current = checkout(&format!("{process}.cwd"));
+    format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
 }
 
 pub(super) fn session_membership(session: &str) -> String {
@@ -517,21 +521,21 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
 
 /// Match unfinished Processes through checkout, Session history and attachments.
 /// Start from the small unfinished inventory and retain the attachment partial index.
-fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
+pub(super) fn task_open_process_ids(selector: &str, filter: &str) -> String {
     let session = session_membership("a");
-    Ok(format!(
-        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1),
-        open AS MATERIALIZED (SELECT id,cwd,agent_session_id,attached_lf_process_id FROM processes INDEXED BY processes_unfinished
-            WHERE completed_at IS NULL),
+    format!(
+        "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id={selector}),
+        open AS MATERIALIZED (SELECT p.id,p.cwd,p.agent_session_id,p.attached_lf_process_id FROM processes p INDEXED BY processes_unfinished
+            WHERE p.completed_at IS NULL AND ({filter})),
         sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
             UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
             UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
         SELECT open.id FROM open JOIN task_scope tw ON {}
-        UNION SELECT s.process FROM sessions s JOIN agent_sessions a ON a.id=s.session
+        UNION SELECT s.process FROM sessions s CROSS JOIN agent_sessions a ON a.id=s.session
             JOIN task_scope tw ON ({session})",
-        process_membership(conn, "open")?
-    ))
+        relocated_process_membership("open")
+    )
 }
 
 /// One of a Task's Graph processes with its inventory entry.
@@ -708,7 +712,7 @@ impl SqliteStore {
         let mut query = conn.prepare(&format!(
             "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
             super::processes::PROCESS_SELECT,
-            task_open_process_ids(&conn)?,
+            task_open_process_ids("?1", "1"),
         ))?;
         let processes = query
             .query_map([task.as_str()], super::processes::read_process)?
@@ -1814,7 +1818,7 @@ mod tests {
         // attachment lookup for unrelated completed providers.
         let cleanup_cost = || {
             let mut query = conn
-                .prepare(&super::task_open_process_ids(&conn).unwrap())
+                .prepare(&super::task_open_process_ids("?1", "1"))
                 .unwrap();
             let ids = query
                 .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))

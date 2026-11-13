@@ -145,7 +145,8 @@ record and never changes; the table stays append-only. Tasks are never deleted
   same Graphs as before on a migrated copy of a real store.
 - One Task's Graph reading is independent of how many Graphs other Tasks ran.
 - A Graph running when its checkout is adopted shows as the Task's execution
-  and blocks `lf task run` until it finishes, without joining the Task's Graphs.
+  and makes its derived state `moving`, and blocks `lf task run` until it
+  finishes, without joining the Task's Graphs.
 
 ## Checks
 
@@ -160,7 +161,23 @@ record and never changes; the table stays append-only. Tasks are never deleted
 
 Prior implementation gated, CI green on PR #1910 (2026-11-13). Adoption regression repaired: status and run selection inspect open Graph/step Processes in the Task's work, without changing Graph membership. A Graph whose owner exited still blocks overlap while its step runs. Earlier Graphs remain unattached.
 
-Remaining: gate owns the affected Task controls, task_graph_launch_tests, task_github_cache_tests, task_execution, waves and documented_commands suites plus clippy.
+Task-state iteration (2026-11-13): the shared derived state also checks open
+Graph/step Processes through the existing checkout/Session membership query.
+It reports `moving` (or approved `shipping`) until those Processes finish;
+done and abandoned still take precedence. The query filters to Graph owners
+and children before reading Session history, with indexed Session lookups.
+`EXPLAIN QUERY PLAN` on the live store (1,233 Tasks, 172,024 Processes, 2,396
+Graphs, 17,928 Sessions) uses `processes_unfinished` and point indexes for
+Graphs, Sessions and events; all Task states in one statement took 295 ms.
+Direct SQL probe: adoption → `moving`, owner exit with open step → `moving`,
+approval → `shipping`, both exited → `idle`; terminal marks take precedence
+and the Graph's `task_id` stays NULL. A 10,000-Task in-memory fixture returned
+the expected states in 1,344 ms, using the unfinished index and Graph/Session
+point lookups.
+- Implement Task-state check: the focused build was stopped at its 900-second budget with no result. Compress 2026-11-13 ran it: `cargo test -p loopflow --lib -- adopting_a_checkout_with_a_running_graph_prevents_another_run process_membership open_process task_state` — 6 pass (18 min build), including the adoption regression (snapshot and `task_detail_facts` both `moving`, then `idle`) and the open-process membership cost test.
+- Compress Task-state 2026-11-13: `task_state_sql` has one running branch (own run, ship process or open Graph/step in the Task's work); the Graph filter is one `graph_processes` probe, `lf_process_id IN (p.id,p.parent_lf_process_id)`. Live store, read-only: covering-index search per unfinished Process, 29 rows either form.
+
+Remaining: gate owns the affected Task controls, task_graph_launch_tests, task_github_cache_tests, task_execution, waves, shared Task-state readers and documented_commands suites plus clippy.
 
 - Implement iteration 2026-11-13: `cargo test -p loopflow --lib adopting_a_checkout_with_a_running_graph_prevents_another_run` — pass (1 test; real OS identity, unknown identity, owner exit with open step, both finished, unchanged Graph membership). `cargo fmt` and `git diff --check` pass. Linker emitted its large `__eh_frame` warning; no Rust warning.
 - Compress 2026-11-13: `select_task_run` checks the Task's own run first, so a Task already running keeps its "is running graph … `lf task interrupt`" message and only an unattached Graph gets the `lf history show` one. Same focused test — pass. Nothing else to cut.

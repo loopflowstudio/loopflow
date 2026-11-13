@@ -95,8 +95,8 @@ Session ID from its lf context block.
 A Graph belongs to the Task it was started for. Graphs that ran in an adopted
 checkout before the Task adopted it stay unattached; `lf task status` lists the
 Graphs launched for the Task from then on. While an earlier Graph still runs
-in that checkout, status reports its execution and `lf task run` starts no
-other Graph until it finishes.
+in that checkout, status shows the Task moving and reports its execution;
+`lf task run` starts no other Graph until it finishes.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries

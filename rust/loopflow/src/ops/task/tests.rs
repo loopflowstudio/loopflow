@@ -539,6 +539,16 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             ))
             .unwrap();
         assert_eq!(snapshot.execution.state, state);
+        assert_eq!(snapshot.status, TaskState::Moving);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_detail_facts(&[&fixture.task])
+                .unwrap()
+                .states[&fixture.task.id],
+            TaskState::Moving
+        );
         assert_eq!(
             snapshot.actions.recommended,
             Some(crate::ops::task_actions::TaskAction::NoAction)
@@ -573,16 +583,17 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE parent_lf_process_id=?1",
         [&graph],
     ).unwrap();
-    let execution = runtime
-        .block_on(crate::ops::task_execution::task_execution(
+    let snapshot = runtime
+        .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
-            &fixture.task,
+            fixture.task.clone(),
         ))
         .unwrap();
     assert_eq!(
-        execution.state,
+        snapshot.execution.state,
         crate::ops::task_execution::TaskExecutionState::Idle
     );
+    assert_eq!(snapshot.status, TaskState::Idle);
     assert!(
         super::select_task_run(&fixture.store, &fixture.task, adopted.path(), None, None).is_ok()
     );

@@ -1113,6 +1113,8 @@ impl SqliteStore {
             // them, and `CROSS JOIN` keeps the window as the outer loop. A `+`
             // on an arm's output stops SQLite merging the UNION in index order,
             // which it would get by scanning the whole index instead of the range.
+            // A new source of `started` or `ended` below needs its own arm here,
+            // or inputs it places in the window silently drop out of every read.
             let mut query = conn.prepare("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND kind='captured' AND observed_at>=?5
@@ -2540,15 +2542,17 @@ mod metadata_tests {
     }
 
     #[test]
-    fn history_windows_start_inputs_at_their_manifest() {
+    fn history_windows_find_inputs_by_each_start_and_end() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            // (session, capture recorded, manifest observed)
-            for (id, captured, manifest) in
-                [("late-manifest", 10, 100), ("early-manifest", 100, 10)]
-            {
+            // (session, capture recorded, manifest observed, terminal observed)
+            for (id, captured, manifest, terminal) in [
+                ("late-manifest", 10, 100, None),
+                ("early-manifest", 100, 10, None),
+                ("late-terminal", 10, 10, Some(100)),
+            ] {
                 let input = crate::session_record::new_artifact_key();
                 conn.execute(
                     "INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,
@@ -2562,26 +2566,45 @@ mod metadata_tests {
                     params![id, input, captured],
                 )
                 .unwrap();
-                let payload = json!({"input_id":input,"source":"manifest.json",
+                let captured_event = conn.last_insert_rowid();
+                let manifest_payload = json!({"input_id":input,"source":"manifest.json",
                     "evidence":{"artifact_key":input,"schema_version":1}});
-                conn.execute(
-                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                     VALUES(?1,'observed',?2,?3,?4,last_insert_rowid())",
-                    params![id, format!("{input}:manifest.json"), manifest, payload.to_string()],
-                )
-                .unwrap();
+                let terminal_payload = json!({"input_id":input,"source":"terminal.json",
+                    "evidence":{"outcome":"done","ended_at":"1970-01-01T00:01:40Z"}});
+                for (file, observed, payload) in [
+                    ("manifest.json", Some(manifest), manifest_payload),
+                    ("terminal.json", terminal, terminal_payload),
+                ] {
+                    let Some(observed) = observed else { continue };
+                    conn.execute(
+                        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                         VALUES(?1,'observed',?2,?3,?4,?5)",
+                        params![id, format!("{input}:{file}"), observed, payload.to_string(), captured_event],
+                    )
+                    .unwrap();
+                }
             }
         }
-        let history = store
-            .conversation_history(None, None, None, None, 50, false)
-            .unwrap();
+        let read = |include_finished| {
+            store
+                .conversation_history(None, None, None, None, 50, include_finished)
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.session_id.to_string(), row.observed_at))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            history
-                .iter()
-                .map(|row| (row.session_id.as_str(), row.observed_at))
-                .collect::<Vec<_>>(),
-            [("late-manifest", 100)],
+            read(false),
+            [("late-manifest".to_string(), 100)],
             "an input starts when its manifest is observed, not when it was captured"
+        );
+        assert_eq!(
+            read(true),
+            [
+                ("late-manifest".to_string(), 100),
+                ("late-terminal".to_string(), 10)
+            ],
+            "an input started earlier ends in the window when its terminal is observed there"
         );
     }
 

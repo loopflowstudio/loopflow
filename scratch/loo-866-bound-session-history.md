@@ -107,7 +107,7 @@ or turn.
 Migration `history_window_indexes`, the `windowed`/`turns` CTEs in
 `pending_inputs`, measured stats and `LIVE_SUBSETS` in `query_plans.rs`,
 `session_history_reads_plan_by_window`, and
-`metadata_tests::history_windows_start_inputs_at_their_manifest`.
+`metadata_tests::history_windows_find_inputs_by_each_start_and_end`.
 Beyond the prototype:
 
 - The bundled SQLite (3.53.2) merges `UNION` arms in output order and picked
@@ -123,6 +123,26 @@ Beyond the prototype:
 - Unanalyzed plans also scanned `agent_sessions s` in the final join and
   `tasks t` in the project filter; both now `CROSS JOIN` from the small side
   (`eligible`, `projects`), here and in `session_events.rs`'s event reader.
+
+## Every arm has a test
+
+`started` comes from two rows and `ended` from three sources; `windowed` names
+each as an arm, and a source added only to the expression drops inputs from
+every window without an error. The comment at `windowed` says so. Each arm has
+a test that fails when it is removed:
+
+| arm | test |
+|---|---|
+| capture `observed_at` | existing history tests |
+| manifest observation | `history_windows_find_inputs_by_each_start_and_end` |
+| terminal observation | same (removing the arm fails it, checked Nov 13) |
+| turn `completed` | `session_events` "completed native turns in the window retain older captures" |
+| Process `completed_at` | `process_completion_ends_inputs_without_exit_events` |
+
+Not settled here: recording an input's end as one appended event would collapse
+the three `ended` sources, the per-input subqueries (Exclusions) and the
+finished-arm half of `windowed`. That is a store-model change beyond this Task;
+it belongs in its own Task if the gate run leaves 1d below 4×.
 
 ## Exclusions
 
@@ -150,6 +170,7 @@ Beyond the prototype:
 - `cargo clippy --all-targets -- -D warnings` — clean (implement).
 - `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` — 47 pass (compress).
 - `bench.sh /tmp/loo866/store.db` (load avg 57–80) — `same` all six windows; 1d 0.55→0.10 s, 0.51→0.15 s; 7d 0.46→0.40 s, 0.61→0.30 s; 30d 1.04→1.55 s; whole 0.93→1.23 s (implement; rerun on a fresh copy for the PR).
+- `cargo test -p loopflow --lib history_windows`, `session_history_reads_plan_by_window`, clippy — pass after the terminal case (implement).
 - `check_migrations.py`, `documented_commands::` for `docs/dev/data.md` — gate.
 
 ## Docs

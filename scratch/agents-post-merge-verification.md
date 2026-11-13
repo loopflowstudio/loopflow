@@ -1,9 +1,11 @@
 # LOO-873: model-unavailable fix forward
 
 Gate, publishing and post-merge verification remain. The model-unavailable
-repair through `31d2fc6d28` includes the sync onto `dfbea8cf81`; the subsequent
-Auto-Ship repair and compress changes are local. PR #1906's merged CI does not
-validate this repair. No Wave or product question is open.
+repair, Auto-Ship stop repair and compress changes are committed through
+`3c721c645e`, including the sync onto `dfbea8cf81`. The focused refusal regression
+and isolated CLI stop/status/restart scenario passed again after compress.
+The earlier incomplete validation is superseded by those results, not by
+PR #1906's merged CI. No Wave or product question is open.
 
 ## Outcome and constraints
 
@@ -31,8 +33,9 @@ currently open.
 
 ## Upstream and merged CI
 
-`git fetch origin main` during realign found no upstream commits missing from
-HEAD. Since #1906, #1901 (`dfbea8cf81`) changed planning and Session reads,
+`git fetch origin main` during realign at `3c721c645e` succeeded;
+`git log --oneline HEAD..origin/main` was empty. Since #1906, #1901
+(`dfbea8cf81`) changed planning and Session reads,
 including provider-transition reads. It is already included in `31d2fc6d28`;
 the provider-result regression passed after that sync. No Wave is assigned.
 
@@ -104,18 +107,14 @@ login or real provider quota was used.
   expected capacity wait. It was stopped; the corrected fixture selected the
   current home's Keychain item, and passed. No product repair was needed.
 
-## Delete — do not maintain
-
-Remove automatic ship restart after a terminal refusal, duplicate stop handlers
-in `carry_task_run` and `ship::run`, and advice to extend an order a direct skill
-run cannot walk. These cuts are complete; no deletion target remains.
+## Current approach
 
 `lf/commands/graph.rs::TaskRunStopped::stop` now prints the stop, withdraws
 Auto-Ship approval and returns the original exit status for both callers.
 `ship_halt` does nothing without approval and sets no person's stop marker.
 The refusal test uses `support::recorded_graphs` for both Graph counts.
 
-Keep `agent/mod.rs::_run_with_transient_retries` as the single walk: model
+`agent/mod.rs::_run_with_transient_retries` is the single walk: model
 refusals skip account rotation and quota recording, while usage limits try
 logins first. `_climb` retains a same-provider thread or imports history across
 providers, supplying the original task when no transcript is available.
@@ -137,12 +136,21 @@ unchanged; docs are in `docs/{config,orchestration,subscriptions,troubleshooting
   waits on Opus capacity; the wait walks from Opus onward and does not launch
   Fable again.
 
-## Remaining checks
+## Remaining work
 
-Gate owns `agent::tests`, `ops::task_execution`,
-`task_graph_launch_tests`, `binary(agent_tests)`, and
-`documented_commands` suites plus formatting and Clippy. The first built-CLI QA
-results are in `/tmp/lf-qa-873/results.json`; `scratch/qa.html` was not retained.
+- Gate: affected `agent::tests`, `ops::task_execution`,
+  `task_graph_launch_tests`, `binary(agent_tests)` and `documented_commands`
+  suites, formatting and Clippy. The 54-test compress result covers the first
+  two modules and three Task regressions, not the whole affected suite set.
+- Publish the repair, then verify the merged repair and its push CI. PR #1906
+  validates the earlier usage-limit implementation only. No app or release
+  check applies to this CLI-only change.
+
+## QA findings and resolution
+
+The first built-CLI QA results are in `/tmp/lf-qa-873/results.json`;
+`scratch/qa.html` was not retained. The retained CLI snapshots below cover the
+stop/status/restart acceptance without that walkthrough artifact.
 That walkthrough found two stop-line faults:
 a direct `lf -b <skill>` (no fallthrough outside a Graph step) advised "add
 another agent to `agents`" when the list already had one, and a provider reason
@@ -153,11 +161,14 @@ refusal once more before halting. `TaskRunStopped::stop` now calls `ship_halt`
 for both commands. The regression incorrectly expected
 `ship_stopped_at` (a person's stop); it now checks withdrawn `shipped_at`,
 repeated status reads past the retry deadline, and manual continuation.
-The corrected regression and isolated CLI repeat passed (below).
+The corrected regression and isolated CLI repeat passed, including after
+centralizing stop handling in compress (below). The prior direction to finish
+this regression and diagnose a hang is resolved: the long run was compiling
+its fixture CLI, then failed an incorrect assertion; the prepared-CLI run
+completed in 5.77s.
 The former `/tmp/lf-qa-873/test.log` has no completed suite result;
-`test2.log` exited 127 because `timeout` was unavailable. Publishing and post-merge
-verification of this repair remain. No app or release check applies to this
-CLI-only change.
+`test2.log` exited 127 because `timeout` was unavailable. Neither is a passing
+result; the completed runs below supply the missing validation.
 
 ## Auto-Ship validation, November 13 UTC
 
@@ -219,3 +230,8 @@ Fixture scripts and raw results remain under `/tmp/lf-verify-873`:
 The local build and all test commands ended. The timed-out fixture's children
 were terminated; final process inspection found no remaining verification
 CLI, provider, server or watcher processes.
+
+## QA at `3c721c645e`, November 12
+
+- Fresh build `lf 0.15.3+3c721c645.dirty`. `scripts/test_network.py` ran `/tmp/lf-qa-873-final/drive.py`: every configuration, fallthrough, pin, exhaustion, direct-skill and legacy-spelling scenario **passed** on the first run. It also ran `task_stop.py`, a copy of the compress Task driver rooted at `/private/tmp/lf-qa-873-final-task`: **passed**. The walkthrough is in `scratch/qa.html`. No product fix was needed.
+- Seen, but not changed: the setting-validation errors share the `invalid graph:` prefix (`lf set --global agents clod:opus`). This predates the change.

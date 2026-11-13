@@ -19,7 +19,7 @@ Demo, per finished surface:
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promotion/bind decision, 1–3 s per family
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'  # the kept few (standalone binary)
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'  # launch/resume settings, 0.6–1.9 s each
-cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # task run/checkout previews, 0.02–1.8 s each
+cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # task run/checkout previews, 0.02–2.5 s each (load-dependent)
 ```
 
 plus the before/after table below with real numbers.
@@ -98,9 +98,15 @@ planning one case per connection mode.
    wiring and renamed the Graph run test
    `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named`. Kept list
    in `tests/README.md`.
-4. Machine commands: parsing and failure-text rows; keep one dispatch and the
-   ownership round trip. The three ownership tests that make no `lf` call
-   after setup move whole.
+4. **Next: Machine commands.** Measure the `machine_commands` before (and
+   `machine_dispatch_resolves_destination_policy_…` in
+   `session_launch_contract`), read the handler and name its chain
+   (`navigation::machine_invocation`, `ssh::parse_remote_command`,
+   `machine::transport_failure`, `work_route::forward`) in the row module's
+   header, write the kept list (one dispatch round trip, one transport
+   failure) into `tests/README.md`, then move parsing and failure-text cases
+   to rows. The three ownership tests that make no `lf` call after setup
+   move whole.
 5. Release lock matrix: cut to one killed and one exited case per mutation
    class (no in-process move; the cost is real processes).
 6. Local planning, `work_open_tests`, `context_launch_tests`,

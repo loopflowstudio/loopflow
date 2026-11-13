@@ -412,6 +412,8 @@ left both Machines running it.
 - Checks: integration `machine_commands::` claiming/move/resume/`a_` 21 passed;
   clippy `--all-targets -D warnings` clean. Gate: `documented_commands::`
   (machines.md) and `server::schema::tests::` (hidden `session receive` flag).
+- Compress: `remote_ownership_writer` reads the registry once
+  (`remote_task_in`). `machine_commands::claim` 2 passed; clippy clean.
 
 ## Open questions (each reversible; the simpler option is built)
 

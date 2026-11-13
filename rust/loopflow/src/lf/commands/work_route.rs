@@ -341,7 +341,11 @@ pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> 
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(task) = resolve_task_id(&store, selector, None)? else {
+    remote_task_in(&store, selector)
+}
+
+fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    let Some(task) = resolve_task_id(store, selector, None)? else {
         return Ok(None);
     };
     let route = store.task_execution_route(&task)?;
@@ -353,10 +357,10 @@ pub(crate) fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> 
 /// move's target is asked first: one that took the Task in, its answer lost,
 /// writes it like any Task that runs there.
 pub(crate) fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(route) = remote_task(selector)? else {
+    let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(store) = read_registry()? else {
+    let Some(route) = remote_task_in(&store, selector)? else {
         return Ok(None);
     };
     let Some(moving) = store.task_move_in_flight(&route.task_id)? else {

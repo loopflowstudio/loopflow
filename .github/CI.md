@@ -3,24 +3,32 @@
 ## Scratch, cancellation and macOS path filters
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
-clear committed scratch additions before pushing a landing candidate. Scratch-free PRs, including
+matrix until scratch is clear. Gate turns the checkpoint into a candidate
+before it reviews (commit, sync, `lf scratch clear`, `lf pr publish`), so the
+matrix runs while it reads the diff. [Gate](../.lf/skills/gate.md) holds the
+steps and where the notes go.
+
+`lf pr submit`, `lf land`, and `lf pr land` clear committed scratch additions
+too; after gate they find none. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
-Implement/compress only build changed code and run its focused test. Gate owns
-affected suites and automated acceptance once; see the verification cadence in
-[AGENTS.md](../AGENTS.md#when-to-run-what). Scratch keeps one check-result line.
+Implement/compress only build changed code and run its focused test. Gate names
+the few tests that matter most for the change and reads their result, and the
+suites', from CI for the head it pushed; see the verification cadence in
+[AGENTS.md](../AGENTS.md#when-to-run-what). The PR body keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Graph steps.
 
 For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
-and the matrix jobs skip. That is not a passing test result. The required merge
+and the matrix jobs skip. That is not a passing test result, though
+`lf pr checks` exits 0 for it: read the lines. The required merge
 queue always rejects scratch artifacts and runs the Linux suite before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
 still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
 After the final `lf sync`, run `lf scratch clear` and check that `scratch/`
-contains only `.gitkeep` before arming. A sync can restore notes retained during
-conflict resolution after an earlier cleanup. Check the final tree with the
+contains only `.gitkeep` before publishing or arming (cached PR copy is consumed
+by publication). A sync can restore notes retained during conflict resolution
+after an earlier cleanup. Check the final tree with the
 same predicate as CI:
 
 ```bash

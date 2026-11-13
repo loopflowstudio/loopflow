@@ -111,10 +111,11 @@ uv run pytest python/tests/test_gate_bounded.py          # one Python file
 
 Never `cargo test`, `cargo test --all` or `cargo nextest run --all` here.
 
-Promotion and binding decisions (`test(adoption::tests::)`) and launch and
-resume settings (`test(run::launch_policy_tests::)`) run as library rows
+Promotion and binding decisions (`test(adoption::tests::)`), launch and
+resume settings (`test(run::launch_policy_tests::)`) and Task run and checkout
+previews (`test(ops::task::explain::tests::)`) run as library rows
 (`cargo nextest run -p loopflow --lib -E '<filter>'`); run those before the
-surface's full-Machine tests. Both lists are in
+surface's full-Machine tests. The lists are in
 [the Rust tests README](../rust/loopflow/tests/README.md#decision-rows-and-full-machine-tests).
 
 ## Gate: a few named tests; CI runs the suites

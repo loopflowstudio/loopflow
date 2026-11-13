@@ -19,6 +19,7 @@ Demo, per finished surface:
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'   # every promotion/bind decision, 1–3 s per family
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'  # the kept few (standalone binary)
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'  # launch/resume settings, 0.6–1.9 s each
+cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # task run/checkout previews, 0.02–1.8 s each
 ```
 
 plus the before/after table below with real numbers.
@@ -26,8 +27,8 @@ plus the before/after table below with real numbers.
 ## Docs
 
 - `rust/loopflow/tests/README.md` "Decision rows and full-Machine tests":
-  the row recipe, and under "Full-Machine tests" the promotion and launch
-  kept lists. Later slices add their table there.
+  the row recipe, and under "Full-Machine tests" the promotion, launch and
+  Task Graph run kept lists. Later slices add their table there.
 - `scripts/testing.md` "Implement: one focused test": points at the rows.
 
 ## Approach
@@ -46,8 +47,9 @@ Seams per surface (all in the CLI's call path):
 | Task Graph run | `ops::task::explain::explain_task_run`, `checkout_explain::explain_task_checkout`, `planning_explain::explain_task_planning`, `task_graph::CapturedGraph` |
 | Machine dispatch | `lf::navigation::machine_invocation`, `ssh::parse_remote_command`, `machine::transport_failure`, `work_route::forward` |
 
-The three explain modules have no in-process tests today; every check of
-them goes through spawned `lf`.
+`planning_explain` still has no in-process tests: its six `global_commands`
+tests (`task_planning_explain_*`, 49 s warm) are the next row candidate. It is
+not a Graph decision, so not a Done-when obligation.
 
 ## Kept full-Machine tests
 
@@ -83,8 +85,19 @@ planning one case per connection mode.
    for row candidates: `contextual_resume_uses_scope_and_recovers_…`,
    `wave_targets_prepare_reuse_and_open_…` (resume target selection);
    `machine_dispatch_resolves_destination_policy_…` belongs to slice 4.
-3. Task Graph run and `global_commands` explain tests: rows against the three
-   explain functions and `CapturedGraph`; keep the two Graph runs.
+3. **Done: Task Graph run and its previews.** Rows in
+   `ops/task/explain/tests.rs` against `explain_task_run` (→ `select_task_run`
+   → `CapturedGraph`) and `explain_task_checkout`, with the
+   `lf::commands::context` wrappers for an absent or unreadable registry. The
+   Clap → `TaskProcessOptions` mapping is in `bin/lf.rs`, outside the library,
+   so it stays with the kept explain tests. Deleted
+   `task_run_from_explain_…`, `task_run_explain_preserves_absent_…`,
+   `task_checkout_explain_reads_restoration_…`,
+   `task_checkout_explain_proposes_unallocated_…`,
+   `a_run_explanation_includes_…_xor`; trimmed three kept explain tests to
+   wiring and renamed the Graph run test
+   `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named`. Kept list
+   in `tests/README.md`.
 4. Machine commands: parsing and failure-text rows; keep one dispatch and the
    ownership round trip. The three ownership tests that make no `lf` call
    after setup move whole.
@@ -170,6 +183,8 @@ Measure each group's "before" on this branch's base before changing it. Per grou
 | Promotion/bind rows, `adoption::tests` | — | 8, 17.9, 0 (1.3–3.3 s each) |
 | session_launch_contract | 30, 254.3, 0 | 27, 244.7, 0 |
 | Launch/resume rows, `run::launch_policy_tests` | — | 5, 6.0, 1 (0.6–1.5 s each) |
+| Explain and Graph run, `global_commands` + `task_graph_launch_tests` | 15, 190.3, 0 | 10, 94.6, 0 |
+| Explain rows, `ops::task::explain::tests` | — | 7, 7.0, 2 (0.02–1.4 s each) |
 
 Promotion, 2026-11-13, Mac debug, load average 545–600 from other
 checkouts: before and after ran back to back. An earlier baseline at lower
@@ -185,11 +200,17 @@ investigated). The `--output-schema` refusal on `session resume` is a check
 in `lf/commands/session.rs` `resume`, before `resolve_session_config`, so it
 stays in the previews test.
 
+Explain, 2026-11-13: before at load 484–638, after at 712–724, both warm
+(the first run after a build spent 70–86 s per test on a cold `lf`). Of the
+10 after, the six untouched `task_planning_explain_*` tests sum 49.0 s
+(59.6 s before); the Graph/run/checkout part went 9 tests, 130.7 s → 4,
+45.7 s.
+
 ## Done when
 
 - Promotion/binding, launch policy, Task Graph explain and Machine dispatch
   decisions each run as in-process rows. Done: promotion/binding, launch
-  policy. Remaining: Task Graph explain (slice 3), Machine dispatch (slice 4). The brief asks "well under 1 s"
+  policy, Task Graph explain. Remaining: Machine dispatch (slice 4). The brief asks "well under 1 s"
   per decision; promotion rows cost ~0.4 s each but their family tests take
   1.3–3.3 s (open, `scratch/questions.md`).
 - `tests/README.md` lists each surface's kept full-Machine tests with the
@@ -205,3 +226,4 @@ stays in the previews test.
 - compress, 2026-11-13: `adoption::tests::` 8/8 passed (1.3–3.3 s each); clippy `--all-targets` clean
 - implement slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5; `session_launch_contract` 27/27; `documented_commands::` ok; clippy clean
 - compress slice 2, 2026-11-13: `run::launch_policy_tests::` 5/5 (0.8–1.9 s each)
+- implement slice 3, 2026-11-13: `ops::task::explain::tests::` 7/7; kept explain + Graph run filter 10/10; clippy `--all-targets` clean

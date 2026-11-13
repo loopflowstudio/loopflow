@@ -32,13 +32,15 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
 ## Decision rows and full-Machine tests
 
-Changing how promotion picks a Session, checkout or Task, or how a launch
-resolves its settings? Run the decision table first. Each family answers in
+Changing how promotion picks a Session, checkout or Task, how a launch
+resolves its settings, or what `task run`/`task checkout` would do? Run the
+decision table first. Each family answers in
 one to three seconds:
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
+cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
 ```
 
@@ -50,7 +52,8 @@ tables below name each surface's.
 A decision is checked once, as a row. Each row calls the function the CLI
 handler calls (`engine::creation::create`, `ops::human_session::bind`,
 `preview_binding`, `primary::ensure`; `run::build_prompt` and
-`resolve_session_config` for launch settings, with a Clap-parsed `Cli`), with
+`resolve_session_config` for launch settings, with a Clap-parsed `Cli`;
+`ops::task::explain_task_run` and `explain_task_checkout` for previews), with
 the store and checkout the CLI would see:
 
 - `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
@@ -103,6 +106,17 @@ resume per harness:
 
 The rest of `session_launch_contract` covers accounts, provider switches,
 OpenCode diagnostics and Machine dispatch.
+
+Task Graph run and its previews (`task_graph_launch_tests` in the library,
+`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+
+| Test | Wiring it proves |
+|---|---|
+| `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
+| `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … ship --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
+| `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
+| `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
 
 ## Boundary checks
 

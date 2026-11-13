@@ -1505,49 +1505,14 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
 }
 
 #[test]
-fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
-    let explain = |task: &GraphTask, args: &[&str]| -> serde_json::Value {
-        let preview = task.run(args);
-        assert!(
-            preview.status.success(),
-            "{}",
-            String::from_utf8_lossy(&preview.stderr)
-        );
-        serde_json::from_slice::<serde_json::Value>(&preview.stdout).unwrap()["action"].clone()
-    };
+fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     // Nothing named, no graph yet: the Wave default, stopping at its review.
     let task = GraphTask::new();
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(
-        (&action["kind"], &action["graph"], &action["take_up"]),
-        (&"run".into(), &"feature".into(), &true.into())
-    );
-    assert_eq!(action["stops_at"], "review");
-    // `-b` runs straight past it to the end.
-    let action = explain(&task, &["-b", "task", "run", "--explain", "--json"]);
-    assert!(action["stops_at"].is_null(), "{action}");
     task.task_run_ok(&["task", "run"]);
     let graph = task.graph();
     assert_eq!(graph["name"], "feature");
     assert_eq!(graph["position"], at("review"));
     assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
-    drop(task);
-
-    // No Wave default: the repository's `graph:`, else the builtin `code`.
-    let task = GraphTask::without_wave_graph(&[]);
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(
-        (&action["graph"], &action["take_up"]),
-        (&"code".into(), &true.into())
-    );
-    let config = task.repo.path().join(".lf/config.yaml");
-    fs::write(
-        &config,
-        format!("{}graph: findings\n", fs::read_to_string(&config).unwrap()),
-    )
-    .unwrap();
-    let action = explain(&task, &["task", "run", "--explain", "--json"]);
-    assert_eq!(action["graph"], "findings");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.
@@ -1650,32 +1615,6 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     assert_eq!(receipt["milestone"], "started", "{receipt}");
     assert!(receipt["session_id"].is_null(), "{receipt}");
     assert_eq!(tasks(), before + 1);
-}
-
-#[test]
-fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
-    let task = GraphTask::new();
-    fs::write(
-        task.repo.path().join(".lf/graphs/conditional.yaml"),
-        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
-    )
-    .unwrap();
-    let output = task.run(&[
-        "task",
-        "run",
-        "INF-123",
-        "conditional",
-        "--explain",
-        "--json",
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(preview["action"]["stops_at"], "demo");
-    assert!(support::recorded_graphs(task.home.path()).is_empty());
 }
 
 #[test]

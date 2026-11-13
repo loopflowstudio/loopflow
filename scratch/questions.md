@@ -145,6 +145,13 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 
 ## Remaining
 
+Every Machine-local column the brief names (`worktree`, `branch`,
+`base_commit`, `parent_pr_id`, `checkout_machine_id`, `primary_session_id`,
+the `ship_*` set, `machines.pool/cost_usd/expires_at`) has no production
+reader left outside the pre-`task_checkouts` fallbacks in
+`read_task_branches`/`read_task_worktree_ownership` (store/sqlite.rs); the
+remaining mentions are pre-migration fixtures.
+
 1. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
    history, so the receipt is what keeps their membership. Folding needs a
    path-history column on `task_checkouts`; open whether that is worth it.

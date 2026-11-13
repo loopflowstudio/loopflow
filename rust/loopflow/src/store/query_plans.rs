@@ -39,11 +39,13 @@ const GROWING: [&str; 15] = [
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
 /// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
+/// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
+/// stopped Tasks backfill to, 216 of them naming a Process.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_primary_sessions');
+         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
@@ -124,6 +126,9 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_branch','838 2'),
          ('task_checkouts','task_checkouts_parent_pr','11 2'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
+         ('task_ship_events','task_ship_events_task','396 3 1'),
+         ('task_ship_events','task_ship_events_start','186 1 1'),
+         ('task_ship_events','task_ship_events_process','216 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
@@ -438,6 +443,35 @@ mod tests {
             store.unrecorded_agent_ancestry().unwrap();
             store.session_steers("viewed", 0, 10).unwrap();
             store.session_steer_source("viewed", &steer.id).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn auto_ship_log_reads_and_writes_plan_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        let task = TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                id: task.clone(),
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                project_id: None,
+                title: "Ship".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let traced = statements(&store, || {
+            store
+                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
+                .unwrap();
+            store.count_ship_restart(&task).unwrap();
+            store
+                .ship_task(&task, &crate::id::LfProcessId::new(), "ship")
+                .unwrap();
+            store.task_shipping(&task).unwrap();
+            store.reset_ship_restarts(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

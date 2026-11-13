@@ -22,14 +22,15 @@ BEGIN SELECT RAISE(ABORT, 'Task ownership entries are append-only'); END;
 -- that claim and, once its Graph stopped, the step it stopped, so running the
 -- same move again carries on leaving. A sent move keeps what it sent until it
 -- arrives, so running it again delivers it without stopping, committing or
--- pushing again.
+-- pushing again. The target records a move it `checked` it can take, naming
+-- where it comes from, so the same command run there asks that Machine for it.
 CREATE TABLE task_moves (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     from_machine_id TEXT NOT NULL,
     to_machine_id TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('leaving', 'sent', 'arrived')),
-    -- When the move began, while leaving or sent; when it arrived, once arrived.
+    state TEXT NOT NULL CHECK (state IN ('checked', 'leaving', 'sent', 'arrived')),
+    -- When the move was checked or began; when it arrived, once arrived.
     at INTEGER NOT NULL,
     -- The ownership entry claiming the Task for the target, while leaving.
     claim_id TEXT,
@@ -147,10 +148,12 @@ CREATE TRIGGER cancel_task_retirement_checkout_delete AFTER DELETE ON task_check
 BEGIN DELETE FROM task_retirements WHERE task_id=OLD.task_id; END;
 
 -- Machine-local: a Task's Auto-Ship log, in the order it happened. `approved`
--- hands the Task off (its Process carries it), `carried` names a later
--- carrier, `restarted` counts a restart after a failed carrier and
--- `progressed` resets that count; `stopped` is a person's stop, which stands
+-- hands the Task off (its Process carries it), `carried` names the current
+-- carrier (one row; a new carrier replaces it), `restarted` counts a restart
+-- after a failed carrier, at most `SHIP_RESTARTS_COUNTED` (6) in a row, and a
+-- step completing deletes them; `stopped` is a person's stop, which stands
 -- until the next approval, and `withdrawn` ends an approval without one.
+-- Readers start at the latest `approved` or `stopped`.
 -- `tasks.shipped_at` stays the planning fact peers share. The Processes may be
 -- pruned, so no key. The six `tasks.ship_*` columns stay for released lf
 -- until the contract drops them.
@@ -158,13 +161,15 @@ CREATE TABLE task_ship_events (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK (kind IN
-        ('approved','carried','restarted','progressed','stopped','withdrawn')),
+        ('approved','carried','restarted','stopped','withdrawn')),
     at INTEGER NOT NULL,
     lf_process_id TEXT,
     -- The person named at a stop no Process made.
     person TEXT
 );
 CREATE INDEX task_ship_events_task ON task_ship_events(task_id, id);
+CREATE INDEX task_ship_events_start ON task_ship_events(task_id, id)
+WHERE kind IN ('approved','stopped');
 CREATE INDEX task_ship_events_process ON task_ship_events(lf_process_id)
 WHERE lf_process_id IS NOT NULL;
 CREATE TRIGGER task_ship_events_append_only BEFORE UPDATE ON task_ship_events
@@ -184,7 +189,7 @@ INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
 SELECT id,'carried',shipped_at,ship_lf_process_id FROM tasks
 WHERE shipped_at IS NOT NULL AND ship_lf_process_id IS NOT NULL
     AND ship_lf_process_id IS NOT ship_approved_lf_process_id;
-WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<64)
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<6)
 INSERT INTO task_ship_events(task_id,kind,at)
 SELECT t.id,'restarted',t.shipped_at FROM tasks t JOIN n ON n.i<=t.ship_restarts
 WHERE t.shipped_at IS NOT NULL;

@@ -266,6 +266,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             repository: Some(repository),
             origin,
             planning_key,
+            from,
             ..
         } => {
             let store = open_shared_store().await?;
@@ -280,6 +281,9 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             let id = crate::durable::TaskId::parse(task)?;
             crate::ops::human_session::moves::arriving_task(&store, &main, &id, issue).await?;
+            if let Some(from) = from {
+                store.sqlite.record_move_checked(&id, from)?;
+            }
             Ok(())
         }
         SessionCommand::Receive { check: true, .. } => {

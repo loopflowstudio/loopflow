@@ -338,6 +338,8 @@ Once sent, the stage after the colon reads `sent, not arrived`; `since` stays
 when the move began.
 
 Running the same move again, from any Machine, asks the Machine the Task left.
+Run on mini, it asks the Machine mini checked the move with, so mini needs that
+Machine added (`lf machine add`).
 A leaving move carries on: it commits, pushes and takes the conversation, which
 are safe to repeat. A sent move is delivered as it was sent, conversation
 included, without committing or pushing again. Either way the Graph continues

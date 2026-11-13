@@ -188,7 +188,13 @@ async fn relay_task(
         source
     } else {
         if let Some(target) = &target {
-            ready(store, target, Some((&task, &route.repository_id)), name).await?;
+            ready(
+                store,
+                target,
+                Some((&task, &route.repository_id, &route.machine_id)),
+                name,
+            )
+            .await?;
             eprintln!("Checked {place}: it can take {name}");
         }
         route.machine_id.clone()
@@ -201,7 +207,19 @@ async fn relay_task(
         &to,
         conversation,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        if to != local || source == local {
+            return error;
+        }
+        let from = store
+            .sqlite
+            .machine_by_id(&source)
+            .ok()
+            .flatten()
+            .map_or_else(|| source.to_string(), |machine| machine.name());
+        anyhow!("{error:#}\n{name} is moving here from {from}, which did not send it; the same move run there carries it on")
+    })?;
     let moved_task = moved
         .task
         .as_ref()
@@ -264,13 +282,17 @@ async fn relay_task(
     Ok((store.sqlite.task_ownership(&task.id)?, stopped))
 }
 
-/// The Machine a Task claimed for `to` was sent from: the writer of the
-/// move's claim. `None` once it arrived, or when `to` claimed it itself.
+/// The Machine a Task moving to `to` comes from: the one `to` checked the
+/// move with, when this is `to`, else the writer of the move's claim. `None`
+/// once it arrived, or when `to` claimed it itself.
 fn sender(
     store: &crate::store::sqlite::SqliteStore,
     task: &crate::durable::TaskId,
     to: &MachineId,
 ) -> Result<Option<MachineId>> {
+    if let Some(from) = store.task_move_checked_from(task)? {
+        return Ok(Some(from));
+    }
     if store.task_move_arrived_on(task, to)? {
         return Ok(None);
     }
@@ -344,14 +366,14 @@ async fn send_from(
 async fn ready(
     store: &SharedStore,
     target: &Machine,
-    task: Option<(&Task, &RepositoryId)>,
+    task: Option<(&Task, &RepositoryId, &MachineId)>,
     what: &str,
 ) -> Result<()> {
     if target.id == store.sqlite.local_machine()?.id {
         return Ok(());
     }
     let mut args = vec!["session".into(), "receive".into(), "--check".into()];
-    if let Some((task, repository)) = task {
+    if let Some((task, repository, from)) = task {
         args.extend([
             "--task".into(),
             task.id.to_string(),
@@ -359,6 +381,8 @@ async fn ready(
             task.identifier.clone(),
             "--repository".into(),
             repository.to_string(),
+            "--from".into(),
+            from.to_string(),
         ]);
         if let Some(path) = store.sqlite.repository_path(repository)? {
             args.extend([

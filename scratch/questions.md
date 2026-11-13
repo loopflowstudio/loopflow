@@ -314,15 +314,34 @@ that answers the parallel-stall question below.
 
 Report: `scratch/qa.html`. Fixed: `lf task list` and `lf machine list` read a
 move in flight (`Moving to mini since …: sent, not arrived`) before ownership,
-which names mini from the claim on. Open findings:
+which names mini from the claim on.
 
-- A retry run on the target before arrival (`lf --machine mini task move X
-  --machine mini`) refuses with `X already runs on <mini> (this Machine)`: mini
-  took the Task in at the check but holds no ownership entry, so the route says
-  it is mini's own. machines.md says retries work "from any Machine".
-- `task_ship_events` gains a `restarted` row per failed restart (about 48 a day
-  at the 30-minute cap) and `ship_log_in` reads the whole log; the column it
-  replaced was a counter. One real Task has 7504 restarts.
+## Done (2026-11-13, ninth pass): QA's two defects
+
+- Retry on the target: `lf session receive --check --from <source>` records a
+  `checked` `task_moves` row on mini; arrival turns it `arrived`.
+  `session_move::sender` reads it first when it is mini's latest record, so
+  `lf task move X --machine <mini>` run on mini asks the source and delivers.
+  Test `machine_commands::a_move_retried_on_its_target_asks_the_machine_it_comes_from`
+  (run with mini's own `lf`, laptop added on mini). machines.md: mini needs the
+  source added.
+- Not fixed: `lf --machine mini task move X --machine mini` forwarded from the
+  laptop carries the laptop's personal settings (`config::remote::PROFILE_ENV`),
+  whose Machine list replaces mini's and never names the laptop. That run now
+  fails with `X is moving here from <laptop>, which did not send it; the same
+  move run there carries it on` instead of `already runs on`. Whether Machine
+  routes should travel in the forwarded profile is open.
+- Ship log bounded: `restarted` stops at `SHIP_RESTARTS_COUNTED` (6, where
+  `repair_backoff` stops growing); a step completing deletes them (`progressed`
+  is gone); a new `carried` row replaces the last. `ship_log_in` reads from the
+  latest `approved`/`stopped` (partial index `task_ship_events_start`). Backfill
+  caps at 6. Test `a_ship_process_failing_all_day_keeps_its_log_short`
+  (48 restarts → 8 rows) and `query_plans::auto_ship_log_reads_and_writes_plan_by_index`;
+  MEASURED gains `task_ship_events` rows from the Machine store's 396 backfilled rows.
+- Checks: integration `machine_commands::` 54, `documented_commands::` 4; lib
+  `store::migrations::` + `task_moves::` + `task_work::` + `ops::task::ship::` +
+  `lf::tests::` 194, `store::query_plans::` 9, `server::schema::tests::` 7;
+  clippy `--all-targets -D warnings` clean.
 
 ## Open questions (each reversible; the simpler option is built)
 

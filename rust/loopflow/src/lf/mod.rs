@@ -1960,6 +1960,9 @@ pub enum SessionCommand {
         /// so a personal Git plan reads the same journal
         #[arg(long, requires = "task")]
         planning_key: Option<String>,
+        /// The Machine the Task moves from, which a retry here asks for it
+        #[arg(long, requires = "task")]
+        from: Option<crate::durable::MachineId>,
         #[arg(long)]
         json: bool,
     },

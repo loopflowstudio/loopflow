@@ -2,7 +2,8 @@
 //! then `sent` when this Machine sent it, until it arrives. A leaving move
 //! keeps its claim and the Graph it stopped, so running the same move again
 //! carries on leaving; a sent move keeps what it sent, so running it again
-//! delivers it without stopping, committing or pushing again.
+//! delivers it without stopping, committing or pushing again. The target
+//! records a move it `checked` it can take, naming the Machine it comes from.
 use rusqlite::{params, OptionalExtension};
 
 use crate::durable::{MachineId, OwnershipEntryId, TaskId};
@@ -62,6 +63,40 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// A move of the Task from `from` checked that this Machine can take it.
+    /// Until it arrives, running the move here asks `from` for it.
+    pub(crate) fn record_move_checked(&self, task: &TaskId, from: &MachineId) -> StoreResult<()> {
+        let here = self.local_machine()?.id;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM task_moves WHERE task_id=?1 AND state='checked'",
+            [task.as_str()],
+        )?;
+        tx.execute(
+            "INSERT INTO task_moves(task_id,from_machine_id,to_machine_id,state,at)
+             VALUES(?1,?2,?3,'checked',?4)",
+            params![task.as_str(), from.as_str(), here.as_str(), now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The Machine a move of the Task checked here comes from, when that is
+    /// this Machine's latest record of it.
+    pub fn task_move_checked_from(&self, task: &TaskId) -> StoreResult<Option<MachineId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT from_machine_id FROM task_moves WHERE task_id=?1
+                 AND id=(SELECT max(id) FROM task_moves WHERE task_id=?1) AND state='checked'",
+                [task.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(MachineId::from_raw))
+    }
+
     /// The Task arrived on `to`: the sender's record keeps only that, and the
     /// receiver records it too. A Task arriving here ends any move this
     /// Machine sent of it earlier, even one whose arrival it never heard of.
@@ -75,9 +110,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE task_moves SET state='arrived',at=?3,payload=NULL
-             WHERE task_id=?1 AND to_machine_id=?2 AND state='sent'",
-            params![task.as_str(), to.as_str(), now_unix()],
+            "UPDATE task_moves SET state='arrived',at=?3,payload=NULL,from_machine_id=?4
+             WHERE task_id=?1 AND to_machine_id=?2 AND state IN ('checked','sent')",
+            params![task.as_str(), to.as_str(), now_unix(), from.as_str()],
         )?;
         if updated == 0 {
             tx.execute(

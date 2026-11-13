@@ -1,0 +1,54 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 56s
+────────────
+ Nextest run ID 9794a2f9-14cf-487b-9446-dab20e763737 with nextest profile: default
+    Starting 3 tests across 1 binary (2884 tests skipped)
+        PASS [   0.026s] (1/3) loopflow lf::commands::ssh::dispatch_tests::ssh_failures_name_their_recovery
+        FAIL [   0.087s] (2/3) loopflow lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags
+  stdout ───
+
+    running 1 test
+    test lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags ... FAILED
+
+    failures:
+
+    failures:
+        lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2886 filtered out; finished in 0.06s
+
+  stderr ───
+
+    thread 'lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags' (1461103110) panicked at rust/loopflow/src/lf/commands/ssh/dispatch_tests.rs:120:49:
+    called `Result::unwrap()` on an `Err` value: ErrorInner { kind: InvalidValue, context: FlatMap { keys: [InvalidArg, InvalidValue, ValidValue], values: [String("--machine <LABEL_OR_ID>"), String(""), Strings([])] }, message: None, source: None, help_flag: Some("--help"), styles: Styles { header: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD | UNDERLINE) }, error: Style { fg: Some(Ansi(Red)), bg: None, underline: None, effects: Effects(BOLD) }, usage: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD | UNDERLINE) }, literal: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD) }, placeholder: Style { fg: None, bg: None, underline: None, effects: Effects() }, valid: Style { fg: Some(Ansi(Green)), bg: None, underline: None, effects: Effects() }, invalid: Style { fg: Some(Ansi(Yellow)), bg: None, underline: None, effects: Effects() }, context: Style { fg: None, bg: None, underline: None, effects: Effects() }, context_value: None }, color_when: Auto, color_help_when: Auto, backtrace: None }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.091s] (3/3) loopflow lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse
+  stdout ───
+
+    running 1 test
+    test lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse ... FAILED
+
+    failures:
+
+    failures:
+        lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2886 filtered out; finished in 0.07s
+
+  stderr ───
+
+    thread 'lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse' (1461103107) panicked at rust/loopflow/src/lf/commands/ssh/dispatch_tests.rs:133:10:
+    called `Result::unwrap()` on an `Err` value: ErrorInner { kind: InvalidValue, context: FlatMap { keys: [InvalidArg, InvalidValue, ValidValue], values: [String("--machine <LABEL_OR_ID>"), String(""), Strings([])] }, message: None, source: None, help_flag: Some("--help"), styles: Styles { header: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD | UNDERLINE) }, error: Style { fg: Some(Ansi(Red)), bg: None, underline: None, effects: Effects(BOLD) }, usage: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD | UNDERLINE) }, literal: Style { fg: None, bg: None, underline: None, effects: Effects(BOLD) }, placeholder: Style { fg: None, bg: None, underline: None, effects: Effects() }, valid: Style { fg: Some(Ansi(Green)), bg: None, underline: None, effects: Effects() }, invalid: Style { fg: Some(Ansi(Yellow)), bg: None, underline: None, effects: Effects() }, context: Style { fg: None, bg: None, underline: None, effects: Effects() }, context_value: None }, color_when: Auto, color_help_when: Auto, backtrace: None }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.095s] 3 tests run: 1 passed, 2 failed, 2884 skipped
+        FAIL [   0.087s] (2/3) loopflow lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags
+        FAIL [   0.091s] (3/3) loopflow lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse
+error: test run failed

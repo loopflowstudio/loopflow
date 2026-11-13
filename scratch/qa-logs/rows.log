@@ -1,0 +1,47 @@
+   Compiling loopflow v0.15.3 (/Users/jack/src/loopflow.loo-889-check-decisions-in/rust/loopflow)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `loopflow` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 27s
+────────────
+ Nextest run ID b0273af7-1b23-45eb-87fe-9b1242a04c60 with nextest profile: default
+    Starting 35 tests across 1 binary (2852 tests skipped)
+        PASS [   0.027s] ( 1/35) loopflow lf::commands::ssh::dispatch_tests::ssh_failures_name_their_recovery
+        PASS [   0.078s] ( 2/35) loopflow lf::commands::ssh::dispatch_tests::transport_flags_need_a_machine_and_retired_commands_do_not_parse
+        PASS [   0.103s] ( 3/35) loopflow lf::commands::ssh::dispatch_tests::the_target_receives_everything_but_the_transport_flags
+        PASS [   1.080s] ( 4/35) loopflow lf::commands::run::launch_policy_tests::unset_chrome_sends_claude_nothing_until_a_choice_is_explicit
+        PASS [   0.049s] ( 5/35) loopflow ops::task::explain::tests::previews_without_a_readable_registry_are_unavailable_and_create_nothing
+        PASS [   1.115s] ( 6/35) loopflow ops::task::explain::tests::checkout_proposes_a_path_for_a_task_without_one
+        PASS [   1.583s] ( 7/35) loopflow lf::commands::run::launch_policy_tests::resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice
+        PASS [   2.556s] ( 8/35) loopflow lf::commands::run::launch_policy_tests::headless_launch_carries_the_schema_and_terminal_launch_refuses_it
+        PASS [   0.023s] ( 9/35) loopflow ops::task_ownership::tests::an_unassign_reads_as_unassign_and_is_stored_as_released
+        PASS [   0.018s] (10/35) loopflow ops::task_ownership::tests::log_lines_read_as_a_time_and_a_person_on_a_named_machine
+        PASS [   2.883s] (11/35) loopflow lf::commands::run::launch_policy_tests::resume_applies_current_policy_and_command_line_overrides
+        PASS [   1.362s] (12/35) loopflow ops::task::explain::tests::run_takes_up_the_named_else_waves_else_repositorys_else_code_graph
+        PASS [   0.016s] (13/35) loopflow store::sqlite::task_ownership::tests::a_later_claim_wins_elsewhere_but_never_displaces_the_local_claim
+        PASS [   0.223s] (14/35) loopflow store::sqlite::task_ownership::tests::a_private_machine_publishes_its_id_but_not_its_hostname
+        PASS [   0.019s] (15/35) loopflow store::sqlite::task_ownership::tests::a_recorded_entry_with_an_unknown_machine_is_owned_without_a_machine
+        PASS [   3.224s] (16/35) loopflow lf::commands::run::launch_policy_tests::launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository
+        PASS [   0.025s] (17/35) loopflow store::sqlite::task_ownership::tests::only_the_local_unclaim_or_handoff_ends_the_local_claim
+        PASS [   3.167s] (18/35) loopflow ops::task::explain::tests::checkout_reuses_a_present_checkout_and_names_option_impediments
+        PASS [   0.439s] (19/35) loopflow store::sqlite::task_ownership::tests::a_handoff_does_not_publish_the_targets_local_label
+        PASS [   0.078s] (20/35) loopflow store::sqlite::task_ownership::tests::unstamped_entries_in_one_second_keep_their_written_order
+        PASS [   3.571s] (21/35) loopflow ops::task::explain::tests::checkout_restores_a_missing_checkout_unless_occupied_terminal_or_remote
+        PASS [   0.386s] (22/35) loopflow store::sqlite::task_ownership::tests::unassigning_an_unowned_task_writes_nothing
+        PASS [   3.680s] (23/35) loopflow ops::task::adoption::tests::binding_refuses_background_and_closed_sessions
+        PASS [   2.624s] (24/35) loopflow ops::task::explain::tests::run_on_a_captured_graph_waits_runs_or_ends_from_its_position
+        PASS [   4.045s] (25/35) loopflow ops::task::adoption::tests::creation_adopts_only_the_selected_work
+        PASS [   2.978s] (26/35) loopflow ops::task::explain::tests::run_names_option_impediments_selection_and_missing_evidence
+        PASS [   4.190s] (27/35) loopflow ops::task::adoption::tests::checkout_adoption_records_its_open_pull_request
+        PASS [   1.309s] (28/35) loopflow store::sqlite::task_ownership::tests::the_owner_reclaims_after_a_stale_unclaim_elsewhere
+        PASS [   1.472s] (29/35) loopflow store::sqlite::task_ownership::tests::another_persons_claim_never_routes_work_to_their_machine
+        PASS [   4.791s] (30/35) loopflow ops::task::adoption::tests::binding_selects_the_task_conversation
+        PASS [   4.794s] (31/35) loopflow ops::task::adoption::tests::refusals_leave_ownership_unchanged
+        PASS [   5.007s] (32/35) loopflow ops::task::adoption::tests::creation_from_a_conversation_keeps_its_directory
+        PASS [   2.472s] (33/35) loopflow store::sqlite::task_ownership::tests::a_double_claim_keeps_the_first_claimant_and_names_the_later_claim
+        PASS [   5.292s] (34/35) loopflow ops::task::adoption::tests::a_shared_primary_moves_to_the_task_and_its_scope_gets_a_new_one
+        PASS [   5.809s] (35/35) loopflow ops::task::adoption::tests::binding_a_done_task_keeps_it_done
+────────────
+     Summary [   5.811s] 35 tests run: 35 passed, 2852 skipped

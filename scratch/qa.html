@@ -59,6 +59,18 @@ Logs: <code>scratch/qa/s1.head.log</code>, <code>lockprobe.head.log</code>, <cod
 <p>The probe needed a fix: its feeder subshell died of SIGPIPE when lf closed one open before the write, leaving lf blocked in
 <code>open()</code> on the FIFO (sampled). <code>lockprobe.sh</code> now runs the feeder with <code>trap "" PIPE</code>. A first, aborted
 attempt overlapped two probes on one FIFO (interleaved YAML, one HELD from the other lf's write); it is discarded.</p>
+<h2>6. Rerun at HEAD 55b8cdac69 (<code>owners_in</code> reads names through <code>machine_names_in</code>)</h2>
+<p>The only code change since section 5 is 7cde745b90, which swaps an inline declarations-to-names map in <code>owners_in</code> for the
+identical <code>machine_names_in</code>. Rebuilt <code>lf</code> (1 m) and reran sections 2 and 4 in a fresh <code>/tmp/lf-qa-867</code>,
+plus owner reads with a declared Machine. Logs: <code>scratch/qa/s1.55b8.log</code>, <code>s4.55b8.log</code>.</p>
+<table><tr><th>check</th><th>result</th></tr>
+<tr><td>create → unassign → claim → claim again</td><td class="ok">Same output as section 2; second claim writes nothing</td></tr>
+<tr><td>malformed <code>machines:</code>, then claim/unassign</td><td class="ok">unassign warns (19 warnings, as before) and succeeds; store writable afterwards</td></tr>
+<tr><td>two concurrent claims</td><td class="ok">both exit 0, one new <code>claim</code> row</td></tr>
+<tr><td><code>mini</code> declared: <code>lf machine list</code>, <code>lf task show --json</code>, claim, unassign</td><td class="ok">mini listed; owner still <code>Jacks-MacBook-Pro-2</code> (local hostname wins); unassign writes one <code>unclaim</code></td></tr></table>
+<p><code>s4.sh</code> needed a fix: on a fresh home with no <code>config.yaml</code> its backup <code>cp</code> failed and the malformed file stayed for the
+rest of the script. It now creates an empty file first. The FIFO lock probe was not rerun: 7cde745b90 changes no read order, only which helper
+builds the same map. A declared name as a label appears only for a Task held by another Machine, which still needs a second reachable Machine.</p>
 <h2>What works now</h2>
 <ul>
 <li>Claim and unassign take the store's write lock only after every config load (FIFO probe, section 1).</li>

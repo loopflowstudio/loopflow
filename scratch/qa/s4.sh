@@ -4,7 +4,7 @@ export HOME=$ROOT/home LF_HOME=$ROOT/lfhome LF=/tmp/lf-qa-867-bin LF_BIN=/tmp/lf
 export CODEX_HOME=$HOME/.codex CLAUDE_CONFIG_DIR=$HOME/.claude
 cd $ROOT/repo; T1=$(cat $ROOT/task1)
 run() { print "\$ lf ${(j: :)@}"; $LF "$@" < /dev/null 2>&1; print "(exit $?)"; }
-print "### malformed personal config"; cp $LF_HOME/config.yaml $ROOT/config.good
+print "### malformed personal config"; touch $LF_HOME/config.yaml; cp $LF_HOME/config.yaml $ROOT/config.good
 print 'machines: [not, a, map' > $LF_HOME/config.yaml
 run task unassign $T1
 cp $ROOT/config.good $LF_HOME/config.yaml

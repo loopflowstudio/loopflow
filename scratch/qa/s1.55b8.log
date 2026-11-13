@@ -1,0 +1,58 @@
+
+### Create a Task
+report",
+    "rank": 0,
+    "assignee": null,
+    "due_date": null,
+    "state": "unstarted",
+    "completed_at": null,
+    "linear_id": null,
+    "pm_snapshot_synced_at": null,
+    "pm_writeback": {
+      "state": "current"
+    },
+    "wave_id": null,
+    "repo_id": "repo_66d7b5f2e79a47cda079938801a292a1",
+    "project_id": null,
+    "worktree": null,
+    "workspace_slug": "",
+    "branch": "",
+    "base_commit": "",
+    "parent_pr_id": null,
+    "created_at": "2026-11-13T14:12:17Z",
+    "updated_at": "2026-11-13T14:12:17Z"
+  },
+  "graph": null,
+  "session_id": null,
+  "milestone": "filed"
+}
+TASK=task_0b0e59bd908d4eacbe2f702031195699
+
+### Ownership after create
+{
+ "log": [],
+ "owner": null,
+ "superseded_by": null
+}
+
+### Unassign
+$ lf task unassign task_0b0e59bd908d4eacbe2f702031195699
+Unowned
+(exit 0)
+
+### Claim
+$ lf task claim task_0b0e59bd908d4eacbe2f702031195699
+Owner: QA Person on Jacks-MacBook-Pro-2
+  Nov 13 06:12  claim  QA Person on Jacks-MacBook-Pro-2
+(exit 0)
+
+### Claim again
+$ lf task claim task_0b0e59bd908d4eacbe2f702031195699
+Owner: QA Person on Jacks-MacBook-Pro-2
+  Nov 13 06:12  claim  QA Person on Jacks-MacBook-Pro-2
+(exit 0)
+
+### Location
+$ lf task location task_0b0e59bd908d4eacbe2f702031195699
+home_3e2a406ec2eaec765604ce7c8f392d66 at 1794579145: unavailable: execution Machine is unknown or not this observer; read its owner
+(exit 0)

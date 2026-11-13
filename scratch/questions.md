@@ -24,6 +24,7 @@
 
 ## Checks
 
+- QA rerun at HEAD 55b8cdac69 (2026-11-13): claim walkthrough, malformed config, concurrent claims and declared-Machine owner reads pass; lock probe not rerun (no read-order change). `scratch/qa.html` §6.
 - QA rerun at HEAD 3cd3700868 (2026-11-13, branch `lf`): claim/unassign walkthrough, FIFO lock probe (0 of 136 config opens under the write lock), malformed config and concurrent claims all as before. `scratch/qa.html` §5.
 
 ## Concept review (2026-11-13)

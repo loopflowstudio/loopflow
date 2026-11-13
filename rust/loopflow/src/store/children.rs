@@ -288,10 +288,11 @@ impl Store {
         task_id: &TaskId,
         observation: crate::linear::LinearIssueObservation,
         observed_at: OffsetDateTime,
+        planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&task_id, &observation, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at, planning_connected)
         })
         .await
     }

@@ -33,7 +33,8 @@ After clearing, write no notes under `scratch/`: the next publish would commit
 them and CI would skip again. Findings and one command/result line per check go
 in the report and PR body. Cached PR copy (step 4) is the one exception: write
 it after clearing, immediately before `lf pr publish`, which consumes it before
-committing.
+committing. A persistent worktree keeps those files, so there pass the copy as
+`lf pr publish --title … --body …` instead.
 
 Then `scratch/` holds only `.gitkeep`, and `rust-test` and `tests-result` read
 pending, running or completed, not skipping. `lf pr checks` also exits 0 for a

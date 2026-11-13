@@ -83,7 +83,9 @@ Working context after the clear:
   that are fixed need no note; the rest goes in the report and the PR body.
   The cached PR copy files (`scratch/pr-title.txt`, `pr-body.md`,
   `.pr-copy-ref`) are the exception: `consume_gate_artifacts`
-  (`rust/loopflow/src/ops/pr.rs`) deletes them before publish commits.
+  (`rust/loopflow/src/ops/pr.rs`) deletes them before publish commits,
+  except in a persistent worktree (`is_persistent_worktree`), where gate
+  passes `--title`/`--body` instead.
 - A gate that ends with work it cannot finish restores the notes with
   `git revert --no-edit <clear-commit>` and says so. The head is a checkpoint
   again, which is the truth.
@@ -115,6 +117,8 @@ name HEAD or its immediate ancestor, so prepare those files after cleanup.
 
 Remaining: packaging and live gate acceptance below.
 Publication and the live matrix observation belong to delivery, not implement.
+Realign 2026-11-13: branch is level with origin/main; no PR exists yet, so
+the first `lf pr publish` in gate creates it.
 
 ## Alternatives
 

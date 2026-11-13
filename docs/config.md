@@ -58,7 +58,9 @@ next entry, so it tries Claude's other models instead: Opus, then Sonnet, then
 Haiku.
 
 When a usage limit refuses a headless step, it tries your next login for that
-provider, then the next entry in `agents`.
+provider, then the next entry in `agents`. If the provider reports that the
+model is unavailable, the step moves directly to the next entry without marking
+the login’s quota spent. An explicit model pin stops instead.
 
 ```bash
 lf task status MTG-328

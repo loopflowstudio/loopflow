@@ -204,9 +204,9 @@ pub struct AgentConfig {
     pub output_schema: Option<serde_json::Value>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
-    /// Agents a Graph step moves to, in order, when a usage limit refuses
-    /// `agent`: the rest of the configured order (`default_agent`, then
-    /// `agents`). Empty when the agent was an explicit choice.
+    /// Agents a Graph step moves to when a usage limit or unavailable model
+    /// refuses `agent`: the rest of the configured order (`default_agent`,
+    /// then `agents`). Empty when the agent was an explicit choice.
     pub fallback_agents: Vec<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
@@ -446,10 +446,10 @@ fn _record_agent_move(provider: &str, reason: &str, next: &str) {
     );
 }
 
-/// A usage limit refused the step and no agent it may use is left: the stop
+/// A provider refused the step and no agent it may use is left: the stop
 /// and what would let it move, where Task status and `lf task run` read it.
-fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried: &[String]) {
-    let advice = _limit_stop_advice(provider, launch, tried);
+fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, rungs: &[String]) {
+    let advice = _limit_stop_advice(provider, launch, rungs);
     eprintln!("Stopped: {advice}");
     _record_limit_recovery(
         provider,
@@ -458,11 +458,20 @@ fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried:
     );
 }
 
-fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) -> String {
+/// `rungs` is the whole order the step could walk; it stops after the last.
+fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[String]) -> String {
+    // Outside a Graph step, or replaying a recorded account, the order is one entry.
+    if let [only] = rungs {
+        if let Some(next) = launch.fallback_agents.iter().find(|a| *a != only) {
+            return format!(
+                "Only a Graph step moves through `agents`, and this run stayed on {only}. Run it again with `-a {next}`"
+            );
+        }
+    }
     if !launch.fallback_agents.is_empty() {
         return format!(
             "Nothing is left in its order after {}; add another agent to `agents`",
-            tried.join(", ")
+            rungs.join(", ")
         );
     }
     let another = if provider == "claude" {
@@ -471,7 +480,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) ->
         "claude"
     };
     format!(
-        "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
+        "No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents {provider},{another}`"
     )
 }
 
@@ -899,6 +908,8 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
 ];
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
 const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+const MODEL_FAILOVER_PROMPT: &str = "Continue this task after the previous model was unavailable. Re-read the current workspace state and finish any interrupted work.";
+const AGENT_FAILOVER_PROMPT: &str = "Continue this task on this provider. Re-read the current workspace state and finish any interrupted work.";
 /// How long a wait for capacity sleeps before looking again. Sleep stops the
 /// monotonic clock on a Mac; each look reads the wall clock and the accounts,
 /// so a cleared cooldown or a new login ends the wait early.
@@ -920,6 +931,9 @@ pub enum AgentFailure {
     /// The provider reported temporary service unavailability.
     #[error("provider unavailable")]
     Unavailable,
+    /// The selected model is unavailable; another configured entry may work.
+    #[error("model unavailable")]
+    ModelUnavailable,
     /// The provider process reported a retryable connection failure.
     #[error("provider transport")]
     Transport,
@@ -1194,7 +1208,7 @@ fn _run_with_transient_retries(
     let mut launched = false;
     let mut transient_failures = 0;
     let mut failovers = 0;
-    let mut account_failure: Option<AgentProcessResult> = None;
+    let mut refusal: Option<AgentProcessResult> = None;
     let mut capacity = CapacityWait::default();
 
     loop {
@@ -1229,6 +1243,7 @@ fn _run_with_transient_retries(
                 let prompt = match failure {
                     AgentFailure::AccountSubscriptionLimit => LIMIT_FAILOVER_PROMPT,
                     AgentFailure::AccountCredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
+                    AgentFailure::ModelUnavailable => MODEL_FAILOVER_PROMPT,
                     _ => RETRY_PROMPT,
                 };
                 if let Some(thread) = result.agent_session.clone().or(launch.resume_token.clone()) {
@@ -1239,6 +1254,7 @@ fn _run_with_transient_retries(
                     failure,
                     AgentFailure::AccountSubscriptionLimit
                         | AgentFailure::AccountCredentialInvalidated
+                        | AgentFailure::ModelUnavailable
                 ) {
                     attempt_config.task_prompt = _with_original_task(prompt, launch);
                 }
@@ -1268,7 +1284,7 @@ fn _run_with_transient_retries(
                 continue;
             }
             AgentAttempt::AccountUnavailable(unavailable) => {
-                let Some(result) = account_failure.as_ref() else {
+                let Some(result) = refusal.as_ref() else {
                     return Err(unavailable.into_error());
                 };
                 // A thread that left no transcript cannot move. The step starts
@@ -1288,41 +1304,42 @@ fn _run_with_transient_retries(
                 // Account exhaustion and a provider refusal take the same path.
                 (
                     result.clone(),
-                    result.failure.expect("saved account failure is classified"),
+                    result.failure.expect("saved refusal is classified"),
                     false,
                 )
             }
         };
         let delay = match failure {
-            AgentFailure::AccountSubscriptionLimit | AgentFailure::AccountCredentialInvalidated => {
+            AgentFailure::AccountSubscriptionLimit | AgentFailure::AccountCredentialInvalidated
+                if can_failover && failovers < MAX_ACCOUNT_FAILOVERS =>
+            {
                 let reason = _failure_reason(&result, failure);
-                if can_failover && failovers < MAX_ACCOUNT_FAILOVERS {
-                    failovers += 1;
-                    account_failure = Some(result);
-                    _record_limit_recovery(&provider, &reason, None);
-                } else if failure == AgentFailure::AccountSubscriptionLimit {
-                    let Some(next) = rungs.get(rung + 1) else {
-                        _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
-                        return Ok(result);
-                    };
-                    rung += 1;
-                    failovers = 0;
-                    // An unavailable fallback still follows this refusal;
-                    // keep walking the order rather than losing the limit.
-                    account_failure = Some(result);
-                    _record_agent_move(&provider, &reason, next);
-                    attempt_config = _climb(&attempt_config, next, process, launch);
-                } else {
-                    return Ok(result);
-                }
+                failovers += 1;
+                refusal = Some(result);
+                _record_limit_recovery(&provider, &reason, None);
                 Duration::ZERO
             }
+            AgentFailure::AccountSubscriptionLimit | AgentFailure::ModelUnavailable => {
+                let reason = _failure_reason(&result, failure);
+                let Some(next) = rungs.get(rung + 1) else {
+                    _record_limit_stop(&provider, &reason, launch, &rungs);
+                    return Ok(result);
+                };
+                rung += 1;
+                failovers = 0;
+                // Keep the refusal if the next entry has no eligible account.
+                refusal = Some(result);
+                _record_agent_move(&provider, &reason, next);
+                attempt_config = _climb(&attempt_config, next, process, launch);
+                Duration::ZERO
+            }
+            AgentFailure::AccountCredentialInvalidated => return Ok(result),
             _ => {
                 let Some(delay) = retry_delays.get(transient_failures).copied() else {
                     return Ok(result);
                 };
                 transient_failures += 1;
-                account_failure = None;
+                refusal = None;
                 delay
             }
         };
@@ -1343,8 +1360,8 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
-/// The agents a Graph step tries in turn when a usage limit refuses one. With
-/// an order to move through (`default_agent`, then `agents`) it is that order
+/// The agents a Graph step tries after a usage limit or unavailable model.
+/// With an order to move through (`default_agent`, then `agents`) it is that order
 /// as written, a bare harness on its configured model. With none, a bare
 /// harness tries its other models and an explicit `harness:model` stays put.
 /// A replay of a recorded account and anything outside a Graph step never moves.
@@ -1397,7 +1414,7 @@ fn _climb(
         next.resume_token = None;
         next.skill_invocation = None;
         next.task_prompt = _history_import(process)
-            .unwrap_or_else(|| _with_original_task(LIMIT_FAILOVER_PROMPT, launch));
+            .unwrap_or_else(|| _with_original_task(AGENT_FAILOVER_PROMPT, launch));
     }
     next
 }
@@ -1424,7 +1441,7 @@ fn _history_import(process: &ProcessConfig) -> Option<String> {
     }
 }
 
-/// The provider's own words for a limit, when it gave any.
+/// The provider's own words for a failure, when it gave any.
 fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String {
     result
         .stderr
@@ -1443,7 +1460,28 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
     if _find_provider_error(result, subscription_limit_text).is_some() {
         return Some(AgentFailure::AccountSubscriptionLimit);
     }
+    if _find_provider_error(result, _model_unavailable).is_some() {
+        return Some(AgentFailure::ModelUnavailable);
+    }
     _find_provider_error(result, classify_retryable_agent_failure)
+}
+
+fn _model_unavailable(text: &str) -> Option<()> {
+    let text = text.to_ascii_lowercase();
+    let names_model = text.contains("model")
+        || crate::config::CLAUDE_MODEL_FAMILIES
+            .iter()
+            .any(|model| text.contains(model));
+    (text.contains("model_not_found")
+        || (names_model
+            && [
+                "is unavailable",
+                "is currently unavailable",
+                "is not available",
+            ]
+            .iter()
+            .any(|phrase| text.contains(phrase))))
+    .then_some(())
 }
 
 pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
@@ -2516,6 +2554,81 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn model_unavailable_is_a_provider_refusal_not_spent_quota_or_answer_prose() {
+        for message in [
+            "claude_result: Fable 5 is currently unavailable. Switch to another model.",
+            "claude_result: Selected model is not available.",
+            "codex_error: model_not_found",
+        ] {
+            assert_eq!(
+                _classify_agent_failure(&failed_result(message)),
+                Some(AgentFailure::ModelUnavailable)
+            );
+            assert!(subscription_limit_text(message).is_none());
+            let prose = AgentProcessResult {
+                exit_code: 1,
+                stdout: message.into(),
+                ..Default::default()
+            };
+            assert_eq!(_classify_agent_failure(&prose), None);
+        }
+        for message in [
+            "service unavailable",
+            "model service temporarily unavailable",
+        ] {
+            assert_eq!(
+                _classify_agent_failure(&failed_result(message)),
+                Some(AgentFailure::Unavailable)
+            );
+        }
+    }
+
+    #[test]
+    fn model_unavailable_skips_logins_and_keeps_the_configured_order() {
+        let launch = AgentConfig {
+            agent: Some("claude:fable".into()),
+            fallback_agents: vec!["claude:opus".into(), "codex".into()],
+            task_prompt: "finish the operation".into(),
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let result = _run_with_transient_retries(
+            &launch,
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
+            &[],
+            |config, _| {
+                attempts.push(config.clone());
+                Ok(if config.agent.as_deref() == Some("codex") {
+                    done()
+                } else {
+                    managed_attempt(AgentProcessResult {
+                        agent_session: Some("thread".into()),
+                        ..failed_result("claude_result: Selected model is unavailable")
+                    })
+                })
+            },
+            |delay| assert_eq!(delay, Duration::ZERO),
+        )
+        .unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|c| c.agent.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["claude:fable", "claude:opus", "codex"]
+        );
+        assert_eq!(attempts[1].resume_token, Some("thread".into()));
+        assert_eq!(attempts[1].task_prompt, MODEL_FAILOVER_PROMPT);
+        assert_eq!(attempts[2].resume_token, None);
+        assert!(attempts[2].task_prompt.ends_with("finish the operation"));
+        assert!(!attempts[2].task_prompt.contains("subscription limit"));
+    }
+
+    #[test]
     fn transient_capacity_failure_resumes_and_finishes() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
@@ -2879,7 +2992,7 @@ trust_level = "trusted"
         // Claude's thread stays behind; without a Session to read, Codex gets
         // the whole task.
         assert_eq!(codex.resume_token, None);
-        assert!(codex.task_prompt.starts_with(LIMIT_FAILOVER_PROMPT));
+        assert!(codex.task_prompt.starts_with(AGENT_FAILOVER_PROMPT));
         assert!(codex.task_prompt.ends_with("implement the plan"));
     }
 
@@ -3533,7 +3646,7 @@ trust_level = "trusted"
         let advice = _limit_stop_advice("codex", &launch, &["codex".into()]);
         assert_eq!(
             advice,
-            "No fallback remains. Change an `agent` or `-a` pin to select another provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents codex,claude`"
+            "No fallback remains. Change an `agent` or `-a` pin to select another model or provider, or remove it to allow fallbacks. If `agents` is missing or has only one entry, configure fallbacks with `lf set --global agents codex,claude`"
         );
         let ordered = AgentConfig {
             fallback_agents: vec!["claude".into()],
@@ -3542,6 +3655,11 @@ trust_level = "trusted"
         assert_eq!(
             _limit_stop_advice("claude", &ordered, &["codex".into(), "claude".into()]),
             "Nothing is left in its order after codex, claude; add another agent to `agents`"
+        );
+        // A direct `lf -b <skill>` has an order but never walks it.
+        assert_eq!(
+            _limit_stop_advice("codex", &ordered, &["codex".into()]),
+            "Only a Graph step moves through `agents`, and this run stayed on codex. Run it again with `-a claude`"
         );
     }
 }

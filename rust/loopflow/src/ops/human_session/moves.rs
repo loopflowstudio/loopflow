@@ -25,7 +25,7 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
-use crate::store::sqlite::task_work::TaskGraphRecord;
+use crate::store::sqlite::task_work::{ShipApproval, TaskGraphRecord};
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
@@ -57,6 +57,8 @@ pub(crate) struct MovedTask {
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
+    /// The standing Auto-Ship approval; absent when the Task was not shipping.
+    pub approval: Option<ShipApproval>,
 }
 
 /// A Graph the move stopped.
@@ -196,6 +198,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             ownership_marker: crate::store::sqlite::task_ownership::marker(&claim)?,
             graph: store.sqlite.task_graph_record(&task.id)?,
             stopped,
+            approval: store.sqlite.task_ship_approval(&task.id)?,
         }),
     })
 }
@@ -669,7 +672,7 @@ pub(crate) fn checkout_of(
 }
 
 /// This Machine owns the Task from here: the move's claim, then its checkout of
-/// the carried branch, then its Graph where it stood.
+/// the carried branch, then its Graph where it stood and its Auto-Ship approval.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,
@@ -704,6 +707,11 @@ async fn take_in_task(
             graph,
             crate::journal::current_lf_process_id().as_ref(),
         )?;
+    }
+    if let Some(approval) = &moved.approval {
+        store
+            .sqlite
+            .take_in_ship_approval(&moved.task_id, approval)?;
     }
     store
         .get_task(&moved.task_id)

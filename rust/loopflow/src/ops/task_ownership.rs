@@ -70,7 +70,8 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 }
 
 /// While this Machine holds an unsuperseded claim, Linear shows its person as
-/// assignee. The person is the Linear viewer on this Machine. Without a viewer
+/// assignee. The person is the Linear viewer on this Machine, which is also
+/// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
     if !super::planning_client::is_linear(&repository.to_string_lossy()) {
@@ -90,6 +91,14 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     };
     match viewer {
         Ok(viewer) => {
+            let name = crate::config::participant_name_in(repository)
+                .ok()
+                .flatten();
+            if let Err(error) =
+                store.record_local_person(&format!("linear:{viewer}"), name.as_deref())
+            {
+                tracing::warn!(%error, "the Linear viewer was not recorded as this Machine's person");
+            }
             if let Err(error) = store.assign_task_owner(task, Some(viewer.as_str())) {
                 tracing::warn!(%task, %error, "Linear assignee was not queued");
             }
@@ -191,6 +200,7 @@ mod tests {
                 kind,
                 person: Some("Lee".into()),
                 person_key: None,
+                person_id: None,
                 machine_id: Some(MachineId::new()),
                 machine_label: Some("lee-mbp".into()),
                 writer_machine_id: None,

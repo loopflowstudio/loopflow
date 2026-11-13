@@ -43,7 +43,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)";

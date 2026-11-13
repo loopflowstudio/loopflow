@@ -104,9 +104,11 @@ wrote as `handoff` read as such claims. `lf task run` and `lf task checkout`
 claim an unowned Task when they allocate its checkout. Completion, abandonment
 and reopening write no entries; a Done Task shows its last owner as history.
 
-A person is named once, in `people`: by the planning provider's user where
-planning has people (Linear), with a display name. Ownership entries and Machines
-refer to that row; the Git email names nobody new.
+A person is named once, in `people`: by the planning provider's user
+(`linear:<user>`, learned when Linear first shows the Task's assignee), else by
+the Git journal's planning user key (`journal:<key>`), with a display name.
+Ownership entries and Machines refer to that row; the Git email names nobody new.
+Entries written before a Machine knew its person still carry only the Git email.
 
 Which Machine runs a person's Wave work is that person's choice, never
 repository content:

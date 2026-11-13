@@ -3021,6 +3021,7 @@ mod tests {
         crate::durable::TaskOwner {
             person: Some("Jack Heart".into()),
             person_key: Some("jack@loopflow.studio".into()),
+            person_id: None,
             machine: crate::durable::MachineRef {
                 id: None,
                 label: None,
@@ -4224,13 +4225,8 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        // Remove the column's dependents so the planning read, not this setup, fails.
-        conn.execute_batch(
-            "DROP INDEX tasks_ship_process;
-             DROP TRIGGER store_revision_tasks_update;
-             ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
-        )
-        .unwrap();
+        // The planning read, not this setup, fails.
+        conn.execute_batch("DROP TABLE task_ship_events").unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
             sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
@@ -4254,7 +4250,7 @@ mod tests {
             );
         };
         assert!(
-            reason.contains("no such column: t.ship_lf_process_id"),
+            reason.contains("no such table: task_ship_events"),
             "{reason}"
         );
         let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();

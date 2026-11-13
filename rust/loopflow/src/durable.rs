@@ -233,6 +233,9 @@ pub struct TaskOwnershipEntry {
     pub person: Option<String>,
     /// The person's stable key; names are display only.
     pub person_key: Option<String>,
+    /// The person's `people` id, their planning provider's identity for them.
+    /// Absent from entries released lf wrote and where the writer knew none.
+    pub person_id: Option<String>,
     pub machine_id: Option<MachineId>,
     /// The Machine's label when written, or as best known on this Machine.
     pub machine_label: Option<String>,
@@ -264,6 +267,9 @@ impl MachineRef {
 pub struct TaskOwner {
     pub person: Option<String>,
     pub person_key: Option<String>,
+    /// The person's `people` id, where the entry named one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub person_id: Option<String>,
     pub machine: MachineRef,
 }
 
@@ -284,6 +290,7 @@ impl TaskOwnershipEntry {
         TaskOwner {
             person: self.person.clone(),
             person_key: self.person_key.clone(),
+            person_id: self.person_id.clone(),
             machine: MachineRef {
                 id: self.machine_id.clone(),
                 label: self.machine_label.clone(),

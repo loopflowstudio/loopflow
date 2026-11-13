@@ -82,15 +82,47 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
 - Main's `tasks_abandoned_checkout` index (`workload_indexes.sql`) indexes
   columns nothing reads now; Task 538340 drops it with them.
 
+## Done (2026-11-13, third pass): ship log, pools, people
+
+- `task_ship_events` (approved, carried, restarted, progressed, stopped,
+  withdrawn; at, Process, person) replaces the local `ship_*` columns: every
+  reader and writer (`task_work.rs` ship fns, `task_state_sql` carrier,
+  process pruning) reads the log; backfilled from the old columns. `tasks.shipped_at`
+  stays: it is the planning field (`task_shipped_at`) peers share. A move
+  carries the standing approval (`MovedTask.approval`); arrival appends it
+  with no carrier, so recovery restarts the ship process there.
+- `pool_machines` (machine, pool, `cost_usd`, `expires_at`) replaces the
+  `machines` columns in `rentals.rs`; backfilled.
+- `people` (`linear:<viewer>` or `journal:<planning user key>`, name);
+  `machines.person_id` is who the Machine belongs to (Linear viewer recorded in
+  `assert_assignee`, journal key at provisioning and backfill; Linear wins);
+  `task_ownership.person_id` and `TaskOwner/TaskOwnershipEntry.person_id` on
+  the wire; the log shows `people.name` over the entry's name; matching ids
+  decide "is this you" before the Git email does. No new email keys.
+- EXPLAIN QUERY PLAN, 10,000 Tasks / 40,000 ship events: the state carrier
+  subquery and log read search `task_ship_events_task`, pruning searches
+  `task_ship_events_process`, pools `pool_machines_pool`, the owner name join
+  the `people` key.
+- Checks (2026-11-13): clippy `--all-targets -D warnings` clean; lib
+  task_work::, task_ownership::, rentals, revisions::, query_plans::,
+  store::migrations:: (131), ops::task::ship::, ops::task_ownership::,
+  processes::, ops::human_session::, planning_peers, server::schema::tests::,
+  waves `planning_failure_keeps_the_stored_workflow_readable` pass; integration
+  dto_fixtures::, machine_commands:: (50), documented_commands:: pass.
+  `server_schema.json` regenerated. Gate runs `two_people`, `transport_tests`.
+- Drop list for LOO-877: `tasks.ship_lf_process_id`, `ship_restarts`,
+  `ship_approved_lf_process_id`, `ship_stopped_at`, `ship_stopped_lf_process_id`,
+  `ship_stopped_person`, index `tasks_ship_process`; `machines.pool`,
+  `cost_usd`, `expires_at`. (`shipped_at` stays.)
+
 ## Remaining
 
-1. **`task_ship_events`**: replace the seven `ship_*` columns with an approval/stop
-   log (who, when, process); the move carries the latest approval.
-2. **`pool_machines`**: move `machines.pool`, `cost_usd`, `expires_at`.
-3. **`people`**: one row per person, keyed by planning-provider identity.
-4. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
+1. (done) Third-pass drop list added to LOO-877 as a comment.
+2. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
    history, so the receipt is what keeps their membership. Folding needs a
    path-history column on `task_checkouts`; open whether that is worth it.
+3. Swift does not decode `person_id` (Codable ignores it); add it where the
+   app shows owners.
 
 ## Open questions (each reversible; the simpler option is built)
 
@@ -109,8 +141,15 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   build reads as written elsewhere. Window is live pre-install processes only.
 - **Writer field optional on the wire.** Markers released lf delivered lack
   `writer_machine_id`, so it deserializes absent as null; Task 538340 makes it required.
-- **People without a planning provider.** Under the Git journal there is no
-  provider user; what keys that person, given no new Git-email keys?
-- **Auto-Ship across a move.** Docs say the move carries the latest approval.
+- **People under the Git journal.** Built: the journal's planning user key
+  (`journal:<key>`), the identity its refs already use. A Machine with neither
+  Linear nor a provisioned key knows no person; its entries carry only the Git
+  email, as before.
+- **A person with both.** Linear's id replaces the journal key on the Machine;
+  their journal-era entries keep the old id. Merging rows is open.
+- **First claim on a Machine.** The Linear viewer is learned after the first
+  claim's assignee write, so that claim names no `person_id`.
+- **Seven ship columns.** `shipped_at` is shared planning, so it stays; the
+  carrier and restart count joined the log as `carried`/`restarted`/`progressed`.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.

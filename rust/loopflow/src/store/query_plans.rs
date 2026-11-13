@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 13] = [
+const GROWING: [&str; 14] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
@@ -24,6 +24,7 @@ const GROWING: [&str; 13] = [
     "task_checkouts",
     "task_events",
     "task_retirements",
+    "task_ship_events",
     "tasks",
 ];
 

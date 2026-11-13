@@ -38,9 +38,11 @@ fn logs_in(
     // Entries the provider has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and the move after it in the order they happened.
     let mut statement = conn.prepare(
-        "SELECT id,kind,person,person_key,machine_id,machine_label,at,writer_machine_id,task_id
-         FROM task_ownership WHERE task_id IN (SELECT value FROM json_each(?1))
-         ORDER BY ordered_at IS NULL,ordered_at,at,rowid",
+        "SELECT o.id,o.kind,coalesce(p.name,o.person),o.person_key,o.machine_id,o.machine_label,
+             o.at,o.writer_machine_id,o.task_id,o.person_id
+         FROM task_ownership o LEFT JOIN people p ON p.id=o.person_id
+         WHERE o.task_id IN (SELECT value FROM json_each(?1))
+         ORDER BY o.ordered_at IS NULL,o.ordered_at,o.at,o.rowid",
     )?;
     let rows = statement.query_map(
         [super::children::ids_json(tasks.iter().map(TaskId::as_str))],
@@ -55,12 +57,14 @@ fn logs_in(
                 row.get::<_, i64>(6)?,
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
             ))
         },
     )?;
     let mut logs = HashMap::<TaskId, Vec<TaskOwnershipEntry>>::new();
     for row in rows {
-        let (id, kind, person, person_key, machine, machine_label, at, writer, task) = row?;
+        let (id, kind, person, person_key, machine, machine_label, at, writer, task, person_id) =
+            row?;
         let task = TaskId::from_raw(task);
         logs.entry(task.clone())
             .or_default()
@@ -70,6 +74,7 @@ fn logs_in(
                 kind: read_kind(&kind)?,
                 person,
                 person_key,
+                person_id,
                 machine_id: machine.as_deref().map(MachineId::from_raw),
                 machine_label,
                 writer_machine_id: writer.as_deref().map(MachineId::from_raw),
@@ -173,6 +178,29 @@ pub(super) fn local_machine_in(conn: &Connection) -> StoreResult<MachineId> {
     Ok(MachineId::from_raw(id))
 }
 
+/// The `people` id of the person this Machine belongs to, once known.
+fn local_person_in(conn: &Connection) -> StoreResult<Option<String>> {
+    Ok(conn.query_row(
+        "SELECT person_id FROM machines WHERE is_local=1",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// Know `id` as a person, named `name` when one is given. An id outside
+/// the planning providers' forms is not a person and is skipped.
+fn name_person_in(conn: &Connection, id: &str, name: Option<&str>) -> StoreResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO people(id,name) VALUES(?1,?2)",
+        params![id, name],
+    )?;
+    conn.execute(
+        "UPDATE people SET name=?2 WHERE id=?1 AND ?2 IS NOT NULL AND name IS NOT ?2",
+        params![id, name],
+    )?;
+    Ok(())
+}
+
 fn reading_in(conn: &Connection, task: &TaskId) -> StoreResult<(Vec<TaskOwnershipEntry>, Reading)> {
     let rows = log_in(conn, task)?;
     let reading = read_log(&rows, &local_machine_in(conn)?);
@@ -258,13 +286,17 @@ fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool>
             .any(|declaration| &declaration.id == machine))
 }
 
-/// Whether a holder is you. A holder with a person key (Git `user.email`) is
+/// Whether a holder is you. A holder and you both named by a `people` id are
+/// the same person exactly when the ids match. Otherwise a holder with a person key (Git `user.email`) is
 /// you exactly when the key is yours, even on a Machine you registered. A
 /// keyless entry, written before keys or recorded before ownership existed, is
 /// yours when it holds one of your Machines. Names are display only.
 fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreResult<bool> {
+    if let (Some(id), Some(mine)) = (&holder.person_id, &me.person.id) {
+        return Ok(id == mine);
+    }
     if let Some(key) = &holder.person_key {
-        return Ok(me.key.as_ref() == Some(key));
+        return Ok(me.person.key.as_ref() == Some(key));
     }
     match &holder.machine.id {
         Some(machine) => is_my_machine_in(conn, machine),
@@ -278,17 +310,37 @@ fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreRes
 /// configuration, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
 pub(crate) struct RepoFacts {
-    key: Option<String>,
-    name: Option<String>,
+    person: Person,
     planning_connected: bool,
 }
 
+/// The person an entry names: their display name, stable key and `people` id.
+#[derive(Debug, Clone)]
+struct Person {
+    name: Option<String>,
+    key: Option<String>,
+    id: Option<String>,
+}
+
+impl From<TaskOwner> for Person {
+    fn from(owner: TaskOwner) -> Self {
+        Self {
+            name: owner.person,
+            key: owner.person_key,
+            id: owner.person_id,
+        }
+    }
+}
+
 impl RepoFacts {
-    fn in_repo(repo: &str) -> StoreResult<Self> {
+    fn in_repo(conn: &Connection, repo: &str) -> StoreResult<Self> {
         Ok(Self {
-            key: crate::config::participant_email(std::path::Path::new(repo)),
-            name: crate::config::participant_name()
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            person: Person {
+                name: crate::config::participant_name()
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                key: crate::config::participant_email(std::path::Path::new(repo)),
+                id: local_person_in(conn)?,
+            },
             planning_connected: crate::ops::planning_client::connected(repo),
         })
     }
@@ -299,7 +351,7 @@ impl RepoFacts {
 
     /// You in the Task's repository.
     pub(crate) fn of_task_in(conn: &Connection, task: &TaskId) -> StoreResult<Self> {
-        Self::in_repo(&task_repo_in(conn, task)?)
+        Self::in_repo(conn, &task_repo_in(conn, task)?)
     }
 
     /// You in a repository by its planning identity.
@@ -314,7 +366,7 @@ impl RepoFacts {
                 |row| row.get(0),
             )
             .optional()?;
-        Self::in_repo(&repo.ok_or(StoreError::NotFound)?)
+        Self::in_repo(conn, &repo.ok_or(StoreError::NotFound)?)
     }
 }
 
@@ -419,8 +471,7 @@ fn move_in(
         conn,
         task,
         OwnershipKind::Claim,
-        holder.person,
-        holder.person_key,
+        holder.into(),
         target,
         me.planning_connected,
     )
@@ -456,18 +507,21 @@ fn append_in(
     conn: &Connection,
     task: &TaskId,
     kind: OwnershipKind,
-    person: Option<String>,
-    person_key: Option<String>,
+    person: Person,
     machine: &MachineId,
     planning_connected: bool,
 ) -> StoreResult<TaskOwnershipEntry> {
     let local = local_machine_in(conn)?;
+    if let Some(id) = &person.id {
+        name_person_in(conn, id, person.name.as_deref())?;
+    }
     let entry = TaskOwnershipEntry {
         id: OwnershipEntryId::new(),
         task_id: task.clone(),
         kind,
-        person,
-        person_key,
+        person: person.name,
+        person_key: person.key,
+        person_id: person.id,
         machine_id: Some(machine.clone()),
         // Private Machines publish no label; teammates see the id.
         machine_label: if *machine == local {
@@ -481,8 +535,8 @@ fn append_in(
     let ordered_at = journal_order_in(conn, task, planning_connected)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
-             at,ordered_at,writer_machine_id,written_here)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1)",
+             at,ordered_at,writer_machine_id,written_here,person_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -493,7 +547,8 @@ fn append_in(
             entry.machine_label,
             entry.at,
             ordered_at,
-            local.as_str()
+            local.as_str(),
+            entry.person_id
         ],
     )?;
     // Peers order the entry by its comment's time; in the journal that is our order.
@@ -558,7 +613,7 @@ pub(super) fn claim_in(
     if owned_here {
         return Ok(None);
     }
-    let key = me.key.clone().ok_or_else(|| {
+    let key = me.person.key.clone().ok_or_else(|| {
         StoreError::InvalidData(
             "claiming needs your Git user.email, which identifies you to teammates; \
              run `git config --global user.email you@example.com`"
@@ -569,8 +624,10 @@ pub(super) fn claim_in(
         conn,
         task,
         OwnershipKind::Claim,
-        me.name.clone(),
-        Some(key),
+        Person {
+            key: Some(key),
+            ..me.person.clone()
+        },
         &local,
         me.planning_connected,
     )
@@ -624,8 +681,8 @@ pub(super) fn ingest_marker_in(
     }
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_ownership(id,task_id,kind,person,person_key,machine_id,
-             machine_label,at,ordered_at,writer_machine_id,written_here)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0)",
+             machine_label,at,ordered_at,writer_machine_id,written_here,person_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -636,9 +693,13 @@ pub(super) fn ingest_marker_in(
             entry.machine_label,
             entry.at,
             ordered_at,
-            entry.writer_machine_id.as_ref().map(MachineId::as_str)
+            entry.writer_machine_id.as_ref().map(MachineId::as_str),
+            entry.person_id
         ],
     )? > 0;
+    if let (true, Some(id)) = (inserted, &entry.person_id) {
+        name_person_in(conn, id, entry.person.as_deref())?;
+    }
     if !inserted {
         if let Some(ordered_at) = ordered_at {
             conn.execute(
@@ -699,8 +760,7 @@ pub(super) fn reassert_in(
         conn,
         task,
         OwnershipKind::Claim,
-        holder.person,
-        holder.person_key,
+        holder.into(),
         &local_machine_in(conn)?,
         planning_connected_in(conn, task)?,
     )
@@ -714,15 +774,19 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
     let held = super::rentals::tasks_held_in(conn, machine)?;
     let mut tasks = Vec::with_capacity(held.len());
     for (task, ownership) in held {
-        let (person, person_key) = ownership
-            .owner
-            .map_or((None, None), |owner| (owner.person, owner.person_key));
+        let person = match ownership.owner {
+            Some(owner) => owner.into(),
+            None => Person {
+                name: None,
+                key: None,
+                id: None,
+            },
+        };
         append_in(
             conn,
             &task,
             OwnershipKind::Claim,
             person,
-            person_key,
             &local,
             planning_connected_in(conn, &task)?,
         )?;
@@ -732,6 +796,21 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
 }
 
 impl SqliteStore {
+    /// This Machine belongs to the person `id` names, as their planning
+    /// provider knows them; `name` is how they are shown.
+    pub(crate) fn record_local_person(&self, id: &str, name: Option<&str>) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        name_person_in(&tx, id, name)?;
+        tx.execute(
+            "UPDATE machines SET person_id=?1 WHERE is_local=1 AND person_id IS NOT ?1
+             AND EXISTS(SELECT 1 FROM people WHERE id=?1)",
+            [id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn task_ownership(&self, task: &TaskId) -> StoreResult<TaskOwnership> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
@@ -816,8 +895,7 @@ impl SqliteStore {
             &tx,
             task,
             OwnershipKind::Claim,
-            sent.person.clone(),
-            sent.person_key.clone(),
+            sent.owner().into(),
             &local_machine_in(&tx)?,
             planning_connected,
         )?;
@@ -846,13 +924,16 @@ impl SqliteStore {
         let Some((local, holder)) = my_claim_in(&tx, task, &me)? else {
             return Ok(None);
         };
-        let key = me.key.or(holder.person_key);
+        let person = Person {
+            name: me.person.name,
+            key: me.person.key.or(holder.person_key),
+            id: me.person.id.or(holder.person_id),
+        };
         let entry = append_in(
             &tx,
             task,
             OwnershipKind::Unassign,
-            me.name,
-            key,
+            person,
             &local,
             me.planning_connected,
         )?;
@@ -937,6 +1018,7 @@ mod tests {
             kind,
             person: Some(person.into()),
             person_key: None,
+            person_id: None,
             machine_id: Some(machine.clone()),
             machine_label: None,
             writer_machine_id: Some(writer.clone()),
@@ -948,6 +1030,7 @@ mod tests {
         Some(TaskOwner {
             person: Some(person.into()),
             person_key: None,
+            person_id: None,
             machine: MachineRef {
                 id: Some(machine.clone()),
                 label: None,
@@ -1034,6 +1117,7 @@ mod tests {
             Some(TaskOwner {
                 person: None,
                 person_key: None,
+                person_id: None,
                 machine: MachineRef {
                     id: None,
                     label: None
@@ -1078,6 +1162,45 @@ mod tests {
         assert!(conn
             .execute("UPDATE task_ownership SET writer_machine_id=NULL", [])
             .is_err());
+    }
+
+    #[test]
+    fn the_planning_journal_user_names_this_machines_person() {
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "task_machine_local");
+        let key = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO planning_user(singleton,user_key) VALUES(1,?1)",
+            [&key],
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("task_machine_local"))
+            .unwrap();
+        assert_eq!(
+            super::local_person_in(&conn).unwrap(),
+            Some(format!("journal:{key}"))
+        );
+    }
+
+    #[test]
+    fn a_claim_names_its_person_once_and_the_latest_name_shows() {
+        let (_dir, store, task) = store_with_unowned_task();
+        store
+            .record_local_person("linear:lee", Some("Lee"))
+            .unwrap();
+        let claim = store.claim_task(&task).unwrap().unwrap();
+        assert_eq!(claim.person_id.as_deref(), Some("linear:lee"));
+        store
+            .record_local_person("linear:lee", Some("Lee Park"))
+            .unwrap();
+        let ownership = store.task_ownership(&task).unwrap();
+        assert_eq!(ownership.log[0].person.as_deref(), Some("Lee Park"));
+        assert_eq!(
+            ownership.owner.unwrap().person_id.as_deref(),
+            Some("linear:lee")
+        );
     }
 
     #[test]

@@ -14137,6 +14137,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, where the entry named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "type": [
             "string",
@@ -14147,6 +14154,7 @@
       "required": [
         "person",
         "person_key",
+        "person_id",
         "machine"
       ],
       "type": "object"
@@ -14220,6 +14228,13 @@
             "null"
           ]
         },
+        "person_id": {
+          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "person_key": {
           "description": "The person's stable key; names are display only.",
           "type": [
@@ -14244,6 +14259,7 @@
         "kind",
         "person",
         "person_key",
+        "person_id",
         "machine_id",
         "machine_label",
         "writer_machine_id",

@@ -235,7 +235,7 @@ impl SqliteStore {
         if !crate::config::placement::write(&tx, None, &["pools", name], None).map_err(invalid)? {
             return Err(StoreError::NotFound);
         }
-        tx.execute("UPDATE machines SET pool=NULL WHERE pool=?1", [name])?;
+        tx.execute("UPDATE pool_machines SET pool=NULL WHERE pool=?1", [name])?;
         tx.execute("DELETE FROM pools WHERE name=?1", [name])?;
         tx.commit()?;
         Ok(())
@@ -246,8 +246,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let ids = {
-            let mut statement =
-                snapshot.prepare("SELECT id FROM machines WHERE pool=?1 ORDER BY id")?;
+            let mut statement = snapshot.prepare(
+                "SELECT machine_id FROM pool_machines WHERE pool=?1 ORDER BY machine_id",
+            )?;
             let rows = statement.query_map([name], |row| row.get::<_, String>(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
@@ -294,8 +295,18 @@ impl SqliteStore {
                 params![pool, now_unix()],
             )?;
         }
-        let changed = tx.execute(
-            "UPDATE machines SET pool=?2,cost_usd=?3,expires_at=?4 WHERE id=?1",
+        let known: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM machines WHERE id=?1)",
+            [machine.as_str()],
+            |row| row.get(0),
+        )?;
+        if !known {
+            return Err(StoreError::NotFound);
+        }
+        tx.execute(
+            "INSERT INTO pool_machines(machine_id,pool,cost_usd,expires_at) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(machine_id) DO UPDATE SET pool=excluded.pool,
+                 cost_usd=excluded.cost_usd,expires_at=excluded.expires_at",
             params![
                 machine.as_str(),
                 ownership.pool,
@@ -303,9 +314,6 @@ impl SqliteStore {
                 ownership.expires_at.map(OffsetDateTime::unix_timestamp)
             ],
         )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
         tx.commit()?;
         Ok(())
     }
@@ -609,7 +617,8 @@ fn live_in(conn: &Connection, ondemand: &str) -> StoreResult<u32> {
 fn ownership_in(conn: &Connection, machine: &MachineId) -> StoreResult<Ownership> {
     let (pool, cost, expires): (Option<String>, Option<String>, Option<i64>) = conn
         .query_row(
-            "SELECT pool,cost_usd,expires_at FROM machines WHERE id=?1",
+            "SELECT p.pool,p.cost_usd,p.expires_at FROM machines m
+             LEFT JOIN pool_machines p ON p.machine_id=m.id WHERE m.id=?1",
             [machine.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

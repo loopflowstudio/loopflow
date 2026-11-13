@@ -480,13 +480,16 @@ pub(super) fn map_machine_by_id(
 
 /// Completion and abandonment are durable. An open Task's state follows
 /// what it is doing: a Graph runs for it while its Task run or ship process
-/// has not exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
+/// has not exited (its carrier is the latest Auto-Ship log entry naming one),
+/// and the Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
+         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
+             FROM task_ship_events e WHERE e.task_id={t}.id \
+             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \

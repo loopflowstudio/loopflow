@@ -320,3 +320,39 @@ fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
         .unwrap();
     assert_eq!(capacity, None);
 }
+
+#[test]
+fn an_owned_machines_pool_cost_and_expiry_move_to_pool_machines() {
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_migration(&conn, "task_machine_local");
+    conn.execute_batch(
+        "INSERT INTO pools(name,created_at) VALUES('lab',1);
+         INSERT INTO machines(id,is_local,created_at,observed_at,pool,cost_usd,expires_at)
+         VALUES('mch_owned',0,1,1,'lab','12.50',99);
+         INSERT INTO machines(id,is_local,created_at,observed_at) VALUES('mch_rented',0,1,1);",
+    )
+    .unwrap();
+    conn.execute_batch(&migration_section_sql("task_machine_local"))
+        .unwrap();
+    type Row = (String, Option<String>, Option<String>, Option<i64>);
+    let rows: Vec<Row> = conn
+        .prepare("SELECT machine_id,pool,cost_usd,expires_at FROM pool_machines")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        [(
+            "mch_owned".to_string(),
+            Some("lab".to_string()),
+            Some("12.50".to_string()),
+            Some(99)
+        )]
+    );
+}

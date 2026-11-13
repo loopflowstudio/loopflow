@@ -3,6 +3,8 @@
 -- lf took in from planning name no writer.
 -- `written_here` stays filled for released lf until the contract drops it.
 ALTER TABLE task_ownership ADD COLUMN writer_machine_id TEXT;
+-- The person, as a `people` id, where this Machine knew one when it wrote.
+ALTER TABLE task_ownership ADD COLUMN person_id TEXT;
 DROP TRIGGER task_ownership_append_only;
 UPDATE task_ownership SET writer_machine_id=(SELECT id FROM machines WHERE is_local=1)
 WHERE written_here=1;
@@ -12,7 +14,7 @@ WHEN NOT (OLD.ordered_at IS NULL AND NEW.ordered_at IS NOT NULL
     AND NEW.person IS OLD.person AND NEW.machine_id IS OLD.machine_id
     AND NEW.at IS OLD.at AND NEW.written_here IS OLD.written_here
     AND NEW.person_key IS OLD.person_key AND NEW.machine_label IS OLD.machine_label
-    AND NEW.writer_machine_id IS OLD.writer_machine_id)
+    AND NEW.writer_machine_id IS OLD.writer_machine_id AND NEW.person_id IS OLD.person_id)
 BEGIN SELECT RAISE(ABORT, 'Task ownership entries are append-only'); END;
 
 -- Machine-local: each move of a Task this Machine sent or received. A sent
@@ -109,3 +111,79 @@ WHEN NEW.worktree IS NOT OLD.worktree OR NEW.branch IS NOT OLD.branch
 BEGIN DELETE FROM task_retirements WHERE task_id=NEW.task_id; END;
 CREATE TRIGGER cancel_task_retirement_checkout_delete AFTER DELETE ON task_checkouts
 BEGIN DELETE FROM task_retirements WHERE task_id=OLD.task_id; END;
+
+-- Machine-local: a Task's Auto-Ship log, in the order it happened. `approved`
+-- hands the Task off (its Process carries it), `carried` names a later
+-- carrier, `restarted` counts a restart after a failed carrier and
+-- `progressed` resets that count; `stopped` is a person's stop, which stands
+-- until the next approval, and `withdrawn` ends an approval without one.
+-- `tasks.shipped_at` stays the planning fact peers share. The Processes may be
+-- pruned, so no key. The seven `tasks.ship_*`/`shipped_at` columns' local
+-- parts stay for released lf until the contract drops them.
+CREATE TABLE task_ship_events (
+    id INTEGER PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN
+        ('approved','carried','restarted','progressed','stopped','withdrawn')),
+    at INTEGER NOT NULL,
+    lf_process_id TEXT,
+    -- The person named at a stop no Process made.
+    person TEXT
+);
+CREATE INDEX task_ship_events_task ON task_ship_events(task_id, id);
+CREATE INDEX task_ship_events_process ON task_ship_events(lf_process_id)
+WHERE lf_process_id IS NOT NULL;
+CREATE TRIGGER task_ship_events_append_only BEFORE UPDATE ON task_ship_events
+BEGIN SELECT RAISE(ABORT, 'Task ship events are append-only'); END;
+CREATE TRIGGER store_revision_task_ship_events_insert AFTER INSERT ON task_ship_events
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_ship_events_delete AFTER DELETE ON task_ship_events
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+-- A stop that stood beside an approval came first: the approval lifted it.
+INSERT INTO task_ship_events(task_id,kind,at,lf_process_id,person)
+SELECT id,'stopped',ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person
+FROM tasks WHERE ship_stopped_at IS NOT NULL;
+INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
+SELECT id,'approved',shipped_at,ship_approved_lf_process_id FROM tasks
+WHERE shipped_at IS NOT NULL;
+INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
+SELECT id,'carried',shipped_at,ship_lf_process_id FROM tasks
+WHERE shipped_at IS NOT NULL AND ship_lf_process_id IS NOT NULL
+    AND ship_lf_process_id IS NOT ship_approved_lf_process_id;
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<64)
+INSERT INTO task_ship_events(task_id,kind,at)
+SELECT t.id,'restarted',t.shipped_at FROM tasks t JOIN n ON n.i<=t.ship_restarts
+WHERE t.shipped_at IS NOT NULL;
+
+-- An owned machine's pool, the cost committed when it was added and when it
+-- stops taking new work. A rented machine has no row. `machines.pool`,
+-- `cost_usd` and `expires_at` stay for released lf until the contract drops them.
+CREATE TABLE pool_machines (
+    machine_id TEXT PRIMARY KEY REFERENCES machines(id) ON DELETE CASCADE,
+    pool TEXT REFERENCES pools(name),
+    cost_usd TEXT,
+    expires_at INTEGER
+);
+INSERT INTO pool_machines(machine_id,pool,cost_usd,expires_at)
+SELECT id,pool,cost_usd,expires_at FROM machines
+WHERE pool IS NOT NULL OR cost_usd IS NOT NULL OR expires_at IS NOT NULL;
+CREATE INDEX pool_machines_pool ON pool_machines(pool);
+
+-- One row per person, keyed by the planning provider's identity for them
+-- (`linear:<user id>`, or `journal:<planning user key>` under the Git journal),
+-- with the name to show. Ownership entries refer to it by `person_id`; a
+-- Machine's `person_id` is who it belongs to.
+CREATE TABLE people (
+    id TEXT PRIMARY KEY CHECK (id GLOB 'linear:?*' OR id GLOB 'journal:?*'),
+    name TEXT
+);
+ALTER TABLE machines ADD COLUMN person_id TEXT REFERENCES people(id);
+INSERT INTO people(id) SELECT 'journal:' || user_key FROM planning_user;
+UPDATE machines SET person_id=(SELECT id FROM people) WHERE is_local=1
+    AND (SELECT count(*) FROM people)=1;
+CREATE TRIGGER store_revision_people_insert AFTER INSERT ON people
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_people_update AFTER UPDATE ON people
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_people_delete AFTER DELETE ON people
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

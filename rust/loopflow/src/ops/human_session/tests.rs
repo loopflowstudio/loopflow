@@ -2070,7 +2070,7 @@ fn a_stale_viewer_record_reads_unviewed_unless_the_owner_says_it_is_held() {
 fn a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles() {
     use std::os::unix::process::ExitStatusExt;
     let ledger = crate::journal::TestLedgerGuard::new();
-    let previous_bin = std::env::var_os("LF_BIN");
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
     // The installed lf is this binary; the owner runs another executable.
     std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let store = crate::journal::process_ledger().unwrap();
@@ -2103,7 +2103,7 @@ fn a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles() {
     let attachment = || store.session_attachment("upgrade").unwrap();
     let before = attachment();
     // A stopped owner's socket accepts connections and never answers.
-    let frozen =
+    let _frozen =
         std::os::unix::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
             .unwrap();
     assert!(super::attaches(&store, &session, &host).unwrap());
@@ -2119,9 +2119,4 @@ fn a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles() {
     let reaped = std::thread::spawn(move || process.wait().unwrap());
     assert!(!super::attaches(&store, &session, &host).unwrap());
     assert!(reaped.join().unwrap().signal().is_some());
-    drop(frozen);
-    match previous_bin {
-        Some(value) => std::env::set_var("LF_BIN", value),
-        None => std::env::remove_var("LF_BIN"),
-    }
 }

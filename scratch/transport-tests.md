@@ -344,6 +344,9 @@ no test that waits out a production timeout except a named fallback above.
    - Not rebuilt: the queued draft in the provider's own terminal buffer
      (provider behaviour, not lf's), and a server restart in the middle of
      the leg (`held_session_survives_server_restart`).
+   - Compressed: the test restores `LF_BIN` through `test_ambient::EnvGuard`
+     (a failed assertion no longer leaks it). Focused test 0.19 s; clippy
+     `--lib --tests` clean.
 6. **Done (2026-11-13).** Relay cases: `TEST_PACE` unchanged. Times under load
    average ~570 (Mac, debug): handoff 0.06 s, stalled 0.33 s, closure 0.47 s,
    unacknowledged owner 0.56 s, acknowledged 1.0 s, setup 1.5 s,

@@ -15,35 +15,51 @@ pre{overflow-x:auto;padding:.8rem;border:1px solid var(--line);border-radius:4px
 table{border-collapse:collapse;width:100%;font-size:.95rem}td,th{border-top:1px solid var(--line);padding:.4rem .5rem;text-align:left;vertical-align:top}
 </style></head><body><main>
 <header>
-<h1>LOO-874: a Task's conversation has two addresses</h1>
-<p>Task LOO-874 · concept-review (third pass, headless) · 2026-11-13</p>
-<p>Built from <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/work_route.rs</code>, <code>rust/loopflow/src/ops/human_session/moves.rs</code>, <code>rust/loopflow/src/store/sqlite/sessions.rs</code>, <code>rust/loopflow/src/store/sqlite/task_ownership.rs</code>, <code>rust/loopflow/src/store/sqlite/rentals.rs</code></p>
+<h1>LOO-874: a move that dies while leaving leaves no row</h1>
+<p>Task LOO-874 · concept-review (fourth pass, headless) · 2026-11-13</p>
+<p>Built from <code>scratch/questions.md</code>, <code>rust/loopflow/src/ops/human_session/moves.rs</code>, <code>rust/loopflow/src/store/sqlite/task_moves.rs</code>, <code>rust/loopflow/src/store/sqlite/task_ownership.rs</code>, <code>rust/loopflow/src/store/migrations/task_machine_local.sql</code>, <code>rust/loopflow/src/ops/task_ownership.rs</code></p>
 </header>
 
-<p><strong>Decision needed:</strong> none. The brief already says the move record replaces "the moved-to marker on Sessions"; one path still reads it for Task conversations. That goes back to implement.</p>
+<p><strong>Decision needed:</strong> none. The brief already says "a half-finished move is a row you can see and retry"; one span of the move breaks that. It goes back to implement.</p>
 
-<h2>Biggest mismatch: resume asks the Session, not the Task</h2>
-<p>The brief: "where does this Task run" has one answer, the ownership log. <code>work_route::forward</code> checks <code>moved_session</code> first, which reads <code>agent_sessions.moved_to_machine_id</code>, and <code>send_task</code> still writes it.</p>
-<pre>laptop$ lf task move LOO-9 --machine rental
-  laptop: LOO-9 conversation <span class="old">moved_to = rental</span>
-rental ends → hand_back_in: ownership says <span class="new">laptop</span>
-laptop$ lf task status LOO-9      # Runs on laptop
-laptop$ lf resume &lt;its session&gt;   # <span class="old">forwards to rental (gone)</span></pre>
-<p class="new">Proposed: a Session that belongs to a Task resumes where the Task runs. <code>send_task</code> stops writing the marker; <code>moved_session</code> skips Task conversations, which route like <code>resume --task</code> and reopen here when the Task runs here. The migration clears the marker on Task conversations.</p>
+<h2>Biggest mismatch: the claim moves before the row exists</h2>
+<p><code>send_task</code> writes the claim naming the target, then stops the Graph, commits, pushes and takes the conversation, and only then records <code>sent</code>. A kill anywhere in that span:</p>
+<pre>laptop$ lf task move LOO-9 --machine mini
+  claim → mini         <span class="old">no task_moves row yet</span>
+  stop Graph, commit, push …   ^C / laptop sleeps, process killed
+laptop$ lf task status LOO-9     # <span class="old">Runs on mini</span>   (mini has nothing)
+laptop$ lf task move LOO-9 --machine mini
+  <span class="old">LOO-9 already runs on mini</span>
+laptop$ lf task claim LOO-9      # the only way back, by hand</pre>
+
+<p class="new">Proposed: the claim and a <code>leaving</code> row are one write.</p>
+<pre>laptop$ lf task move LOO-9 --machine mini
+  claim → mini + task_moves <span class="new">leaving</span>      (one transaction)
+  stop Graph → row keeps the stopped step
+  commit, push, take conversation   ^C
+laptop$ lf task status LOO-9
+  <span class="new">Leaving for mini since 10:42: not sent
+    retry: lf task move LOO-9 --machine mini</span>
+laptop$ lf task move LOO-9 --machine mini
+  <span class="new">resumes leaving → sent → arrived; Graph continues at the stopped step</span></pre>
 
 <h2>Actions → concepts → APIs</h2>
 <table>
 <tr><th>Action</th><th>Concept</th><th>Change</th></tr>
-<tr><td><code>lf resume &lt;session&gt;</code>, Task conversation</td><td>Ownership log</td><td class="new">routes by <code>task_execution_route</code>; marker ignored</td></tr>
-<tr><td><code>lf resume &lt;session&gt;</code>, no Task</td><td>Session marker</td><td>unchanged: <code>moved_to_machine_id</code> is the only record</td></tr>
-<tr><td><code>lf task move X --machine M</code></td><td>Move record (<code>task_moves</code>)</td><td class="new">completes the conversation here without a marker</td></tr>
+<tr><td><code>lf task move X --machine M</code></td><td>Move record</td><td class="new">claim + <code>leaving</code> row in one store call; <code>sent</code> with payload once it has left</td></tr>
+<tr><td>repeat of the same move</td><td>Move record</td><td class="new">on <code>leaving</code>: resume leave with the recorded stopped Graph; on <code>sent</code>: redeliver (as now)</td></tr>
+<tr><td>leave fails (dirty rebase, push refused)</td><td>Ownership log</td><td class="new">hand back and delete the row in one transaction</td></tr>
+<tr><td><code>lf task status X</code></td><td>Move record</td><td class="new"><code>Leaving for M since …: not sent</code> + retry line</td></tr>
 </table>
 
-<h2>Settled by the build</h2>
-<p><code>task_checkouts</code>, <code>task_moves</code>, <code>task_ship_events</code>, <code>pool_machines</code>, <code>people</code>, <code>task_primary_sessions</code>, writer-stamped <code>claim | unclaim</code> entries. <code>session_moves</code> (agent switch at Stop) and <code>relocated_task_processes</code> (directory moved on disk) stay: the brief grouped them with Machine moves, but neither crosses Machines. LOO-877 drops the replaced columns.</p>
+<h2>Counterexample kept</h2>
+<p>A repeat finds nothing live to stop. Without the stopped step on the row, the payload says no Graph was running and mini would not continue it. So the row records the stop as soon as <code>stop_graphs</code> returns. Commit, push and taking a stopped agent repeat safely.</p>
+
+<h2>Everything else in the brief</h2>
+<p>Checked against the built passes: <code>tasks</code> loses no column yet but nothing reads the Machine-local ones (LOO-877 drops them); ownership entries name their writer; <code>handoff</code>/<code>recorded</code> read as <code>claim</code>; <code>people</code>, <code>pool_machines</code>, <code>task_ship_events</code>, <code>task_checkouts</code>, <code>task_primary_sessions</code> are built; the Session marker is left only for Task-less Sessions. <code>session_moves</code> and <code>relocated_task_processes</code> stay because neither crosses Machines.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>When a handed-back Task's conversation reopens here, its turns on the ended Machine are gone. (a) reopen from what this Machine has; (b) start a fresh thread seeded from the log (<code>lf session new</code>).</li>
+<li>The brief names move states "sent or arrived". A third state <code>leaving</code> is built next. (a) keep <code>leaving</code>; (b) a <code>sent</code> row with no payload means not finished leaving.</li>
 </ol>
 </main></body></html>

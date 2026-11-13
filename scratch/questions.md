@@ -236,6 +236,30 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   `moved_session` tidied. `machine_commands::a_handed_back` + `resuming_a_task`
   3 passed; clippy clean.
 
+## Next implement (concept-review, 2026-11-13): a move is a row from its claim
+
+The brief: "a half-finished move is a row you can see and retry". Today
+`send_task` writes the claim naming `to`, then stops the Graph, commits,
+pushes and takes the conversation, and only then records `sent`. A kill in
+that span (seconds to minutes, not a race) leaves this Machine reading "Runs
+on mini" with no row; a repeat refuses ("already runs on mini"), and only
+`lf task claim` here recovers it, by hand.
+
+- `task_moves` gains `leaving`, written in the same transaction as the move's
+  claim (one store call in place of `claim_for` + a later insert).
+- Once `stop_graphs` returns, the row keeps the stopped Graph: a repeat finds
+  nothing live to stop, and without it the receiver would not continue the
+  step that was running. Commit, push and take repeat safely (clean tree,
+  pushed branch, stopped agent).
+- A repeat of `lf task move X --machine M` on a `leaving` row naming M resumes
+  `leave` from there; then `sent` with the payload, as now. `claim_for`'s
+  "already runs on" stays for a Task with no row.
+- A failed leave hands back and deletes the row in one transaction.
+- `lf task status`: `Leaving for mini since …: not sent` + the same retry line.
+- Test: write the claim and a `leaving` row with a stopped Graph (as a kill
+  would leave them), run the move again, assert it arrives on mini and the
+  Graph continues from the stopped step.
+
 ## Remaining
 
 Every Machine-local column the brief names (`worktree`, `branch`,
@@ -280,8 +304,6 @@ that answers the parallel-stall question below.
   `ensure_task` opens a Task conversation in the repository when the Task has
   no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
   NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
-- **Killed mid-leave.** A send killed between its claim and its `sent`
-  record leaves the Task claimed for `to` with nothing sent; a repeat says it
-  already runs there. `lf task claim` on the source recovers it.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
-  `task_ship_events`, `people`, `pool_machines`.
+  `task_ship_events`, `people`, `pool_machines`. `leaving` is a third
+  `task_moves` state beside the brief's "sent or arrived" (next implement).

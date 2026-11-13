@@ -61,21 +61,20 @@ call sites while `empty_writes` runs. (`statements()` is thread-local and has
 the same blind spot; leave it unless a test needs it.)
 
 Call site: the innermost `loopflow::` frame outside `store::contention` and
-`store::query_plans`. If a shared helper (a `with_write` wrapper) turns out to
-be the innermost frame on most paths, report the innermost two frames.
+`store::query_plans` (`contention::call_site`). The one regression run named
+the public store method, so no second frame is reported.
 
 ## Where it asserts
 
-Each assertion wraps the part of a path that should change nothing, after a
-first call that may legitimately write (a receipt, a hold):
+Each assertion wraps the whole path: a write that changes a row is never
+reported, so a first call that records a receipt or a hold needs no carve-out.
 
 1. `store::query_plans` tests: the repeated `record_owner_viewer_hold(Viewed)`,
    `pending_retirements`, `sessions_for_agent_session`,
    `resolve_history_input`, `unrecorded_agent_ancestry`, a second
    `session_steers` and `session_steer_source`.
 2. `server::boundary::tests::boundary_statements_never_scan_tables_that_grow_with_use`:
-   the boundary sequence after the first settle (Start resume, Tool, Compact,
-   Tool, Stop), split where a moment legitimately writes.
+   the boundary sequence (Start resume, Tool, Compact, Tool, Stop).
 3. Work reads on the write store:
    `ops::task::registered_task_status` (`lf task status`, Desktop, screens),
    reached by `ops/human_session/tests.rs`
@@ -111,8 +110,9 @@ address, `PROGRESS_STEPS = 1` in test builds), `query_plans::empty_writes` (self
 path tests, the boundary sequence, `task_detail_reads_capacity_once_for_all_sessions`
 (now `multi_thread`, `block_in_place` around `registered_task_status`) and
 `query_selection_uses_current_reported_attention_and_prunes_ended_activity`.
-Each wrap covers the whole path: a write that changes a row is never reported,
-so first calls need no carve-out. Docs updated to the built API.
+Docs match the built API. Merged origin/main through #1910 without conflicts.
+
+Remaining: gate (clippy `--all-targets`, `documented_commands::`), publish.
 
 ## Exclusions
 

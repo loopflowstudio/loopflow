@@ -27,11 +27,11 @@ adds scope.
 - implement / compress / realign: no code change. Slices 5 (release lock
   matrix) and 6 (local planning, `work_open_tests`, `context_launch_tests`,
   `settings_launch_tests`) are outside Done-when.
-- gate / land: PR head `f5a28f36`, MERGEABLE, origin/main has nothing newer.
-  At 23:50Z its CI had lint, build, python, e2e and library shards 0/1/2/5
-  green; library 3/4, integration 1–3, macos-26 and task-installation still
-  running. Wait on that run and fix real failures; don't push only to
-  re-trigger.
+- gate / land: PR head is `a4e2d438` (this scratch note on top of
+  `f5a28f36`; code identical), MERGEABLE, origin/main still `39b37794`.
+  CI on `4ba42d46` passed in full; `f5a28f36`'s run was still in progress
+  and `a4e2d438`'s pending at 23:50Z. Wait on the head run and fix real
+  failures; don't push only to re-trigger. `lf pr land` clears this note.
 
 ## Open outside this Task
 

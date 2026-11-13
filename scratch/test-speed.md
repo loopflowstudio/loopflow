@@ -176,7 +176,7 @@ requests. All four provider/mode variants remain.
 'test(ops::linear::task_planning_tests::native_runner_is_quiet_until_its_turn_ends) | test(documented_commands::)' --test-threads 6`:
 8/8 passed, 7.702 s wall. Four runner cases: 86.043 → 15.291 s summed;
 Codex foreground: 65.720 → 3.823 s. The testing guide no longer excludes these
-short cases from affected Linear gates. `cargo fmt` passed; clippy pending.
+short cases from affected Linear gates. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
 ## Next work
 

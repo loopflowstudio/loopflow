@@ -1,30 +1,45 @@
 # LOO-873: model-unavailable fix forward
 
-**Implementation ready for gate.** The provider-result regression now completes
-Fable → Opus, stops pinned and exhausted orders, and leaves quota windows and
-account cooldowns untouched. PR #1906 remains merged history; this repair is local.
+Gate, publishing and post-merge verification remain. The model-unavailable
+repair through `31d2fc6d28` includes the sync onto `dfbea8cf81`; the subsequent
+Auto-Ship repair and compress changes are local. PR #1906's merged CI does not
+validate this repair. No Wave or product question is open.
+
+## Outcome and constraints
+
+One ordered `agents` list carries provider and model choices. A contextual
+`default_agent` moves or adds an entry to the front; a narrower list replaces
+the wider list according to existing setting precedence. `agent` and `-a`
+pin a provider, and a named model pins that model. Bare Claude retains its
+existing Opus → Sonnet → Haiku fallback when it has no configured next entry.
+Keep the deprecated comma `default_agent` readable with its warning.
+
+The Task comments record these words from Jack Heart:
+
+- `3620444c-bdc4-44fe-837e-fa59603ad3d6`: “maybe we should say agents needs to be: [claude:opus, codex, claude:fable]”.
+- `6642bd2d-cac8-48ee-9520-64a7e2813548`: “if your top level is : agents: [a,b,c] / default_agent: d / then the real order is d,a,b,c”.
+- `a2be0aec-0f87-48d0-97d6-bfda1134b7d4`: “Only for the scope at which the default_agent works”.
+- `aa962b91-55ca-4d3f-b9a6-53774dbce716`: “not too worried about occasionally duplicative trying of same harness”.
 
 Task comment `b488fa11-c370-4127-957c-fc85437801a9` includes
 “when claude:fable is refused (usage limit or model unavailable)” and says to
 try another Claude model before Codex. Later direction puts that model order
 in `agents`. The merged PR acknowledges that only usage limits fall through.
-That disclosure does not deliver the model-unavailable claim. Headless decision:
-repair this concrete case in the same Task, without reopening the other recorded
-product choices.
+That disclosure did not deliver the model-unavailable claim; this repair adds
+it without changing the configuration choices above. No product decision is
+currently open.
 
-The preceding pass intended ordered fallback, useful stop advice, and recovery
-without replaying completed steps. Its QA covered Claude model moves and a
-Task capacity wait, but left Codex-to-Claude and login-to-login recovery
-unobserved. This pass exercised both successfully through the built CLI and
-provider protocol fixtures. It also reproduced the model-unavailable gap on
-main; this is new runtime observation, not an inference from absent earlier QA.
+## Upstream and merged CI
 
-## Main and CI
+`git fetch origin main` during realign found no upstream commits missing from
+HEAD. Since #1906, #1901 (`dfbea8cf81`) changed planning and Session reads,
+including provider-transition reads. It is already included in `31d2fc6d28`;
+the provider-result regression passed after that sync. No Wave is assigned.
 
 - PR: https://github.com/loopflowstudio/loopflow/pull/1906, merged
   2026-11-13T02:59:45Z at `112c27a053e19f5fe08c5394c624ece981acbd8e`.
 - `git fetch origin main`; `lf sync --manual main --json` printed
-  `Synced onto main; the sync and edits remain local.` Local HEAD is
+  `Synced onto main; the sync and edits remain local.` At that verification, HEAD was
   `51aa9a3b1a8bda076d46e894405d9e407ae91d54`. Its tree and the merge commit's
   tree are both `cdaca6bea8ebc5e8d47298f2ee88c4d24f81ad68`.
   `git diff --exit-code origin/main -- . ':!scratch'` exited 0.
@@ -38,7 +53,7 @@ main; this is new runtime observation, not an inference from absent earlier QA.
 - **PR checks, separately:** https://github.com/loopflowstudio/loopflow/actions/runs/43352284784
   — the PR's checks succeeded. They are not the push-run result.
 
-## Commands and results
+## Merged-version observations
 
 All fixture invocations removed inherited `LF_*`/`REX_*` variables and used
 private `HOME`, `LF_HOME`, Claude and Codex homes under `/tmp/lf-verify-873`.
@@ -89,40 +104,96 @@ login or real provider quota was used.
   expected capacity wait. It was stopped; the corrected fixture selected the
   current home's Keychain item, and passed. No product repair was needed.
 
-## Fix-forward design (2026-11-12)
+## Delete — do not maintain
 
-Use `AgentFailure::ModelUnavailable` for provider error lines that name an
-unavailable model. The existing retry loop moves directly to the next allowed
-entry, without rotating logins or recording spent quota. Preserve the thread
-within a provider and the original task across providers. Explicit model pins
-stop once with the existing exhaustion advice; interactive runs stay unchanged.
-Generic service failures retain transient backoff. Record moves and terminal
-stops through the existing recovery record so Task runs do not replay the refusal.
+Remove automatic ship restart after a terminal refusal, duplicate stop handlers
+in `carry_task_run` and `ship::run`, and advice to extend an order a direct skill
+run cannot walk. These cuts are complete; no deletion target remains.
 
-Delete — do not maintain: usage-limit-only stop wording in Graph and Task
-status is replaced with provider-refusal wording. No deletion targets remain.
-Keep the existing recovery owner, configuration, quota recording, and
-reset-wait behavior; no schema change.
+`lf/commands/graph.rs::TaskRunStopped::stop` now prints the stop, withdraws
+Auto-Ship approval and returns the original exit status for both callers.
+`ship_halt` does nothing without approval and sets no person's stop marker.
+The refusal test uses `support::recorded_graphs` for both Graph counts.
 
-In `agent/mod.rs::_run_with_transient_retries`, match arms separate account
-rotation, ordered fallback, credential stops, and transient backoff. Model
-refusals cannot enter account rotation; saved `refusal` covers both account
-and model errors when a fallback has no eligible login. The provider-result
-test keeps each case's order, launches, and stop advice together in its table.
+Keep `agent/mod.rs::_run_with_transient_retries` as the single walk: model
+refusals skip account rotation and quota recording, while usage limits try
+logins first. `_climb` retains a same-provider thread or imports history across
+providers, supplying the original task when no transcript is available.
+`ops/task_execution.rs::limit_stop` reads the existing recovery record and
+removes duplicate trailing periods. Configuration, schema and reset waits stay
+unchanged; docs are in `docs/{config,orchestration,subscriptions,troubleshooting}.md`.
 
-Focused checks cover classification from provider errors (never answer prose),
-ordered model/provider fallback, pins, exhaustion, and unchanged quota evidence.
-Remaining: gate owns `agent::tests`, `ops::task_execution`,
-`a_run_stopped_by_a_usage_limit`, `binary(agent_tests)`, and
-`documented_commands` suites plus formatting and Clippy. QA owns a built-CLI
-walkthrough of the original Fable refusal and explicit `-a claude:fable` pin.
-No harness decoder, transition recorder, configuration, or schema changed.
+## Unobserved cases to retain
 
-- `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib --test agent_tests --jobs 4 model_unavailable -- --test-threads=1` (inherited `LF_*` removed, stdin closed): 3 passed, including all three provider-result scenarios; test build and fixture CLI build passed. macOS linker reported a large `__eh_frame` warning.
+- A refusal scoped to one login's plan ("not available on your plan") reads
+  the same as a model that is down, so a second login that could run the model
+  is skipped and the step goes on at the next entry. Trying logins would need a
+  per-login model hold. Revisit if a provider is seen sending one.
+- A line naming a model with both "is currently unavailable" and "try again
+  later" classifies as a model refusal: it moves when an entry is left, and on
+  a pin or the last entry stops once instead of backing off. The observed
+  Fable line has no retry wording.
+- Fable unavailable, then every Opus login held until a known reset: the step
+  waits on Opus capacity; the wait walks from Opus onward and does not launch
+  Fable again.
 
-- `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib --jobs 4 a_pinned_agent_refused_at_launch_fails_with_its_limit -- --test-threads=1` (same isolation): passed after pin advice was changed to name another model or provider.
-- `cargo fmt --all -- --check`; `git diff --check`: passed. No test or provider process remained under this checkout's target directory.
-- Compress: `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib --test agent_tests --jobs 4 -- agent::tests:: model_unavailable --test-threads=1 < /dev/null`: 49 unit tests and the three-case provider-result test passed; test and fixture CLI builds passed with the same macOS linker warning. Gate owns the broader suites and Clippy listed above.
+## Remaining checks
+
+Gate owns `agent::tests`, `ops::task_execution`,
+`task_graph_launch_tests`, `binary(agent_tests)`, and
+`documented_commands` suites plus formatting and Clippy. The first built-CLI QA
+results are in `/tmp/lf-qa-873/results.json`; `scratch/qa.html` was not retained.
+That walkthrough found two stop-line faults:
+a direct `lf -b <skill>` (no fallthrough outside a Graph step) advised "add
+another agent to `agents`" when the list already had one, and a provider reason
+ending in a period printed `model.. No fallback`. A third fault was
+behavioral: `lf -b task run` approves Auto-Ship but did not withdraw it on a
+refusal stop, so the next Task read restarted `lf ship`, which met the same
+refusal once more before halting. `TaskRunStopped::stop` now calls `ship_halt`
+for both commands. The regression incorrectly expected
+`ship_stopped_at` (a person's stop); it now checks withdrawn `shipped_at`,
+repeated status reads past the retry deadline, and manual continuation.
+The corrected regression and isolated CLI repeat passed (below).
+The former `/tmp/lf-qa-873/test.log` has no completed suite result;
+`test2.log` exited 127 because `timeout` was unavailable. Publishing and post-merge
+verification of this repair remain. No app or release check applies to this
+CLI-only change.
+
+## Auto-Ship validation, November 13 UTC
+
+- `LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib --jobs 4 a_run_stopped_by_a_usage_limit -- --nocapture --test-threads=1 < /dev/null` (inherited `LF_*` removed, stable Rust, `TMPDIR=/private/tmp`): **1 passed, 0 failed**, 5.77s after a 1m 19s test build; `/tmp/lf-qa-873/refusal-regression-fixed.log`. The first run built its fixture CLI internally and then failed the incorrect `ship_stopped_at` assertion after 536.71s. A process sample showed Rust compilation, not a fixture deadlock; the prepared-CLI run completed normally. The macOS linker again reported the large `__eh_frame` warning.
+- `uv run --no-sync python scripts/test_network.py "$PWD/.venv/bin/python3" /tmp/lf-qa-873/refusal-followup.py < /dev/null`: **passed**, `/tmp/lf-qa-873/refusal-cli2.log`; full results `/private/tmp/lf-qa-873-followup2/results.json`. The initial driver used unsupported `server status --json`; removing `--json` fixed the driver before the fresh run. No product change was needed.
+- `cargo fmt --all -- --check`; `git diff --check`: **passed**. Gate owns broader suites and Clippy.
+
+The isolated CLI used a fresh git-planning repository, private Machine and
+provider homes, a fake Keychain, one managed Claude login, and provider protocol
+fixtures with external networking denied. `first-step` ran on pinned Opus;
+`verify-step` ran on pinned Fable and received
+“Fable 5 is currently unavailable. Switch to another model.”
+It stopped once: one Graph, two provider launches, no Auto-Ship approval, and
+no person's stop marker. Three text status reads, then text and JSON reads
+after moving the failed-process timestamp past the retry deadline, left those
+counts unchanged. Status said “stopped after a provider refusal” and no longer
+said “Ship failed” or printed doubled punctuation.
+
+Removing the verify-step pin and manually running the Task completed the second
+Graph at `[2/2] verify-step`: Fable refused, Opus completed, and first-step did
+not run again. Quota-window count stayed zero and the account cooldown stayed
+unset. Auto-Ship was approved again by the manual headless run. The fixture
+server and credential holder, plus the previous QA server, were stopped.
+
+## Compress checks, November 13 UTC
+
+- `cargo build -p loopflow --bin lf --jobs 4` (inherited `LF_*`/`REX_*` removed, stable Rust): passed, 5m 11s; `/tmp/lf-873-compress-checks.log`.
+- `uv run --no-sync python scripts/test_network.py "$PWD/.venv/bin/python3" /tmp/lf-873-compress-cli.py < /dev/null`: passed after centralizing stop handling; `/tmp/lf-873-compress-cli.log`, full snapshots `/private/tmp/lf-qa-873-compress/results.json`. One refusal stop; repeated text/JSON reads beyond the retry deadline left one Graph and two launches. Manual continuation added only Fable → Opus at the stopped step; quota windows stayed empty and cooldown unset. The isolated server and holder were stopped.
+
+- `LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib --jobs 4 -- agent::tests:: ops::task_execution:: a_run_stopped_by_a_usage_limit task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt a_stopped_run_is_started_again_from_where_it_began --test-threads=1 < /dev/null` (same isolation): **54 passed, 0 failed**, 46.20s after a 1m 16s build; `/tmp/lf-873-compress-checks.log`. The macOS linker reported the existing large `__eh_frame` warning. Stopped the test's leftover holder, whose log was under `/private/tmp/.tmprcvdzx`.
+- `cargo fmt --all -- --check`; `git diff --check`: passed. `lf context`: scratch under both limits; broader suites and Clippy remain with gate.
+
+## Earlier repair checks
+
+- After sync onto `dfbea8cf81434b72c2243a416827a29994afc877` as `31d2fc6d28`: `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --test agent_tests --jobs 4 model_unavailable_result_falls_through_or_stops_without_spending_quota -- --exact --test-threads=1` (inherited `LF_*`/`REX_*` removed, stable Rust, stdin closed): passed, all three scenarios, 281.22s including fixture CLI build.
+- Earlier classification, order and pin checks: `git show 31d2fc6d28:scratch/agents-post-merge-verification.md`, “Repair check results”. The uncommitted pre-compress notes, including the Auto-Ship QA, were moved to `/tmp/lf-873-pre-compress-plan.md` before editing.
 
 ## Reproduced gap before repair
 
@@ -143,14 +214,8 @@ Error: verify-step: claude_result: Fable 5 is currently unavailable. Switch to a
 
 Exit 1. The recorded model sequence was only `['fable']`; Opus never launched.
 
-Handle a provider's model-unavailable refusal by trying the next configured
-entry, keeping list order and explicit pins. Do not mark the login's quota
-spent for a model-availability error. Add a regression at the provider-result
-boundary and check exhaustion advice for this separate refusal kind.
-
 Fixture scripts and raw results remain under `/tmp/lf-verify-873`:
 `check.py`, `remaining.py`, `managed_retry.py`, `unavailable.py`, `results.json`.
 The local build and all test commands ended. The timed-out fixture's children
 were terminated; final process inspection found no remaining verification
-CLI, provider, server or watcher processes. No app or release check applies
-to this CLI-only, unreleased change.
+CLI, provider, server or watcher processes.

@@ -448,8 +448,8 @@ fn _record_agent_move(provider: &str, reason: &str, next: &str) {
 
 /// A provider refused the step and no agent it may use is left: the stop
 /// and what would let it move, where Task status and `lf task run` read it.
-fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried: &[String]) {
-    let advice = _limit_stop_advice(provider, launch, tried);
+fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, rungs: &[String]) {
+    let advice = _limit_stop_advice(provider, launch, rungs);
     eprintln!("Stopped: {advice}");
     _record_limit_recovery(
         provider,
@@ -458,11 +458,20 @@ fn _record_limit_stop(provider: &str, reason: &str, launch: &AgentConfig, tried:
     );
 }
 
-fn _limit_stop_advice(provider: &str, launch: &AgentConfig, tried: &[String]) -> String {
+/// `rungs` is the whole order the step could walk; it stops after the last.
+fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[String]) -> String {
+    // Outside a Graph step, or replaying a recorded account, the order is one entry.
+    if let [only] = rungs {
+        if let Some(next) = launch.fallback_agents.iter().find(|a| *a != only) {
+            return format!(
+                "Only a Graph step moves through `agents`, and this run stayed on {only}. Run it again with `-a {next}`"
+            );
+        }
+    }
     if !launch.fallback_agents.is_empty() {
         return format!(
             "Nothing is left in its order after {}; add another agent to `agents`",
-            tried.join(", ")
+            rungs.join(", ")
         );
     }
     let another = if provider == "claude" {
@@ -1313,7 +1322,7 @@ fn _run_with_transient_retries(
             AgentFailure::AccountSubscriptionLimit | AgentFailure::ModelUnavailable => {
                 let reason = _failure_reason(&result, failure);
                 let Some(next) = rungs.get(rung + 1) else {
-                    _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
+                    _record_limit_stop(&provider, &reason, launch, &rungs);
                     return Ok(result);
                 };
                 rung += 1;
@@ -3646,6 +3655,11 @@ trust_level = "trusted"
         assert_eq!(
             _limit_stop_advice("claude", &ordered, &["codex".into(), "claude".into()]),
             "Nothing is left in its order after codex, claude; add another agent to `agents`"
+        );
+        // A direct `lf -b <skill>` has an order but never walks it.
+        assert_eq!(
+            _limit_stop_advice("codex", &ordered, &["codex".into()]),
+            "Only a Graph step moves through `agents`, and this run stayed on codex. Run it again with `-a claude`"
         );
     }
 }

@@ -136,6 +136,8 @@ pub(crate) const STOPPED: &str = "; stopped: ";
 /// The current `lf task run` does not retry such a run automatically.
 pub(crate) fn limit_stop(recovery: &AgentLimitRecovery) -> Option<String> {
     let (reason, advice) = recovery.reason.rsplit_once(STOPPED)?;
+    // Providers often end their own words with a period.
+    let reason = reason.trim_end_matches('.');
     Some(format!("{reason}. {advice}"))
 }
 
@@ -380,7 +382,7 @@ mod tests {
         let mut stopped = snapshot(TaskExecutionState::Blocked);
         let nowhere = AgentLimitRecovery {
             reason: format!(
-                "codex_error: You've hit your usage limit{}no `agents` list is set",
+                "codex_error: You've hit your usage limit.{}no `agents` list is set",
                 super::STOPPED
             ),
             ..recovery(None)

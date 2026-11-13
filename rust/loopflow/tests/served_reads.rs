@@ -103,10 +103,12 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
-    let _server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
+    // Seed corruption before SQLite opens it: a live WAL can restore pages
+    // over a later overwrite of just the main database file.
     fs::write(&database, "unreadable Work registry").unwrap();
     let before = fs::read(&database).unwrap();
+    let _server = Server::start(repo.path(), home.path());
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");

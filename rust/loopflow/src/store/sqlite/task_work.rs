@@ -116,7 +116,7 @@ pub(super) fn task_of_process(
         .query_row(
             &format!(
                 "WITH members AS MATERIALIZED (
-                    SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
+                    SELECT session_id AS id FROM session_events INDEXED BY session_events_process
                         WHERE lf_process_id=?1
                     UNION SELECT agent_session_id FROM processes
                         WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)

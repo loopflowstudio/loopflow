@@ -154,6 +154,18 @@ fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
 }
 
 impl SqliteStore {
+    /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
+    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
+    /// second on a store of 770 MB. The Machine server runs it at start and
+    /// about once a day; nothing else does.
+    pub(crate) fn refresh_statistics(&self) -> StoreResult<()> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+        Ok(())
+    }
+
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
@@ -1033,15 +1045,15 @@ impl SqliteStore {
     // -- Provider accounts -----------------------------------------------------
 
     pub fn upsert_provider_account(&self, account: &ProviderAccount) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // The preferences file is written before the row, outside any write
+        // transaction: a rejected preference writes neither.
+        crate::config::placement::write_account_preferences(&conn, account)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        conn.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,utilization_percent,cooldown_until,cooldown_reason,last_selected_at,created_at,updated_at,observed_email,observed_subject,observed_plan,observed_credential_digest)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
             ON CONFLICT(provider,account_id) DO UPDATE SET home=excluded.home,credential_state=excluded.credential_state,utilization_percent=excluded.utilization_percent,cooldown_until=excluded.cooldown_until,cooldown_reason=excluded.cooldown_reason,last_selected_at=excluded.last_selected_at,updated_at=excluded.updated_at,observed_email=excluded.observed_email,observed_subject=excluded.observed_subject,observed_plan=excluded.observed_plan,observed_credential_digest=excluded.observed_credential_digest",
             params![account.provider,account.account_id.as_str(),account.home.as_ref().map(|path| path.to_string_lossy().to_string()),account.credential_state.as_str(),account.utilization_percent,account.cooldown_until,account.cooldown_reason,account.last_selected_at,account.created_at,account.updated_at,account.observed_email,account.observed_subject,account.observed_plan,account.observed_credential_digest])?;
-        crate::config::placement::write_account_preferences(&tx, account)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        tx.commit()?;
         Ok(())
     }
 

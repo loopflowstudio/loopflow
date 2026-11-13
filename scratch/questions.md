@@ -378,7 +378,8 @@ row stays. Found while testing: the move claim names mini, so mini was the
 ownership writer and `lf task claim` on the laptop was refused in the store and
 forwarded to mini twice (`work_route::forward`, `engine::task::ownership`).
 While a move from here is in flight, `require_writer_in` writes here and both
-routes keep claim/unassign here (`work_route::remote_ownership_writer`);
+routes keep claim/unassign here (`work_route::remote_ownership_writer`;
+the thirteenth pass asks a `sent` move's target first);
 execution routing (`writer_in`) is unchanged. machines.md gained the sentence.
 `query_plans` counts `task_moves` and `task_ownership` as growing and measures
 `idx_task_ownership_task` (895 entries / 880 Tasks on this Machine's store).

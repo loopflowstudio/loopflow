@@ -2202,6 +2202,18 @@ fn resume_takes_over_an_owner_from_another_build() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
     let (previous, session) = owner_on_another_build(&fixture, &path);
+    let agent = || -> Option<String> {
+        fixture
+            .sql()
+            .query_row(
+                "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let first_agent = agent();
+    assert!(first_agent.is_some());
     let mut viewer = fixture
         .command(&["session", "resume", &session])
         .env("PATH", &path)
@@ -2218,6 +2230,12 @@ fn resume_takes_over_an_owner_from_another_build() {
     fixture.ends(&previous);
     let current = fixture.owner_of(&session);
     assert_ne!(current, previous);
+    // The installed lf runs its own provider on the same thread.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while agent() == first_agent {
+        assert!(Instant::now() < deadline, "the provider was not replaced");
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert!(
         viewer.try_wait().unwrap().is_none(),
         "viewer left the conversation"

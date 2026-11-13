@@ -145,7 +145,7 @@ What exists after slice 4 (merged legs keep their own `Fixture`):
 
 | Rule | Destination |
 |---|---|
-| superseded-owner retention (5 `unanswering_superseded_owners_preserve_*`) | store `owner_retention` table test (`steers_tests.rs`). The planned `human_session::attaches` case was never written; the turn-continuity rule is slice 5 |
+| superseded-owner retention (5 `unanswering_superseded_owners_preserve_*`) | store `owner_retention` table test (`steers_tests.rs`), plus `human_session::tests::a_superseded_owner_keeps_a_live_turn_…` for `attaches` (slice 5) |
 | prepare reads `detached` (`opening_reattaches_an_owner_whose_viewer_record_went_stale`, prepare half of `opening_takes_over_…`) | `human_session::viewed_summary` test with a fake socket at `transport::endpoint` |
 | native settlement vs cleanup (`silent_native_turns_survive_until_settlement`, `native_background_watches_survive_until_settlement`, hook part of `retained_hooks_survive_upgrade`) | `server/boundary.rs`, `retirement_tests`, Clap alias parse test |
 | `resume_refuses_a_graph_step_and_leaves_it_running` | `human_session::run_refusal` test |
@@ -164,7 +164,7 @@ Duplicates or guards for removed mechanisms; each one's rule is covered above.
 Slices 1–4 deleted the whole list; names are in
 `git show 7acc5cea27 117378aadb da53314382 dc3d722f36 79f92459fc -- rust/loopflow/tests/transport_tests.rs`
 and the slice 4 commit.
-Unused fixture helpers go with them. `lifetime.rs` tests (14 s on `POLL` sleeps) get the same `#[cfg(test)]` timing value if it is one line; otherwise leave them.
+Unused fixture helpers go with them. `lifetime.rs` `POLL` is a `#[cfg(test)]` value (slice 6).
 
 ## Forbidden
 
@@ -312,32 +312,51 @@ no test that waits out a production timeout except a named fallback above.
      list; five held-terminal `SessionStart` requests became
      `ServerProof::start_held`. `relay_tests::` 11/11, 2.5 s wall;
      `transport_tests -E 'test(held)'` 7/7; clippy clean.
-5. **Next.** Steer (Task comment, 2026-11-13): coverage removed in #1922
-   (open, not on main) "to rebuild in this suite with a controlled timeout".
-   On this branch slice 3 (`da53314382`) already deleted both legs of
-   `continue_session_after_upgrade`, not only the frozen one, and nothing
-   replaced them:
-   - frozen (`unanswering_superseded_owner_preserves_pending_turn_and_queued_input`):
-     owner SIGSTOPped, `lf session resume` against the replaced build fails
-     and leaves provider attachment, capture, provider thread and Task binding
-     unchanged, the owner running, no second turn completed. Failed on #1922's
-     CI with "relay did not exit" after a 20 s `wait_exit`; the give-up timeout
-     was not traced.
-   - live (`resumed_session_completes_turns_after_build_replacement_and_viewer_return`):
-     a live turn stays in the old provider, queued drafts reach it in order,
-     the superseded owner keeps running; after settlement the viewer follows
-     the new build (new agent process and token) and more turns land in the
-     same history. `resume_takes_over_an_owner_from_another_build` covers only
-     the idle reopen with `--resume`.
-   Trace the give-up timeout, then put both rules in the cheapest layer
-   (relay with `TEST_PACE`, or `human_session` with a fake owner socket as in
-   `a_stale_viewer_record_reads_unviewed_…`); a real-process leg only for what
-   needs two builds.
-6. **Open against "Done when".** Relay cases under 1 s: slice 2's quiet-window
-   and exhaustion cases take ~2 s (`Status::wait` polls in 50 ms steps), the
-   acknowledged-past-deadline case 1.1 s. Either shorten `TEST_PACE` for those
-   or accept them; not decided. `lifetime.rs` `POLL` sleeps (14 s) untouched.
-   CI sum under 400 s is unmeasured until gate.
+5. **Done (2026-11-13).** Steer (Task comment, 2026-11-13): coverage removed
+   in #1922 (open, not on main) "to rebuild in this suite with a controlled
+   timeout". Slice 3 (`da53314382`) had deleted both legs of
+   `continue_session_after_upgrade` with nothing replacing them.
+   - Give-up timeout: the frozen resume's only bound is the relay's
+     acknowledgement deadline, `Pace.attach` (5 s; `transport.rs` `view`).
+     `attaches` returns true on the owner's `LiveTurn` retention before any
+     socket read, so nothing else waits on the stopped owner. A probe of the
+     deleted frozen leg (Mac, debug, not kept) exited 1 after 6.7 s:
+     "Execution owner did not acknowledge attachment…". On #1922's Linux CI
+     (run 43518654010) the same leg was still running at the fixture's 20 s
+     `wait_exit`; the cause of the Linux overrun is not reproduced here. Both
+     the relay's connect to the owner (`UnixStream::connect`, no timeout) and
+     the setup before it can block without a bound. The new tests do not use
+     that path.
+   - Frozen leg → `ops::human_session::tests::a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles`
+     (0.04–0.12 s). The owner is a `/bin/sleep` child (another executable than
+     `LF_BIN`), it holds a live turn and its socket never answers: `attaches`
+     is true, the owner is not signalled and the attachment is unchanged.
+     The relay half (no acknowledgement → exit with the cause, typed input not
+     delivered) is the existing `owner-unacknowledged` relay case. A mutation
+     dropping the `LiveTurn` early return fails the test.
+   - Live leg: the same test's second half (turn settled → `attaches` ends
+     the superseded owner and returns false). The kept two-build
+     `resume_takes_over_an_owner_from_another_build` now also waits for a new
+     `agent_process_id` beside its `--resume <same thread>` and new-owner
+     checks (6.2 s locally). Input order into an attached owner is the host
+     bench's input rules; viewer return to a held terminal is
+     `a_held_conversation_outlives_its_view`.
+   - Not rebuilt: the queued draft in the provider's own terminal buffer
+     (provider behaviour, not lf's), and a server restart in the middle of
+     the leg (`held_session_survives_server_restart`).
+6. **Done (2026-11-13).** Relay cases: `TEST_PACE` unchanged. Times under load
+   average ~570 (Mac, debug): handoff 0.06 s, stalled 0.33 s, closure 0.47 s,
+   unacknowledged owner 0.56 s, acknowledged 1.0 s, setup 1.5 s,
+   unacknowledged 1.5 s, outage 1.9 s, move 2.2 s, quiet 3.4 s. Child startup
+   (~0.5 s) and the windows each rule must span (quiet: 4 × 300 ms silence
+   answered; move: 4 heartbeats) take most of that. A shorter silence makes
+   false reconnects likely under CI load. Accepted; re-measure on CI at
+   gate. `lifetime.rs` `POLL` is now a `#[cfg(test)]` 100 ms const (2 s in
+   builds). It paces only the recorder's retries and shell/client rechecks.
+   `viewer_state_retries_…` went from ~6 s to 0.33 s; its deadlines are 5 s
+   bounds, not `POLL` multiples. `viewer_tests::snapshot_preview_*` (3 cases,
+   > 60 s each under this load) are untouched. CI sum under 400 s is
+   unmeasured until gate.
 
 ## Checks
 

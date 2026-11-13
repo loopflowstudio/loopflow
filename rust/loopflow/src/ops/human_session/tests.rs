@@ -2060,3 +2060,68 @@ fn a_stale_viewer_record_reads_unviewed_unless_the_owner_says_it_is_held() {
     // An owner with no socket at all holds no viewer either.
     assert!(unviewed());
 }
+
+/// An owner on a replaced build keeps a conversation whose turn is live,
+/// answering or frozen: saved history cannot rebuild that turn, so resume
+/// attaches to it, and a frozen owner then fails the attachment without input
+/// (`relay_tests`' `owner-unacknowledged`). Once the turn settles, resume ends
+/// that owner so the conversation continues on the installed lf.
+#[test]
+fn a_superseded_owner_keeps_a_live_turn_and_gives_way_once_it_settles() {
+    use std::os::unix::process::ExitStatusExt;
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let previous_bin = std::env::var_os("LF_BIN");
+    // The installed lf is this binary; the owner runs another executable.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+    let store = crate::journal::process_ledger().unwrap();
+    let owner = store.test_lf_process();
+    let session = store.test_session("upgrade", &crate::session_record::new_artifact_key());
+    let mut process = std::process::Command::new("/bin/sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    let pid = process.id();
+    let live = crate::journal::OsProcess::read(pid).unwrap().unwrap();
+    let conn = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+    conn.execute(
+        "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+        rusqlite::params![owner, live.pid, live.started_at],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET transport_lf_process_id=?1,agent_process_id=?1",
+        [&owner],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded)
+         VALUES('upgrade',?1,1,0,1,0)",
+        [&owner],
+    )
+    .unwrap();
+    let host = crate::transport::Host::Owner(owner.clone());
+    let attachment = || store.session_attachment("upgrade").unwrap();
+    let before = attachment();
+    // A stopped owner's socket accepts connections and never answers.
+    let frozen =
+        std::os::unix::net::UnixListener::bind(crate::transport::endpoint(&owner).unwrap())
+            .unwrap();
+    assert!(super::attaches(&store, &session, &host).unwrap());
+    assert!(
+        process.try_wait().unwrap().is_none(),
+        "the live turn's owner ended"
+    );
+    assert_eq!(attachment(), before);
+
+    conn.execute("UPDATE session_activity SET pending_input=0,yielded=1", [])
+        .unwrap();
+    // The owner exits on its signal; reaping it lets its record read gone.
+    let reaped = std::thread::spawn(move || process.wait().unwrap());
+    assert!(!super::attaches(&store, &session, &host).unwrap());
+    assert!(reaped.join().unwrap().signal().is_some());
+    drop(frozen);
+    match previous_bin {
+        Some(value) => std::env::set_var("LF_BIN", value),
+        None => std::env::remove_var("LF_BIN"),
+    }
+}

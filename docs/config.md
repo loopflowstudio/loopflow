@@ -784,12 +784,6 @@ skill:
     agent: claude:opus
 ```
 
-| Key | What it does | When a usage limit refuses a headless step |
-| --- | --- | --- |
-| `agent`, `-a` | Pins one harness | Changes login; never changes provider |
-| `default_agent` | Names one entry, tried first when no `agent` applies | Moves through the rest of `agents` |
-| `agents` | Ordered `harness[:model]` entries Loopflow may pick | Moves through the list in order |
-
 See [Keep going when a provider runs out](#keep-going-when-a-provider-runs-out)
 for model ordering, list replacement and `default_agent` precedence.
 

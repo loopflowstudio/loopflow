@@ -1189,11 +1189,49 @@ fn _run_with_transient_retries(
     loop {
         let provider = parse_agent(attempt_config.agent()?).0;
         let retry = launched || attempt_config.agent != launch.agent;
-        let (mut result, can_failover) = match run(&attempt_config, retry)? {
+        let (result, failure, can_failover) = match run(&attempt_config, retry)? {
             AgentAttempt::Finished {
-                result,
+                mut result,
                 can_failover,
-            } => (result, can_failover),
+            } => {
+                launched = true;
+                origin = None;
+                result.failure = if process.auto {
+                    result.failure.or_else(|| _classify_agent_failure(&result))
+                } else {
+                    None
+                };
+                // Pi and OpenCode own retries; resuming adds model-visible input.
+                if matches!(provider.as_str(), "opencode" | "pi") {
+                    return Ok(result);
+                }
+                let Some(failure) = result.failure else {
+                    return Ok(result);
+                };
+                attempt_config = launch.clone();
+                attempt_config.agent = Some(rungs[rung].clone());
+                // A route chooses again; an exact pin would hold the spent account.
+                if can_failover {
+                    attempt_config.provider_account_id = None;
+                }
+                let prompt = match failure {
+                    AgentFailure::AccountSubscriptionLimit => LIMIT_FAILOVER_PROMPT,
+                    AgentFailure::AccountCredentialInvalidated => CREDENTIAL_FAILOVER_PROMPT,
+                    _ => RETRY_PROMPT,
+                };
+                if let Some(thread) = result.agent_session.clone().or(launch.resume_token.clone()) {
+                    attempt_config.resume_token = Some(thread);
+                    attempt_config.task_prompt = prompt.to_string();
+                    attempt_config.skill_invocation = None;
+                } else if matches!(
+                    failure,
+                    AgentFailure::AccountSubscriptionLimit
+                        | AgentFailure::AccountCredentialInvalidated
+                ) {
+                    attempt_config.task_prompt = _with_original_task(prompt, launch);
+                }
+                (result, failure, can_failover)
+            }
             AgentAttempt::AccountUnavailable(AccountUnavailable {
                 error,
                 retry_at: Some(retry_at),
@@ -1233,83 +1271,34 @@ fn _run_with_transient_retries(
                     error = unavailable.error,
                     "alternate provider account unavailable"
                 );
-                if result.failure == Some(AgentFailure::AccountSubscriptionLimit) {
-                    let reason = _failure_reason(result, AgentFailure::AccountSubscriptionLimit);
-                    _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
-                }
-                return Ok(result.clone());
+                // Keep the continuation without restoring a thread we gave up.
+                // Account exhaustion and a provider refusal take the same path.
+                (
+                    result.clone(),
+                    result.failure.expect("saved account failure is classified"),
+                    false,
+                )
             }
         };
-        launched = true;
-        origin = None;
-        let failure = if process.auto {
-            result.failure.or_else(|| _classify_agent_failure(&result))
-        } else {
-            None
-        };
-        result.failure = failure;
-        // Pi and OpenCode cannot be resumed without adding a new
-        // model-visible input. Preserve failure; only explicit input starts more work.
-        if matches!(provider.as_str(), "opencode" | "pi") {
-            return Ok(result);
-        }
-        let Some(failure) = failure else {
-            return Ok(result);
-        };
-        let thread = result.agent_session.clone().or(launch.resume_token.clone());
-        attempt_config = launch.clone();
-        attempt_config.agent = Some(rungs[rung].clone());
-        // A route chooses again: an exact pin would hold the step on an
-        // account that has since run out. The thread keeps its account when it can.
-        if can_failover {
-            attempt_config.provider_account_id = None;
-        }
         let delay = match failure {
             AgentFailure::AccountSubscriptionLimit | AgentFailure::AccountCredentialInvalidated => {
-                let prompt = if failure == AgentFailure::AccountSubscriptionLimit {
-                    LIMIT_FAILOVER_PROMPT
-                } else {
-                    CREDENTIAL_FAILOVER_PROMPT
-                };
-                let stuck = !can_failover || failovers == MAX_ACCOUNT_FAILOVERS;
-                // No other login can take the step: a launch without a route,
-                // or one that refused on every login. The next agent in its
-                // order can, whether or not a turn ever ran.
-                let next = rungs
-                    .get(rung + 1)
-                    .filter(|_| stuck && failure == AgentFailure::AccountSubscriptionLimit);
                 let reason = _failure_reason(&result, failure);
-                if stuck && next.is_none() {
-                    if failure == AgentFailure::AccountSubscriptionLimit {
+                if can_failover && failovers < MAX_ACCOUNT_FAILOVERS {
+                    failovers += 1;
+                    account_failure = Some(result);
+                    _record_limit_recovery(&provider, &reason, None);
+                } else if failure == AgentFailure::AccountSubscriptionLimit {
+                    let Some(next) = rungs.get(rung + 1) else {
                         _record_limit_stop(&provider, &reason, launch, &rungs[..=rung]);
-                    }
+                        return Ok(result);
+                    };
+                    rung += 1;
+                    failovers = 0;
+                    account_failure = None;
+                    _record_agent_move(&provider, &reason, next);
+                    attempt_config = _climb(&attempt_config, next, process, launch);
+                } else {
                     return Ok(result);
-                }
-                // The conversation moves with the step; a turn that never
-                // reached a thread still has its whole task to do.
-                match thread {
-                    Some(thread) => {
-                        attempt_config.resume_token = Some(thread);
-                        attempt_config.task_prompt = prompt.to_string();
-                        attempt_config.skill_invocation = None;
-                    }
-                    None => {
-                        attempt_config.task_prompt = _with_original_task(prompt, launch);
-                    }
-                }
-                match next {
-                    None => {
-                        failovers += 1;
-                        account_failure = Some(result.clone());
-                        _record_limit_recovery(&provider, &reason, None);
-                    }
-                    Some(next) => {
-                        rung += 1;
-                        failovers = 0;
-                        account_failure = None;
-                        _record_agent_move(&provider, &reason, next);
-                        attempt_config = _climb(&attempt_config, next, process, launch);
-                    }
                 }
                 Duration::ZERO
             }
@@ -1319,11 +1308,6 @@ fn _run_with_transient_retries(
                 };
                 transient_failures += 1;
                 account_failure = None;
-                if let Some(thread) = thread {
-                    attempt_config.resume_token = Some(thread);
-                    attempt_config.task_prompt = RETRY_PROMPT.to_string();
-                    attempt_config.skill_invocation = None;
-                }
                 delay
             }
         };
@@ -2885,9 +2869,61 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn exhausted_accounts_without_a_reset_move_to_the_next_agent() {
+        for (first, next, thread) in [
+            ("codex", "claude", None),
+            ("codex", "claude", Some("thread")),
+            ("claude:opus", "claude:sonnet", Some("thread")),
+        ] {
+            let launch = AgentConfig {
+                agent: Some(first.to_string()),
+                fallback_agents: vec![next.to_string()],
+                provider_account_id: Some(ProviderAccountId::parse("primary").unwrap()),
+                task_prompt: "implement the plan".to_string(),
+                ..Default::default()
+            };
+            let process = ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            };
+            let mut attempts = Vec::new();
+            let result = _run_with_transient_retries(
+                &launch,
+                &process,
+                &[],
+                |config, _| {
+                    attempts.push(config.clone());
+                    Ok(if attempts.len() == 1 {
+                        managed_attempt(AgentProcessResult {
+                            agent_session: thread.map(Into::into),
+                            ..failed_result("You've hit your usage limit")
+                        })
+                    } else if config.agent.as_deref() == Some(first) {
+                        AgentAttempt::AccountUnavailable(AccountUnavailable::terminal(
+                            "no eligible managed account",
+                        ))
+                    } else {
+                        done()
+                    })
+                },
+                |delay| assert_eq!(delay, Duration::ZERO),
+            )
+            .unwrap();
+
+            assert_eq!(result.exit_code, 0);
+            assert_eq!(attempts.len(), if thread.is_some() { 4 } else { 3 });
+            let continued = attempts.last().unwrap();
+            assert_eq!(continued.agent.as_deref(), Some(next));
+            assert_eq!(continued.provider_account_id, None);
+            assert_eq!(continued.resume_token, None);
+            assert!(continued.task_prompt.ends_with("implement the plan"));
+        }
+    }
+
+    #[test]
     fn nothing_that_will_free_up_ends_the_step_with_its_limit_failure() {
         let launch = AgentConfig {
-            agent: Some("claude".to_string()),
+            agent: Some("claude:opus".to_string()),
             ..Default::default()
         };
         // The thread is given up first in case only it stood in the way.
@@ -2899,7 +2935,10 @@ trust_level = "trusted"
         .into_iter();
         let result = _run_with_transient_retries(
             &launch,
-            &auto_process(),
+            &ProcessConfig {
+                wait_for_capacity: true,
+                ..auto_process()
+            },
             &[],
             |_, _| Ok(scripted.next().expect("scripted attempt")),
             |_| {},

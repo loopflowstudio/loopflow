@@ -202,10 +202,10 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             validate_agent_policy(agent)?;
         }
     }
-    let mut value = value.clone();
+    let mut normalized = value.clone();
     if path[0] == "agents" {
-        _list_agents(&mut value);
-        let entries = value
+        _list_agents(&mut normalized);
+        let entries = normalized
             .as_sequence()
             .ok_or_else(|| invalid("agents needs a list, such as claude,codex"))?;
         for entry in entries {
@@ -218,7 +218,7 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         }
     }
     let mut check = super::catalog::defaults();
-    insert(&mut check, path, value.clone());
+    insert(&mut check, path, normalized);
     let parsed = serde_yaml_ng::from_value::<Config>(check)
         .map_err(|error| invalid(format!("{}: {error}", path.join("."))))?;
     if let Some(model) = &parsed.claude.model {

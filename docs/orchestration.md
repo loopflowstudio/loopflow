@@ -92,11 +92,10 @@ Mechanical steps ride along as commands:
 - kickoff              # plan the change, risks answered
 - write-docs           # edit the actual user docs before implementation
 - implement
-- compress
+- concept-review
 - graph: refresh      # sync with main, then realign the plan
 - loop: implement     # loop-or-next decides: advance, iterate, or blocked
-- concept-review
-- loop: implement
+- compress
 - qa                  # use the change through its real path before anyone demos it
 - loop: implement
 - pr-publish

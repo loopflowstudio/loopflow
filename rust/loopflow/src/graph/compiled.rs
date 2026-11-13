@@ -615,18 +615,17 @@ mod tests {
                     "kickoff",
                     "write-docs",
                     "implement",
-                    "compress",
+                    "concept-review",
                     "sync",
                     "realign",
                     "loop-or-next",
-                    "concept-review",
-                    "loop-or-next",
+                    "compress",
                     "qa",
                     "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
-                3,
+                2,
             ),
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
@@ -698,12 +697,11 @@ mod tests {
                 "kickoff",
                 "write-docs",
                 "implement",
-                "compress",
+                "concept-review",
                 "sync",
                 "realign",
                 "loop-or-next",
-                "concept-review",
-                "loop-or-next",
+                "compress",
                 "qa",
                 "loop-or-next",
                 "pr-publish",
@@ -719,8 +717,7 @@ mod tests {
             returns,
             [
                 (compiled.steps[6].key, &implement),
-                (compiled.steps[8].key, &implement),
-                (compiled.steps[10].key, &implement)
+                (compiled.steps[9].key, &implement)
             ]
         );
         // Review and landing are the conversation's to launch, not this Graph's.
@@ -729,7 +726,7 @@ mod tests {
             .steps
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
-        assert_eq!(compiled.steps[5].sources, ["pursue", "refresh"]);
+        assert_eq!(compiled.steps[4].sources, ["pursue", "refresh"]);
     }
 
     #[test]

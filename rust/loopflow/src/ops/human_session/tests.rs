@@ -976,7 +976,7 @@ async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
 }
 
 #[allow(clippy::await_holding_lock)]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn task_detail_reads_capacity_once_for_all_sessions() {
     let _lock = crate::journal::test_env_lock();
     let logins = Logins::new().await;
@@ -999,9 +999,20 @@ async fn task_detail_reads_capacity_once_for_all_sessions() {
             due_date: None,
         })
         .unwrap();
-    let mut status = crate::ops::task::registered_task_status(&logins.store, task)
-        .await
-        .unwrap();
+    // `lf task status`, Desktop and screens read this on the write store.
+    let mut status = None;
+    let empty = crate::store::query_plans::empty_writes(&logins.store.sqlite, || {
+        status = Some(tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(crate::ops::task::registered_task_status(
+                    &logins.store,
+                    task,
+                ))
+                .unwrap()
+        }));
+    });
+    crate::store::query_plans::assert_no_empty_writes(&empty);
+    let mut status = status.unwrap();
     let capacity = crate::provider_account::LaunchCapacity::read(&logins.store.sqlite).unwrap();
     let mut expected = Vec::new();
     for id in ["first", "second", "third"] {

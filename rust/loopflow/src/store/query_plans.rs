@@ -162,6 +162,23 @@ pub(crate) fn statements(store: &SqliteStore, run: impl FnOnce()) -> Vec<String>
     TRACED.with(|traced| traced.borrow_mut().take().unwrap())
 }
 
+/// The call site of each write transaction `run` ends on `store`'s connection
+/// that took the write lock and changed no row: an `IMMEDIATE` transaction that
+/// only read, or an autocommit write that matched nothing. Each one made every
+/// other writer on the Machine wait for nothing.
+pub(crate) fn empty_writes(store: &SqliteStore, run: impl FnOnce()) -> Vec<String> {
+    super::contention::empty_writes::record(&store.conn, run)
+}
+
+/// Fail naming each of `empty_writes`' call sites.
+pub(crate) fn assert_no_empty_writes(found: &[String]) {
+    assert!(
+        found.is_empty(),
+        "took the write lock and changed nothing:\n  {}",
+        found.join("\n  ")
+    );
+}
+
 /// A partial index over a live subset (open Sessions, unfinished Processes)
 /// stays this small because concurrency bounds it; one over history does not.
 const LIVE_SUBSET_ROWS: i64 = 1_000;
@@ -282,10 +299,59 @@ pub(crate) fn foreign_key_lookups(store: &SqliteStore) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{foreign_key_lookups, growing_scans, statements, GROWING, MEASURED};
+    use super::{
+        assert_no_empty_writes, empty_writes, foreign_key_lookups, growing_scans, statements,
+        GROWING, MEASURED,
+    };
     use crate::durable::TaskId;
     use crate::store::sqlite::{SqliteStore, ViewerHold};
     use rusqlite::params;
+
+    fn take_the_lock_for_nothing(store: &SqliteStore) {
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.query_row("SELECT count(*) FROM probe", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        drop(tx);
+        conn.transaction().unwrap().commit().unwrap();
+        conn.execute("UPDATE probe SET x=2 WHERE x=0", []).unwrap();
+    }
+
+    #[test]
+    fn a_write_that_changes_nothing_is_reported_and_a_read_is_not() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("CREATE TABLE probe(x); INSERT INTO probe VALUES (1);")
+            .unwrap();
+
+        let found = empty_writes(&store, || take_the_lock_for_nothing(&store));
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(
+            found
+                .iter()
+                .all(|site| site.ends_with("::take_the_lock_for_nothing")),
+            "{found:?}"
+        );
+
+        let found = empty_writes(&store, || {
+            let mut conn = store.conn.lock().unwrap();
+            conn.execute_batch("BEGIN DEFERRED; SELECT count(*) FROM probe; ROLLBACK;")
+                .unwrap();
+            let savepoint = conn.savepoint().unwrap();
+            savepoint
+                .query_row("SELECT count(*) FROM probe", [], |row| row.get::<_, i64>(0))
+                .unwrap();
+            savepoint.commit().unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute("UPDATE probe SET x=2 WHERE x=1", []).unwrap();
+            tx.commit().unwrap();
+        });
+        assert_no_empty_writes(&found);
+    }
 
     /// A Machine's retirement sweep and its viewers' polls.
     fn fixture() -> (
@@ -329,18 +395,22 @@ mod tests {
     #[test]
     fn retirement_sweeps_and_viewer_polls_plan_by_index() {
         let (_home, store, task, viewer) = fixture();
-        let traced = statements(&store, || {
-            assert!(store.pending_retirements().unwrap().contains(&task));
-            store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
-                .unwrap();
-            store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
-                .unwrap();
-            store
-                .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
-                .unwrap();
+        let mut traced = Vec::new();
+        let empty = empty_writes(&store, || {
+            traced = statements(&store, || {
+                assert!(store.pending_retirements().unwrap().contains(&task));
+                store
+                    .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+                    .unwrap();
+                store
+                    .record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200)))
+                    .unwrap();
+                store
+                    .record_owner_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
+                    .unwrap();
+            })
         });
+        assert_no_empty_writes(&empty);
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
@@ -410,15 +480,21 @@ mod tests {
         let steer = store
             .save_session_steer("viewed", "person", "Look here")
             .unwrap();
-        let traced = statements(&store, || {
-            store
-                .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
-                .unwrap();
-            assert!(store.resolve_history_input("abc").is_err());
-            store.unrecorded_agent_ancestry().unwrap();
-            store.session_steers("viewed", 0, 10).unwrap();
-            store.session_steer_source("viewed", &steer.id).unwrap();
+        let mut traced = Vec::new();
+        let empty = empty_writes(&store, || {
+            traced = statements(&store, || {
+                store
+                    .sessions_for_agent_session(&crate::id::AgentSessionId::from("thread"))
+                    .unwrap();
+                assert!(store.resolve_history_input("abc").is_err());
+                store.unrecorded_agent_ancestry().unwrap();
+                // The first read files the steer's receipt; the second has nothing to file.
+                store.session_steers("viewed", 0, 10).unwrap();
+                store.session_steers("viewed", 0, 10).unwrap();
+                store.session_steer_source("viewed", &steer.id).unwrap();
+            })
         });
+        assert_no_empty_writes(&empty);
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

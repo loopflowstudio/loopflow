@@ -932,12 +932,14 @@ mod tests {
         store
             .save_session_steer("session", "Fixture author", "TRACED")
             .unwrap();
-        let traced = crate::store::query_plans::statements(&store, || {
-            let at = |moment, callback: serde_json::Value| {
-                boundary(moment, &adapter, &delivery, callback)
-            };
-            // A resumed conversation selects again and receives the steer.
-            let printed = answer(
+        let mut traced = Vec::new();
+        let empty = crate::store::query_plans::empty_writes(&store, || {
+            traced = crate::store::query_plans::statements(&store, || {
+                let at = |moment, callback: serde_json::Value| {
+                    boundary(moment, &adapter, &delivery, callback)
+                };
+                // A resumed conversation selects again and receives the steer.
+                let printed = answer(
             &store,
             &at(
                 BoundaryMoment::Start,
@@ -949,14 +951,14 @@ mod tests {
         .steers
         .unwrap()
         .batch;
-            let mut prompt = at(
-                BoundaryMoment::Tool,
-                serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
+                let mut prompt = at(
+                    BoundaryMoment::Tool,
+                    serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit",
                 "prompt_id":"p-1","prompt":"go"}),
-            );
-            prompt.printed = vec![printed];
-            answer(&store, &prompt).unwrap();
-            answer(
+                );
+                prompt.printed = vec![printed];
+                answer(&store, &prompt).unwrap();
+                answer(
             &store,
             &at(
                 BoundaryMoment::Compact,
@@ -964,7 +966,7 @@ mod tests {
             ),
         )
         .unwrap();
-            answer(
+                answer(
             &store,
             &at(
                 BoundaryMoment::Tool,
@@ -972,7 +974,7 @@ mod tests {
             ),
         )
         .unwrap();
-            answer(
+                answer(
             &store,
             &at(
                 BoundaryMoment::Stop,
@@ -980,7 +982,9 @@ mod tests {
             ),
         )
         .unwrap();
+            });
         });
+        crate::store::query_plans::assert_no_empty_writes(&empty);
         let found = crate::store::query_plans::growing_scans(&store, &traced);
         assert!(found.is_empty(), "{}", found.join("\n"));
     }

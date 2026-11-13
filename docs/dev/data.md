@@ -218,6 +218,31 @@ under the same rules, so a child column on a growing table needs an index
 whatever its `ON DELETE` action. A partial `WHERE <column> IS NOT NULL` index
 serves it when the column is mostly NULL.
 
+The same tests catch a path that takes the write lock and changes nothing.
+Every write connection begins `IMMEDIATE`, so a transaction that only reads,
+or an `UPDATE` that matches no row, still makes every other writer wait.
+`empty_writes` runs a closure and returns the call site of each one, whichever
+thread ended the transaction:
+
+```rust
+let found = query_plans::empty_writes(&store, || {
+    store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200))).unwrap();
+    store.record_owner_viewer_hold(&viewer, Some(ViewerHold::Viewed(200))).unwrap();
+});
+query_plans::assert_no_empty_writes(&found);
+```
+
+```text
+took the write lock and changed nothing:
+  <loopflow::store::sqlite::SqliteStore>::record_owner_viewer_hold::<&loopflow::id::LfProcessId>
+```
+
+A write that changes a row is not reported, so the first hold above may write
+and the repeat must not. A deferred `BEGIN … ROLLBACK` or a read-only
+savepoint never takes the lock and is not reported either. Fix a finding by
+reading first and returning before the transaction opens, or with a savepoint,
+which takes the lock only at its first write.
+
 The Machine server keeps the statistics current: `PRAGMA analysis_limit=400;
 PRAGMA optimize=0x10002` once when it starts and about once a day after, never
 per connection or per command. A store that never ran a server stays

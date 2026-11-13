@@ -210,6 +210,8 @@ impl SqliteStore {
             super::repositories::ensure_repository_in(&tx, repo)?;
             tx.commit()?;
         }
+        // Reasserting a claim needs the repository's planning configuration.
+        let planning_connected = crate::ops::planning_client::connected(repo);
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;
@@ -383,7 +385,7 @@ impl SqliteStore {
             touched.insert(task);
         }
         for task in &touched {
-            super::task_ownership::reassert_in(&tx, task)?;
+            super::task_ownership::reassert_in(&tx, task, planning_connected)?;
         }
 
         tx.execute(

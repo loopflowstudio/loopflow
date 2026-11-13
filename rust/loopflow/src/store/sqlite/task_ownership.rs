@@ -4,13 +4,14 @@
 //! Machines: your Task's next entry is written on its Machine when that is one
 //! of yours, otherwise on your Machine for its Wave. An inbound entry never
 //! ends this Machine's own open claim; only its own unclaim or handoff does.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
-    MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskExecutionSource, TaskId, TaskOwner,
-    TaskOwnership, TaskOwnershipEntry,
+    MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, OwningMachineSource,
+    ProjectId, RepositoryId, TaskExecutionSource, TaskId, TaskOwner, TaskOwnership,
+    TaskOwnershipEntry,
 };
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
@@ -257,12 +258,8 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
 }
 
 /// This Machine, or one registered with `lf machine add`.
-fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool> {
-    Ok(machine == &local_machine_in(conn)?
-        || crate::config::placement::machine_declarations(conn)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .values()
-            .any(|declaration| &declaration.id == machine))
+fn is_my_machine_in(conn: &Connection, me: &RepoFacts, machine: &MachineId) -> StoreResult<bool> {
+    Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains(machine))
 }
 
 /// Whether a holder is you. A holder with a person key (Git `user.email`) is
@@ -274,29 +271,48 @@ fn is_mine_in(conn: &Connection, me: &RepoFacts, holder: &TaskOwner) -> StoreRes
         return Ok(me.key.as_ref() == Some(key));
     }
     match &holder.machine.id {
-        Some(machine) => is_my_machine_in(conn, machine),
+        Some(machine) => is_my_machine_in(conn, me, machine),
         None => Ok(false),
     }
 }
 
 /// What an ownership write needs from outside the store: you in the Task's
-/// repository (Git `user.email` is your person key) and whether the repository
-/// has a remote planning provider. Reading them spawns `git` and loads
-/// configuration, so callers read them before they take the write lock.
+/// repository (Git `user.email` is your person key), whether the repository
+/// has a remote planning provider, the Machines you registered and your Machine
+/// for the Task's Wave or repository. Reading them spawns `git` and loads
+/// configuration files, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
 pub(crate) struct RepoFacts {
     key: Option<String>,
     name: Option<String>,
     planning_connected: bool,
+    declared_machines: HashSet<MachineId>,
+    owning_machine: (MachineId, OwningMachineSource),
 }
 
 impl RepoFacts {
-    fn in_repo(repo: &str) -> StoreResult<Self> {
+    fn in_scope(
+        conn: &Connection,
+        repo: &str,
+        wave: Option<String>,
+        repository: &RepositoryId,
+    ) -> StoreResult<Self> {
         Ok(Self {
             key: crate::config::participant_email(std::path::Path::new(repo)),
             name: crate::config::participant_name()
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?,
             planning_connected: crate::ops::planning_client::connected(repo),
+            declared_machines: crate::config::placement::machine_declarations(conn)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                .into_values()
+                .map(|declaration| declaration.id)
+                .collect(),
+            owning_machine: super::scope_defaults::owning_machine_in(
+                conn,
+                wave,
+                Some(repository.to_string()),
+                MachineSetting::Tasks,
+            )?,
         })
     }
 
@@ -306,31 +322,66 @@ impl RepoFacts {
 
     /// You in the Task's repository.
     pub(crate) fn of_task_in(conn: &Connection, task: &TaskId) -> StoreResult<Self> {
-        Self::in_repo(&task_repo_in(conn, task)?)
+        let (repo, wave, repository): (String, Option<String>, String) = conn
+            .query_row(
+                "SELECT w.repo,p.wave_id,t.repository_id FROM tasks t
+                 JOIN repository_plans w ON w.id=t.repository_id
+                 LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+                [task.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        Self::in_scope(conn, &repo, wave, &RepositoryId::from_raw(repository))
     }
 
-    /// You in a repository by its planning identity.
-    pub(crate) fn of_repository_in(
+    /// You in the repository and Project of a Task about to be created.
+    pub(crate) fn of_new_task_in(
         conn: &Connection,
-        repository: &crate::durable::RepositoryId,
+        repository: &RepositoryId,
+        project: Option<&ProjectId>,
     ) -> StoreResult<Self> {
-        let repo: Option<String> = conn
+        let repo: String = conn
             .query_row(
                 "SELECT repo FROM repository_plans WHERE id=?1",
                 [repository.as_str()],
                 |row| row.get(0),
             )
-            .optional()?;
-        Self::in_repo(&repo.ok_or(StoreError::NotFound)?)
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        let wave = match project {
+            Some(project) => conn
+                .query_row(
+                    "SELECT wave_id FROM projects WHERE id=?1",
+                    [project.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten(),
+            None => None,
+        };
+        Self::in_scope(conn, &repo, wave, repository)
     }
 }
 
-/// Loads planning configuration. Read before the write transaction when the
-/// Task is known; reassertion and ended-Machine handbacks discover it inside.
-fn planning_connected_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+/// Whether the Task's repository has a remote planning provider. Loading
+/// planning configuration takes milliseconds: read it before the write lock.
+pub(super) fn planning_connected_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(crate::ops::planning_client::connected(&task_repo_in(
         conn, task,
     )?))
+}
+
+/// The planning connection of each open Task a Machine holds, read before the
+/// write that hands them back.
+pub(super) fn held_planning_in(
+    conn: &Connection,
+    machine: &MachineId,
+) -> StoreResult<HashMap<TaskId, bool>> {
+    super::rentals::tasks_held_in(conn, machine)?
+        .into_iter()
+        .map(|(task, _)| Ok((task.clone(), planning_connected_in(conn, &task)?)))
+        .collect()
 }
 
 fn task_repo_in(conn: &Connection, task: &TaskId) -> StoreResult<String> {
@@ -354,22 +405,12 @@ pub(super) fn writer_in(
     let (_, reading) = reading_in(conn, task)?;
     if let Some(holder) = &reading.owner {
         if let Some(machine) = &holder.machine.id {
-            if is_mine_in(conn, me, holder)? && is_my_machine_in(conn, machine)? {
+            if is_mine_in(conn, me, holder)? && is_my_machine_in(conn, me, machine)? {
                 return Ok((machine.clone(), TaskExecutionSource::Owner));
             }
         }
     }
-    let (wave, repository): (Option<String>, Option<String>) = conn.query_row(
-        "SELECT p.wave_id,t.repository_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-        [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    let (machine, source) = super::scope_defaults::owning_machine_in(
-        conn,
-        wave,
-        repository,
-        crate::durable::MachineSetting::Tasks,
-    )?;
+    let (machine, source) = me.owning_machine.clone();
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 
@@ -694,6 +735,7 @@ fn notify_superseded_in(
 pub(super) fn reassert_in(
     conn: &Connection,
     task: &TaskId,
+    planning_connected: bool,
 ) -> StoreResult<Option<TaskOwnershipEntry>> {
     let (_, reading) = reading_in(conn, task)?;
     let (true, Some(holder)) = (reading.reassert, reading.owner) else {
@@ -706,14 +748,20 @@ pub(super) fn reassert_in(
         holder.person,
         holder.person_key,
         &local_machine_in(conn)?,
-        planning_connected_in(conn, task)?,
+        planning_connected,
     )
     .map(Some)
 }
 
 /// Hand each open Task an ended Machine still owns to this Machine, in its
 /// owner's name: the claim survives and the log keeps the Machine as history.
-pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
+/// `planning` comes from [`held_planning_in`]; a Task claimed on the Machine
+/// since then loads its planning connection here.
+pub(super) fn hand_back_in(
+    conn: &Connection,
+    machine: &MachineId,
+    planning: &HashMap<TaskId, bool>,
+) -> StoreResult<Vec<TaskId>> {
     let local = local_machine_in(conn)?;
     let held = super::rentals::tasks_held_in(conn, machine)?;
     let mut tasks = Vec::with_capacity(held.len());
@@ -721,6 +769,10 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
         let (person, person_key) = ownership
             .owner
             .map_or((None, None), |owner| (owner.person, owner.person_key));
+        let planning_connected = match planning.get(&task) {
+            Some(connected) => *connected,
+            None => planning_connected_in(conn, &task)?,
+        };
         append_in(
             conn,
             &task,
@@ -728,7 +780,7 @@ pub(super) fn hand_back_in(conn: &Connection, machine: &MachineId) -> StoreResul
             person,
             person_key,
             &local,
-            planning_connected_in(conn, &task)?,
+            planning_connected,
         )?;
         tasks.push(task);
     }

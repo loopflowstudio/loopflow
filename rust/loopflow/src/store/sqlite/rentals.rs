@@ -542,6 +542,10 @@ impl SqliteStore {
         state: RentalState,
     ) -> StoreResult<(Rental, Vec<TaskId>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let planning = match (&rental_in(&conn, id)?.machine_id, state.is_live()) {
+            (Some(machine), false) => super::task_ownership::held_planning_in(&conn, machine)?,
+            _ => Default::default(),
+        };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ended = (!state.is_live()).then(now_unix);
         tx.execute(
@@ -550,7 +554,7 @@ impl SqliteStore {
         )?;
         let rental = rental_in(&tx, id)?;
         let returned = match (&rental.machine_id, state.is_live()) {
-            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine)?,
+            (Some(machine), false) => super::task_ownership::hand_back_in(&tx, machine, &planning)?,
             _ => Vec::new(),
         };
         tx.commit()?;

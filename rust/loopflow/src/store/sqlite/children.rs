@@ -253,9 +253,11 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let me = match creation {
-            Some(input) => {
-                super::task_ownership::RepoFacts::of_repository_in(&conn, &input.repository_id)?
-            }
+            Some(input) => super::task_ownership::RepoFacts::of_new_task_in(
+                &conn,
+                &input.repository_id,
+                input.project_id.as_ref(),
+            )?,
             None => super::task_ownership::RepoFacts::of_task_in(&conn, task_id)?,
         };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -906,6 +908,7 @@ impl SqliteStore {
         observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let planning_connected = super::task_ownership::planning_connected_in(&conn, task_id)?;
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let existing = transaction
@@ -956,7 +959,7 @@ impl SqliteStore {
                 follow_ups_created.push(id);
             }
         }
-        super::task_ownership::reassert_in(&transaction, task_id)?;
+        super::task_ownership::reassert_in(&transaction, task_id, planning_connected)?;
 
         let Some((last_revision, last_title, last_description)) = existing else {
             // Baseline the definition; existing comments were imported above.
@@ -2531,7 +2534,13 @@ impl SqliteStore {
         let me = task
             .worktree
             .is_some()
-            .then(|| super::task_ownership::RepoFacts::of_repository_in(&conn, &task.repository_id))
+            .then(|| {
+                super::task_ownership::RepoFacts::of_new_task_in(
+                    &conn,
+                    &task.repository_id,
+                    task.project_id.as_ref(),
+                )
+            })
             .transpose()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task(task)?;

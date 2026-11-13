@@ -87,13 +87,18 @@ pub(super) fn graphs_in(
         .collect()
 }
 
-/// What the Graph process says of the Graph, and the Work its checkout names.
+/// What the Graph process says of the Graph, including the Task it started for.
 pub(super) fn entry_in(
     conn: &Connection,
     graph: &GraphProcess,
 ) -> StoreResult<GraphProcessInventoryEntry> {
     let process = &graph.process;
-    let task = super::task_work::task_of_process(conn, &process.id)?
+    let task = conn
+        .query_row(
+            "SELECT task_id FROM graph_processes WHERE lf_process_id=?1",
+            [&process.id],
+            |row| row.get::<_, Option<String>>(0),
+        )?
         .map(|id| TaskId::parse(&id))
         .transpose()
         .map_err(invalid)?;

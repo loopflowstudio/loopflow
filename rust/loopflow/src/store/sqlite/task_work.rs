@@ -2271,18 +2271,27 @@ mod tests {
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE is_local=1))", params![child.as_str(), project.as_str()]).unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
-        // A nested checkout's work is also its enclosing Task's.
+        // A Graph in a nested checkout started for the deepest Task, as its
+        // launch binds it; the enclosing Task keeps the nested Session.
         let child_graph = store.test_graph(
             "child",
             "/missing/task%_/child",
             &[("implement", None)],
             None,
         );
+        let graph_ids = |task: &TaskId| {
+            store
+                .task_work(task)
+                .unwrap()
+                .graph_processes
+                .into_iter()
+                .map(|graph| graph.summary.id)
+                .collect::<Vec<_>>()
+        };
+        let enclosing = graph_ids(&task);
+        assert!(!enclosing.contains(&child_graph.to_string()));
+        assert_eq!(graph_ids(&child), [child_graph.to_string()]);
         let work = store.task_work(&task).unwrap();
-        assert!(work
-            .graph_processes
-            .iter()
-            .any(|graph| graph.summary.id == child_graph.as_str()));
         assert!(work
             .sessions
             .iter()
@@ -2294,6 +2303,7 @@ mod tests {
             conn.execute("UPDATE tasks SET worktree='' WHERE id=?1", [task.as_str()])
                 .unwrap();
         }
+        // Without its checkout the Task keeps the Graphs started for it.
         let work = store.task_work(&task).unwrap();
         assert_eq!(
             work.sessions
@@ -2302,24 +2312,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert!(work.graph_processes.is_empty());
+        assert_eq!(graph_ids(&task), enclosing);
 
-        // A Graph explicitly bound through a Session remains visible after the
-        // checkout disappears. Inventory and Task status use the same rule.
-        let bound_graph = store.test_graph("bound", "/elsewhere", &[], None);
+        // A Session that later names a taskless Graph does not make it the
+        // Task's: the Graph's Task is what its launch recorded.
+        let taskless = store.test_graph("taskless", "/elsewhere", &[], None);
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','bound-graph',?1,3,'{}')", [&bound_graph]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
         }
-        let work = store.task_work(&task).unwrap();
-        assert_eq!(work.graph_processes.len(), 1);
-        assert_eq!(work.graph_processes[0].summary.id, bound_graph.as_str());
-        assert_eq!(
-            work.graph_processes[0].summary.task_id.as_ref(),
-            Some(&task)
-        );
-        let (_, entry) = store.graph_process(bound_graph.as_str()).unwrap().unwrap();
-        assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
-        assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
+        assert_eq!(graph_ids(&task), enclosing);
+        let (_, entry) = store.graph_process(taskless.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.task_id, None);
     }
 }

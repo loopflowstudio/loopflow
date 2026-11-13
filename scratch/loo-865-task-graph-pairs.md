@@ -120,6 +120,13 @@ record and never changes; the table stays append-only. Tasks are never deleted
 - Graph association now follows launch binding (canonicalized cwd, work
   declaration), not the lexical cwd test. Symlinked checkout paths resolve the
   same way the launch does.
+- A Graph in a nested checkout is the deepest Task's only; the enclosing Task
+  no longer lists it (its Sessions still do). The live store had none.
+- A Task whose worktree is cleared keeps the Graphs started for it; before, they
+  dropped out with the checkout.
+- A Session that links a Graph after launch no longer moves the Graph to its
+  Task. The Graph summary's `task_id` (`entry_in`) reads the recorded column
+  too, so inventory, `--taskless` and Task status agree.
 - `completed_graph_steps` for every Task still costs ~40 ms in the step join
   (14k steps). Callers ask about watched Tasks, so this is out of scope.
 
@@ -149,6 +156,13 @@ recording the deepest checkout's Task. Left: the gate's store-copy comparison.
 - `cargo test -p loopflow --lib -- graph_process_task_backfills store::sqlite::task_work::`: builds; the 14 tests never finish here. The test binary sits in state `TN` (stopped) even after SIGCONT and when started with `setsid` and no terminal, like other worktrees' test binaries on this Machine (2026-11-13; rerun at realign after merging origin/main 87f0e3c60a: same, `running 14 tests` then stopped). Gate or CI runs them; nothing on the branch has executed these tests yet.
 
 - QA 2026-11-13 (`scratch/qa.html`): a 0.15.3-written private store opened by the branch keeps every Task's Graphs identical; new launches, `task.get` `graph.step_finished` and `plan.list` latest Graph pair correctly. Focused tests stopped in `TN` again; gate or CI runs them.
+
+- Gate 2026-11-13: `scripts/test.py --reuse-passing` stopped at resource preflight (uv cache inventory deadline, 38 GiB free); its plan ran by hand. Lib and integration test processes started under nextest on this Machine enter `TN` and stay there until they get SIGCONT; this happens to other worktrees' tests too, so it is not this branch. The runs below continued stopped descendants of their own nextest only.
+  - architecture, test inventory, `cargo fmt --check`: pass.
+  - nextest `task_work::`, `graph_inventory::` (store and command), `bind_attribution::`, migration test, `server::events::`, `graph_tests::`, `task_graph_launch_tests::`, `planning_foreground_tests::`, `graph_discovery_tests::`, `machine_commands::`, and the two `record_graph` integration tests: 173/173 after fixes. An earlier pass also covered `store::sqlite::processes::`, `rollover::`, `documented_commands::`, `performance_tests::`, `task_adoption_tests::`: pass. `machine_commands::` remote tests failed once with the SSH stand-in unreachable for 20 s, then passed.
+  - `cargo clippy --all-targets -- -D warnings`: pass. Website `dev.py test`: 73 passed.
+  - Left to CI: `binary(session_launch_contract)`, the full matrix.
+- Gate fixes: the migration fixture inserted a second local Machine (rejected); `entry_in` still derived a Graph's `task_id` from the cwd/Session rule while `graphs_of_task` read the column, so it now reads the column; `task_work_includes_checkout_binding…` asserted the old nested-checkout, cleared-worktree and late-Session-link pairings and now asserts the recorded ones.
 
 ## Docs
 

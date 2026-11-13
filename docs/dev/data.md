@@ -82,8 +82,8 @@ Graph's name, compiled graph and Task at launch, then each step's Process, node 
 iteration counts. Nothing updates those rows, and no step reads or writes them.
 A Session reaches its Graph through the step row of the Process that captured its
 input. Every Graph started for a Task, by naming it or in its checkout, is
-equally that Task's work. A Graph started before a Task adopted its checkout
-stays taskless. Taskless execution uses the same Graph runner. A step's result
+equally that Task's work. In a nested checkout it is the deepest Task's. A
+Graph started before a Task adopted its checkout stays taskless. Taskless execution uses the same Graph runner. A step's result
 is how its process exited; a deciding or routing step also answers through the Session turn
 its Process captured. No generic attempt lifecycle sits between these owners.
 

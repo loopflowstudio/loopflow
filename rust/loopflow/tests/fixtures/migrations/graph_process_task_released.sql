@@ -1,12 +1,12 @@
 -- Released Graphs, paired with Tasks only by the read-time rule.
-INSERT INTO machines(id,created_at,observed_at,is_local)
-VALUES('HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',1,2,1);
 INSERT INTO repository_plans(id,repo,selected) VALUES('repo_graphs','/repo',1);
 INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,worktree,checkout_machine_id,created_at,updated_at)
-VALUES('task_outer','repo_graphs','GRAPH-1','Outer','/repo','HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',1,1),
-      ('task_inner','repo_graphs','GRAPH-2','Inner','/repo/task/','HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',1,1),
-      ('task_sibling','repo_graphs','GRAPH-3','Sibling','/repo/task-other','HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',1,1),
-      ('task_bound','repo_graphs','GRAPH-4','Bound','/bound','HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',1,1);
+SELECT t.column1,'repo_graphs',t.column2,t.column3,t.column4,m.id,1,1
+FROM (VALUES('task_outer','GRAPH-1','Outer','/repo'),
+             ('task_inner','GRAPH-2','Inner','/repo/task/'),
+             ('task_sibling','GRAPH-3','Sibling','/repo/task-other'),
+             ('task_bound','GRAPH-4','Bound','/bound')) AS t
+JOIN machines m ON m.is_local=1;
 INSERT INTO processes(id,trace_id,cwd,started_at)
 VALUES('graph-deep','trace','/repo/task/deep/er',1),
       ('graph-sibling','trace','/repo/task-other/x',1),

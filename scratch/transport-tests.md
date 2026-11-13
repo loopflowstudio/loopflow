@@ -1,7 +1,9 @@
 # LOO-887: rebuild the transport tests around the current design
 
-Stacked on `jack-heart/way-faster-gate` (`scratch/test-speed.md`): build on its
-seeded fixture homes, its host-level grace test and its three-cycle shell test.
+Stacked on `jack-heart/way-faster-gate` (PR #1920, open): build on its seeded
+fixture homes, its host-level grace test and its three-cycle shell test. Its
+notes and CI timings were cleared from scratch at publish; read them with
+`git show c4e1251328:scratch/test-speed.md` and `…:scratch/test-timings.tsv`.
 
 ## Outcome and demo
 
@@ -13,7 +15,7 @@ cargo nextest run -p loopflow --lib -E 'test(transport::)'          # host + rel
 cargo nextest run -p loopflow --test transport_tests                # ~30 real-process tests
 ```
 
-Before (CI medians, `scratch/test-timings.tsv`, three merge-queue runs): 131 tests
+Before (CI medians from the parent's `test-timings.tsv`, three merge-queue runs): 131 tests
 in `transport_tests`, 1,646 s summed, 70 over 10 s. Lib `transport::` tests: 72
 tests, ~117 s (registry 63 s, viewer 38 s, lifetime 14 s).
 

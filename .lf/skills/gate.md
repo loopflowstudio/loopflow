@@ -94,6 +94,13 @@ candidate head: report the two separately.
    them. Investigate required-check timeouts instead of hiding them with a
    later green run.
 
+   A local run is small and bounded. Name modules in the filter so it finishes
+   well inside nextest's twenty-minute run limit (`.config/nextest.toml`), and
+   never raise a limit or wait past one. A test that fails in a loaded run and
+   passes when rerun alone failed from load: name it in the report and leave
+   it to CI. Don't instrument it or rerun it to measure the race. A test that
+   fails alone, or in CI, is the one to investigate.
+
    One build at a time: never run compilers, test runners or linters against
    the same build directory concurrently, including in background tool calls.
    Match CI's formatting/static analysis. Checks run headless; use a headless

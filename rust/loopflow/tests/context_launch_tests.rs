@@ -29,6 +29,48 @@ fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[
     command
 }
 
+/// A Task with the Machine server running, holding `files` in its own linked
+/// checkout. A conversation that names it is Work: without a terminal it runs
+/// detached, and Codex runs behind its private app-server, where lf's
+/// configuration rides. Adopting a checkout starts no Task conversation beside
+/// it, which would share the stand-in's state.
+fn codex_task(
+    repo: &TestRepo,
+    home: &Path,
+    files: &[(&str, &str)],
+) -> (loopflow_test_support::MachineServer, PathBuf, String) {
+    let server = loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home);
+    let worktree = repo.create_named_worktree("native");
+    for (path, content) in files {
+        let path = worktree.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    let output = native_codex_command(
+        repo.path(),
+        home,
+        &[
+            "task",
+            "create",
+            "--title",
+            "Native Codex",
+            "--worktree",
+            worktree.to_str().unwrap(),
+            "--json",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = created["task"]["id"].as_str().unwrap().to_string();
+    (server, worktree, id)
+}
+
 /// Live agent Processes once their exit records are written. The terminal
 /// gets the provider's exit after a short wait; its host lingers to settle the
 /// provider, so a reader waits for it.
@@ -58,16 +100,29 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             (Some("fast"), Some("priority")),
         ] {
             let repo = TestRepo::new();
-            repo.create_file(
-                ".lf/config.yaml",
-                "diff: false\ndiff_files: false\npaste: false\n",
-            );
-            repo.create_file(".lf/skills/tier-probe.md", "Tier probe");
-            repo.create_file(".lf/graphs/tier-check.yaml", "- tier-probe\n");
+            let files = [
+                (
+                    ".lf/config.yaml",
+                    "diff: false\ndiff_files: false\npaste: false\n",
+                ),
+                (".lf/skills/tier-probe.md", "Tier probe"),
+                (".lf/graphs/tier-check.yaml", "- tier-probe\n"),
+            ];
+            for (path, content) in files {
+                repo.create_file(path, content);
+            }
             let home = tempfile::tempdir().unwrap();
             support::install_native_codex(&home.path().join("bin"));
+            // An interactive Codex conversation hosts its app-server as Work, in
+            // its Task's checkout. A bare Graph runs its headless step here.
+            let (_server, worktree, task) = codex_task(&repo, home.path(), &files);
+            let cwd = if mode == "-i" {
+                worktree.as_path()
+            } else {
+                repo.path()
+            };
             let run = |args: &[&str]| {
-                let output = native_codex_command(repo.path(), home.path(), args)
+                let output = native_codex_command(cwd, home.path(), args)
                     .output()
                     .unwrap();
                 assert!(
@@ -89,7 +144,7 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             let args = if mode == "-b" {
                 vec![mode, "-a", "codex", "graph", "tier-check"]
             } else {
-                vec![mode, "-a", "codex", ":", "Tier probe"]
+                vec![mode, "--task", &task, "-a", "codex", ":", "Tier probe"]
             };
             run(&args);
             let params = read("native-config.json");
@@ -146,7 +201,24 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
                 assert_eq!(probe["new"], resume_tier.unwrap_or("priority"));
                 assert_eq!(probe["fork"], resume_tier.unwrap_or("priority"));
             }
-            assert_eq!(settled_live_agents(&database), 0);
+            if mode == "-i" {
+                // The probe's new thread is a conversation started beside this
+                // one, so its app-server outlives the exit. Stop the stand-in.
+                let pids: Vec<i64> = database
+                    .prepare(
+                        "SELECT pid FROM processes WHERE kind='agent' AND completed_at IS NULL",
+                    )
+                    .unwrap()
+                    .query_map([], |row| row.get(0))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                assert_eq!(pids.len(), 1, "{setting:?}: {pids:?}");
+                // SAFETY: the pid is this fixture's own stand-in app-server.
+                unsafe { libc::kill(pids[0] as i32, libc::SIGKILL) };
+            } else {
+                assert_eq!(settled_live_agents(&database), 0);
+            }
             assert_eq!(
                 fs::read_to_string(native.join("config.toml")).unwrap(),
                 provider_config
@@ -165,12 +237,16 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         "fail-after-submit",
     ] {
         let repo = TestRepo::new();
-        repo.create_file(
-            ".lf/config.yaml",
-            "diff: false\ndiff_files: false\npaste: false\n",
-        );
         let home = tempfile::tempdir().unwrap();
         crate::support::install_native_codex(&home.path().join("bin"));
+        let (_server, worktree, task) = codex_task(
+            &repo,
+            home.path(),
+            &[(
+                ".lf/config.yaml",
+                "diff: false\ndiff_files: false\npaste: false\n",
+            )],
+        );
         let native = home.path().join(".codex");
         fs::create_dir(&native).unwrap();
         let config = "model=\"fixture\"\n";
@@ -180,9 +256,17 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         fs::write(home.path().join(failure), "").unwrap();
         let start = std::time::Instant::now();
         let output = native_codex_command(
-            repo.path(),
+            &worktree,
             home.path(),
-            &["-i", "-a", "codex", ":", "Preserve this request"],
+            &[
+                "-i",
+                "--task",
+                &task,
+                "-a",
+                "codex",
+                ":",
+                "Preserve this request",
+            ],
         )
         .output()
         .unwrap();
@@ -245,10 +329,9 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             })
             .unwrap();
         fs::remove_file(home.path().join(failure)).unwrap();
-        let output =
-            native_codex_command(repo.path(), home.path(), &["session", "resume", &session])
-                .output()
-                .unwrap();
+        let output = native_codex_command(&worktree, home.path(), &["session", "resume", &session])
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{failure}: {}",
@@ -285,18 +368,32 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
 #[test]
 fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_replay() {
     let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "diff: false\ndiff_files: false\npaste: false\n",
-    );
     let body = "Preserve 雪, \"quotes\", $(shell syntax), and newlines.\n".repeat(8_000);
-    repo.create_file(".lf/skills/probe.md", &body);
     let home = tempfile::tempdir().unwrap();
     crate::support::install_native_codex(&home.path().join("bin"));
-    let command = |args: &[&str]| native_codex_command(repo.path(), home.path(), args);
-    let output = command(&["-i", "-a", "codex", "probe", "Find the bug."])
-        .output()
-        .unwrap();
+    let (_server, worktree, task) = codex_task(
+        &repo,
+        home.path(),
+        &[
+            (
+                ".lf/config.yaml",
+                "diff: false\ndiff_files: false\npaste: false\n",
+            ),
+            (".lf/skills/probe.md", &body),
+        ],
+    );
+    let command = |args: &[&str]| native_codex_command(&worktree, home.path(), args);
+    let output = command(&[
+        "-i",
+        "--task",
+        &task,
+        "-a",
+        "codex",
+        "probe",
+        "Find the bug.",
+    ])
+    .output()
+    .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -352,10 +449,13 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert!(!state.contains_key("/<session-flags>/config.toml:session_start:0:0"));
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    // The Task's own conversation may start beside this one.
     let session: String = database
-        .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [key],
+            |row| row.get(0),
+        )
         .unwrap();
     // Closing before subscription must not report the already-recorded first
     // request as unsent. A genuine terminal failure must still fail.
@@ -1442,31 +1542,49 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                 repo.path().join("document.txt")
             };
             fs::write(&path, &body).unwrap();
-            repo.create_file(".gitignore", "ignored.txt\n");
-            repo.create_file("config.txt", "CONFIG-DOCUMENT-662");
-            repo.create_file("frontmatter.txt", "FRONTMATTER-DOCUMENT-662");
-            repo.create_file(
-                ".lf/config.yaml",
-                "diff: false\ndiff_files: false\npaste: false\ndocs: [config.txt]\n",
-            );
-            if native {
-                repo.create_file(
+            let skill = if native {
+                (
                     ".agents/skills/probe/SKILL.md",
                     "---\nname: probe\ndescription: Probe docs\n---\nRead the supplied reference.",
-                );
+                )
             } else {
-                repo.create_file(
+                (
                     ".lf/skills/probe.md",
                     "---\ndocs: [frontmatter.txt]\n---\nRead the supplied reference.",
-                );
-            }
+                )
+            };
+            let files = [
+                (".gitignore", "ignored.txt\n"),
+                ("config.txt", "CONFIG-DOCUMENT-662"),
+                ("frontmatter.txt", "FRONTMATTER-DOCUMENT-662"),
+                (
+                    ".lf/config.yaml",
+                    "diff: false\ndiff_files: false\npaste: false\ndocs: [config.txt]\n",
+                ),
+                skill,
+            ];
+            // The interactive launch is Work, so its first turn rides Codex's
+            // app-server rather than a bare terminal's argv.
+            let work = (selection == "external").then(|| codex_task(&repo, home.path(), &files));
+            let checkout = match &work {
+                Some((_, worktree, _)) => worktree.clone(),
+                None => {
+                    for (file, content) in files {
+                        repo.create_file(file, content);
+                    }
+                    repo.path().to_path_buf()
+                }
+            };
             let selected = if selection == "relative" {
                 "document.txt".to_string()
             } else {
                 path.display().to_string()
             };
-            let args = [
-                if selection == "external" { "-i" } else { "-b" },
+            let mut args = vec![if selection == "external" { "-i" } else { "-b" }];
+            if let Some((_, _, task)) = &work {
+                args.extend(["--task", task.as_str()]);
+            }
+            args.extend([
                 "-a",
                 "codex",
                 "--docs",
@@ -1474,8 +1592,8 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                 "skill",
                 "probe",
                 "Report final marker.",
-            ];
-            let preview = native_codex_command(repo.path(), home.path(), &args)
+            ]);
+            let preview = native_codex_command(&checkout, home.path(), &args)
                 .args(["--context", "--json"])
                 .output()
                 .unwrap();
@@ -1490,17 +1608,28 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             assert_eq!(expected.matches("FIRST-662").count(), 1);
             assert!(expected.contains("CONFIG-DOCUMENT-662"));
             assert_eq!(expected.contains("FRONTMATTER-DOCUMENT-662"), !native);
-            assert!(preview["references"].as_array().unwrap().is_empty());
-            assert!(!repo.path().join(".lf/prompts").exists());
+            // The document rides the prompt, never as a reference; a Task's
+            // launch references only its own context.
+            assert!(!preview["references"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reference| reference.to_string().contains(&selected)));
+            assert_eq!(
+                preview["references"].as_array().unwrap().is_empty(),
+                work.is_none()
+            );
+            assert!(!checkout.join(".lf/prompts").exists());
             assert!(!home.path().join("native-argv.jsonl").exists());
             assert!(!home.path().join("runs").exists());
-            assert!(!home.path().join("loopflow.db").exists());
-            let output = native_codex_command(repo.path(), home.path(), &args)
+            // Creating the Task opened the store; preview still writes nothing.
+            assert_eq!(home.path().join("loopflow.db").exists(), work.is_some());
+            let output = native_codex_command(&checkout, home.path(), &args)
                 .output()
                 .unwrap();
             assert!(
                 output.status.success(),
-                "{}",
+                "{selection}/{large}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
             let turns: serde_json::Value =
@@ -1519,7 +1648,7 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                 .any(|asset| {
                     asset["kind"] == "document"
                         && asset["source_path"].as_str().is_some_and(|source| {
-                            repo.path().join(source).canonicalize().unwrap()
+                            checkout.join(source).canonicalize().unwrap()
                                 == path.canonicalize().unwrap()
                                 && expected.contains(&format!(
                                     "Document: {}",

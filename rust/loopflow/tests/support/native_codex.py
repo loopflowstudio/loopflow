@@ -415,6 +415,11 @@ def main() -> None:
         _server(args[args.index("--listen") + 1].removeprefix("unix://"), home)
     elif "app-server" in args:
         _stdio(home)
+    else:
+        # A bare launch is plain `codex` in its terminal, configured by argv.
+        print("\n".join(args), flush=True)
+        with (home / "launched").open("a") as file:
+            file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
 
 
 if __name__ == "__main__":

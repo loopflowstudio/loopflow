@@ -418,7 +418,20 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(entries(), claimed, "{launch}");
-        let status = task.status();
+        // The Task's background conversation runs the same stand-in, so `ready`
+        // can arrive before the Graph's step; wait for the Graph itself.
+        let status = loop {
+            let status = task.status();
+            if !status["work"]["graph_processes"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+                || Instant::now() >= deadline
+            {
+                break status;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         let graphs = status["work"]["graph_processes"].as_array().unwrap();
         assert_eq!(graphs.len(), 1, "{launch}: {status}");
         assert_eq!(graphs[0]["state"], "current");

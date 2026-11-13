@@ -1625,7 +1625,7 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     let provider = home.path().join("bin/codex");
     let script = fs::read_to_string(&provider).unwrap().replace(
         "#!/bin/sh\n",
-        "#!/bin/sh\ncase \" $* \" in *' --remote '*) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
+        "#!/bin/sh\ncase \" $* \" in *' app-server '*) ;; *) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
     );
     fs::write(&provider, script).unwrap();
 

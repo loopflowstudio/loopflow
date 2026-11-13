@@ -1,9 +1,9 @@
 # LOO-887: rebuild the transport tests around the current design
 
-Stacked on `jack-heart/way-faster-gate` (PR #1920, open): build on its seeded
-fixture homes, its host-level grace test and its three-cycle shell test. Its
-notes and CI timings were cleared from scratch at publish; read them with
-`git show c4e1251328:scratch/test-speed.md` and `…:scratch/test-timings.tsv`.
+Built on PR #1920 (`be8ffd616a`, on main and merged here): its seeded
+fixture homes, host-level grace test and three-cycle shell test. Its notes and
+CI timings: `git show c4e1251328:scratch/test-speed.md` and
+`…:scratch/test-timings.tsv`.
 
 ## Outcome and demo
 
@@ -68,14 +68,11 @@ Done when:
   real-process test still shows ~10 s on CI.
 - Simple owner tests cost ~5–6 s: an owner lingers 2 s after its child exits
   (`hosted.rs:1171`) plus process startup. Accept it for the kept set.
-- Fixed sleeps left after slice 2 (`tests/transport_tests.rs`, by test):
-  6 s `acknowledged_viewer_remains_attached_past_handshake_deadline`, 5 s
-  `a_held_conversation_outlives_its_view`, 3 s
-  `a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait`, 8 s
-  `sessions_keep_serving_when_their_lf_executable_goes`, 4 s in `headless_run`
-  and in `shell_reconnects_and_settles`, a 6 s shell sleep in
-  `viewer_stream_waits_for_destination_resolution_before_attachment`; the 32 s
-  quiet loop in `ssh_shells.rs:704`. All go.
+- Fixed sleeps left after slice 3: `transport_tests.rs` 6 s in
+  `acknowledged_viewer_remains_attached_past_handshake_deadline`, 5 s in
+  `a_held_conversation_outlives_its_view`, 4 s each in `headless_run` and
+  `shell_reconnects_and_settles`; the 32 s quiet loop in
+  `tests/transport/ssh_shells.rs:704`. All go in slice 4.
 - `ghostty_vt`'s 7 unit tests also run in `transport_tests` through its `#[path]`
   include. Negligible; left alone.
 - `scripts/testing.md` routes store-wide schema changes to `binary(transport_tests)`
@@ -294,7 +291,12 @@ no test that waits out a production timeout except a named fallback above.
    `retention_after(setup)` helper with one assertion each. `cargo nextest run
    -p loopflow --lib -E 'test(owner_retention_names)'`: pass, 0.18 s; clippy
    `--lib --tests --test transport_tests` clean (no orphaned helpers).
-4. Merge the kept real-process tests (63 → ≤ 35); remove fixed sleeps; SSH trims. (README
+4. Merge the kept real-process tests (63 → ≤ 35, per the surface table);
+   remove the fixed sleeps above; SSH trims; port the local relay rules
+   (control handoff, a host that stops reading, acknowledged viewer past the
+   attach deadline) to `relay_tests`; drop `server_mobile_changes_…`'s config
+   branches; fold the Graph exit-1 case of `native_exit_preserves_…` into the
+   launcher test. (README
    bare-Graph fix and `scripts/testing.md` routing already landed with the docs.)
 
 ## Checks

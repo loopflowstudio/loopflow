@@ -94,32 +94,6 @@ uses it. No `INDEXED BY` names it; a plan assertion in
 The branch schema may differ from the installed one; the new FK test is the
 authoritative list.
 
-Partial-index `SCAN`s the new rule will newly flag in existing tests are
-unknown until it runs (`query_plans` tests, `server::boundary`). Fix each with an
-index or query rewrite in this branch; a fix needing a redesign goes to a
-linked Task, as LOO-839 did.
-
-## Changes
-
-1. `query_plans.rs`: partial-walk threshold, collect-then-filter across both
-   passes, `foreign_key_lookups`, regenerated `MEASURED`. Failure text names
-   the index's measured rows.
-2. Migration (`uv run python scripts/new_migration.py foreign_key_children`):
-   indexes for the FK children above (partial `IS NOT NULL` where the column is
-   mostly NULL), the `agent_process_session` replacement, plus whatever the FK
-   test finds on the branch schema.
-3. Tests in `query_plans.rs`:
-   - `a_walk_of_a_large_partial_index_is_a_scan`: the LOO-839
-     `kind='observed' AND json_extract(...)` statement is flagged naming
-     `session_observation_receipt`; `SELECT ... FROM processes WHERE completed_at IS NULL`
-     (`processes_unfinished`) is not.
-   - `every_partial_index_on_a_growing_table_is_measured`.
-   - `foreign_key_children_on_growing_tables_are_indexed`:
-     `growing_scans(&store, &foreign_key_lookups(&store))` is empty.
-4. `docs/dev/data.md` § "Query cost and the write lock": replace "walking a
-   partial index ... does not" with the measured-size rule; say FK child lookups
-   are checked from the schema.
-
 ## Exclusions
 
 - Per-path FK tracing (adding child lookups for each traced parent DELETE/UPDATE).
@@ -140,7 +114,10 @@ store; indexes newer than its schema (`session_provider_transitions` and this
 branch's) were built and `ANALYZE`d on a `.backup` copy. Migration
 `foreign_key_children.sql` adds the six indexes in the risk table; on that copy
 every growing FK child lookup then plans as `SEARCH`. No existing hot-path test
-was newly flagged.
+was newly flagged. `docs/dev/data.md` § "Query cost and the write lock" states
+the measured-size rule and the schema-wide FK check.
+
+Remaining: the gate checks below.
 
 ## Checks
 

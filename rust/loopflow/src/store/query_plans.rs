@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn session_history_reads_plan_by_window() {
-        let (_home, store, _task, _viewer) = fixture();
+        let (_home, store, task, _viewer) = fixture();
         let input = crate::session_record::new_artifact_key();
         store.test_session("history", &input);
         store
@@ -444,7 +444,7 @@ mod tests {
                 &serde_json::json!({"status":"completed"}),
             )
             .unwrap();
-        let traced = statements(&store, || {
+        let mut traced = statements(&store, || {
             store
                 .recent_conversation_history(None, None, None, 100, 50)
                 .unwrap();
@@ -453,6 +453,20 @@ mod tests {
                 .unwrap();
             store.input_history(&input).unwrap();
         });
+        // A Task drill's window is the Task (Desktop Task history, `task.context`).
+        // Its selector resolution scans `tasks` for short-id prefixes once per
+        // drill, whatever the history holds; only the history read is checked.
+        let drill = statements(&store, || {
+            store
+                .pending_conversation_history(None, None, Some(task.as_str()), 0, true)
+                .unwrap();
+        });
+        let history = drill
+            .into_iter()
+            .filter(|sql| sql.starts_with("WITH windowed"));
+        let before = traced.len();
+        traced.extend(history);
+        assert!(traced.len() > before, "the drill reads history");
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

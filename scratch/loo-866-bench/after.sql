@@ -1,27 +1,34 @@
 WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
-                UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND kind='captured' AND observed_at>=?5
+                UNION SELECT CASE scoped.kind WHEN 'captured' THEN scoped.seq ELSE scoped.captured_event END
+                    FROM tasks t CROSS JOIN session_events scoped ON scoped.task_id=t.id
+                    WHERE ?7 IS NULL AND (t.id=?3 OR t.issue_identifier=?3 OR t.external_issue_id=?3)
+                    AND scoped.kind IN ('captured','observed','started')
+                UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
                 UNION SELECT +c.seq FROM session_events o CROSS JOIN session_events c ON c.kind='captured'
                     AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
-                    WHERE ?7 IS NULL AND o.kind='observed' AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind='observed' AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
                     AND o.observed_at>=?5 AND (?6 OR substr(o.receipt_key,-14)=':manifest.json')
                 UNION SELECT origin.captured_event FROM session_events completion CROSS JOIN session_events origin
                     ON origin.session_id=completion.session_id AND origin.provider_thread=completion.provider_thread
                     AND origin.provider_turn=completion.provider_turn AND origin.kind='started'
-                    WHERE ?7 IS NULL AND ?6 AND completion.kind IN ('started','usage','completed','output')
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed','output')
                     AND completion.kind='completed' AND completion.observed_at>=?5 AND +origin.captured_event IS NOT NULL
                 UNION SELECT CASE ran.kind WHEN 'captured' THEN ran.seq ELSE ran.captured_event END
                     FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?6 AND exited.completed_at>=?5 AND ran.kind IN ('captured','started')
-                    AND (ran.kind='captured' OR ran.captured_event IS NOT NULL)),
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind IN ('captured','started')),
             -- A native turn starts in the window only if all its events fall in it;
             -- one its Process completed in the window may have started earlier.
             turns(session_id,provider_thread,provider_turn) AS (
                 SELECT +session_id,+provider_thread,+provider_turn FROM session_events
-                    WHERE ?7 IS NULL AND kind IN ('started','usage','completed','output') AND observed_at>=?5
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed','output') AND observed_at>=?5
                 UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
                     FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL),
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
+                UNION SELECT +scoped.session_id,+scoped.provider_thread,+scoped.provider_turn
+                    FROM tasks t CROSS JOIN session_events scoped ON scoped.task_id=t.id
+                    WHERE ?7 IS NULL AND (t.id=?3 OR t.issue_identifier=?3 OR t.external_issue_id=?3)
+                    AND scoped.kind='started' AND scoped.captured_event IS NULL),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -60,7 +67,7 @@ WITH windowed(seq) AS (
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
                     AND terminal.receipt_key=i.receipt_key||':terminal.json'
-                WHERE i.kind='captured' AND (?7 IS NULL OR i.receipt_key=?7)
+                WHERE i.kind='captured'
                     -- `eligible` keeps only these when finished inputs are excluded;
                     -- filtering here spares the per-input subqueries on older ones.
                     AND (?6 OR COALESCE(m.observed_at,i.observed_at)>=?5) AND

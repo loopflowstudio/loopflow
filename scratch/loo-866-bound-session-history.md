@@ -55,6 +55,7 @@ are. Each arm is a necessary condition:
 | arm | why it is needed | index |
 |---|---|---|
 | exact input `?7` | `input_history` | `session_capture_key` |
+| Task `?3` (time arms off) | Task drills read the Task, not all time | `session_events_task` |
 | capture `observed_at>=since` | start without a manifest | `session_capture_window` (new) |
 | manifest observation `>=since` → capture by receipt key | start with a manifest | `session_input_outcome_window` (new) |
 | *finished:* terminal observation `>=since` | `ended` from `:terminal.json` | same |
@@ -94,48 +95,50 @@ or turn.
 - One query, no per-window variant. Rust doesn't pick a plan.
 - Partial indexes over `observed_at`, not a stored start column: captures are
   immutable and `ended` has three sources.
-- ~~The wide-window regression is taken for now: only manual reads pay it.~~
-  Wrong (concept review, Nov 13): Desktop's Task history view reads the whole
-  store. `RegistryQuery.taskHistory` is `session.usage` with `days: 0`, and
-  `task.context` is `usage::sessions(0, task)`; both reach `pending_inputs` at
-  `since=0` with only `?3` set. `lf usage` defaults to `--days 30`. `ops/run.rs`
-  callers are tests. QA measured whole-store 2.5→8.7 s. See "Next".
-  Measured options that narrow the wide-window cost, not taken: widening
+- A history read is bounded by its scope; time is one scope. A Task drill's
+  window is the Task (concept review, Nov 13): Desktop's Task history
+  (`RegistryQuery.taskHistory` = `session.usage` days 0) and `task.context`
+  (`usage::sessions(0, task)`) read `pending_inputs` at `since=0` with only
+  `?3` set. With `?3` set the time arms are off and one Task arm reads every
+  `session_events` row naming the Task through `session_events_task`
+  (capture, manifest, `started` origin → `captured_event`); `turns` gets the
+  native `started` rows. The exact `?3` filter stays.
+- Binding assigns future work only (`bind_session`): an input captured before
+  the bind carries no `task_id` and is not in the Task's history, on main and
+  here. `task_history_reads_every_row_naming_the_task` pins it.
+- At `since<=0` the manifest, completion and Process arms are off (`?5>0`):
+  the capture and turn arms already read everything.
+- Measured options that narrow the wide-window cost, not taken: widening
   `session_turn_events` with `captured_event` (30d native branch 1.0 → 0.76 s)
   and `session_events_process(lf_process_id, session_id, kind, captured_event)`
   (30d finished 1.52 → 1.22 s; 7d ~15%).
 
-## Next (concept review, Nov 13)
+## Task drills (Nov 13)
 
-A history read is bounded by its scope, and time is one scope. A Task drill's
-window is the Task, not all time: it should cost what the Task holds. The
-design's own rule ("history reads cost what their window holds") settles
-this; it was applied to `since` and not to `?3`.
+`bench.sh` now adds `since=0`, finished-included rows for the Task with the
+most attributed rows and the 10th. Load avg 600–680, best of 5:
 
-Implement direction:
+| read | main | branch |
+|---|---|---|
+| Task drill, 689 rows (LOO-809) | 14.6 s | 0.37 s |
+| Task drill, 180 rows | 11.1 s | 0.011 s |
 
-- Add Task arms to `windowed` and `turns`, active when `?3` is set (and the
-  time arms off then, the way `?7` turns them off). Every source of an input's
-  `task_id` is a `session_events` row with `task_id`, readable through
-  `session_events_task`: the capture itself (`i.task_id`), its manifest
-  (`m.task_id` → `captured_event`), and a `started` origin (`origin.task_id` →
-  `captured_event`; with `captured_event IS NULL` it is a native turn for
-  `turns`). Tasks resolve from `tasks` by `id`/`issue_identifier`/
-  `external_issue_id` first, as the outer filter does. The exact `?3` filter
-  stays; the arms are a superset, like the time arms.
-- Check bound Sessions: if a binding (`agent_sessions.task_id`, `bound_at`)
-  attributes inputs whose rows carry no `task_id`, the outer filter misses
-  them today too; the arm need not add them. Confirm with a test rather than
-  assume.
-- Unfiltered `since=0` (`bind_attribution`, `context_cost` from
-  `FIRST_WEEK_START`): if no Task scope applies, an `?5<=0` arm reading every
-  capture once, with the window arms off, keeps whole-store reads at main's
-  cost without a Rust-side variant. Take it only if the bench shows the
-  window arms are what makes `since=0` slower.
-- Done when gains: `taskHistory`/`task.context` for a Task on the store copy
-  read no `SCAN` and are not slower than main; bench adds a Task-drill row
-  (`same` rows, before/after). Plan check joins
-  `session_history_reads_plan_by_window`.
+Warm, at load ~415: 3.8–4.5 s → 0.08–0.10 s and 3.0–4.1 s → 0.02–0.06 s.
+`same` rows on every row. Plan reads `tasks` by MULTI-INDEX OR and
+`session_events_task`; no history scan.
+
+Unscoped whole store (`bind_attribution`, `context_cost` from
+`FIRST_WEEK_START`) is still slower than main. Same run, 3 tries each,
+times in s:
+
+| `since=0` | main | window arms on | `?5>0` gate (taken) |
+|---|---|---|---|
+| finished excluded | 8.0–10.0 | 4.4–96 | 3.1–5.2 |
+| finished included | 2.8–3.0 | 6.9–8.9 | 3.9–6.0 |
+
+The remaining gap at finished-included is the `windowed` UNION's temp
+B-tree over every capture plus the `turns` join-back; main walks the index
+directly. Open: whether those two callers need main's cost.
 
 ## Implemented (Nov 13)
 
@@ -176,6 +179,7 @@ a test that fails when it is removed:
 
 | arm | test |
 |---|---|
+| Task (capture, manifest, `started` origin, native turn) | `task_history_reads_every_row_naming_the_task` |
 | capture `observed_at` | existing history tests |
 | manifest observation | `history_windows_find_inputs_by_each_start_and_end` |
 | terminal observation | same (removing the arm fails it, checked Nov 13) |
@@ -201,12 +205,15 @@ gate ~5× (1.89→0.37 s), QA ~3.5× (10.2→2.9 s), both at load avg 150+.
 - `lf session history --since 1d` and Desktop's 7d activity read only the
   window: no `SCAN` of `session_events` or `processes` in their plans,
   unanalyzed or with measured stats.
+- Task drills (`taskHistory`, `task.context`) read no `SCAN` and are not slower
+  than main: met (Task drills above).
 - `bench.sh` reports `same` for every window, 1d ≥ 4× faster, 7d not slower.
   Gate (fresh copy, interleaved, medians of 9 at load avg 260–290): 1d
   finished-included 1.89→0.37 s (~5×), 7d finished-included 2.10→1.86 s.
 
 ## Checks
 
+- Task arms + `?5>0` gate (load avg 400–680): `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session` 38/39, the one failure the drill's selector-resolution `tasks` scan (`scratch/questions.md`); after scoping the check to the history statement, `session_history_reads_plan_by_window` passes. `task_history_reads_every_row_naming_the_task` passes. `bench.sh`: `same` on all eight rows. Clippy, CI suites: gate.
 - After sync `65be402161`: `cargo test -p loopflow --lib -- store::query_plans:: store::sqlite::session server::boundary::` 51 pass; fmt and clippy clean.
 - QA Nov 13 (load avg 200–250, `scratch/qa.html`): `same` all six windows on a `VACUUM INTO` copy; 1d 10.2→2.9 s and 4.5→0.6 s; 7d 6.0→5.0 s, 7.5→5.7 s; 30d 3.9→7.1 s; whole 2.5→8.7 s. Real Task conversation, steer and exit read back through branch `lf session history`; main and branch statements agree on that store. 1d finished-included still below 4×.
 - Gate Nov 13 (load avg 150–290; `scripts/test.py` stopped at resource preflight on a `du` deadline with 46.9 GiB free, plan run by hand): architecture, inventory, `cargo fmt --check`, clippy, website (73), swift boundaries pass. Nextest `query_plans`, `sqlite::session*`, `server::boundary`, session_history/activity/context_cost/bind_attribution, `documented_commands`, `session_cli_tests`, `two_people`, `transport_tests`: 212/218. Six provider-startup tests missed their 30 s launch deadline; four pass on rerun, `resume_refuses_a_graph_step_and_leaves_it_running` and `session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` failed again at load 236 ("launched missing", "codex/failure failed to start"). No launch or resume path calls `pending_inputs`; CI owns them. Swift: `ThemeTests.ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly` failed (theme files; no Swift in this diff); CI owns it.

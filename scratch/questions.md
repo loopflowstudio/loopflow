@@ -305,9 +305,10 @@ brief listed them with Machine moves, but neither crosses Machines.
 
 Left for gate, collected from the passes above:
 `two_people`, `transport_tests`, `session_lifecycle_tests`, `served_reads`,
-`task_graph_launch_tests` (fixtures changed); `server::schema::tests::` (Clap
-help for `session send`); `documented_commands::` (machines.md, edited again this pass); a nextest run
-that answers the parallel-stall question below.
+`task_graph_launch_tests` (fixtures changed); a nextest run that answers the
+parallel-stall question below. `server::schema::tests::` (ninth pass) and
+`documented_commands::` (tenth pass, before compress only rewrapped machines.md)
+passed after their last relevant change; gate's suite run covers them again.
 
 ## QA (2026-11-13)
 
@@ -360,6 +361,9 @@ which names mini from the claim on.
   reaches mini and refuses with "did not send it". Running any in-flight move
   locally (drop the stage match in `runs_here`) would also cover it;
   kept to `sent` as directed.
+- **Mini's ownership log.** After a move, mini's `lf task status` log does
+  not show the laptop's earlier claim (QA, cosmetic); the log only holds
+  entries that reached mini.
 - **Parallel stalls.** Whether the stalls of those three groups under the
   default thread count predate this branch is unchecked; gate's nextest run
   answers it.

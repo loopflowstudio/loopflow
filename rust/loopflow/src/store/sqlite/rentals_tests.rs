@@ -254,7 +254,7 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
     store.add_machine(&machine, "lf@pod", "pod").unwrap();
     let first = open_task(&store);
     store.claim_task(&first).unwrap();
-    store.handoff_task(&first, &machine).unwrap();
+    store.move_claim(&first, &machine).unwrap();
     let planning =
         super::super::task_ownership::held_planning_in(&store.conn.lock().unwrap(), &machine)
             .unwrap();
@@ -262,7 +262,7 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
     // Another writer claims a Task after preflight but before BEGIN.
     let second = open_task(&store);
     store.claim_task(&second).unwrap();
-    store.handoff_task(&second, &machine).unwrap();
+    store.move_claim(&second, &machine).unwrap();
     {
         let mut conn = store.conn.lock().unwrap();
         let tx = conn

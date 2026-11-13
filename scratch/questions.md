@@ -243,3 +243,12 @@ Nothing left from the concept review's three directions.
   already runs there. `lf task claim` on the source recovers it.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.
+
+## Sync onto main 295f257b8e (2026-11-13)
+
+- Combined preflight `OwnershipFacts` and store-only ended-Machine handback
+  with person ids, writer ids and move-as-claim entries. Main's new rental
+  test calls `move_claim`.
+- `cargo test -p loopflow --lib task_ownership::`: 12 passed after fixing the
+  new test's two old `handoff_task` calls; linker warned about the size of
+  `__eh_frame`. `cargo fmt` clean. Gate owns static analysis and broader suites.

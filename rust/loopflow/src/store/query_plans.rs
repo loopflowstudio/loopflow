@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 10] = [
+const GROWING: [&str; 11] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
@@ -23,6 +23,7 @@ const GROWING: [&str; 10] = [
     "steers",
     "task_events",
     "task_retirements",
+    "task_update_readings",
     "tasks",
 ];
 
@@ -35,7 +36,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
          'planning_peer_changes','planning_peer_routes','repository_plans','steers',
-         'task_retirements');
+         'task_retirements','task_update_readings');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
@@ -103,6 +104,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('steers','steers_wave','0 0 0'),
          ('task_retirements','sqlite_autoindex_task_retirements_1','258 1'),
          ('task_retirements','task_retirements_unfinished','179 1'),
+         ('task_update_readings','sqlite_autoindex_task_update_readings_1','1219 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),
@@ -410,6 +412,59 @@ mod tests {
             store.unrecorded_agent_ancestry().unwrap();
             store.session_steers("viewed", 0, 10).unwrap();
             store.session_steer_source("viewed", &steer.id).unwrap();
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn a_hook_reading_its_steers_and_task_updates_plans_by_index() {
+        let (_home, store, task, _viewer) = fixture();
+        store.test_session("hooked", &crate::session_record::new_artifact_key());
+        let process = store.test_lf_process();
+        let claim = store
+            .claim_session_attachment("hooked", None, &process, false)
+            .unwrap();
+        store
+            .record_agent_process_identity("hooked", &claim, std::process::id(), 1)
+            .unwrap();
+        let adapter = store.reserve_steer_adapter("hooked", &claim).unwrap();
+        store
+            .with_provider_context(
+                &adapter,
+                "thread",
+                crate::steer::NativeBoundary::Activate { source: "startup" },
+                || Ok(()),
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1 WHERE id='hooked'",
+                [],
+            )
+            .unwrap();
+        store
+            .save_session_steer("hooked", "person", "Look here")
+            .unwrap();
+        let traced = statements(&store, || {
+            // The first reading writes the Task's baseline; the next update
+            // compares against it.
+            crate::harness::task_updates::write(&store, "hooked").unwrap();
+            let reading = store.task_update_reading(&task).unwrap();
+            assert!(store
+                .save_task_update(
+                    &task,
+                    reading.as_deref(),
+                    reading.as_deref().unwrap(),
+                    &[("update:-:fixture".into(), "Task update".into())],
+                )
+                .unwrap());
+            store.baseline_task_updates("hooked").unwrap();
+            let (claimed, _) = store.claim_session_steers(&adapter, "thread").unwrap();
+            assert_eq!(claimed.len(), 1);
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

@@ -226,7 +226,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.ship` | `lf ship` | `engine::task` |
 | `task.hold` | `lf task hold <issue>` | `engine::task` |
-| `task.steer` | `lf task steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
@@ -239,7 +239,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.history` | `lf session history` (`lf history`) | read |
 | `session.retention` | `lf session retention` | read |
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
-| `session.steer` | `lf [--wave <wave>] session steer [<id>] <message>` | write; `engine::session::steer` |
+| `session.steer` | `lf [--wave <wave>] steer [<id>] <message>` | write; `engine::session::steer` |
 | `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
@@ -554,12 +554,13 @@ that gets no answer still prints the block.
 
 ```bash
 lf -b research 'how does src/sync.rs retry?' &
-lf session steer SESSION 'skip the vendored code'   # read after the child's next tool call
+lf steer SESSION 'skip the vendored code'   # read after the child's next tool call
 ```
 
 After a tool call, at a prompt, at session start and after a compaction, a
-launch's hook opens the store and claims the Session's unread steers and its
-Task update (`steer::claim`, `task_updates::claim`). One row in
+launch's hook opens the store, writes what changed on the Session's Tasks as
+steers (`task_updates::write`) and claims the Session's unread steers
+(`steer::claim`). One row in
 `steer_delivered` per Session and steer says whether that Session read it:
 
 1. The hook inserts the row with `claimed_at`, for up to eight steers, oldest
@@ -573,7 +574,7 @@ Task update (`steer::claim`, `task_updates::claim`). One row in
 A hook that dies between 2 and 3 leaves a claim that lapses after fifteen
 seconds, and the steer is printed again: a steer can arrive twice, and cannot
 be lost. `lf session steers <session>` shows each steer `delivered` or
-`pending`; `--retry <steer>` deletes the row. A store the hook cannot read is a
+`pending`. A store the hook cannot read is a
 line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
@@ -602,12 +603,12 @@ managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
 key names the socket and must still name the conversation. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer at start and whenever either
-moves; every idle conversation with news gets its unread steers and its
-Task update in one message, and is recorded as in a turn until its next Stop.
+moves; every idle conversation with news gets its unread steers, Task updates
+among them, in one message, and is recorded as in a turn until its next Stop.
 One with no news is not connected to. A turn end checks
-its own conversation the same way. The update is recorded as delivered first;
-the steers are claimed as a hook claims them and stamped once the message is
-sent, so a failed send leaves a claim that lapses for the next boundary:
+its own conversation the same way. The steers are claimed as a hook claims
+them and stamped once the message is sent, so a failed send leaves a claim
+that lapses for the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -618,9 +619,8 @@ sent, so a failed send leaves a claim that lapses for the next boundary:
   is the message.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox leaves its news unclaimed. A failed send after claiming can lose
-the Task update; the steers arrive again. LOO-841 replaces the progress
-receipt with inbox confirmation. Bare Sessions are never woken. No
+Claude inbox leaves its news unclaimed. After a failed send the steers arrive
+again. Bare Sessions are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 

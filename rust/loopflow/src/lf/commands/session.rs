@@ -52,28 +52,69 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     }
 }
 
+/// `lf steer`: save `message` for a Session or a Task named by `target`, or
+/// with none for the Wave or repository the invocation selected. A target
+/// that names no Session is a Task. `--json` prints what the server answers:
+/// `task.steer` the Task's thread with the entry, `session.steer` the steer.
+pub fn steer(
+    cli: &crate::lf::Cli,
+    target: Option<&str>,
+    message: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    use crate::engine::session::SteerScope;
+    let directory = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (store, session) = runtime.block_on(async {
+        let store = open_shared_store().await?;
+        let session = match target {
+            Some(id) => crate::ops::human_session::session_by_id(&store, id).await?,
+            None => None,
+        };
+        anyhow::Ok((store, session))
+    })?;
+    let scope = match (&session, target, cli.wave.as_deref()) {
+        (Some(session), _, _) => SteerScope::Session(&session.id),
+        (None, Some(issue), wave) => {
+            let unknown = || format!("{issue} names no Session and no Task");
+            let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
+                .with_context(unknown)?;
+            let thread = runtime.block_on(async {
+                let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
+                    .await
+                    .with_context(unknown)?;
+                let scope = SteerScope::Task { issue, wave };
+                let steer = crate::engine::session::steer(&store, &repo, scope, message).await?;
+                anyhow::Ok((steer, store.sqlite.task_comments(&task.id)?))
+            })?;
+            match json {
+                true => println!("{}", serde_json::to_string(&thread.1)?),
+                false => println!("Saved {}", thread.0.id),
+            }
+            return Ok(());
+        }
+        (None, None, Some(wave)) => SteerScope::Wave(wave),
+        // Global `--repo` has already entered the selected repository.
+        (None, None, None) if cli.repo.is_some() => SteerScope::Repository,
+        (None, None, None) => anyhow::bail!(
+            "name who to steer: a Session ID, a Task ID, `--wave WAVE` or `--repo NAME_OR_PATH`"
+        ),
+    };
+    let steer = runtime.block_on(crate::engine::session::steer(
+        &store, &directory, scope, message,
+    ))?;
+    if json {
+        println!("{}", serde_json::to_string(&steer)?);
+    } else {
+        println!("Saved {}", steer.id);
+    }
+    Ok(())
+}
+
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
         SessionCommand::Serve { .. } => {
             unreachable!("serve owns its process before any runtime")
-        }
-        SessionCommand::Steer { id, message, json } => {
-            use crate::engine::session::SteerScope;
-            let store = open_shared_store().await?;
-            // Global `--repo` has already entered the selected repository.
-            let scope = match (id.as_deref(), cli.wave.as_deref()) {
-                (Some(id), _) => SteerScope::Session(id),
-                (None, Some(wave)) => SteerScope::Wave(wave),
-                (None, None) => SteerScope::Repository,
-            };
-            let directory = std::env::current_dir()?;
-            let steer = crate::engine::session::steer(&store, &directory, scope, message).await?;
-            if *json {
-                println!("{}", serde_json::to_string(&steer)?);
-            } else {
-                println!("Saved {}", steer.id);
-            }
-            Ok(())
         }
         SessionCommand::Steers {
             id,

@@ -127,7 +127,7 @@ running child with a steer:
 
 ```bash
 lf session list --headless                        # the child's Session ID
-lf session steer SESSION 'skip the vendored code'
+lf steer SESSION 'skip the vendored code'
 ```
 
 The child reads the steer after its next tool call, with no Machine server
@@ -142,9 +142,11 @@ Work that ends in its own PR is a Task; wait for it with `lf task wait`.
 ## Steer
 
 ```bash
-lf task steer INF-123 "keep the public API"      # save a Task steer, from a person or an agent Session
-lf session steers SESSION --json                 # inspect delivery
-lf session steers SESSION --retry STEER_ID        # retry one delivery
+lf steer INF-123 "keep the public API"   # every Session on the Task; joins its thread
+lf steer SESSION "skip the vendored code"   # one conversation
+lf --wave parser steer "tokenizer first"    # every Session on the Wave
+lf --repo . steer "hold merges"             # every Session in the repository
+lf session steers SESSION --json            # what that Session has read
 lf --wave <wave> wave-operate "prioritize the parser"
 lf --wave <wave> wave-operate "recover the failed parser Graph"
 ```
@@ -162,13 +164,17 @@ the same Session keeps what it has read. The context stays bounded, with
 complete sources available for excerpts.
 
 `lf session steers SESSION` shows each steer as pending or delivered. Delivered
-means lf printed it into the conversation, not that the model followed it.
-`--retry` makes one steer pending again without starting a turn.
+means lf printed it into the conversation, not that the model followed it; to
+say it again, steer again.
+
+Task updates arrive the same way. When a Task's position, a run or a comment
+that is not direction changes, lf saves a steer for the Task's interactive
+conversations, marked as an observation and not a request.
 
 Keep routine agent progress in working notes and the Session response. `lf task report`
 from an agent Session marks its entry as progress, excluded from steers. Use
-`lf task steer` only to save a deliberate steer. Tracker comments from people
-and `lf task steer` remain steers, even through the same account. Other
+`lf steer` only to save a deliberate steer. Tracker comments from people
+and `lf steer` remain steers, even through the same account. Other
 integrations should mark progress with
 `<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
 eligible because their authorship cannot be inferred safely.

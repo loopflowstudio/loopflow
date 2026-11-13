@@ -129,7 +129,7 @@ checkout is adopted. Closed or headless Sessions cannot become primary.
 ## Steer it while it runs
 
 ```bash
-lf task steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
+lf steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf task status LOO-12 --json                        # the thread: your steers, teammates', the agents' reports
 lf task interrupt LOO-12                          # stop its running Graph
 lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish

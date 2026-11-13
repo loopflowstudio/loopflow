@@ -21,7 +21,7 @@ other implementation and proof gaps.
 
 ```bash
 lf task create --title "Fix the parser" --json
-lf task steer <id> "Keep quoted input"
+lf steer <id> "Keep quoted input"
 lf checkout <id>
 ```
 
@@ -626,7 +626,7 @@ Task selects its primary conversation without reopening the Task; earlier usage
 attribution remains unchanged.
 
 ```bash
-lf task steer INF-124 "keep the public name"
+lf steer INF-124 "keep the public name"
 lf --wave product wave-operate "recover the stopped release Task"
 ```
 

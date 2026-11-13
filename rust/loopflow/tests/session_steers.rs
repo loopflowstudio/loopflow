@@ -132,7 +132,7 @@ if (home / 'expect-bare').exists():
     seen = pathlib.Path(os.environ['LF_STEER_SEEN'])
     checked = seen.stat().st_mtime_ns
     assert after_tool() == '' and seen.stat().st_mtime_ns == checked, 'lf ran with no new steer'
-    subprocess.check_call([arguments[2], 'session', 'steer', caller['session_id'], 'BARE_DIRECTION'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECTION'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     steered = json.loads(after_tool())['hookSpecificOutput']
     assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
     assert after_tool() == '', 'the steer arrived twice'
@@ -885,15 +885,14 @@ fn public_commands_save_steers_without_launching_providers() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    run(&["session", "steer", "REPOSITORY_DIRECTION"]);
+    run(&["--repo", ".", "steer", "REPOSITORY_DIRECTION"]);
     run(&[
         "--wave",
         task.task.wave_id.as_ref().unwrap().as_str(),
-        "session",
         "steer",
         "WAVE_DIRECTION",
     ]);
-    run(&["task", "steer", task.task.id.as_str(), "TASK_DIRECTION"]);
+    run(&["steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)
@@ -918,7 +917,7 @@ fn public_commands_save_steers_without_launching_providers() {
         [conn.last_insert_rowid()],
     )
     .unwrap();
-    run(&["session", "steer", "idle", "DIRECT_DIRECTION"]);
+    run(&["steer", "idle", "DIRECT_DIRECTION"]);
     let page: serde_json::Value = serde_json::from_str(&run(&[
         "session", "steers", "idle", "--json", "--limit", "2",
     ]))

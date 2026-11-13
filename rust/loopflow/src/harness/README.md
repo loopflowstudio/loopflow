@@ -52,7 +52,7 @@ by its reader floor, missing a column or gone; a hook that fails; a lock that
 cannot be read.
 
 Every lf invocation at a turn or tool boundary is best-effort. Every launch's
-hook reads the Session's unread steers and its Task update from the store, in
+hook reads the Session's unread steers, Task updates among them, from the store, in
 its own process, and at a tool boundary only when a steer may be waiting
 ([Every launch reads its own steers](../server/README.md#every-launch-reads-its-own-steers)).
 A bare launch no owner holds
@@ -101,19 +101,25 @@ a comment. Each managed conversation hears what changed on its Tasks: a Graph
 run or step that settled, its Graph position, a comment from anyone else. A
 comment with direction is a steer (source `comment:<id>`) and arrives only as
 one.
-History from before its first boundary is a baseline, not a report to repeat.
 
-`task_updates::read` compares the Tasks against the last update the Session
-received, recorded in its history. It caches the revision at which a Session
-had no news, avoiding history rebuilds until that revision changes in a
-process that lives that long. Two readers claim it: each launch's hook, which
-prints it with the steers, and the Machine server, which wakes an idle managed
-conversation when the store's `task_updates` revision moves
+A Task update is a steer lf writes (source `update:…`), owned by the Task. No
+writer sits at each fact: `task_updates::write` compares the Task with its
+last reading (`task_update_readings`) and saves what moved, one steer for its
+position and runs and one per comment. Whoever looks first writes it for
+everyone: a conversation's hook before it claims its steers, or the Machine
+server before it wakes an idle conversation
 ([Waking an idle conversation](../server/README.md#waking-an-idle-conversation)).
-Both record the update as `dispatched` before it leaves, so it reaches the
-conversation once whichever goes first. A run between steps keeps its last
-report until its next step or its end. An exit no one records stays unreported
-until something else on the Task moves.
+A second reader of the same change finds the reading already moved and writes
+nothing. So an exit no one recorded is still reported the next time anything
+looks.
+
+Only interactive conversations read updates, never the Session whose comment
+it is, and only they look: a worker Run rebuilds no Task history. The Task's
+first reading is a baseline, and a conversation that just started marks the
+updates written before it as read. The steer is rendered as an observation,
+not direction. A run between steps keeps its last report until its next step
+or its end. The server caches the revision at which a Task had nothing new; a
+hook's process is too short-lived to.
 
 The revision's triggers follow Task membership, Graph and step facts, comments
 and delivery receipts. Transcript, usage, availability and ordinary tool-process

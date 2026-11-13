@@ -1680,12 +1680,7 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
                 }
                 // Native agent stays open without a watcher. Only the turn
                 // boundary may acquire the change made while it was idle.
-                tokio::time::sleep(std::time::Duration::from_secs(if agent == "codex" {
-                    60
-                } else {
-                    1
-                }))
-                .await;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 assert_eq!(state.lock().await.requests, 0);
                 let mut provider = state.lock().await;
                 provider.issues[0]["title"] = json!("Changed during the turn");

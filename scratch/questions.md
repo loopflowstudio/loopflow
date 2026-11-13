@@ -70,14 +70,13 @@ LOO-875 removes the deprecated `default_agent` comma alias,
 once `agents` ships. Keep `config::agent_list`: comma strings are also a
 supported spelling of `agents` in files, `lf set` and `--setting`.
 
-### Delete — do not maintain
+### Stop advice
 
-This wording pass replaces `_limit_stop_advice`'s claim that configuring
-`agents` alone lets a pinned step move, and its omission of one-entry lists.
-Keep the existing no-fallback and exhausted-order branches and regression;
-no configuration plumbing or additional deletion is needed.
-Compression keeps the advice as two actions: change/remove a pin, then add
-fallback entries if needed. Troubleshooting uses the same distinction.
+`dfd8d74ed4` corrects `_limit_stop_advice`: change or remove an `agent`/`-a`
+pin separately from adding fallback entries to a missing or one-entry list.
+The existing no-fallback and exhausted-order branches remain; no configuration
+plumbing was added. The focused advice regression and `docs/troubleshooting.md`
+use the same distinction. The preceding feedback's wording action is complete.
 
 On 2026-11-12, realign rechecked `origin/main`: `git fetch origin` still found
 `78bb9f5564`, already merged in `d1184a5120`; `git log HEAD..origin/main`
@@ -85,9 +84,10 @@ was empty. The upstream Task-move change makes
 `limit_recovery::restarts_by_itself` require `task_claimed_here` instead of
 `task_owned`; it does not change agent ordering or the exhausted-limit stop.
 `lf task status LOO-873 --json` supplied no newer product decision. No Wave is
-selected. Source review confirmed that the manual-recovery code, stop/status
-messages and subscription/troubleshooting docs agree; no code repair was
-needed in this realign pass.
+selected. After `dfd8d74ed4`, realign repeated the upstream and Task-comment
+reads: the same upstream tip and no newer product decision. The advice, focused
+regression and troubleshooting docs agree; no code repair or test rerun was
+needed. Gate verification and the demo checks above remain outstanding.
 
 ## Observed runs (2026-11-12)
 
@@ -192,6 +192,14 @@ Concept review 6 (2026-11-12) read the docs, config resolution, agent loop,
 stop record and manual restart against the Task comments and found no design
 change. Implement has no new direction.
 
+Concept review 7 (2026-11-12) read `8dbd1d9405` and `dfd8d74ed4`: the
+`Continuing on <agent>: <reason>` and `Stopped: <advice>` stderr lines sit on
+the same paths as the existing `Waiting for <provider> capacity` line and say
+what the stop record and `lf task status` say; the advice and
+`docs/troubleshooting.md` separate a pin from a short list the same way. Task
+comments end at 22:12Z with the quotes above. No design change; the four
+choices stay open for demo with their built defaults.
+
 ## Checks and handoff
 
 - Advice correction and compression: `cargo test -p loopflow --lib agent::tests::a_pinned_agent_refused_at_launch_fails_with_its_limit` (LF variables unset, stdin closed): 1 passed after the shorter wording; existing linker `__eh_frame` advisory. `cargo fmt --check` and `git diff --check` passed. Gate owns affected suites and clippy.
@@ -211,6 +219,13 @@ change. Implement has no new direction.
   moves and stops now print to stderr beside the existing wait line; doc line
   on bare-claude fallthrough. Not reached: Task path (needs a real managed
   login) and Codex on either side.
+- QA second pass (2026-11-13, `scratch/qa.html`): real `lf -b task run` with a
+  fixture managed login. A capacity wait reprinted every move on each 60 s poll
+  and replaced the wait in `lf task status`; `CapacityWait::fall_through` now
+  announces moves only before waiting (`agent::tests::` 45 passed). A Sonnet
+  refusal cools the only login, so `[claude:sonnet, claude:opus, …]` waits
+  instead of moving or stopping; the Task-path stop stays covered only by the
+  regression.
 - Demo still needs a real provider refusal: the Graph test's failing step
   writes the stop record itself. With no `agents`, run on an exhausted Codex
   login, inspect the stop and `lf task status`; then set `agents` and see it

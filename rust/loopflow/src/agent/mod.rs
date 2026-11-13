@@ -391,6 +391,15 @@ impl CapacityWait {
         let left = retry_at - crate::store::rows::now_unix();
         Duration::from_secs(left.clamp(1, CAPACITY_POLL_SECS) as u64)
     }
+
+    /// Every account for this rung is held back, so the step tries `next`.
+    /// Once waiting, each poll walks the order again without saying so: the
+    /// wait already did, and a move would replace it where status reads.
+    fn fall_through(&self, provider: &str, reason: &str, next: &str) {
+        if self.announced.is_none() {
+            _record_agent_move(provider, reason, next);
+        }
+    }
 }
 
 /// Status only: a store that cannot say so never stops the recovery.
@@ -1198,6 +1207,7 @@ fn _run_with_transient_retries(
             } => {
                 launched = true;
                 origin = None;
+                capacity = CapacityWait::default();
                 result.failure = if process.auto {
                     result.failure.or_else(|| _classify_agent_failure(&result))
                 } else {
@@ -1251,7 +1261,7 @@ fn _run_with_transient_retries(
                     earliest_reset = Some(reset);
                     let next = &rungs[rung];
                     tracing::warn!(error, agent = %next, "every account held back; falling through");
-                    _record_agent_move(&provider, &error, next);
+                    capacity.fall_through(&provider, &error, next);
                     attempt_config = _climb(origin, next, process, launch);
                 }
                 continue;

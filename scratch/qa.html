@@ -3,7 +3,25 @@
 <h1>LOO-873 QA: one ordered <code>agents</code> list</h1>
 <p>Branch <code>lf 0.15.3+c57f1daf3.dirty</code>, private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-873</code>, disposable Git repo, foreground <code>lf server run</code>. A stand-in <code>claude</code> on <code>PATH</code> speaks Claude's stream-json and answers a turn with a real <code>result</code> line <code>{"is_error":true,"result":"You've hit your usage limit for &lt;model&gt;…"}</code> for the models named in a control file, and succeeds otherwise. Every launch's argv was logged, so the models tried are what lf actually started.</p>
 
-<h2>Scenarios</h2>
+<h2>Second pass: the Task path (2026-11-13)</h2>
+<p>Branch build of <code>dfd8d74ed4</code> plus the fix below, same private home. The first pass's "needs a login" came from running <code>lf account</code>, which checks the fixture token with Anthropic and marks the login Missing. With the fixture login registered again (throwaway example, since deleted) and <code>FAKE_SECURITY</code> on <code>PATH</code>, <code>lf -b task run</code> launched real Task steps. Graph <code>qa-two</code> = <code>qa-prep</code> (order fable, opus, haiku) then <code>qa-work</code> (sonnet, opus, haiku); the stand-in refused sonnet, opus and haiku.</p>
+<table><tr><th>#</th><th>What happened</th><th>Seen</th></tr>
+<tr><td>T1</td><td>The only login was still cooling from the first pass. qa-prep fell through its order, then waited for capacity.</td><td>Before the fix, the terminal repeated <code>Continuing on claude:opus</code> / <code>Continuing on claude:haiku</code> on every 60-second poll: 11 pairs in 10 minutes. <code>lf task status</code> showed only <code>Session event 211 is active; activity samples are unavailable or stale</code>, not the wait.</td></tr>
+<tr><td>T2</td><td>The same run on the fixed build (new Task).</td><td><pre>[1/2] qa-prep
+Continuing on claude:opus: failed to select provider account: no eligible managed claude account: 'fixture@example.com' cooling until 2026-11-13T01:30:23Z
+Continuing on claude:haiku: …
+Waiting for claude capacity until Nov 12 17:30: …</pre>No more lines over 10 minutes of polls. Status: <code>qa-prep is waiting for claude capacity until Nov 12 17:30: … It goes on by itself.</code></td></tr>
+<tr><td>T3</td><td>Cooldown over.</td><td>qa-prep launched <code>--model fable</code>, a new conversation (its own first rung), and finished. qa-work launched <code>--model sonnet</code> and was refused.</td></tr>
+<tr><td>T4</td><td>qa-work's Sonnet refusal.</td><td>The refusal cooled the only login for 15 minutes, so opus and haiku could not get an account: the moves printed once, then <code>Waiting for claude capacity until Nov 12 17:45</code>. Status: <code>qa-work is waiting for claude capacity until Nov 12 17:45 … It goes on by itself.</code> This is the built "known reset keeps the wait" path; the exhausted-order stop is not reached with one managed login.</td></tr>
+<tr><td>T5</td><td>Refusals cleared during the wait.</td><td id="t5">At the reset (01:45:34Z) qa-work relaunched <code>--model sonnet --resume</code> on the same thread and finished; <code>exit 0</code>, Graph <code>qa-two: at end</code>, Task <code>done</code>.</td></tr>
+</table>
+<h3>Fixed in this pass</h3>
+<p><code>agent/mod.rs</code>: <code>CapacityWait::fall_through</code> announces a held-back move only before the step starts waiting; each poll then walks the order silently. A finished launch resets the wait. On <code>main</code> each poll already wrote a "continuing on" row, which replaced the wait where status reads; the first pass's stderr line made that visible every minute. <code>cargo test -p loopflow --lib agent::tests::</code>: 45 passed. No new unit test: the change is stderr and store output, which those tests do not observe.</p>
+<h3>Found, not changed</h3>
+<ul><li>A limit named for one model ("usage limit for sonnet") cools the whole login, so the other Claude models in the order cannot run on that login until the cooldown ends. This is existing account handling from <code>main</code>. With one login, <code>[claude:sonnet, claude:opus]</code> waits rather than moving to Opus.</li>
+<li>Starting a private server resumed an old QA Task whose Auto-Ship had been approved; its run used the same login. Recorded in the repository <code>qa</code> skill.</li></ul>
+
+<h2>First pass: scenarios</h2>
 <table>
 <tr><th>#</th><th>Setup</th><th>Models launched</th><th>Result</th></tr>
 <tr><td>1</td><td><code>lf set --global agents claude:opus,claude:sonnet</code></td><td>–</td><td>File holds <code>agents: [claude:opus, claude:sonnet]</code>; <code>lf config settings</code>: <code>agent  claude:opus, then claude:sonnet  Personal global</code>; <code>--explain</code> names the list as selected.</td></tr>
@@ -28,7 +46,7 @@ Error: qa-work: claude_result: You've hit your usage limit for sonnet. Upgrade o
 
 <h2>Not reached</h2>
 <ul>
-<li><b>Task path with a real refusal</b> (<code>lf -b task run</code>, <code>lf task status</code>, no relaunch). Task steps need a managed login; a fixture account inserted through <code>upsert_provider_account</code> shows "needs a login" because a real build reads the credential through the provider login, not the fixture file. <code>lf account connect claude --api-key</code> does not satisfy it either. The Task-level stop and manual restart remain covered by <code>a_run_stopped_by_a_usage_limit_is_not_started_again</code>, which injects the stop record. The agent loop's recording, exercised for real above, is the record that test injects.</li>
+<li><b>(First pass; the second pass reached the Task wait path, see above. The exhausted-order stop on the Task path is still reached only by the regression.)</b> <b>Task path with a real refusal</b> (<code>lf -b task run</code>, <code>lf task status</code>, no relaunch). Task steps need a managed login; a fixture account inserted through <code>upsert_provider_account</code> shows "needs a login" because a real build reads the credential through the provider login, not the fixture file. <code>lf account connect claude --api-key</code> does not satisfy it either. The Task-level stop and manual restart remain covered by <code>a_run_stopped_by_a_usage_limit_is_not_started_again</code>, which injects the stop record. The agent loop's recording, exercised for real above, is the record that test injects.</li>
 <li><b>Codex as either side.</b> Codex runs through its app-server protocol; no stand-in was built. The incident's exact shape (Codex refused, Claude takes over) remains for demo on real logins.</li>
 <li>Login-to-login failover within one provider (needs two managed logins).</li>
 </ul>

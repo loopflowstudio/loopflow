@@ -2633,8 +2633,8 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     viewers_enter_the_execution_directory_and_later_ones_the_selected_directory();
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
-    fixture.wait_file("drawn");
-    std::thread::sleep(Duration::from_millis(100));
+    // Once an observer has seen `drawn`, the owner's screen holds it.
+    until_out(&mut fixture.viewer(&owner, false), "drawn");
     let mut first = fixture.viewer(&owner, true);
     let mut second = fixture.viewer(&owner, false);
     for viewer in [&mut first, &mut second] {

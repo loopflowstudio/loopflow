@@ -396,6 +396,19 @@ no test that waits out a production timeout except the one named above.
      2.78 s wall (Mac, debug). Clippy `--all-targets` clean. CI sum and SSH
      cases: gate/CI.
 
+8. **Done (2026-11-13): no guessed wait left in the kept set.**
+   `every_viewer_starts_with_the_snapshot_and_shares_live_output` no longer
+   sleeps 100 ms after the program's `drawn` file: an observer viewer reads
+   until `drawn` arrives (snapshot or live output), then the two viewers under
+   test attach; no production change. Snapshot content and size stay the
+   bench's `a_fresh_viewer_starts_with_the_screen_at_its_own_size`. The other
+   sleeps are 20–200 ms poll steps inside deadline loops, plus two 800 ms
+   windows (`held_session_survives_server_restart`, `a_held_view_waits_…`)
+   that check the view stays open while the server or holder is stopped; those
+   windows are the assertion. `cargo nextest run -p loopflow --test
+   transport_tests -E 'test(every_viewer_starts_with_the_snapshot)'`: pass,
+   9.1 s (Mac, debug). Clippy `--test transport_tests` clean.
+
 ## Outside this Task
 
 The frozen-resume overrun on #1922's Linux CI (still running at 20 s where

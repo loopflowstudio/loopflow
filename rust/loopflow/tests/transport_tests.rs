@@ -6519,7 +6519,7 @@ printf '\r\naccepted: %s\r\n' "$answer"
     fixture
         .sql()
         .execute(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
             rusqlite::params![task.task.id.as_str(), session],
         )
         .unwrap();
@@ -7533,8 +7533,13 @@ fn server_subscriptions_refresh_work_and_resolve_primary_session() {
     // projection or shadow Task store in the service.
     let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2,issue_title='Updated subscribed Task' WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), session],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE tasks SET issue_title='Updated subscribed Task' WHERE id=?1",
+        [registered.task.id.as_str()],
     )
     .unwrap();
     // The read shares the subscription's connection.

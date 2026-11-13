@@ -1102,7 +1102,7 @@ impl GraphTask {
         )
         .unwrap();
         db.execute(
-            "UPDATE tasks SET primary_session_id='opening-primary' WHERE id=?1",
+            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'opening-primary')",
             [self.registered.task.id.as_str()],
         )
         .unwrap();
@@ -1600,7 +1600,7 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     assert_eq!(first_turn, request);
     let primary: String = db
         .query_row(
-            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
             [receipt["task"]["id"].as_str().unwrap()],
             |row| row.get(0),
         )

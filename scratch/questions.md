@@ -121,23 +121,30 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   `ship_stopped_person`, index `tasks_ship_process`; `machines.pool`,
   `cost_usd`, `expires_at`. (`shipped_at` stays.)
 
+## Done (2026-11-13, fourth pass): Task primary Sessions
+
+- `task_primary_sessions` (task → session, both unique, cascading) replaces
+  `tasks.primary_session_id`, backfilled where the Session exists here. Every
+  reader and writer in `store/sqlite/sessions.rs` moved (Task-primary filter,
+  summary flag, `task_primary_in`, ensure/choose upserts, workspace
+  admission, `primary_scope`), plus lib and integration fixtures. Arrival
+  binds through `ensure_primary_session`, so the receiving Machine writes its
+  own row. Test: `a_released_tasks_primary_session_stays_its_conversation_here`.
+- On LOO-877's drop list (steer d5ca6933): `tasks.primary_session_id` and index
+  `tasks_primary_session`.
+- Checks (2026-11-13): lib store::sqlite::sessions, task_work::, selections,
+  store::migrations::, ops::human_session 228 pass (incl. the upgrade probe,
+  now asserting the `task_primary_sessions` index); integration
+  machine_commands::, dto_fixtures::, work_open_tests::, documented_commands::
+  139 pass; clippy clean. Gate runs session_lifecycle_tests, transport_tests,
+  served_reads and task_graph_launch_tests (fixtures changed).
+
 ## Remaining
 
-The third-pass drop list is on LOO-877 as a comment.
-
-1. `tasks.primary_session_id` is still on `tasks`, though the brief lists it
-   with the checkout fields and `agent_sessions` rows are Machine-local. It has
-   ~10 readers/writers in `store/sqlite/sessions.rs` (`primary_session` reads,
-   the Task-Session bind updates, the cwd-follow update) plus
-   `task_work.rs` and `selections.rs` tests; moving it to `task_checkouts`
-   (and to LOO-877's drop list) is the last Machine-local column this Task
-   named. A move already carries the conversation (`MovedSession.primary`,
-   `ops/human_session/moves.rs`) and arrival binds it with
-   `ensure_primary_session`, so the arriving Machine writes its own row.
-2. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
+1. `relocated_task_processes` not folded: relocation keeps Process `cwd` as
    history, so the receipt is what keeps their membership. Folding needs a
    path-history column on `task_checkouts`; open whether that is worth it.
-3. Swift does not decode `person_id` (Codable ignores it); add it where the
+2. Swift does not decode `person_id` (Codable ignores it); add it where the
    app shows owners.
 
 ## Open questions (each reversible; the simpler option is built)
@@ -167,5 +174,9 @@ The third-pass drop list is on LOO-877 as a comment.
   claim's assignee write, so that claim names no `person_id`.
 - **Seven ship columns.** `shipped_at` is shared planning, so it stays; the
   carrier and restart count joined the log as `carried`/`restarted`/`progressed`.
+- **Primary Session not on `task_checkouts`.** Directed there, but
+  `ensure_task` opens a Task conversation in the repository when the Task has
+  no checkout, and a `task_checkouts` row means a checkout here (`worktree NOT
+  NULL`; `unstarted` reads its absence). A Machine-local table keeps both.
 - **Names.** `task_checkouts`, `task_moves` (`sent`/`arrived`),
   `task_ship_events`, `people`, `pool_machines`.

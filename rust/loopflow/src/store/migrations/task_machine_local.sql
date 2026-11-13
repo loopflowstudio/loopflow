@@ -64,6 +64,24 @@ CREATE INDEX task_checkouts_branch ON task_checkouts(branch);
 -- The retirement sweep finds abandoned Tasks that still have a checkout here.
 CREATE INDEX tasks_abandoned ON tasks(id) WHERE abandoned_at IS NOT NULL;
 
+-- Machine-local: the conversation this Machine opens for a Task. A Task with
+-- no checkout here can still have one (it runs in the repository), so it is
+-- not a checkout column. `tasks.primary_session_id` stays for released lf
+-- until the contract drops it.
+CREATE TABLE task_primary_sessions (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL UNIQUE REFERENCES agent_sessions(id) ON DELETE CASCADE
+);
+INSERT OR IGNORE INTO task_primary_sessions(task_id,session_id)
+SELECT t.id,t.primary_session_id FROM tasks t
+JOIN agent_sessions s ON s.id=t.primary_session_id;
+CREATE TRIGGER store_revision_task_primary_sessions_insert AFTER INSERT ON task_primary_sessions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_primary_sessions_update AFTER UPDATE ON task_primary_sessions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_primary_sessions_delete AFTER DELETE ON task_primary_sessions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 -- The current PR follows the checkout's branch, base and parent.
 CREATE TRIGGER task_checkout_to_pr_insert AFTER INSERT ON task_checkouts
 BEGIN

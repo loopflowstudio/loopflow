@@ -1833,7 +1833,7 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "UPDATE tasks SET primary_session_id='task-primary' WHERE id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
             [task.as_str()],
         )
         .unwrap();

@@ -1387,7 +1387,7 @@ mod tests {
         ).unwrap();
         let sql = format!(
             "SELECT (SELECT json_group_array(id) FROM ({})),
-                EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=a.id)
+                EXISTS(SELECT 1 FROM task_primary_sessions p WHERE p.session_id=a.id)
              FROM agent_sessions a WHERE id=?1",
             super::session_tasks("a")
         );
@@ -1398,7 +1398,8 @@ mod tests {
                 .unwrap();
             (result, query.get_status(rusqlite::StatementStatus::VmStep))
         };
-        // The upgrade moves the released checkouts into `task_checkouts`.
+        // The upgrade moves the released checkouts into `task_checkouts` and the
+        // primary Session into `task_primary_sessions`.
         apply_pending_migrations(&conn);
         let (after, _) = read();
         assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
@@ -1418,7 +1419,7 @@ mod tests {
         assert!(
             plans
                 .iter()
-                .any(|line| line.contains("tasks_primary_session")),
+                .any(|line| line.contains("task_primary_sessions") && line.contains("INDEX")),
             "{plans:?}"
         );
         assert_eq!(
@@ -1500,7 +1501,7 @@ mod tests {
                             &crate::session_record::new_artifact_key(),
                         );
                         conn.execute(
-                            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+                            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                             params![tasks[2].as_str(), session],
                         )
                         .unwrap();

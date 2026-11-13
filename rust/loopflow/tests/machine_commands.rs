@@ -1272,7 +1272,7 @@ fn task_run_open_resolves_remote_selectors_before_opening_locally() {
     )
     .unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id='remote-selected-primary' WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'remote-selected-primary')",
         [target.task.id.as_str()],
     )
     .unwrap();

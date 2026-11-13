@@ -786,7 +786,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     )
     .unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -892,7 +892,7 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -979,7 +979,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1068,7 +1068,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
-        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();

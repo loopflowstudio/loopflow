@@ -209,7 +209,7 @@ fn inventory_query(
     }
     if let Some(primary) = filter.primary {
         use crate::session::SessionPrimary;
-        let task = "EXISTS (SELECT 1 FROM tasks t WHERE t.primary_session_id=s.id)";
+        let task = "EXISTS (SELECT 1 FROM task_primary_sessions t WHERE t.session_id=s.id)";
         sql.push_str(&match primary {
             SessionPrimary::All => {
                 format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
@@ -270,7 +270,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        s.id IN (SELECT primary_session_id FROM tasks WHERE primary_session_id IS NOT NULL),
+        s.id IN (SELECT session_id FROM task_primary_sessions),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -422,7 +422,7 @@ fn read_summary(
 fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
     conn.query_row(
         &format!(
-            "{SESSION_SELECT} WHERE s.id=(SELECT primary_session_id FROM tasks WHERE id=?1)
+            "{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)
              AND s.completed_at IS NULL"
         ),
         [task.as_str()],
@@ -523,7 +523,8 @@ fn ensure_primary_session_in(
             [&session.id],
         )?,
         PrimaryScope::Task(task) => conn.execute(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)
+             ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
             params![task.as_str(), session.id],
         )?,
     };
@@ -607,9 +608,10 @@ pub(super) fn choose_task_primary_in(
 ) -> StoreResult<()> {
     let chosen = conn.execute(
         &format!(
-            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+            "INSERT INTO task_primary_sessions(task_id,session_id) SELECT ?1,?2 WHERE ?2 IN (
                     SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))",
+                    AND s.completed_at IS NULL AND s.id IN ({}))
+                 ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
             super::task_work::session_ids("?1")
         ),
         params![task.as_str(), session],
@@ -1438,7 +1440,7 @@ impl SqliteStore {
         // Binding may have selected a directory while an opening prepared the
         // old scope's workspace. Its explicit choice wins over that preparation.
         let updated = tx.execute(
-            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
+            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM task_primary_sessions WHERE session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -1457,7 +1459,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let task: Option<String> = conn
             .query_row(
-                "SELECT id FROM tasks WHERE primary_session_id=?1",
+                "SELECT task_id FROM task_primary_sessions WHERE session_id=?1",
                 [id],
                 |row| row.get(0),
             )
@@ -2173,6 +2175,42 @@ mod metadata_tests {
     use crate::session::{GraphProcessSummaryState, SessionFilter};
 
     #[test]
+    fn a_released_tasks_primary_session_stays_its_conversation_here() {
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&conn, "task_machine_local");
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('primary','Primary','human',1,0,'/repo');
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,primary_session_id)
+             VALUES('task_1','repo_1','FIX-1',1,'primary');
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES('task_2','repo_1','FIX-2',1);",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("task_machine_local"))
+            .unwrap();
+        let primaries = || {
+            let mut query = conn
+                .prepare("SELECT task_id,session_id FROM task_primary_sessions")
+                .unwrap();
+            query
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<(String, String)>>>()
+                .unwrap()
+        };
+        assert_eq!(primaries(), [("task_1".into(), "primary".into())]);
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; DELETE FROM agent_sessions WHERE id='primary';",
+        )
+        .unwrap();
+        assert_eq!(primaries(), []);
+    }
+
+    #[test]
     fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -2187,16 +2225,20 @@ mod metadata_tests {
             )
             .unwrap();
             for primary in [Some("primary"), None] {
+                let task = crate::durable::TaskId::new();
                 conn.execute(
-                    "INSERT INTO tasks(repository_id,id,created_at,primary_session_id,issue_identifier)
-                     VALUES(?1,?2,1,?3,?2)",
-                    params![
-                        repository.as_str(),
-                        crate::durable::TaskId::new().as_str(),
-                        primary
-                    ],
+                    "INSERT INTO tasks(repository_id,id,created_at,issue_identifier)
+                     VALUES(?1,?2,1,?2)",
+                    params![repository.as_str(), task.as_str()],
                 )
                 .unwrap();
+                if let Some(primary) = primary {
+                    conn.execute(
+                        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                        params![task.as_str(), primary],
+                    )
+                    .unwrap();
+                }
             }
         }
         let rows = store

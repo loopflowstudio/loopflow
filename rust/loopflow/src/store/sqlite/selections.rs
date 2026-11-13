@@ -1588,7 +1588,7 @@ mod tests {
             "selection-primary",
             &crate::session_record::new_artifact_key(),
         );
-        store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; UPDATE tasks SET primary_session_id='selection-primary' WHERE id='task_22222222222222222222222222222222';").unwrap();
+        store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_22222222222222222222222222222222','selection-primary');").unwrap();
         let location = ViewLocation {
             machine_id: "machine_recorded".into(),
             cwd: "/repo/task".into(),

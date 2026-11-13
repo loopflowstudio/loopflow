@@ -99,8 +99,9 @@ plan in the conversation; do not require a document template or a prior skill.
    - One build at a time: never run two compilers, test runners or linters
      against the same build directory concurrently, in the background or in
      parallel tool calls.
-   - Gate owns affected suites and the design's automated acceptance checks,
-     once. Do not run them early because they appear in Done when.
+   - Gate starts CI for the suites and selects a few high-risk tests, including
+     the design's automated acceptance checks. Do not run suites early because
+     they appear in Done when.
    - If a check cannot run headless here, use a headless equivalent or leave it
      to gate/CI rather than stopping implementation. Ask the person for a
      judgment you need when one is in the conversation; headless, leave it for

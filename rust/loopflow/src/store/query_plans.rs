@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 14] = [
+const GROWING: [&str; 15] = [
     "agent_sessions",
     "planning_peer_changes",
     "planning_peer_routes",
@@ -23,6 +23,7 @@ const GROWING: [&str; 14] = [
     "steers",
     "task_checkouts",
     "task_events",
+    "task_primary_sessions",
     "task_retirements",
     "task_ship_events",
     "tasks",
@@ -32,11 +33,13 @@ const GROWING: [&str; 14] = [
 /// Sessions, 166,864 Processes, 266,075 Session events and 36,055 planning
 /// changes (November 12). `steers` and `task_retirements` are left to the
 /// fixture, which analyzes them as built so partial indexes are measured.
-/// `task_checkouts` takes the 838 checkouts `tasks_checkout_root` counted.
+/// `task_checkouts` takes the 838 checkouts `tasks_checkout_root` counted and
+/// `task_primary_sessions` the 299 primaries `tasks_primary_session` counted.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_batches',
          'steer_deliveries','session_steers','steer_adapters','projects','waves',
-         'planning_peer_changes','planning_peer_routes','repository_plans','task_checkouts');
+         'planning_peer_changes','planning_peer_routes','repository_plans','task_checkouts',
+         'task_primary_sessions');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','16454 1'),
          ('agent_sessions','agent_sessions_held_terminal','66 2'),
@@ -102,6 +105,8 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_worktree','838 1'),
          ('task_checkouts','task_checkouts_root','838 1'),
          ('task_checkouts','task_checkouts_branch','838 2'),
+         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','299 1'),
+         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','299 1'),
          ('tasks','idx_tasks_issue_identifier','1185 1'),
          ('tasks','idx_tasks_project','1185 22 1'),
          ('tasks','idx_tasks_repository','1185 149 21 2'),
@@ -111,7 +116,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('tasks','sqlite_autoindex_tasks_2','1185 1'),
          ('tasks','tasks_branch','1185 2'),
          ('tasks','tasks_checkout_root','838 838 1'),
-         ('tasks','tasks_primary_session','299 1'),
          ('tasks','tasks_ship_process','156 1'),
          ('waves','idx_waves_active_locator','61 2 2 1'),
          ('waves','idx_waves_parent','61 61'),

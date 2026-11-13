@@ -138,6 +138,10 @@ LOO-874 replaced"). It drops only what the merged migration replaced.
   machine_commands::, dto_fixtures::, work_open_tests::, documented_commands::
   139 pass; clippy clean. Gate runs session_lifecycle_tests, transport_tests,
   served_reads and task_graph_launch_tests (fixtures changed).
+- Compress: `store/query_plans.rs` counts `task_primary_sessions` as growing,
+  with the 299 measured primaries moved off `tasks_primary_session`; summary
+  flag and inventory filter search its `session_id` index. Lib query_plans 6,
+  server::boundary 13 passed.
 
 ## Remaining
 

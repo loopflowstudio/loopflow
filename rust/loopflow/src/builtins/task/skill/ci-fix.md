@@ -26,13 +26,13 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
    - Read the latest completed failed checks and their logs, and compare them
      with the synced code; an old failure may already be fixed.
    - If you were handed an earlier attempt's conclusion, continue from its
-     changes. A rerun can fix the same head; don't make a commit just to change
-     the SHA.
-   - Before changing code, check whether the same check fails on the base
-     branch's latest commit, or failed on a timeout, hang or race unrelated to
-     the diff. That is a flake: rerun it (`gh run rerun <run-id> --failed`), or
-     re-queue a failed merge-queue run with `lf pr arm`, and report `published`
-     with no code change.
+     changes. Don't make a commit just to change the SHA.
+   - A failed test is never repaired by a rerun. A test that fails on a
+     timeout, hang or race is flaky even when this branch didn't touch it and
+     the base branch is green: make it deterministic or delete it, in this PR,
+     and say which in the PR body. Don't add a retry, a longer timeout or a
+     wider tolerance. If the same test also fails on the base branch's latest
+     commit, the fix is still made here.
 
 3. **Fix and verify.**
    - When the sync was the requirement and checks are green, finish the sync
@@ -50,8 +50,8 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
    - Reproduce each failure locally and make the smallest correct fix.
    - Run focused checks first; broaden only when needed. Don't skip tests or
      push an empty commit to force a rerun.
-   - When a missing local check let the failure reach CI, fix that in the gate
-     guidance or repository conventions too.
+   - A failure reaching CI is normal. Add a local check to gate guidance or
+     repository conventions only when it is cheap and would have caught it.
 
 4. **Publish and arm.**
    - Read the whole diff and keep unrelated work out.

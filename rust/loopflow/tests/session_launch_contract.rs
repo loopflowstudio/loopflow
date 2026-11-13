@@ -19,6 +19,7 @@ struct Fixture {
 impl Fixture {
     fn new(provider: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(&home.path().join("machine"));
         let fixture = Self {
             _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), &home.path().join("machine")),
             repo: TestRepo::new(),
@@ -465,6 +466,21 @@ fn resume_fallback_preserves_provider_and_can_refresh_its_model() {
         pair(&resumed, "--model", expected);
         assert_eq!(fixture.session(), session);
     }
+    for (agents, expected) in [
+        ("[codex, claude:haiku]", "sonnet"),
+        ("[claude:haiku, codex]", "haiku"),
+    ] {
+        let resumed = fixture.run(&[
+            "--setting",
+            &format!("agents={agents}"),
+            "session",
+            "resume",
+            &session,
+        ]);
+        pair(&resumed, "--resume", token);
+        pair(&resumed, "--model", expected);
+        assert_eq!(fixture.session(), session);
+    }
 }
 
 #[test]
@@ -764,6 +780,10 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
     assert_eq!(
         serde_json::from_slice::<Value>(&explicit.stdout).unwrap()["id"],
         id
+    );
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agents: [claude:sonnet, codex]\nyolo: true\nchrome: true\ndiff: false\ndiff_files: false\npaste: false\n",
     );
     let first = fixture.run(&["resume"]);
     bypass(&first, "claude", true);

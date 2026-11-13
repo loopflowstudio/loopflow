@@ -499,6 +499,107 @@ fn explicit_reconciliation_recovers_merged_delivery_without_completing_work() {
 }
 
 #[test]
+fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let adopted = loopflow_test_support::TestRepo::new();
+    let mut fixture = runtime.block_on(task_fixture_at("ADOPT-LIVE", repo.path().into()));
+    let graph = fixture.store.sqlite.test_graph(
+        "code",
+        adopted.path().to_str().unwrap(),
+        &[("implement", None)],
+        None,
+    );
+    fixture.task.worktree = Some(adopted.path().into());
+    let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+    conn.execute(
+        "UPDATE tasks SET worktree=?1 WHERE id=?2",
+        rusqlite::params![adopted.path().to_str().unwrap(), fixture.task.id.as_str()],
+    )
+    .unwrap();
+
+    // Use this process's identity without launching a provider or a watcher.
+    conn.execute(
+        "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id=?3 OR parent_lf_process_id=?3",
+        rusqlite::params![
+            std::process::id(),
+            crate::journal::process_started_at(std::process::id())
+                .unwrap()
+                .unwrap(),
+            graph
+        ],
+    )
+    .unwrap();
+    let assert_running = |state| {
+        let snapshot = runtime
+            .block_on(super::snapshot::read_task_snapshot(
+                &fixture.store,
+                fixture.task.clone(),
+            ))
+            .unwrap();
+        assert_eq!(snapshot.execution.state, state);
+        assert_eq!(snapshot.status, TaskState::Moving);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_detail_facts(&[&fixture.task])
+                .unwrap()
+                .states[&fixture.task.id],
+            TaskState::Moving
+        );
+        assert_eq!(
+            snapshot.actions.recommended,
+            Some(crate::ops::task_actions::TaskAction::NoAction)
+        );
+        assert!(snapshot.execution.reason.contains(graph.as_str()));
+        let error =
+            super::select_task_run(&fixture.store, &fixture.task, adopted.path(), None, None)
+                .unwrap_err();
+        assert!(error.to_string().contains(graph.as_str()), "{error}");
+        assert!(fixture
+            .store
+            .sqlite
+            .task_graphs(&fixture.task.id)
+            .unwrap()
+            .is_empty());
+    };
+    assert_running(crate::ops::task_execution::TaskExecutionState::Running);
+    conn.execute(
+        "UPDATE processes SET pid=NULL,os_started_at=NULL WHERE id=?1 OR parent_lf_process_id=?1",
+        [&graph],
+    )
+    .unwrap();
+    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
+    // An exited owner does not hide its still-open step.
+    conn.execute(
+        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE id=?1",
+        [&graph],
+    )
+    .unwrap();
+    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
+    conn.execute(
+        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE parent_lf_process_id=?1",
+        [&graph],
+    ).unwrap();
+    let snapshot = runtime
+        .block_on(super::snapshot::read_task_snapshot(
+            &fixture.store,
+            fixture.task.clone(),
+        ))
+        .unwrap();
+    assert_eq!(
+        snapshot.execution.state,
+        crate::ops::task_execution::TaskExecutionState::Idle
+    );
+    assert_eq!(snapshot.status, TaskState::Idle);
+    assert!(
+        super::select_task_run(&fixture.store, &fixture.task, adopted.path(), None, None).is_ok()
+    );
+}
+
+#[test]
 fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();

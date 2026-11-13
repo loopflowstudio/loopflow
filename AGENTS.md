@@ -168,7 +168,7 @@ Use `uv` for Python. Never use pip directly.
 uv run python scripts/test.py --list                     # suites this branch reaches
 cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
 uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: a few named tests; CI runs the suites
 cargo fmt
 cargo clippy --all-targets -- -D warnings
 uv sync
@@ -239,7 +239,7 @@ that carry DTO values are not DTOs.
 docstring or none.
 
 **`*_test.py` / `test_*.py`:** short tests, one behavior each; assert on
-results, not mock calls; delete flaky tests rather than adding retries.
+results, not mock calls; no flaky tests (see Testing).
 
 **Typer CLI code:** lowercase short flags only; pass args through to the
 underlying tool; default to sensible behavior (whole repo as context).
@@ -373,6 +373,13 @@ Test what people would notice, not implementation details. A test that wouldn't
 fail when the feature breaks isn't worth keeping. Use a mix of smoke tests,
 edge cases at real boundaries, and tests of what users expect.
 
+No flaky tests. A test that fails and then passes with nothing changed is
+broken, whichever branch it shows up on: make it deterministic or delete it, in
+the change where it failed. Rerunning is never the fix, and neither is a retry,
+a longer timeout or a wider tolerance. Usual causes: reading state before the
+thing that writes it has finished, asserting an exact duration or timestamp,
+depending on test order, a shared port or path.
+
 Mock network, databases, file systems (when testing logic), subprocesses and
 slow operations. Don't mock to check internal wiring: assert on results, not on
 calls. Elaborate mock setup means the code does too much, the test checks the
@@ -389,14 +396,15 @@ function pointer.
 - **realign:** reconcile the plan; test only a repair or a real doubt.
 - **lint:** formatting and static analysis.
 - **rebase:** no tests when conflict-free; one focused test after conflicts.
-- **gate:** affected suites and automated acceptance once, reusing results only for identical content and command plan.
+- **gate:** publish first so CI runs the suites, then review. A few named tests locally: feedback on a fix, a CI failure, a risk no suite covers.
 - **CI / release:** the full matrix and deployment checks.
 - **qa / demo / review:** the real product, as people use it.
 
 Required checks run headless, with no display, permission dialog or person.
 Desktop uses app builds and view tests. A check that can't run here goes to
 gate or CI; it never blocks an earlier step. Real failures still get fixed.
-Scratch keeps one line per check: command, result, and who runs it later.
+Scratch keeps one line per check: command, result, and who runs it later;
+once gate clears scratch, the PR body keeps them.
 
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative

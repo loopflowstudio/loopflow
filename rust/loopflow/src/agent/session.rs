@@ -298,7 +298,7 @@ pub(crate) fn resolve_session_config(
         .map(|candidate| candidate.value.as_str().expect("agent is a string"));
     let configured_agent = candidate
         .filter(|candidate| candidate.source != crate::config::ConfigSource::Builtin)
-        .map(|candidate| candidate.value.as_str().expect("agent is a string"));
+        .and_then(|_| resolved.settings["agent"].value.as_str());
     let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {

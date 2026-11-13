@@ -51,6 +51,10 @@ Every agent that works on a Task starts from the same place: the Task's notes
 and thread, its checkout and `scratch/`, and, in a Wave, the Wave's goal,
 memory and KRs.
 
+Run `lf incident` in a Task checkout to investigate a failure, including after
+the Task is done. A named Graph keeps the checkout's Task context and records
+its own run; it leaves the Task's Graph position and completion unchanged.
+
 ### Recover a creation whose reply was lost
 
 ```bash
@@ -92,6 +96,11 @@ provider history and live attachment. The selected Session becomes the Task's
 primary conversation; `lf open --task LOO-12` and `lf resume --task LOO-12` find it.
 Pass `--session` explicitly to keep a conversation. An agent reads its own
 Session ID from its lf context block.
+A Graph belongs to the Task it was started for. Graphs that ran in an adopted
+checkout before the Task adopted it stay unattached; `lf task status` lists the
+Graphs launched for the Task from then on. While an earlier Graph still runs
+in that checkout, status shows the Task moving and reports its execution;
+`lf task run` starts no other Graph until it finishes.
 Without `--run`, `lf task create --worktree` adopts only the checkout; it selects
 no conversation. `--run` then uses ordinary Task conversation admission.
 Opening a conversation more recently never selects it. Explicit-source retries

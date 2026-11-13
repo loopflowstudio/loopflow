@@ -25,6 +25,7 @@ impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(home.path());
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), bin.join("lf")).unwrap();
@@ -2218,6 +2219,102 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     assert_eq!(steps[0]["key"], 0);
     assert_eq!(steps[1]["label"], "work-proof");
     assert_eq!(steps[1]["key"], 1);
+}
+
+#[test]
+fn standalone_graph_launches_in_a_completed_tasks_checkout() {
+    let fixture = Fixture::new(false);
+    support::install_native_codex(&fixture.home.path().join("bin"));
+    support::managed_codex_account(fixture.home.path());
+    let checkout = fixture.repo.create_named_worktree("finished-work");
+    std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
+    std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
+    std::fs::write(
+        checkout.join(".lf/graphs/incident.yaml"),
+        "- recovery-proof\n",
+    )
+    .unwrap();
+    std::fs::write(
+        checkout.join(".lf/skills/recovery-proof.md"),
+        "Inspect the failure.\n",
+    )
+    .unwrap();
+    let created = fixture.json(&[
+        "task",
+        "create",
+        "--title",
+        "Finished work",
+        "--worktree",
+        checkout.to_str().unwrap(),
+        "--json",
+    ])["task"]
+        .clone();
+    let task = created["id"].as_str().unwrap();
+    fixture
+        .db()
+        .execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
+            rusqlite::params![
+                task,
+                serde_json::json!({"name": "code", "steps": []}).to_string()
+            ],
+        )
+        .unwrap();
+    let completed = fixture.run(&["task", "complete", task]);
+    assert!(completed.status.success(), "{completed:?}");
+    let before = fixture.json(&["task", "status", task, "--json"])["task"].clone();
+    assert_eq!(before["state"], "done");
+    assert_eq!(
+        before["graph"],
+        serde_json::json!({"name": "code", "step": "end"})
+    );
+    let output = fixture
+        .command(&["-b", "--agent", "codex", "incident"])
+        .current_dir(&checkout)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    let session_task: String = fixture
+        .db()
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE skill='recovery-proof'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(session_task, task);
+    assert!(fixture
+        .home
+        .path()
+        .join("native-server-config.json")
+        .exists());
+    assert_eq!(
+        fixture.json(&["task", "status", task, "--json"])["task"],
+        before
+    );
+    assert_eq!(
+        support::recorded_graphs(fixture.home.path())[0]
+            .0
+            .as_deref(),
+        Some("succeeded")
+    );
+    let restart = fixture.run(&["-b", "task", "run", task]);
+    assert!(!restart.status.success(), "{restart:?}");
+    assert!(
+        String::from_utf8_lossy(&restart.stderr)
+            .contains("reopens planning without moving its Graph"),
+        "{restart:?}"
+    );
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(
+        fixture.json(&["task", "status", task, "--json"])["task"],
+        before
+    );
 }
 
 #[test]

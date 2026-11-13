@@ -16,6 +16,11 @@
 - `rentals::tasks_held_in` is gone. `task_ownership::held_in` returns
   `HeldTask { task, owner, since }` from the store alone, so `tasks_held_by`
   no longer loads Machine declarations once per held Task.
+- Outside Task ownership, two rental writes still load placement config after
+  `BEGIN`: `set_machine_ownership` (`declared_pools`) and `admit_rental`
+  (`ondemand_in`), both in `rentals.rs`. Left alone here: they are Machine
+  pool/on-demand writes, not Task ownership. Moving those reads before `BEGIN`
+  would be a separate Task.
 
 ## Checks
 

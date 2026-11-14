@@ -422,6 +422,8 @@ exercise that path. Unreproduced; worth its own Task if it recurs.
 - After merging main (`39b3779427`): the slice 5 test passes (0.04 s); the
   rest goes to gate/CI.
 
+- qa (Mac, debug, load ~230): `test(transport::)` 100/100, 2.8 s wall, three repeats clean; `transport_tests` 41/41 (34 + 7 ghostty), 39.4 s wall, 170.5 s summed; real `lf session serve` + two PTY attaches reattach without replay and exit cleanly. Report: `scratch/qa.html`.
+
 Left for gate/CI: the `transport_tests` CI sum against 400 s, relay case times
 on CI, and the SSH cases (Linux only).
 

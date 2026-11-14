@@ -1,0 +1,158 @@
+<!doctype html><meta charset="utf-8"><title>LOO-887 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12px}td,th{padding:.2em .8em;text-align:left;border-bottom:1px solid #ddd}</style>
+<h1>LOO-887 QA: transport tests rebuilt</h1>
+<p>Mac, debug build, load average ~230, 2026-11-13, branch at <code>e69ae2c120</code>. The people this change is for run the two suites, so QA runs them the way the plan's demo says, repeats the fast one to look for flakes, and drives the real <code>lf</code> relay once to check the production pacing still behaves.</p>
+
+<h2>1. In-process rules</h2>
+<p><code>cargo nextest run -p loopflow --lib -E 'test(transport::)'</code> with <code>LF_*</code>/<code>REX_*</code> unset and stdin closed.</p>
+<table><tr><th>Run</th><th>Result</th></tr>
+<tr><td>first</td><td>100/100 pass, 2.78 s wall</td></tr>
+<tr><td>3 repeats (+ superseded-owner and owner-retention tests)</td><td>102/102 each, 3.57 / 3.26 / 3.18 s</td></tr></table>
+<p>Slowest cases (relay windows, matching slice 6's list):</p><pre>PASS [   0.564s] ( 89/100) loopflow transport::relay_tests::an_owner_that_never_acknowledges_ends_the_viewer_without_its_input
+PASS [   0.635s] ( 90/100) loopflow transport::relay_tests::closing_the_pane_cancels_a_pending_reconnect
+PASS [   0.992s] ( 91/100) loopflow transport::registry::tests::a_view_continues_from_its_position_after_the_server_restarts
+PASS [   1.016s] ( 92/100) loopflow transport::relay_tests::an_acknowledged_viewer_stays_attached_past_the_attach_deadline
+PASS [   0.937s] ( 93/100) loopflow transport::relay_tests::failed_setup_retry_only_reconnects_without_taking_claims
+PASS [   0.979s] ( 94/100) loopflow transport::relay_tests::an_unacknowledged_attachment_reconnects_to_the_same_terminal
+PASS [   1.294s] ( 95/100) loopflow transport::registry::tests::queries_replayed_from_the_ring_are_not_answered_again
+PASS [   1.498s] ( 96/100) loopflow transport::registry::tests::a_holder_that_refuses_connections_and_keeps_its_lock_is_waited_for
+PASS [   1.401s] ( 97/100) loopflow transport::relay_tests::move_here_is_consumed_before_its_takeover_is_sent
+PASS [   2.018s] ( 98/100) loopflow transport::relay_tests::a_quiet_host_stays_attached_and_a_silent_bridge_reconnects
+PASS [   2.182s] ( 99/100) loopflow transport::registry::tests::an_ended_terminal_is_settled_and_never_answers_again
+PASS [   2.238s] (100/100) loopflow transport::relay_tests::outage_input_is_discarded_and_retry_reconnects_after_exhaustion
+Summary [   2.783s] 100 tests run: 100 passed, 2804 skipped</pre>
+
+<h2>2. Real-process suite</h2>
+<p><code>cargo nextest run -p loopflow --test transport_tests --test-threads 6</code>: 41/41 pass (34 transport tests + 7 <code>ghostty_vt</code> unit tests), 11 skipped (8 ignored acceptance + 3 SSH, Linux only). <b>39.4 s wall, 170.5 s summed</b> (before: 131 tests, 1,646 s CI-median sum). Slowest is <code>resume_takes_over_only_an_owner_that_does_not_answer</code> at 22.4 s: three merged legs, each with its own fixture.</p>
+<pre>PASS [  22.401s] (41/41) loopflow::transport_tests resume_takes_over_only_an_owner_that_does_not_answer
+PASS [  10.740s] (35/41) loopflow::transport_tests json_launches_start_once_and_return_one_record
+PASS [  10.425s] (40/41) loopflow::transport_tests server_mobile_changes_preserve_local_connections
+PASS [  10.112s] ( 7/41) loopflow::transport_tests a_held_view_waits_for_a_holder_stopped_at_server_startup
+PASS [   9.805s] ( 6/41) loopflow::transport_tests a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume
+PASS [   9.798s] ( 5/41) loopflow::transport_tests a_held_conversation_outlives_its_view
+PASS [   9.020s] (38/41) loopflow::transport_tests server_preserves_owner_and_graph_across_restart
+PASS [   8.584s] ( 3/41) loopflow::transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+PASS [   7.486s] (36/41) loopflow::transport_tests resume_takes_over_an_owner_from_another_build
+PASS [   6.633s] (27/41) loopflow::transport_tests desktop_shell_reconnects_without_replay_and_close_settles_its_jobs
+PASS [   6.445s] ( 2/41) loopflow::transport_tests a_held_view_meeting_another_build_reopens_as_the_installed_lf
+PASS [   5.719s] ( 9/41) loopflow::transport_tests a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit
+PASS [   5.501s] ( 1/41) loopflow::transport_tests a_stalled_bridge_leaves_the_healthy_bridge_and_control_checkpoint_live
+PASS [   4.022s] (33/41) loopflow::transport_tests server_reconnect_preserves_newer_viewers_input_and_geometry
+PASS [   3.959s] (26/41) loopflow::transport_tests held_terminals_share_one_holder_and_add_no_server_threads
+PASS [   3.605s] (24/41) loopflow::transport_tests headless_runs_settle_their_original_step_after_creator_teardown
+PASS [   3.338s] (39/41) loopflow::transport_tests task_cleanup_ends_an_abandoned_tasks_held_terminal
+PASS [   3.319s] (13/41) loopflow::transport_tests codex_original_request_channel_and_turn_survive_all_viewers
+PASS [   2.931s] (23/41) loopflow::transport_tests held_session_survives_server_restart
+PASS [   2.535s] ( 4/41) loopflow::transport_tests bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal
+PASS [   2.479s] (19/41) loopflow::transport_tests conversation_open_here_confirms_attachment_and_does_not_take_existing_input
+PASS [   2.383s] (32/41) loopflow::transport_tests prepared_start_preserves_a_claim_time_winner
+PASS [   2.254s] (21/41) loopflow::transport_tests first_native_launch_keeps_only_valid_desktop_terminal_placement
+PASS [   2.209s] (20/41) loopflow::transport_tests every_viewer_starts_with_the_snapshot_and_shares_live_output
+PASS [   2.138s] (29/41) loopflow::transport_tests native_pending_request_survives_creator_exit_without_settling_capture_or_replay
+PASS [   2.102s] (22/41) loopflow::transport_tests interactive_graph_settles_each_step_before_starting_the_next
+PASS [   2.098s] (28/41) loopflow::transport_tests local_terminal_reconnects_without_replaying_input_or_taking_newer_claims
+PASS [   1.809s] (31/41) loopflow::transport_tests pipe_viewers_deliver_input_size_and_exit
+PASS [   1.763s] (10/41) loopflow::transport_tests detached_owner_keeps_no_descriptor_its_terminal_inherited
+PASS [   1.386s] ( 8/41) loopflow::transport_tests completed_task_cleanup_signals_shell_owner_and_settles_jobs
+PASS [   1.237s] (34/41) loopflow::transport_tests server_startup_cancels_its_pending_installer_when_pane_closes
+PASS [   1.046s] (30/41) loopflow::transport_tests resume_json_returns_after_relay_and_viewer_takeover
+PASS [   0.658s] (25/41) loopflow::transport_tests owned_program_does_not_inherit_the_desktop_pane_relay
+PASS [   0.480s] (37/41) loopflow::transport_tests server_status_does_not_install_or_create_work</pre>
+
+<h2>3. The real relay, by hand</h2>
+<p>Branch <code>lf</code>, private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-887</code>, inherited <code>LF_*</code>/<code>REX_*</code> removed. <code>lf session serve --terminal -- /bin/sh</code>, then two <code>lf session attach</code> views on real PTYs (driver: <code>scratch/qa/drive.py</code>). First view runs a command and leaves an unsent line, then its terminal closes; the second view (different size) reattaches, clears the line, runs another command and exits the shell.</p>
+<pre>serve first line: &#x27;2ee58dce-898b-41b7-9cd2-a99e0635338b&#x27;
+[first] &#x27;QA_41&#x27; seen=True after 1.66s
+--- [first] screen text ---
+[&lt;65535u[&gt;4;0m&gt;]104\]110\]111\]112\]8;;\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HHHHHHHHHqa$ [&lt;65535uqa$ echo QA_$((40+1))
+QA_41
+qa$ echo DRAFT_NOT_SENT
+--- end ---
+owner alive after first view closed: True
+[second] &#x27;QA_41&#x27; seen=True after 0.11s
+[second] &#x27;QA_52&#x27; seen=True after 0.23s
+--- [second] screen text ---
+[&lt;65535u[&gt;4;0m&gt;]104\]110\]111\]112\]8;;\
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HHHHHHHHHHHHqa$ echo QA_$((40+1))
+QA_41
+qa$ echo DRAFT_NOT_SENT[&lt;65535uqa$ echo DRAFT_NOT_SENTqa$ echo DRAFT_NOT_SENTecho QA_$((50+2))
+QA_52
+qa$ exit
+exit
+[&lt;65535u[&gt;4;0m&gt;]104\]110\]111\]112\]8;;\
+--- end ---
+attach exit status 0
+QA_41 echoed count in second view: 1
+owner exited rc=0
+owner stderr: </pre>
+<p>What it shows: the owner outlives its view; the second view's screen arrives in 0.11 s with the earlier output once (no replay); the unsent text stays as the shell's own line and is never submitted; <code>exit</code> ends the view with status 0 and the owner with 0. No processes left with the private <code>LF_HOME</code>, and no <code>server.plist</code> was written. (The repeated <code>DRAFT_NOT_SENT</code> in the stripped text is the repaint plus the shell redrawing after Ctrl-U; the escape stripping drops cursor moves.)</p>
+<p>The production constants behind <code>Pace</code> match main exactly: heartbeat 10 s, silence 30 s, attach 5 s, backoff 100 ms doubling to ×32, write stall 2 s; <code>lifetime::POLL</code> is 2 s outside tests.</p>
+
+<h2>Fixed</h2><p>Nothing; nothing broke.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>CI timings: the "&lt; 400 s summed on Linux" target is measured here only on a Mac (170.5 s). Gate/CI.</li>
+<li>SSH cases (<code>transport/ssh_shells.rs</code>): Linux CI only.</li>
+<li>Held terminals and server reconnect by hand: they need a provider stand-in and a private server; the real-process suite runs those with real binaries (<code>a_held_pane_reads_reconnecting_…</code>, <code>held_session_survives_server_restart</code>), and that is what this QA leans on.</li>
+<li>Desktop panes in a window: no display check run.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ul>
+<li>The frozen-resume overrun from #1922's Linux CI (relay's <code>UnixStream::connect</code> to the owner has no bound) stays outside this Task, as the plan says; not reproduced here.</li>
+<li><code>resume_takes_over_only_an_owner_that_does_not_answer</code> at 22 s is the one kept test well past the others; its legs run serially.</li>
+</ul>

@@ -94,7 +94,7 @@ lf checkout INF-123                    # ensure Work and worktree only
 lf task run INF-123                    # place an existing Task, start its Graph, return once it runs
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -103,8 +103,16 @@ hand off the whole seed, and never delegate the one blocker between you and
 completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
-`--stack-on` forks the child's worktree from the parent Task's active PR, records
-the fork commit, and inherits the parent's files. Scratch follows the same Git
+`--stack-on` forks the child's worktree from the parent Task's branch, records
+the fork commit, and inherits the parent's files. The parent needs a placed
+branch, not a PR. When the parent has no PR yet, its branch is pushed to origin
+if needed, never forced. A published parent's missing remote branch is restored
+after reading its PR from GitHub: a merged PR stops stacking; a closed PR uses
+a new unpublished parent record. If Auto was requested for an earlier head,
+stacking turns Auto off before pushing. The same clean head keeps its merge
+request. When its remote branch exists, the child uses `origin/<branch>` and
+reports any local commits left out. Run `lf commit -p`
+in the parent's checkout to include them. Scratch follows the same Git
 merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.

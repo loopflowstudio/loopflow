@@ -290,12 +290,26 @@ even without an ignore rule or when already staged: its staged and working
 contents survive sync without entering the checkpoint. Other ignored files stay
 ignored unless explicitly staged. Previously committed telemetry stays in history.
 
-Sync follows a stack parent through its squash merge. Stack one Task on
-another's open PR, even a draft:
+Sync follows a stack parent through its squash merge. Stack one Task on any
+other Task that has a branch, before that parent lands or even opens a PR:
 
 ```bash
 lf task run LOO-13 --stack-on LOO-12
 ```
+
+When the parent has no PR yet, stacking pushes its branch if origin lacks it or
+is behind. It never force-pushes or opens a PR for the parent. A published
+parent's missing remote branch is restored after reading its PR from GitHub:
+a merged PR stops stacking; a closed PR uses a new unpublished parent record.
+If GitHub cannot be read, stacking uses the saved PR state. If Auto was requested
+for an earlier head, stacking turns Auto off before pushing. The same clean head
+keeps its merge request.
+If the published parent's remote branch exists and is behind, or
+origin has diverged, the child bases on `origin/<branch>` and the stack line
+counts the local commits it leaves out. Run `lf commit -p` in the parent's
+checkout to include them. Stacking stops when the parent is not a Task, has no
+branch yet (`lf checkout LOO-12` places one), has already merged, or the push
+fails; a failed push shows git's message.
 
 Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --abort`.
 

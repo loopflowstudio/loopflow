@@ -68,9 +68,21 @@ lf checkout INF-124 --stack-on INF-123 --design scratch/child-design.md
 lf task run INF-124
 ```
 
-The parent must have a published PR; a draft suffices. The child can start and
-publish before that PR merges. It records its fork point and targets the parent's
-PR branch. Prepare a self-contained child-specific design and transfer it with
+The parent needs only a placed branch. Until it publishes a PR, stacking pushes
+the branch if origin lacks it or is behind, never forcing, and records an
+unpublished Task PR for it without opening one on GitHub. A published parent's
+missing remote branch is restored after reading its PR from GitHub: a merged
+PR stops stacking; a closed PR uses a new unpublished parent record. If Auto
+was requested for an earlier head, stacking turns Auto off before pushing.
+The same clean head keeps its merge request.
+When the published parent is ahead of origin, or origin's branch has diverged,
+the child bases on `origin/<branch>` and the stack line counts the local commits
+it leaves out. Run `lf commit -p` in the parent's checkout to include them. The
+child can start and publish before the parent publishes or merges.
+It records its fork point and targets the parent's branch. Stacking fails when
+the parent is not a Task, has no placed branch, has already merged, or the push
+fails; the error names which, with git's message for a failed push. Prepare a
+self-contained child-specific design and transfer it with
 `--design`; its receipt retains source Task, commit and content hash. Identical
 retries do not reset the child; changed content at an occupied destination is a
 handoff conflict, with both versions retained.
@@ -79,6 +91,9 @@ creating a child does not delete inherited files or add a cleanup commit.
 After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
+Selecting a different parent for an existing stack keeps the checkout intact.
+The next `lf sync` retains files inherited from the old parent as child work
+and merges the new parent's changes; repeating the same selection keeps its fork.
 The child retains its Task, PR, branch and Session identity and its own design.
 
 ## Commit and publish

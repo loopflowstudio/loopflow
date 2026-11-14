@@ -57,7 +57,11 @@ fn stacked_checkout_preserves_inherited_scratch_and_edits() {
         .execute("DELETE FROM task_prs WHERE task_id=?1", [child.id.as_str()])
         .unwrap();
     runtime
-        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
+        .block_on(
+            parent
+                .store
+                .stack_task_placement(&child, &parent.pr.id, &child.base_commit),
+        )
         .unwrap();
 
     let checkout = || {

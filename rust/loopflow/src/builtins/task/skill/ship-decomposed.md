@@ -47,8 +47,8 @@ one large honest PR beats an artificially staged series.
    managed work is asked for. Then give each independently deliverable outcome
    its own Task, reuse existing Tasks for matching scope, and keep the original
    Task's intended outcome with its slice. Independent Tasks start from main;
-   dependent Tasks stack on their parent. A published parent PR, even a draft,
-   is enough to start and publish a child; only landing waits for the parent.
+   dependent Tasks stack on their parent. The parent's branch is enough to
+   start and publish a child; only landing waits for the parent.
 3. Save the original change with `lf commit` before moving anything. Use
    Loopflow for checkouts and Git changes; carry the existing code into each
    slice without rewriting it or losing mixed hunks. Keep the source until every

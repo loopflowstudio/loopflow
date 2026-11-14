@@ -1622,7 +1622,23 @@ mod tests {
             tickets: Arc<Tickets>,
             subscriptions: &Arc<Subscriptions>,
         ) -> Self {
-            let subscriptions = subscriptions.clone();
+            Self::connect_counted(
+                clients,
+                tickets,
+                subscriptions,
+                &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            )
+        }
+
+        /// A connection whose client slot comes from `slots`, which the
+        /// server's connections share.
+        fn connect_counted(
+            clients: &Clients,
+            tickets: Arc<Tickets>,
+            subscriptions: &Arc<Subscriptions>,
+            slots: &Arc<Semaphore>,
+        ) -> Self {
+            let (subscriptions, slots) = (subscriptions.clone(), slots.clone());
             let (client, server) = UnixStream::pair().unwrap();
             let clients = clients.clone();
             let server = tokio::spawn(async move {
@@ -1634,7 +1650,7 @@ mod tests {
                     None,
                     None,
                     tickets,
-                    &Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+                    &slots,
                     &subscriptions,
                 )
                 .await
@@ -1896,6 +1912,49 @@ mod tests {
                 client.receive().await.unwrap(),
                 ServerMessage::Response { id, .. } if id == "a"
             ));
+            // A bridge takes no client slot: more bridges than the server
+            // admits clients, and a client still gets in.
+            let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+            let subscriptions = Arc::new(Subscriptions::default());
+            let mut bridges = Vec::new();
+            for _ in 0..MAX_CONNECTIONS + 8 {
+                let ticket = tickets.issue(
+                    Admission::Local,
+                    Purpose::Terminal(Host::Owner(owner.clone())),
+                );
+                let mut bridge =
+                    Client::connect_counted(&clients, tickets.clone(), &subscriptions, &slots);
+                bridge.send(&ClientMessage::Attach { ticket }).await;
+                assert!(matches!(
+                    bridge.receive().await.unwrap(),
+                    ServerMessage::Bridged { owner_lf_process_id: Some(bridged), terminal_id: None }
+                        if bridged == owner
+                ));
+                bridges.push((bridge, listener.accept().await.unwrap().0));
+            }
+            let mut desktop =
+                Client::connect_counted(&clients, tickets.clone(), &subscriptions, &slots);
+            assert!(matches!(
+                desktop.hello(REVISION, REVISION).await,
+                ServerMessage::Welcome(_)
+            ));
+            drop(bridges);
+            // An attach without a ticket is refused before any bridge.
+            let mut malformed = Client::connect_with(&clients, tickets.clone());
+            malformed
+                .writer
+                .write_all(b"{\"type\":\"attach\"}\n")
+                .await
+                .unwrap();
+            assert!(matches!(
+                malformed.receive().await.unwrap(),
+                ServerMessage::Error {
+                    id: None,
+                    code: ErrorCode::Invalid,
+                    ..
+                }
+            ));
+            malformed.ended().await;
             // An owner that ended between ticket and redemption fails by name.
             drop(listener);
             let ticket = tickets.issue(Admission::Local, Purpose::Terminal(Host::Owner(owner)));
@@ -3123,6 +3182,427 @@ mod tests {
         assert!(rest.is_empty());
         writer.await.unwrap();
         assert!(client.server.await.unwrap().is_err());
+    }
+
+    // ---- Work subscriptions over the test's Machine store ----
+
+    /// The Machine store under the test's `LF_HOME`.
+    fn home_store() -> crate::store::sqlite::SqliteStore {
+        crate::store::sqlite::SqliteStore::open_ephemeral(
+            &crate::store::lf_home_dir().join("loopflow.db"),
+        )
+        .unwrap()
+    }
+
+    /// A started (owned) Task in `repo`, so `state:open` selects it.
+    fn create_task(
+        store: &crate::store::sqlite::SqliteStore,
+        repo: &loopflow_test_support::TestRepo,
+        title: &str,
+    ) -> crate::work::task::Task {
+        let path = repo.path().canonicalize().unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
+                id: crate::durable::TaskId::new(),
+                project_id: None,
+                title: title.into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+                 VALUES(?1,?2,'recorded',NULL,NULL,1,1000,1)",
+                [
+                    format!("own_{}", uuid::Uuid::new_v4().simple()),
+                    task.id.to_string(),
+                ],
+            )
+            .unwrap();
+        task
+    }
+
+    /// Subscribe as `id` and answer its first reading.
+    async fn subscribe(client: &mut Client, id: &str, operation: Read) -> serde_json::Value {
+        client
+            .send(&ClientMessage::Subscribe {
+                id: id.into(),
+                operation,
+                select: None,
+                resume: None,
+            })
+            .await;
+        assert!(matches!(
+            client.receive().await.unwrap(),
+            ServerMessage::Response { id: of, .. } if of == id
+        ));
+        reading(client, id).await
+    }
+
+    /// The next reading of `id`, within ten seconds.
+    async fn reading(client: &mut Client, id: &str) -> serde_json::Value {
+        loop {
+            let message = tokio::time::timeout(Duration::from_secs(10), client.receive())
+                .await
+                .expect("a reading within ten seconds")
+                .unwrap();
+            if let ServerMessage::Reading { id: of, frame, .. } = message {
+                if of == id {
+                    return frame;
+                }
+            }
+        }
+    }
+
+    /// The reading answering checkpoint `answers`.
+    async fn confirmed(client: &mut Client, id: &str, answers: u64) -> serde_json::Value {
+        client
+            .send(&ClientMessage::Checkpoint {
+                id: id.into(),
+                checkpoint: answers,
+            })
+            .await;
+        loop {
+            let frame = reading(client, id).await;
+            if frame["answers"] == answers {
+                return frame;
+            }
+        }
+    }
+
+    async fn request(client: &mut Client, id: &str, operation: Read) -> serde_json::Value {
+        client
+            .send(&ClientMessage::Request {
+                id: id.into(),
+                operation: Operation::Read(operation),
+                select: None,
+            })
+            .await;
+        loop {
+            match client.receive().await.unwrap() {
+                ServerMessage::Response { id: of, result, .. } if of == id => return result,
+                ServerMessage::Error {
+                    id: Some(of),
+                    message,
+                    ..
+                } if of == id => {
+                    panic!("{id} failed: {message}")
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn session_attach_tickets_the_current_owner_and_refuses_a_replaced_one() {
+        with_empty_home(async {
+            let store = home_store();
+            let session =
+                store.test_session("attached", &crate::session_record::new_artifact_key());
+            let launcher = store.test_lf_process();
+            let attachment = store
+                .claim_session_attachment(session.id.as_str(), None, &launcher, true)
+                .unwrap();
+            let (replaced, current) = (store.test_lf_process(), store.test_lf_process());
+            store
+                .bind_session_transport(session.id.as_str(), &attachment, &current)
+                .unwrap();
+            let listener =
+                tokio::net::UnixListener::bind(crate::transport::endpoint(&current).unwrap())
+                    .unwrap();
+            let processes = || -> i64 {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+                    .unwrap()
+            };
+            let before = processes();
+            let (clients, tickets) = (Clients::default(), Arc::new(Tickets::default()));
+            let mut client = Client::connect_with(&clients, tickets.clone());
+            client.hello(REVISION, REVISION).await;
+            let attach = |session: crate::id::LfSessionId, exact: Option<LfProcessId>| {
+                ClientMessage::Request {
+                    id: "attach".into(),
+                    select: None,
+                    operation: Operation::Server(ServerOperation::SessionAttach {
+                        session,
+                        owner_lf_process_id: exact,
+                        terminal_id: None,
+                    }),
+                }
+            };
+
+            // An exact owner that was replaced is refused, naming its successor.
+            client
+                .send(&attach(session.id.clone(), Some(replaced.clone())))
+                .await;
+            let ServerMessage::Error {
+                code: ErrorCode::NotFound,
+                data: Some(data),
+                ..
+            } = client.receive().await.unwrap()
+            else {
+                panic!("expected the replaced owner to be refused")
+            };
+            assert_eq!(data["owner_lf_process_id"], replaced.as_str());
+            assert_eq!(data["current_lf_process_id"], current.as_str());
+
+            // Without an owner ID, the Session's current owner is ticketed.
+            client.send(&attach(session.id.clone(), None)).await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected a ticket")
+            };
+            assert_eq!(result["owner_lf_process_id"], current.as_str());
+            assert_eq!(
+                result["expires_in_ms"],
+                super::TICKET_LIFETIME.as_millis() as u64
+            );
+            let ticket = result["ticket"].as_str().unwrap().to_owned();
+            assert_eq!(ticket.len(), 22, "{ticket}");
+            // The connection that asked stays a client.
+            client
+                .send(&ClientMessage::Request {
+                    id: "after".into(),
+                    operation: catalog(),
+                    select: None,
+                })
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Response { id, .. } if id == "after"
+            ));
+
+            // Another connection of the same user redeems the ticket, once.
+            let mut bridge = Client::connect_with(&clients, tickets.clone());
+            bridge
+                .send(&ClientMessage::Attach {
+                    ticket: ticket.clone(),
+                })
+                .await;
+            assert!(matches!(
+                bridge.receive().await.unwrap(),
+                ServerMessage::Bridged { owner_lf_process_id: Some(owner), terminal_id: None }
+                    if owner == current
+            ));
+            listener.accept().await.unwrap();
+            let mut spent = Client::connect_with(&clients, tickets.clone());
+            spent.send(&ClientMessage::Attach { ticket }).await;
+            assert!(matches!(
+                spent.receive().await.unwrap(),
+                ServerMessage::Error {
+                    id: None,
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            ));
+
+            // A Session with no owner gets nothing started.
+            client
+                .send(&attach(
+                    crate::id::LfSessionId::from("session_missing"),
+                    None,
+                ))
+                .await;
+            assert!(matches!(
+                client.receive().await.unwrap(),
+                ServerMessage::Error {
+                    code: ErrorCode::NotFound,
+                    ..
+                }
+            ));
+            assert_eq!(processes(), before);
+        });
+    }
+
+    /// `session.continue` resumes exactly its Session in the Session's
+    /// directory; the registry starts it once per request
+    /// (`registry_tests::a_held_terminal_outlives_the_server_that_started_it`).
+    #[test]
+    fn continuing_a_session_resumes_exactly_it_and_a_missing_one_is_refused() {
+        with_empty_home(async {
+            // Only the launch request is built; no CLI is executed.
+            let binary = std::env::current_exe().unwrap();
+            let _binary =
+                crate::lf::commands::graph::EnvVarGuard::set("LF_BIN", binary.to_str().unwrap());
+            let store = home_store();
+            let session =
+                store.test_session("continued", &crate::session_record::new_artifact_key());
+            let id = session.id.clone();
+            let start = tokio::task::spawn_blocking(move || {
+                super::continuing(id, "phone-continue".into(), 40, 60)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(std::path::Path::new(&start.argv[0]), binary);
+            assert_eq!(
+                start.argv[1..],
+                ["session", "resume", "--", session.id.as_str()]
+            );
+            assert_eq!(start.cwd, session.cwd);
+            assert_eq!(start.session.as_ref(), Some(&session.id));
+            assert_eq!(
+                (start.request.as_str(), start.rows, start.cols),
+                ("phone-continue", 40, 60)
+            );
+            assert!(start.env.iter().any(|(name, value)| name == "LF_HOME"
+                && std::path::Path::new(value) == crate::store::lf_home_dir()));
+            assert!(start
+                .env
+                .iter()
+                .any(|(name, value)| name == "LF_BIN" && std::path::Path::new(value) == binary));
+
+            let missing = tokio::task::spawn_blocking(|| {
+                super::continuing(
+                    crate::id::LfSessionId::from("session_00000000000040008000000000000099"),
+                    "phone-continue".into(),
+                    40,
+                    60,
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert_eq!(missing.code, ErrorCode::NotFound);
+            assert_eq!(missing.message, "Session is unavailable");
+        });
+    }
+
+    #[test]
+    fn a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session() {
+        with_empty_home(async {
+            let store = home_store();
+            let repo = loopflow_test_support::TestRepo::new();
+            let task = create_task(&store, &repo, "Subscribed");
+            let session = store.test_session("primary", &crate::session_record::new_artifact_key());
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            let plans = Read::PlanList {
+                directory: "/".into(),
+                wave: None,
+                task: None,
+                all: true,
+            };
+            let initial = subscribe(&mut client, "plans", plans).await;
+            assert!(initial["unavailable"].is_null(), "{initial}");
+            assert!(
+                initial["body"].to_string().contains("Subscribed"),
+                "{initial}"
+            );
+            assert_eq!(confirmed(&mut client, "plans", 17).await["answers"], 17);
+
+            // A changed Task reaches the watch through the shared invalidation
+            // path, and a read on the same connection resolves its primary Session.
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET primary_session_id=?2,issue_title='Updated subscribed Task' WHERE id=?1",
+                    [task.id.as_str(), session.id.as_str()],
+                )
+                .unwrap();
+            let view = request(
+                &mut client,
+                "view",
+                Read::DesktopViewGet {
+                    directory: repo.path().to_path_buf(),
+                    expression: Some(format!("task:{}", task.identifier)),
+                },
+            )
+            .await;
+            assert_eq!(
+                view["contents"][0]["primary_session"],
+                session.id.as_str(),
+                "{view}"
+            );
+            let changed = confirmed(&mut client, "plans", 18).await;
+            assert!(
+                changed["body"]
+                    .to_string()
+                    .contains("Updated subscribed Task"),
+                "{changed}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_task_watch_follows_renames_and_the_portfolio_across_repositories() {
+        with_empty_home(async {
+            use crate::portfolio::PortfolioCommand;
+            // Portfolio changes run their own runtime.
+            let change = |command: PortfolioCommand| async move {
+                tokio::task::spawn_blocking(move || {
+                    crate::portfolio::change(&command, &crate::store::lf_home_dir())
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            };
+            let store = home_store();
+            let (first, second) = (
+                loopflow_test_support::TestRepo::new(),
+                loopflow_test_support::TestRepo::new(),
+            );
+            change(PortfolioCommand::Manual).await;
+            change(PortfolioCommand::Add {
+                paths: vec![first.path().to_path_buf()],
+            })
+            .await;
+            let task = create_task(&store, &first, "Watched");
+            let query = Read::ViewSelect {
+                expression: Some("kind:task state:open".into()),
+            };
+            let contents = |frame: &serde_json::Value| -> Vec<serde_json::Value> {
+                frame["body"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("expected a complete Task reading: {frame}"))
+                    .iter()
+                    .flat_map(|plan| plan["contents"].as_array().unwrap().clone())
+                    .collect()
+            };
+            let mut watch = Client::connect();
+            watch.hello(REVISION, REVISION).await;
+            let initial = subscribe(&mut watch, "tasks", query.clone()).await;
+            assert_eq!(contents(&initial).len(), 1, "{initial}");
+
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE tasks SET issue_title='Renamed on Desktop' WHERE id=?1",
+                    [task.id.as_str()],
+                )
+                .unwrap();
+            assert_eq!(
+                contents(&reading(&mut watch, "tasks").await)[0]["title"],
+                "Renamed on Desktop"
+            );
+
+            // A Task outside the portfolio is absent, as from Desktop's sidebar.
+            create_task(&store, &second, "Elsewhere");
+            assert_eq!(contents(&confirmed(&mut watch, "tasks", 11).await).len(), 1);
+            change(PortfolioCommand::Add {
+                paths: vec![second.path().to_path_buf()],
+            })
+            .await;
+            while contents(&reading(&mut watch, "tasks").await).len() != 2 {}
+            assert_eq!(contents(&confirmed(&mut watch, "tasks", 12).await).len(), 2);
+
+            // The one-shot read shares the subscription's query and projection.
+            let mut once = Client::connect();
+            once.hello(REVISION, REVISION).await;
+            let plans = request(&mut once, "once", query).await;
+            assert_eq!(plans.as_array().unwrap().len(), 2, "{plans}");
+        });
     }
 }
 

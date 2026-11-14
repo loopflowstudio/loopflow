@@ -229,3 +229,10 @@ at `scratch/concept-review.html` shows the failure and recovery interaction.
 Next: gate the implemented correction; no additional implement direction.
 
 - `cargo test -p loopflow --lib claude_usage_reconciliation_explains_overlapping_and_cleared_holds` — passed (1); linker repeated the compact-unwind size warning above. `cargo fmt --check` and `git diff --check` passed; gate/CI own clippy, documented commands and broader suites after this explanation fix.
+
+Realign after QA, 2026-11-14: the QA direction (longer Fable hold reported
+behind an account-wide cooldown; `--clear-cooldown` naming remaining scoped
+holds) is implemented. `lf account next` reaches
+`provider_account::account_unavailable_reason` via `profile::show_next`
+(`profile.rs:161`); `clear_account_cooldown` appends
+`account_capacity_holds`. Same focused test passed again (1). Remaining: gate.

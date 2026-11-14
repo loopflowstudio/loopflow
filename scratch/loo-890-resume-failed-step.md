@@ -191,4 +191,4 @@ the files below, and `lf help task run` says the same.
 ## Remaining
 
 - Gate: Swift build/tests; CI suites.
-- Demo: `lf task run` on `held` as in the Demo section, with `lf task status` naming the resume step.
+- QA (2026-11-13, `scratch/qa.html`): demo walked on a private Machine; retries, next run, `--from`, interrupt and resume all start where expected. Not reached: loop/XOR resume with a provider, Machine move, `lf ship` after a stop, Desktop ladder.

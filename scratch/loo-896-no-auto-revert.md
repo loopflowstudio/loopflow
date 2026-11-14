@@ -75,6 +75,18 @@ repair of `WorkCacheTests`.
 
 Implemented: workflow inlined, script and test deleted, CI.md updated.
 
+## Next implement direction (concept review)
+
+Drop `workflow_dispatch` from `macos-main.yml` and the `gh workflow run` line
+from `.github/CI.md`. Dispatch runs on whatever ref it is started from, so
+`gh workflow run macos-main.yml --ref <branch>` would force-move `last-green`
+to a commit that isn't on main. Nothing needs dispatch: the next push to main
+retests the batch from the same `last-green`, and `gh run rerun <id>` retests a
+red run on its own commit. A rerun of a superseded run can only move
+`last-green` backward, which widens the next batch and tests more, never less.
+CI.md's manual-rerun sentence becomes: "To retest a red run without a new push:
+`gh run rerun <id>`."
+
 ## Checks
 
 - `actionlint .github/workflows/macos-main.yml` — passed locally.

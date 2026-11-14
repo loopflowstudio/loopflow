@@ -143,9 +143,7 @@ def _write_submission(path: Path, receipt: dict[str, object]) -> None:
     temporary.replace(path)
 
 
-def _notarytool_failed(
-    result: subprocess.CompletedProcess, what: str, advice: str
-) -> RuntimeError:
+def _notarytool_failed(result: subprocess.CompletedProcess, what: str, advice: str) -> RuntimeError:
     """Print notarytool's output; the error names Apple's first line, then what is safe next."""
     stdout, stderr = result.stdout.strip(), result.stderr.strip()
     for output in (stdout, stderr):

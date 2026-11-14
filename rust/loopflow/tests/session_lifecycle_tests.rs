@@ -25,6 +25,7 @@ impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
+        support::seed_store(home.path());
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), bin.join("lf")).unwrap();

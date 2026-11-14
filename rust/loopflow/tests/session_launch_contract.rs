@@ -698,6 +698,42 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
 }
 
 #[test]
+fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
+    let fixture = Fixture::new("codex");
+    let machine = fixture.home.path().join("machine");
+    support::register_codex_account(&machine);
+    fs::write(machine.join("fail-server"), "").unwrap();
+    let failed = fixture
+        .command()
+        .args([
+            "-i",
+            "--only-account",
+            "fixture@example.com",
+            ":",
+            "Preserve this initial request",
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let session = fixture.session();
+    fs::remove_file(machine.join("fail-server")).unwrap();
+    // The server failed before Codex started a thread.
+    let resumed = fixture.run(&["-a", "claude", "session", "resume", &session]);
+    // A fresh Claude input, not the reopened Codex bootstrap.
+    assert!(args(&resumed).contains(&"--session-id"), "{resumed}");
+    let provider: String = rusqlite::Connection::open(machine.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT provider FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(provider, "claude");
+    assert_eq!(fixture.session(), session);
+}
+
+#[test]
 fn a_codex_terminal_moved_to_another_login_ends_and_says_where_it_went() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");

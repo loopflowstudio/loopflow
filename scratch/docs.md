@@ -1,0 +1,30 @@
+# LOO-860 docs (written, describe intended behavior)
+
+- docs/sessions.md "Switch agents mid-conversation": the switch sticks; plain resume reopens on the latest input's provider, its conversation and account.
+- docs/config.md: "Existing Sessions resume on the provider their latest input ran on"; stopped-session resume paragraph links the switch section.
+
+# Implementation (done)
+
+- Cause found in the store: f505abc0's capture came from `lf --agent codex session resume` (process 42b65c77). `append_input` captured the row's provider (claude) and published the prepared manifest as claude; `conversation_launch_args` then launched `--agent codex`, and `start_prepared` rewrote only the manifest harness. Captured events are immutable (`preserve_capture_update`), so the provider must be right at capture.
+- `append_input` applies `handoff_agent`; `open_waiting_locked` appends a fresh input instead of launching a prepared one when another harness is selected.
+- `resolve_session_config` takes the input's thread and account only when the input's manifest harness is the resumed provider.
+- Migration `resume_on_latest_input_provider` moves a Session to the only provider that recorded its `provider_thread` (model cleared). Dry run on a copy of ~/.lf/loopflow.db changed exactly 3 rows: f505abc0…, session_b5b0a13d…, session_c9a397ed… → codex.
+- `provider_account.rs` `select_route` needed no change: it looks up `provider_session_account(provider, thread)`, which matches once the provider and thread agree.
+- Deleted uncalled `retarget_unpublished_capture` (sqlite + async wrapper) and `capture_seq_in`.
+- Compress: `new_thread` and `append_input` share `switch_agent` for the provider/model rewrite. `cargo test -p loopflow --lib ops::human_session::`: 51 pass.
+
+Checks: `cargo test -p loopflow --lib` for `ops::human_session::` (51), `agent::session::` (9), `store::migrations::` (132): pass. New regression test fails with the `append_input` fix removed. Gate still owns `documented_commands::`, clippy and the affected-suite run.
+
+# Concept review (2026-11-12)
+
+Model: an input launches on the provider it recorded; an invocation that selects another harness appends its own input, and the Session row follows it. `agent_sessions.provider` stays a stored mirror of the latest input's harness (deriving it would read a manifest file per listed Session).
+
+Done: `open_waiting_locked` skips `resume_native_session` when `handoff_agent` is set, so `lf -a claude session resume` on a Codex bootstrap with no provider thread appends and launches a Claude input. `session_launch_contract another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input` (stand-in `fail-server`) passes, and fails with the guard removed ("native history cannot resume in claude"). `ops::human_session::` 51 pass. Compress after a51dcd1dd2: no further cuts.
+
+Open (not in this Task's scope): a Codex bootstrap whose server started a thread but whose client failed (`fail-terminal`) has a provider thread and no transcript, so `lf -a claude session resume` takes `new_thread` and fails in `conversation_log::read`: "The codex transcript of Session … was not found. Keep this conversation open and retry after codex saves its first turn." That transcript never arrives for a failed bootstrap.
+
+# QA (2026-11-12)
+
+Real Claude and Codex, private `LF_HOME`, branch `lf`; report in `scratch/qa.html`. Claude → `-a codex` → plain → `-a claude` → plain, headless and interactive, plus Desktop `--prepare --json`: each resume ran on the latest input's provider and thread.
+
+Fixed: a 0.15.3 store with no account records (prepared Claude Session opened with `-a codex`) stayed `provider=claude` with a Codex thread; the branch resumed Claude with it ("No conversation found with session ID"). The migration now also moves a Session to its current input's observed manifest harness (`json_valid`-guarded, indexed: 0.46 s on a 16,585-Session copy of ~/.lf, still exactly the same 3 rows). `store::migrations::` 132 pass.

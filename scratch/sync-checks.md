@@ -1,1 +1,0 @@
-- `cargo test -p loopflow --lib a_bare_launch_carries_only_a_store_steer_capability` with inherited `LF_*` removed and closed stdin: passed (1 test), November 13, 2026. Linker warned that `__eh_frame` exceeded compact-unwind offsets. Gate and CI run broader checks.

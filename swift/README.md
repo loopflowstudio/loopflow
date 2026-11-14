@@ -315,10 +315,10 @@ Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pa
 and jobs; New Shell starts fresh execution.
 
 Close a web page with **⌘W**, then press **⇧⌘T**: the same page returns with
-its Back/Forward history. Closing a page while it is still loading keeps Desktop
-open. Moving or hiding its pane keeps the page and history too. Undo holds only
-the latest close in that workspace; closing another tab or hiding another pane
-replaces it. Pages no longer open or held for Undo are released automatically.
+its Back/Forward history. Moving or hiding its pane keeps the page and history
+too. Undo holds only the latest close in that workspace; closing another tab or
+hiding another pane replaces it. Pages no longer open or held for Undo are
+released automatically.
 
 Browser lifetime diagnostics in `lf.log` record workspace, pool, tab and page
 identity, initial URL scheme and monotonic age. `retire` records the previous

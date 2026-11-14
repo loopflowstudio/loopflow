@@ -182,16 +182,16 @@ async fn read_task_run(
                 take_up,
             }
         }
-        Some(place) => match graph.interactive_at(&place).filter(|_| !through) {
+        Some(start) => match graph.interactive_at(&start.place).filter(|_| !through) {
             Some(step) => TaskRunAction::Wait {
                 graph: name,
                 take_up,
                 step: step.into(),
             },
             None => TaskRunAction::Run {
-                from: graph.step_name(&place).into(),
+                from: graph.step_name(&start.place),
                 stops_at: (!through)
-                    .then(|| graph.next_interactive(&place))
+                    .then(|| graph.next_interactive(&start.place))
                     .flatten()
                     .map(str::to_owned),
                 graph: name,

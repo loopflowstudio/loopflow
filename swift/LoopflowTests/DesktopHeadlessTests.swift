@@ -374,7 +374,7 @@ struct DesktopHeadlessTests {
 
         // Stopped, it holds the Task and is offered again.
         let process = "11111111-1111-4111-8111-111111111111"
-        let stopped = try view(position: ["kind": "run", "step": "review-design", "lf_process_id": process, "running": false])
+        let stopped = try view(position: ["kind": "run", "step": "review-design", "at": "implement", "lf_process_id": process, "running": false])
         let again = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
         #expect(try again.accessibilityValue().string() == "Stopped")
         #expect(try !again.button().isDisabled())
@@ -469,10 +469,10 @@ struct DesktopHeadlessTests {
         let waiting = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps, position: .at(step: "demo"))
         #expect(TaskWorkflowBar.stages(waiting, shipping: false).map(\.place) == [.passed, .here, .ahead])
         let stopped = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps,
-                                position: .run(step: "review-design", lfProcessId: "p", running: false))
+                                position: .run(step: "review-design", at: "implement", lfProcessId: "p", running: false))
         #expect(TaskWorkflowBar.stages(stopped, shipping: false).map(\.place) == [.passed, .here, .ahead])
         #expect(TaskWorkflowBar(model: model, task: task, work: .available(TaskOverview(
-            sessions: [], graphProcesses: [], graph: stopped))).live == "Stopped before demo")
+            sessions: [], graphProcesses: [], graph: stopped))).live == "Stopped at implement before demo")
         let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
         let shipped = TaskWorkflowBar(model: model, task: shipping, work: .available(work))
         #expect(shipped.live == shipping.shipping?.reason)

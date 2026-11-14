@@ -620,7 +620,7 @@ impl World {
             bail!("nothing remains of {requested}; complete the Task instead");
         };
         // The run's Graph records the steps up to the next interactive one.
-        let steps: Vec<ConcreteStep> = captured.steps[start.cursor().index..]
+        let steps: Vec<ConcreteStep> = captured.steps[start.cursor.index..]
             .iter()
             .enumerate()
             .take_while(|(offset, step)| {
@@ -629,7 +629,7 @@ impl World {
             .map(|(_, step)| step.clone())
             .collect();
         let stops_at = captured
-            .after(&start)
+            .after(&start.place)
             .and_then(|next| captured.next_interactive(&next))
             .unwrap_or(END)
             .to_owned();
@@ -652,7 +652,7 @@ impl World {
         if !store.sqlite.start_task_graph_run(
             &task.id,
             &row,
-            &start.cursor(),
+            &start.cursor,
             &run.id,
             stops_at == END,
         )? {

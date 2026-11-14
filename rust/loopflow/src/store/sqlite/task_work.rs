@@ -225,7 +225,8 @@ fn latest_task_graphs(
 }
 
 /// The Task's Graph row: the graph it took up, the step it stands at or its
-/// run left, and that run with the cursor it began from.
+/// run left, and that run with the cursor its next attempt sets out from: where
+/// it began, then the step after the last one it finished.
 pub(crate) struct TaskGraphRow {
     pub graph: CapturedGraph,
     pub step: String,
@@ -233,8 +234,8 @@ pub(crate) struct TaskGraphRow {
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run began from, if it is on one. The
-/// run's Process stays behind.
+/// step it stands at, and the cursor its run sets out from again, if it is on
+/// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TaskGraphRecord {
     pub graph: CapturedGraph,
@@ -751,7 +752,11 @@ impl SqliteStore {
     fn read_task_graph(&self, row: TaskGraphRow) -> TaskGraph {
         let position = match row.run {
             None => TaskGraphPosition::At { step: row.step },
-            Some((_, process)) => TaskGraphPosition::Run {
+            Some((cursor, process)) => TaskGraphPosition::Run {
+                at: row
+                    .graph
+                    .step_name_of(&cursor)
+                    .unwrap_or_else(|| row.step.clone()),
                 step: row.step,
                 lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
@@ -793,7 +798,7 @@ impl SqliteStore {
 
     /// Take up a Graph that moved here. A Task on a run stays on it, carried
     /// by `by`, the receiving Process: it ends with the move, so the run reads
-    /// as stopped and the next `lf task run` starts it again from where it began.
+    /// as stopped and the next `lf task run` starts it again where it stopped.
     pub(crate) fn place_moved_task_graph(
         &self,
         task: &TaskId,
@@ -854,6 +859,30 @@ impl SqliteStore {
         let started = start_run_in(&tx, task, (&row.step, stopped), start, by, ships)?;
         tx.commit()?;
         Ok(started)
+    }
+
+    /// The run `carrier` carries finished a step: its next attempt, or the
+    /// next `lf task run`, sets out from `cursor`. A run that no longer
+    /// carries the Task writes nothing.
+    pub(crate) fn advance_task_graph_run(
+        &self,
+        task: &TaskId,
+        carrier: &LfProcessId,
+        cursor: &ExecutionCursor,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let cursor = serde_json::to_string(cursor)?;
+        conn.execute(
+            "UPDATE task_graphs SET run_start=?3,updated_at=?4
+             WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
+            rusqlite::params![
+                task.as_str(),
+                carrier.as_str(),
+                cursor,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        Ok(())
     }
 
     /// The run `carrier` carries stopped at `step` (or reached `end`): put the

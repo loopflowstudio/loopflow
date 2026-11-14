@@ -284,9 +284,18 @@ impl CapturedGraph {
         }
     }
 
-    /// What a person calls the step at `place`.
-    pub fn step_name(&self, place: &Place) -> &str {
-        names(self.step_at(place))[0]
+    /// What a person calls the step at `place`; an operation by the display
+    /// name its Graph records it under.
+    pub fn step_name(&self, place: &Place) -> String {
+        match self.step_at(place) {
+            ConcreteStep::Command(command) => command.item.display_name(),
+            step => names(step)[0].to_owned(),
+        }
+    }
+
+    /// What a person calls the step `cursor` stands at, if the graph has it.
+    pub fn step_name_of(&self, cursor: &ExecutionCursor) -> Option<String> {
+        self.place_of(cursor).map(|place| self.step_name(&place))
     }
 
     /// Steps a person would name for `--from`, for messages.
@@ -343,11 +352,13 @@ pub enum TaskGraphPosition {
     /// The Task stands at `start`, at `end`, or at this interactive step,
     /// waiting on a person in the Task conversation.
     At { step: String },
-    /// `lf task run` (`lf_process_id`) carries the Task on from `step`.
-    /// `running` is read from that Process: a run that ended without
-    /// arriving stopped, and the next `lf task run` starts it again.
+    /// `lf task run` (`lf_process_id`) carries the Task on from `step`, and
+    /// runs `at`. `running` is read from that Process: a run that ended
+    /// without arriving stopped, and the next `lf task run` starts it again
+    /// at `at`; the steps before it stay done.
     Run {
         step: String,
+        at: String,
         lf_process_id: String,
         running: bool,
     },
@@ -376,8 +387,8 @@ impl TaskGraph {
         let name = &self.name;
         match &self.position {
             TaskGraphPosition::At { step } => format!("Graph {name}: at {step}"),
-            TaskGraphPosition::Run { step, running, .. } => format!(
-                "Graph {name}: {} from {step}",
+            TaskGraphPosition::Run { at, running, .. } => format!(
+                "Graph {name}: {} at {at}",
                 if *running { "running" } else { "stopped" }
             ),
         }
@@ -390,8 +401,8 @@ impl TaskGraph {
             (TaskGraphPosition::Run { running: true, .. }, _) => {
                 return format!("{summary}. A person takes part again when that run stops.");
             }
-            (TaskGraphPosition::Run { .. }, _) => format!(
-                "{summary}. `lf task run {issue}` starts that run again; read its log in `lf task status {issue}` first."
+            (TaskGraphPosition::Run { at, .. }, _) => format!(
+                "{summary}. `lf task run {issue}` starts that run again at {at}; read its log in `lf task status {issue}` first."
             ),
             (_, Some(step)) => format!(
                 "{summary}. The Task conversation works this step with the {} skill; when the person is done, `lf task run {issue}` continues after it.",
@@ -544,6 +555,7 @@ mod tests {
         assert!(guidance.contains("--from <step>"));
         let running = at(TaskGraphPosition::Run {
             step: "explore".into(),
+            at: "implement".into(),
             lf_process_id: "process".into(),
             running: true,
         });

@@ -406,7 +406,7 @@ struct DTOFixtureTests {
         let during = try completed.taskPart()
         let after = try arrived.taskPart()
         #expect(before.work.graph == during.work.graph)
-        guard case .run(_, _, true) = during.work.graph?.position else {
+        guard case .run(_, _, _, true) = during.work.graph?.position else {
             Issue.record("Completed Task lost its live run")
             return
         }
@@ -471,7 +471,7 @@ struct DTOFixtureTests {
         #expect(graph.name == "feature")
         #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
         #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
-        #expect(graph.position == .run(step: "review-design", lfProcessId: work.graphProcesses[0].id, running: true))
+        #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
         // Every position field is required.

@@ -720,7 +720,7 @@ impl SqliteStore {
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
                      IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
                  AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
+                     IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?13 OR p.project_slug=?6 OR p.external_project_id=?14))
                  AND (?7 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
                      IN (SELECT id FROM tasks WHERE id=?15 OR issue_identifier=?16 OR external_issue_id=?17))))

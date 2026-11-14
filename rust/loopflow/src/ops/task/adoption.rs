@@ -263,3 +263,6 @@ pub(crate) async fn bind_session(
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
